@@ -352,7 +352,11 @@ what modern C++20 and CMake provide for free.
 
 ## 4. License
 
-**Settled: Apache 2.0**
-Permissive (the user's inclination), with an explicit patent non-aggression clause
-as low-cost insurance. No principled reason for copyleft given the build-from-scratch
-approach and optional-bridge third-party strategy.
+**Settled: GPL-3.0**
+Copyleft. Chosen to enable direct linking with GPL-licensed computational software
+without restrictions — Gmsh (mesh generation), Code_Aster and CalculiX (structural FEM
+solvers directly relevant to mechanics), GSL (numerical methods), and others.
+
+LGPL libraries (deal.II, FEniCS, SLEPc) are compatible with GPL and can be linked directly.
+Permissive libraries (PETSc/BSD, Eigen/MPL-2.0, SUNDIALS/BSD, nanobind/BSD) are compatible.
+Permissiveness for proprietary use was not a priority.
