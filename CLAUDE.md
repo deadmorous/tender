@@ -1,4 +1,4 @@
-# tcalc
+# tender
 
 Tensor algebra library for computational mechanics, using direct (coordinate-free) tensor notation.
 

@@ -7,14 +7,14 @@ _First discussed: 2026-06-02_
 **CAS — Computer Algebra System.** Software that manipulates mathematical expressions
 symbolically rather than numerically. Examples: Mathematica, Maple, SymPy (Python),
 GiNaC (C++), SymEngine (C++). A CAS can expand polynomials, compute indefinite integrals,
-factor expressions, solve equations symbolically, and so on. tcalc is, in essence,
+factor expressions, solve equations symbolically, and so on. tender is, in essence,
 a domain-specific CAS for tensor algebra and continuum mechanics derivations.
 
 **UFL — Unified Form Language.** A domain-specific language embedded in Python, used by
 the FEniCS finite element framework to express variational forms (weak forms of PDEs).
 A UFL expression describes something like ∫_V σ:ε(v) dV in a form that FEniCS can
 automatically discretize and assemble into finite element matrices. It is one example
-of what the output of a tcalc derivation might be fed into for numerical solving.
+of what the output of a tender derivation might be fed into for numerical solving.
 
 ---
 
