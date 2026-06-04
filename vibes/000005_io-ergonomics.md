@@ -21,7 +21,7 @@ Methods are reserved for other purposes (to be determined).
 | Python op | Precedence | Tensor meaning | Notes |
 |---|---|---|---|
 | `+` | add | addition | standard |
-| `-` | sub | subtraction / negation | standard |
+| `-` | add | subtraction / negation | standard |
 | `*` | mul | tensor product ⊗; scalar scale is the rank-0 case | no type-dispatch ambiguity: scaling IS multiplication by a rank-0 tensor |
 | `/` | mul | division by scalar | |
 | `%` | mul | cross product × | `^` excluded — its precedence is lower than `+` |
