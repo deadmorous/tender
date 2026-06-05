@@ -152,6 +152,106 @@ open implementation question.
 
 ---
 
+## Constraint verification
+
+### The problem
+
+Identities and theorems impose requirements on their inputs — symmetry,
+skew-symmetry, positive definiteness, orthogonality, rank, isotropy, minor/major
+symmetry (for rank-4), etc. Before applying an identity the system must
+establish whether the requirement is satisfied. This is non-trivial in general.
+
+### Catalogue of common requirements
+
+| Requirement | Invariant definition | Notes |
+|---|---|---|
+| Rank n | expression is rank-n | Always verifiable structurally |
+| Symmetric | **A** = **A**^T | A_{ij} = A_{ji} |
+| Skew-symmetric | **A** = −**A**^T | A_{ij} = −A_{ji} |
+| Traceless | tr(**A**) = 0 | |
+| Orthogonal | **A**^T·**A** = **I** | |
+| Idempotent | **A**²= **A** | projection tensors |
+| Positive definite | **v**·**A**·**v** > 0 ∀**v**≠0 | hard to verify symbolically |
+| Isotropic (rank-2) | **A** = λ**I** | |
+| Minor symmetry (rank-4) | C_{ijkl}=C_{jikl}=C_{ijlk} | elasticity |
+| Major symmetry (rank-4) | C_{ijkl}=C_{klij} | elasticity |
+
+This list will grow as new identities are added to the library.
+
+### Three verification strategies
+
+**1 — Structural (syntactic):** the system determines the property directly from
+the expression tree, with no computation. Examples:
+- **a**⊗**b** + **b**⊗**a** is visibly symmetric
+- A rank-1 expression trivially satisfies `rank=1`
+- A scalar times **I** is visibly isotropic
+
+**2 — Algebraic:** the system computes a witness expression and checks if it
+reduces to zero (or the expected value). Example: compute **A** − **A**^T and
+attempt to simplify; if the result is zero, **A** is symmetric. This may fail
+if the simplifier is not strong enough — it gives a definitive yes but not a
+definitive no.
+
+**3 — User declaration:** the user asserts the constraint explicitly. The system
+trusts the declaration and records it in the derivation history for auditability.
+
+```python
+A = tensor('A').declare(symmetric=True)
+# or as a separate step:
+state = state.assume(A, symmetric=True)
+```
+
+The system tries strategies 1 and 2 in order. If both fail, it either requires
+a user declaration or raises an informative error explaining what could not be
+verified.
+
+### Caching verified constraints
+
+Since expression objects are immutable, the result of any constraint check can
+be cached directly on the object as an attribute — set at most once, just like
+`name`. This means a constraint is never verified more than once for the same
+expression, regardless of how many identities or derivation steps query it.
+
+User declarations write to the same cache, making structural verification and
+user declaration uniform at the storage level: the attribute is either absent
+(unknown), `True` (verified or declared), or `False` (verified false — useful
+to rule out spurious identity matches quickly).
+
+### Representation-dependence: the mixed-coordinates pitfall
+
+Some requirements that are simple to state in terms of covariant or contravariant
+components become non-obvious in mixed coordinates. **Symmetry** is the canonical
+example.
+
+A = a **i**⊗**i** + b **j**⊗**j** + c **k**⊗**k** is clearly symmetric.
+Expressed as A^i_j **e**^i⊗**e**_j in a non-orthonormal custom basis
+{**e**_1=**i**, **e**_2=2**j**+**k**, **e**_3=2**i**+**j**+3**k**},
+the mixed coordinate matrix A^i_j is:
+
+```
+[[ a,          4(b−c)/5,    (10a+2b−12c)/5 ],
+ [ 0,          (6b−c)/5,      3(b−c)/5     ],
+ [ 0,          2(c−b)/5,      (6c−b)/5     ]]
+```
+
+This matrix is not symmetric, yet the tensor is. The covariant matrix A_{ij}
+is symmetric; the mixed matrix A^i_j = g^{ik} A_{kj} is not, because the
+metric g^{ij} deforms the matrix in general.
+
+**General principle**: any requirement stated as a condition on a coordinate
+matrix is only reliable when using covariant OR contravariant coordinates — not
+mixed. The system must know the coordinate type of an expression before applying
+a matrix-level check. For mixed coordinates, the system must first lower (or
+raise) both indices, then check.
+
+This generalises beyond symmetry: any matrix identity that holds for covariant
+components (A_{ij} = A_{ji}, A_{ij} = −A_{ji}, A_{ii} = 0, etc.) may fail
+as a matrix identity in mixed coordinates. The invariant definition is always
+the ground truth; coordinate representations are checked by converting to
+covariant/contravariant form first.
+
+---
+
 ## Open questions
 
 ### Q_pattern_matching — RESOLVED

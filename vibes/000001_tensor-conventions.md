@@ -118,6 +118,29 @@ A CS object carries:
 
 Standard CS types: Cartesian (WCS reference), cylindrical, spherical, and arbitrary user-defined.
 
+### CS construction paths
+
+Six ways to construct a CS:
+
+1. **Built-in**: cylindrical, spherical, polar 2D, etc. — pre-defined with simplified
+   Christoffel symbols and basis derivatives available in the standard identity library.
+2. **Embedding map**: user provides **r**(u, v, w); covariant basis **g**_i = ∂**r**/∂q^i
+   is computed automatically; Christoffel symbols derivable from the metric.
+3. **Metric specification**: user provides g_{ij} directly.
+4. **Curve / Frenet-Serret**: basis derived from a space curve **r**(s).
+5. **Surface / cross-product extension**: 2D tangent basis from **r**(u, v), extended
+   to 3D by adding the surface normal via cross product.
+6. **Direct basis specification**: user provides basis vectors **e**_1, **e**_2, **e**_3
+   as explicit vector expressions (e.g., linear combinations of WCS basis vectors).
+   The system automatically derives:
+   - Metric g_{ij} = **e**_i @ **e**_j
+   - Cobasis **e**^i via metric inverse (general) or Levi-Civita formula in 3D:
+     **e**^i = (1/2v) Σ_{j,k} ε^{ijk} (**e**_j × **e**_k), v = **e**_1 @ (**e**_2 % **e**_3)
+   - Inverse metric g^{ij} = **e**^i @ **e**^j
+   - Christoffel symbols Γ^k_{ij} = **e**^k @ ∂**e**_i/∂x^j
+
+   Example: e_1 = **i**, e_2 = 2**j** + **k**, e_3 = 3**k** + 2**i** + **j**.
+
 ### Fields
 
 - **Scalar field**: symbolic expression or lambda in CS coordinates

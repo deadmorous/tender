@@ -153,10 +153,14 @@ with upper↔lower matching required (relaxed for orthonormal bases).
 
 Crossing from Layer 1 to Layer 3 (projecting onto a basis) is explicit.
 Crossing from Layer 1 to Layer 2 (labelling a collection of objects) is also
-explicit. Layers 2 and 3 can combine: a collection of basis vectors **e**_i is
-both collection-indexed (ordinal i) and coordinate-indexed (the basis vector
-itself carries a lower slot) — but these are separate index concepts on the same
-object.
+explicit.
+
+**Basis vector indices are Layer 3, not Layer 2.** The index on **e**_i is its
+co/contravariant slot — lower for basis vectors, upper for cobasis vectors. It
+is simultaneously the identifier of which vector and its slot type. There is no
+separate ordinal layer beneath it. A numbered collection of arbitrary vectors
+(e.g., eigenvectors **v**_i) would be Layer 2; a set of basis vectors **e**_i
+that defines a coordinate system is Layer 3.
 
 ### Q_mixed_coords — RESOLVED
 
