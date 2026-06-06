@@ -29,7 +29,7 @@ public:
     Rational(int64_t num, int64_t den) : num_(num), den_(den)
     {
         if (den_ == 0)
-            die("Rational: zero denominator");
+            die("Rational: zero denominator"); // GCOV_EXCL_LINE
         normalize();
     }
 
@@ -71,7 +71,7 @@ public:
     [[nodiscard]] auto operator-() const -> Rational
     {
         if (num_ == INT64_MIN)
-            die("Rational: overflow (negation of INT64_MIN)");
+            die("Rational: overflow (negation of INT64_MIN)"); // GCOV_EXCL_LINE
         return Rational{Tag{}, -num_, den_};
     }
 
@@ -98,7 +98,7 @@ public:
     [[nodiscard]] auto operator/(Rational const& rhs) const -> Rational
     {
         if (rhs.is_zero())
-            die("Rational: division by zero");
+            die("Rational: division by zero"); // GCOV_EXCL_LINE
         // num_/den_ ÷ rhs.num_/rhs.den_ = (num_*rhs.den_) / (den_*rhs.num_)
         return Rational{
             to64(i128(num_) * rhs.den_, "division"),
@@ -161,12 +161,12 @@ private:
     static auto to64(i128 v, char const* op) -> int64_t
     {
         if (v > INT64_MAX || v < INT64_MIN)
-        {
+        { // GCOV_EXCL_START
             char buf[64];
             std::snprintf(
                 buf, sizeof(buf), "Rational: arithmetic overflow (%s)", op);
             die(buf);
-        }
+        } // GCOV_EXCL_STOP
         return static_cast<int64_t>(v);
     }
 
@@ -192,7 +192,7 @@ private:
         if (den_ < 0)
         {
             if (num_ == INT64_MIN || den_ == INT64_MIN)
-                die("Rational: overflow in normalisation");
+                die("Rational: overflow in normalisation"); // GCOV_EXCL_LINE
             num_ = -num_;
             den_ = -den_;
         }
@@ -202,11 +202,11 @@ private:
     }
 
     [[noreturn]] static auto die(char const* msg) noexcept -> void
-    {
+    { // GCOV_EXCL_START
         std::fputs(msg, stderr);
         std::fputc('\n', stderr);
         std::abort();
-    }
+    } // GCOV_EXCL_STOP
 };
 
 } // namespace tender

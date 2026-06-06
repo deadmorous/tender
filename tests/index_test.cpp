@@ -317,3 +317,49 @@ TEST(Convolve, Latex)
     auto* e = convolve(rl, v, 0, w, 0);
     EXPECT_EQ(e->latex(), "v^{i} w_{i}");
 }
+
+TEST(Convolve, Python)
+{
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {{SlotLevel::Upper, "i"}});
+    auto* w = make_named_tensor(rl, "w", 1, {{SlotLevel::Lower, "i"}});
+    auto* e = convolve(rl, v, 0, w, 0);
+    EXPECT_EQ(e->python(), "convolve(tensor('v', 1), 0, tensor('w', 1), 0)");
+}
+
+TEST(Convolve, RhsRemainingSlots)
+{
+    auto rl = make_rl();
+    // v: rank-1 upper "i"
+    auto* v = make_named_tensor(rl, "v", 1, {{SlotLevel::Upper, "i"}});
+    // T: rank-2 lower "i", lower "j"
+    SlotList sl = {{SlotLevel::Lower, "i"}, {SlotLevel::Lower, "j"}};
+    auto* T = make_named_tensor(rl, "T", 2, sl);
+    // convolve v's upper (0) with T's lower i (0): rank = 1+2-2 = 1
+    auto* e = convolve(rl, v, 0, T, 0);
+    EXPECT_EQ(e->rank(), 1);
+    // Remaining: T's lower j (from rhs)
+    ASSERT_EQ(e->slots().size(), 1u);
+    EXPECT_EQ(e->slots()[0].display, "j");
+    EXPECT_EQ(e->slots()[0].level, SlotLevel::Lower);
+}
+
+TEST(ExplicitSum, Python)
+{
+    auto rl = make_rl();
+    auto* idx = auto_sum_index_3d(rl, "i");
+    SlotList sl = {{SlotLevel::Upper, "i", idx}, {SlotLevel::Lower, "i", idx}};
+    auto* T = make_named_tensor(rl, "T", 2, sl);
+    auto* e = make_explicit_sum(rl, T, idx);
+    EXPECT_EQ(e->python(), "explicit_sum(index=i, tensor('T', 2))");
+}
+
+TEST(NoSum, Python)
+{
+    auto rl = make_rl();
+    auto* idx = auto_sum_index_3d(rl, "i");
+    SlotList sl = {{SlotLevel::Upper, "i", idx}, {SlotLevel::Lower, "i", idx}};
+    auto* T = make_named_tensor(rl, "T", 2, sl);
+    auto* e = make_no_sum(rl, T, idx);
+    EXPECT_EQ(e->python(), "no_sum(index=i, tensor('T', 2))");
+}

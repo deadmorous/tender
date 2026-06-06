@@ -10,6 +10,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(TENDER_BUILD_TESTS "Build test targets" ON)
 option(TENDER_BUILD_BENCHMARKS "Build benchmark targets" ON)
 option(TENDER_BUILD_PYTHON "Build Python bindings (requires nanobind)" OFF)
+option(TENDER_BUILD_COVERAGE "Build with GCC coverage instrumentation" OFF)
+
+if(TENDER_BUILD_COVERAGE)
+    include(cmake/coverage.cmake)
+endif()
 
 # --- Third-party dependencies ---
 
@@ -60,4 +65,8 @@ endif()
 
 if(TENDER_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
+endif()
+
+if(TENDER_BUILD_COVERAGE)
+    tender_add_coverage_target()
 endif()

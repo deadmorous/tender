@@ -311,3 +311,67 @@ TEST(Named, ConflictingNameThrows)
     named("A", v);
     EXPECT_THROW(named("B", v), std::logic_error);
 }
+
+// ===========================================================================
+// Coverage gap tests
+// ===========================================================================
+
+TEST(NamedConst, Rank)
+{
+    auto rl = make_rl();
+    EXPECT_EQ(make_named_const(rl, "e")->rank(), 0);
+}
+
+TEST(Scale, Python)
+{
+    auto rl = make_rl();
+    auto* v = make_symbolic_var(rl, "x");
+    auto* e = make_scale(rl, Rational(2, 3), v);
+    EXPECT_EQ(e->python(), "scale(2/3, symbolic_var('x'))");
+}
+
+TEST(Sum, Rank)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    auto* e = make_sum(rl, {x, y});
+    EXPECT_EQ(e->rank(), 0);
+}
+
+TEST(Sum, Python)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    auto* e = make_sum(rl, {x, y});
+    EXPECT_EQ(e->python(), "sum([symbolic_var('x'), symbolic_var('y')])");
+}
+
+TEST(Sum, LatexPositiveSecondTerm)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    // -x + y: first term negative, second positive → exercises " + " branch
+    auto* e = make_sum(rl, {make_scale(rl, Rational{-1}, x), y});
+    EXPECT_EQ(e->latex(), "-x + y");
+}
+
+TEST(Sum, LatexNegativeUnitCoeff)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    // x - y: second term has coeff -1, exercises abs_coeff==1 branch
+    auto* e = make_sum(rl, {x, make_scale(rl, Rational{-1}, y)});
+    EXPECT_EQ(e->latex(), "x - y");
+}
+
+TEST(Sum, RankMismatchThrows)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x"); // rank 0
+    auto* v = make_named_tensor(rl, "v", 1, {{SlotLevel::Upper, "i"}});
+    EXPECT_THROW(make_sum(rl, {x, v}), std::invalid_argument);
+}

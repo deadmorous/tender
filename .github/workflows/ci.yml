@@ -37,3 +37,30 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q cmake ninja-build gcc-14 g++-14 gcovr
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=gcc-14 \
+            -DCMAKE_CXX_COMPILER=g++-14 \
+            -DTENDER_BUILD_TESTS=ON \
+            -DTENDER_BUILD_COVERAGE=ON \
+            -DTENDER_BUILD_PYTHON=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Coverage
+        run: cmake --build build --target coverage
