@@ -517,6 +517,41 @@ NB_MODULE(_tender, m)
             return apply_identity(id, pm);
         }, "identity"_a, "mapping"_a);
 
+    m.def("find_matches",
+        [](Identity const& id, Expr* expr, int max_nodes) {
+            auto bindings = find_matches(id, expr, max_nodes);
+            nb::list result;
+            for (auto const& b: bindings) {
+                nb::dict d;
+                for (auto const& [pv, ex]: b)
+                    d[nb::cast(const_cast<PatternVar*>(pv))] = nb::cast(ex);
+                result.append(d);
+            }
+            return result;
+        }, "identity"_a, "expr"_a, "max_nodes"_a = 10000);
+
+    m.def("apply_identity_auto",
+        [](Identity const& id, Expr* expr, int max_nodes) {
+            return apply_identity_auto(id, expr, max_nodes);
+        }, "identity"_a, "expr"_a, "max_nodes"_a = 10000);
+
+    // declare_symmetric / declare_skew_symmetric on NamedTensor
+    // (accessed via the Expr binding since NamedTensor is a subclass)
+    m.def("declare_symmetric", [](Expr* e) {
+        if (auto* nt = dynamic_cast<NamedTensor*>(e))
+            nt->declare_symmetric();
+        else
+            throw std::invalid_argument("declare_symmetric: not a NamedTensor");
+    }, "expr"_a);
+
+    m.def("declare_skew_symmetric", [](Expr* e) {
+        if (auto* nt = dynamic_cast<NamedTensor*>(e))
+            nt->declare_skew_symmetric();
+        else
+            throw std::invalid_argument(
+                "declare_skew_symmetric: not a NamedTensor");
+    }, "expr"_a);
+
     // =======================================================================
     // Singleton getters — called once from __init__.py to create module attrs
     // =======================================================================

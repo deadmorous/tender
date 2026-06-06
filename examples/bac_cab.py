@@ -1,6 +1,6 @@
 """
-BAC-CAB identity — definition and manual application
-=====================================================
+BAC-CAB identity — definition and manual/automatic application
+==============================================================
 
 The BAC-CAB rule is the vector triple product identity:
 
@@ -8,8 +8,8 @@ The BAC-CAB rule is the vector triple product identity:
 
 This example shows how to:
   1. Define a named algebraic identity using pattern variables.
-  2. Apply it manually to a concrete expression.
-  3. Chain the result into a derivation step.
+  2. Apply it manually to a concrete expression (explicit mapping).
+  3. Apply it automatically via find_matches / apply_identity_auto.
 
 Run:
     source examples/env.sh          # sets PYTHONPATH
@@ -23,6 +23,9 @@ from tender import (
     dot,
     Identity,
     apply_identity,
+    find_matches,
+    apply_identity_auto,
+    doc,
     State,
     Derivation,
     show,
@@ -95,3 +98,31 @@ assert all(has_contract(t) for t in result.terms), \
     "Expected each term to contain a dot product (Contract node)"
 
 print("BAC-CAB identity applied and verified.")
+
+# ---------------------------------------------------------------------------
+# Automatic targeting via find_matches / apply_identity_auto
+# ---------------------------------------------------------------------------
+matches = find_matches(bac_cab, expr)
+assert len(matches) == 1, f"Expected exactly 1 match, got {len(matches)}"
+
+auto_step = apply_identity_auto(bac_cab, expr)
+auto_history = Derivation([auto_step]).apply(State(expr))
+assert auto_history[-1].expr.latex() == history[-1].expr.latex(), \
+    "Auto-targeting produced a different result than manual targeting"
+
+print("Auto-targeting verified: same result as manual application.")
+
+# ---------------------------------------------------------------------------
+# doc() — render the identity as LaTeX
+# ---------------------------------------------------------------------------
+print()
+print(doc(bac_cab, format="plain"))
+print()
+print(doc(bac_cab))
+
+# ---------------------------------------------------------------------------
+# Standard library
+# ---------------------------------------------------------------------------
+from tender.lib.identities.epsilon import bac_cab as lib_bac_cab
+print()
+print("Standard library entry (same identity):", lib_bac_cab.name)

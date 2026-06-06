@@ -6,6 +6,7 @@
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/identity.hpp>
+#include <tender/match.hpp>
 #include <tender/index.hpp>
 #include <tender/integral.hpp>
 #include <tender/polynomial.hpp>

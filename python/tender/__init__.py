@@ -95,6 +95,10 @@ from ._tender import (
     localize_step,
     collect_step,
     apply_identity,
+    find_matches,
+    apply_identity_auto,
+    declare_symmetric,
+    declare_skew_symmetric,
     # Singleton getters (private)
     _identity_singleton,
     _levi_civita_singleton,
@@ -112,6 +116,38 @@ wcs = _wcs_singleton()
 cylindrical_cs = _cylindrical_cs_singleton()
 spherical_cs = _spherical_cs_singleton()
 nabla = Nabla()
+
+def doc(entry, format="latex"):
+    """Render an Identity (or future Theorem) as LaTeX, plain text, or Jupyter math.
+
+    Parameters
+    ----------
+    entry : Identity
+        The identity to document.
+    format : str
+        ``"latex"`` (default) — returns a compilable LaTeX snippet.
+        ``"plain"`` — returns ASCII text.
+        ``"jupyter"`` — displays in Jupyter via IPython.display.Math.
+    """
+    name = entry.name
+    lhs_tex = entry.lhs.latex()
+    rhs_tex = entry.rhs.latex()
+
+    if format == "plain":
+        return f"[{name}]  {entry.lhs.python()}  =  {entry.rhs.python()}"
+
+    tex = f"\\textbf{{{name}:}}\n\\[\n  {lhs_tex} = {rhs_tex}\n\\]"
+
+    if format == "jupyter":
+        try:
+            from IPython.display import Math, display
+            display(Math(lhs_tex + " = " + rhs_tex))
+            return
+        except ImportError:
+            pass  # fall through to latex
+
+    return tex
+
 
 def _label_to_math(label):
     """Render a step label as a LaTeX math-mode fragment.
@@ -197,9 +233,13 @@ __all__ = [
     "show", "show_final",
     # LaTeX document export
     "to_latex_document",
+    # Documentation
+    "doc",
     # Step factories
     "simplify_identity_step", "expand_step", "expand_poly_step",
     "substitute_step", "diff_step",
     "apply_integration_by_parts_step", "apply_divergence_theorem_step",
-    "localize_step", "collect_step", "apply_identity",
+    "localize_step", "collect_step",
+    "apply_identity", "find_matches", "apply_identity_auto",
+    "declare_symmetric", "declare_skew_symmetric",
 ]

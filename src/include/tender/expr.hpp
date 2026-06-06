@@ -246,9 +246,22 @@ public:
         return symbol_;
     }
 
+    [[nodiscard]] auto is_symmetric() const noexcept -> bool
+    {
+        return symmetric_;
+    }
+    [[nodiscard]] auto is_skew_symmetric() const noexcept -> bool
+    {
+        return skew_symmetric_;
+    }
+    auto declare_symmetric() -> void { symmetric_ = true; }
+    auto declare_skew_symmetric() -> void { skew_symmetric_ = true; }
+
 private:
     std::string symbol_;
     int rank_;
+    bool symmetric_ = false;
+    bool skew_symmetric_ = false;
 };
 
 // Annotation: force summation over `index` regardless of occurrence count.

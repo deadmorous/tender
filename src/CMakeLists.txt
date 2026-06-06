@@ -5,6 +5,7 @@ add_library(tender
     expr.cpp
     identity.cpp
     index.cpp
+    match.cpp
     polynomial.cpp
     polynomial_expr.cpp
     simplify.cpp)

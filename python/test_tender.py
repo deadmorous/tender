@@ -14,7 +14,10 @@ from tender import (
     State, Derivation,
     simplify_identity_step, expand_step, substitute_step,
     apply_integration_by_parts_step, localize_step, collect_step,
-    show,
+    apply_identity, find_matches, apply_identity_auto,
+    declare_symmetric, declare_skew_symmetric,
+    Identity, make_pattern_var,
+    show, doc,
     Rational,
     Sum, Scale, Contract, DoubleContract, CrossProduct,
     IdentityTensor, LeviCivitaTensor,
@@ -504,6 +507,105 @@ def test_expr_repr_not_empty():
 # ===========================================================================
 # collect_step
 # ===========================================================================
+
+# ===========================================================================
+# Phase 13 — automatic identity matching and standard library
+# ===========================================================================
+
+def test_find_matches_basic():
+    a = make_pattern_var("a"); a.constrain_rank(1)
+    b = make_pattern_var("b"); b.constrain_rank(1)
+    c = make_pattern_var("c"); c.constrain_rank(1)
+    u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
+    lhs = cross(a, cross(b, c))
+    id_ = Identity("test", lhs, a)
+    expr = cross(u, cross(v, w))
+    matches = find_matches(id_, expr)
+    assert len(matches) == 1
+    assert matches[0][a] is u
+    assert matches[0][b] is v
+    assert matches[0][c] is w
+
+
+def test_find_matches_no_match():
+    a = make_pattern_var("a"); a.constrain_rank(1)
+    u = tensor("u", 0)  # scalar — won't match rank-1
+    id_ = Identity("test", a, a)
+    matches = find_matches(id_, u)
+    assert len(matches) == 0
+
+
+def test_apply_identity_auto_bac_cab():
+    from tender.lib.identities.epsilon import bac_cab
+    u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
+    expr = cross(u, cross(v, w))
+    step = apply_identity_auto(bac_cab, expr)
+    result = Derivation([step]).apply(State(expr))[-1].expr
+    from tender import Sum as TSum
+    assert isinstance(result, TSum)
+    assert len(result.terms) == 2
+
+
+def test_apply_identity_auto_no_match_raises():
+    a = make_pattern_var("a"); a.constrain_rank(1)
+    u = tensor("u", 0)  # scalar
+    id_ = Identity("test", a, a)
+    with pytest.raises(Exception):
+        apply_identity_auto(id_, u)
+
+
+def test_doc_plain():
+    a = make_pattern_var("a"); a.constrain_rank(1)
+    id_ = Identity("my-id", a, a)
+    result = doc(id_, format="plain")
+    assert "my-id" in result
+
+
+def test_doc_latex():
+    a = make_pattern_var("a"); a.constrain_rank(1)
+    id_ = Identity("my-id", a, a)
+    result = doc(id_, format="latex")
+    assert "my-id" in result
+    assert r"\[" in result
+
+
+def test_standard_library_epsilon():
+    from tender.lib.identities.epsilon import bac_cab, double_cross, ALL
+    assert bac_cab.name == "BAC-CAB"
+    assert double_cross.name == "double-cross"
+    assert len(ALL) == 2
+
+
+def test_standard_library_identity_tensor():
+    from tender.lib.identities.identity_tensor import (
+        identity_dot_vec, identity_double_contract, ALL)
+    assert identity_dot_vec.name == "identity-dot-vec"
+    assert len(ALL) == 2
+
+
+def test_standard_library_functions():
+    from tender.lib.identities.functions import exp_product, ALL
+    assert exp_product.name == "exp-product"
+    assert len(ALL) == 2
+
+
+def test_declare_symmetric():
+    A = tensor("A", 2)
+    declare_symmetric(A)
+    a = make_pattern_var("a"); a.constrain_rank(2); a.constrain_symmetric()
+    id_ = Identity("test", a, a)
+    matches = find_matches(id_, A)
+    assert len(matches) == 1
+
+
+def test_declare_skew_symmetric():
+    W = tensor("W", 2)
+    declare_skew_symmetric(W)
+    a = make_pattern_var("a"); a.constrain_rank(2); a.constrain_skew_symmetric()
+    id_ = Identity("test", a, a)
+    matches = find_matches(id_, W)
+    assert len(matches) == 1
+
 
 def test_collect_step_scalar_raises():
     s = tensor("s", 0)
