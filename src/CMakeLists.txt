@@ -1,6 +1,7 @@
 add_library(tender
     coord_system.cpp
     derivation.cpp
+    integral.cpp
     expr.cpp
     identity.cpp
     index.cpp

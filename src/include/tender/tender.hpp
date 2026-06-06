@@ -7,5 +7,6 @@
 #include <tender/expr.hpp>
 #include <tender/identity.hpp>
 #include <tender/index.hpp>
+#include <tender/integral.hpp>
 #include <tender/polynomial.hpp>
 #include <tender/rational.hpp>
