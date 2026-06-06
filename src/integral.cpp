@@ -270,11 +270,15 @@ auto apply_divergence_theorem_step(VolumeDomain* domain) -> DerivationStep
 // Try to extract the integrand from a single (non-Sum) term if it is an
 // Integral over `domain` (possibly wrapped in Scale).
 // Returns the extracted integrand (with scale folded in) or nullptr.
-static auto try_extract_integrand(
-    ResourceList& rl, Expr* t, Domain* domain) -> Expr*
+static auto try_extract_integrand(ResourceList& rl, Expr* t, Domain* domain)
+    -> Expr*
 {
     Rational sc{1};
-    if (auto* s = dynamic_cast<Scale*>(t)) { sc = s->coeff(); t = s->expr(); }
+    if (auto* s = dynamic_cast<Scale*>(t))
+    {
+        sc = s->coeff();
+        t = s->expr();
+    }
     if (auto* integ = dynamic_cast<Integral*>(t))
         if (integ->domain() == domain)
         {
@@ -326,8 +330,7 @@ auto localize_step(Domain* domain) -> DerivationStep
 // or left as nullptr for pointwise terms.
 // Folds any Scale coefficient into the returned coefficient expression.
 static auto extract_coeff(
-    ResourceList& rl, Expr* term, Expr* v,
-    Domain*& domain_out) -> Expr*
+    ResourceList& rl, Expr* term, Expr* v, Domain*& domain_out) -> Expr*
 {
     Rational scale{1};
     Expr* inner = term;
@@ -383,9 +386,9 @@ static auto collect_impl(ResourceList& rl, Expr* e, Expr* v) -> Expr*
 
     // Map each domain pointer to its list of collected coefficients.
     // nullptr key = pointwise (no integral wrapper).
-    std::vector<Domain*>              domain_order; // preserves first-seen order
+    std::vector<Domain*> domain_order; // preserves first-seen order
     std::map<Domain*, std::vector<Expr*>> groups;
-    std::vector<Expr*>                residuals;
+    std::vector<Expr*> residuals;
 
     for (Expr* t: all_terms)
     {
@@ -408,9 +411,8 @@ static auto collect_impl(ResourceList& rl, Expr* e, Expr* v) -> Expr*
     for (Domain* dom: domain_order)
     {
         auto& coeffs = groups[dom];
-        Expr* coeff_expr = (coeffs.size() == 1)
-            ? coeffs[0]
-            : make_sum(rl, coeffs);
+        Expr* coeff_expr =
+            (coeffs.size() == 1) ? coeffs[0] : make_sum(rl, coeffs);
         Expr* contracted = make_contract(rl, coeff_expr, v);
         if (dom)
             result_terms.push_back(make_integral(rl, dom, contracted));
@@ -430,9 +432,9 @@ auto collect_step(Expr* v) -> DerivationStep
         throw std::invalid_argument(
             "collect_step: variation must have rank >= 1");
     return DerivationStep{
-        "collect(" + v->latex() + ")",
-        [v](ResourceList& rl, Expr* e) -> Expr*
-        { return collect_impl(rl, e, v); }};
+        "collect(" + v->latex() + ")", [v](ResourceList& rl, Expr* e) -> Expr* {
+            return collect_impl(rl, e, v);
+        }};
 }
 
 } // namespace tender

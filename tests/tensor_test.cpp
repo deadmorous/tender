@@ -326,6 +326,31 @@ TEST(CrossProduct, RankTooLowThrows)
     EXPECT_THROW(make_cross_product(rl, v, s), std::invalid_argument);
 }
 
+TEST(CrossProduct, LatexNestedRhsParenthesised)
+{
+    // a×(b×c) must render as "a \times (b \times c)", not "a \times b \times
+    // c". Nested CrossProduct is valid in patterns; bypass the guard to build
+    // it.
+    auto rl = make_rl();
+    auto* a = vec(rl, "a");
+    auto* b = vec(rl, "b");
+    auto* c = vec(rl, "c");
+    auto* bc = rl.make<CrossProduct>(b, c);
+    auto* abc = rl.make<CrossProduct>(a, bc);
+    EXPECT_EQ(abc->latex(), "a \\times (b \\times c)");
+}
+
+TEST(CrossProduct, LatexNestedLhsParenthesised)
+{
+    auto rl = make_rl();
+    auto* a = vec(rl, "a");
+    auto* b = vec(rl, "b");
+    auto* c = vec(rl, "c");
+    auto* ab = rl.make<CrossProduct>(a, b);
+    auto* abc = rl.make<CrossProduct>(ab, c);
+    EXPECT_EQ(abc->latex(), "(a \\times b) \\times c");
+}
+
 // ===========================================================================
 // TensorProduct zero propagation (Phase 4 extension to existing factory)
 // ===========================================================================

@@ -472,8 +472,8 @@ TEST(Localize, DiscardsOtherDomainTerms)
     auto* g = make_named_tensor(rl, "g", 0, {});
 
     // Sum of Integral over V and Integral over ∂V
-    auto* sum_expr = make_sum(rl, {make_integral(rl, V, f),
-                                   make_integral(rl, dV, g)});
+    auto* sum_expr =
+        make_sum(rl, {make_integral(rl, V, f), make_integral(rl, dV, g)});
 
     // Localize over V: extracts f and discards the ∂V term entirely.
     // (Test functions with support inside V make the ∂V integral vanish.)
@@ -546,7 +546,7 @@ TEST(CollectStep, TwoVolumeIntegralsGrouped)
 
     auto* intAv = make_integral(rl, V, make_contract(rl, A, v));
     auto* intBv = make_integral(rl, V, make_contract(rl, B, v));
-    auto* sum   = make_sum(rl, {intAv, intBv});
+    auto* sum = make_sum(rl, {intAv, intBv});
 
     auto step = collect_step(v);
     auto* result = step.apply(rl, State{sum}).expr();
@@ -567,18 +567,18 @@ TEST(CollectStep, TwoVolumeIntegralsGrouped)
 TEST(CollectStep, ThreeDomainsKeptSeparate)
 {
     auto rl = make_rl();
-    auto* n  = make_named_tensor(rl, "n",  1, {});
-    auto* V  = make_volume_domain(rl, "V", n);
+    auto* n = make_named_tensor(rl, "n", 1, {});
+    auto* V = make_volume_domain(rl, "V", n);
     auto* dV = V->surface_boundary();
-    auto* A  = make_named_tensor(rl, "A", 1, {});
-    auto* B  = make_named_tensor(rl, "B", 1, {});
-    auto* C  = make_named_tensor(rl, "C", 1, {});
-    auto* v  = make_named_tensor(rl, "v", 1, {});
+    auto* A = make_named_tensor(rl, "A", 1, {});
+    auto* B = make_named_tensor(rl, "B", 1, {});
+    auto* C = make_named_tensor(rl, "C", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
 
-    auto* intAv  = make_integral(rl, V,  make_contract(rl, A, v));
-    auto* intBv  = make_integral(rl, dV, make_contract(rl, B, v));
-    auto* Cv     = make_contract(rl, C, v);
-    auto* sum    = make_sum(rl, {intAv, intBv, Cv});
+    auto* intAv = make_integral(rl, V, make_contract(rl, A, v));
+    auto* intBv = make_integral(rl, dV, make_contract(rl, B, v));
+    auto* Cv = make_contract(rl, C, v);
+    auto* sum = make_sum(rl, {intAv, intBv, Cv});
 
     auto step = collect_step(v);
     auto* result = step.apply(rl, State{sum}).expr();
@@ -597,7 +597,7 @@ TEST(CollectStep, ResidualTermsPreserved)
     auto* v = make_named_tensor(rl, "v", 1, {});
 
     // A·v + B  (B has no v; both rank 0)
-    auto* Av  = make_contract(rl, A, v);
+    auto* Av = make_contract(rl, A, v);
     auto* sum = make_sum(rl, {Av, B});
 
     auto step = collect_step(v);

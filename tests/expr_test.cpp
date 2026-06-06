@@ -281,6 +281,36 @@ TEST(TensorProduct, Latex)
     EXPECT_EQ(make_tensor_product(rl, x, y)->latex(), "x \\otimes y");
 }
 
+TEST(TensorProduct, LatexScalarLeft)
+{
+    // Scalar ⊗ tensor renders as "(scalar) tensor" without \otimes.
+    auto rl = make_rl();
+    auto* s = make_symbolic_var(rl, "s");        // rank 0
+    auto* v = make_named_tensor(rl, "v", 1, {}); // rank 1
+    EXPECT_EQ(make_tensor_product(rl, s, v)->latex(), "(s) v");
+}
+
+TEST(TensorProduct, LatexScalarRightAtomicNoParens)
+{
+    // Tensor ⊗ scalar_symbol — scalar needs no parens.
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {}); // rank 1
+    auto* s = make_symbolic_var(rl, "s");        // rank 0
+    EXPECT_EQ(make_tensor_product(rl, v, s)->latex(), "v s");
+}
+
+TEST(TensorProduct, LatexScalarRightCompoundParens)
+{
+    // Tensor ⊗ (a·b) — compound scalar needs parens: "v (a \cdot b)".
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* a = make_named_tensor(rl, "a", 1, {});
+    auto* b = make_named_tensor(rl, "b", 1, {});
+    auto* dot_ab = rl.make<Contract>(a, b); // rank 0
+    auto* tp = make_tensor_product(rl, v, dot_ab);
+    EXPECT_EQ(tp->latex(), "v (a \\cdot b)");
+}
+
 TEST(TensorProduct, Python)
 {
     auto rl = make_rl();

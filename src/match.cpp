@@ -72,16 +72,16 @@ static auto satisfies_constraints(PatternVar const* pv, Expr* expr) -> bool
 // ===========================================================================
 
 // Forward declaration for mutual recursion.
-static auto match_impl(
-    Expr* pattern, Expr* expr, PatternBinding const& bindings)
+static auto match_impl(Expr* pattern, Expr* expr, PatternBinding const& bindings)
     -> std::vector<PatternBinding>;
 
 // Attempt to match two expressions that have the same structural type.
 // Returns merged binding lists.
 template <typename BinaryNode>
 static auto match_binary(
-    BinaryNode* p, Expr* expr_raw, PatternBinding const& bindings)
-    -> std::vector<PatternBinding>
+    BinaryNode* p,
+    Expr* expr_raw,
+    PatternBinding const& bindings) -> std::vector<PatternBinding>
 {
     auto* e = dynamic_cast<BinaryNode*>(expr_raw);
     if (!e)
@@ -101,8 +101,9 @@ static auto match_binary(
 
 template <typename UnaryNode>
 static auto match_unary(
-    UnaryNode* p, Expr* expr_raw, PatternBinding const& bindings)
-    -> std::vector<PatternBinding>
+    UnaryNode* p,
+    Expr* expr_raw,
+    PatternBinding const& bindings) -> std::vector<PatternBinding>
 {
     auto* e = dynamic_cast<UnaryNode*>(expr_raw);
     if (!e)
@@ -110,8 +111,7 @@ static auto match_unary(
     return match_impl(p->arg(), e->arg(), bindings);
 }
 
-static auto match_impl(
-    Expr* pattern, Expr* expr, PatternBinding const& bindings)
+static auto match_impl(Expr* pattern, Expr* expr, PatternBinding const& bindings)
     -> std::vector<PatternBinding>
 {
     // --- PatternVar ---
@@ -119,9 +119,9 @@ static auto match_impl(
     {
         auto it = bindings.find(pv);
         if (it != bindings.end())
-            return (it->second == expr)
-                ? std::vector<PatternBinding>{bindings}
-                : std::vector<PatternBinding>{};
+            return (it->second == expr) ?
+                       std::vector<PatternBinding>{bindings} :
+                       std::vector<PatternBinding>{};
         if (!satisfies_constraints(pv, expr))
             return {};
         PatternBinding extended = bindings;
@@ -131,42 +131,40 @@ static auto match_impl(
 
     // --- Leaf identity checks (pointer or value equality) ---
     if (dynamic_cast<IdentityTensor*>(pattern))
-        return dynamic_cast<IdentityTensor*>(expr)
-            ? std::vector<PatternBinding>{bindings}
-            : std::vector<PatternBinding>{};
+        return dynamic_cast<IdentityTensor*>(expr) ?
+                   std::vector<PatternBinding>{bindings} :
+                   std::vector<PatternBinding>{};
     if (dynamic_cast<LeviCivitaTensor*>(pattern))
-        return dynamic_cast<LeviCivitaTensor*>(expr)
-            ? std::vector<PatternBinding>{bindings}
-            : std::vector<PatternBinding>{};
+        return dynamic_cast<LeviCivitaTensor*>(expr) ?
+                   std::vector<PatternBinding>{bindings} :
+                   std::vector<PatternBinding>{};
 
     if (auto* rc = dynamic_cast<RationalConst*>(pattern))
     {
         auto* re = dynamic_cast<RationalConst*>(expr);
-        return (re && re->value() == rc->value())
-            ? std::vector<PatternBinding>{bindings}
-            : std::vector<PatternBinding>{};
+        return (re && re->value() == rc->value()) ?
+                   std::vector<PatternBinding>{bindings} :
+                   std::vector<PatternBinding>{};
     }
 
     if (auto* nc = dynamic_cast<NamedConst*>(pattern))
     {
         auto* ne = dynamic_cast<NamedConst*>(expr);
-        return (ne && ne->symbol() == nc->symbol())
-            ? std::vector<PatternBinding>{bindings}
-            : std::vector<PatternBinding>{};
+        return (ne && ne->symbol() == nc->symbol()) ?
+                   std::vector<PatternBinding>{bindings} :
+                   std::vector<PatternBinding>{};
     }
 
     if (auto* pv2 = dynamic_cast<SymbolicVar*>(pattern))
     {
         // Concrete SymbolicVar / Parameter: must be the same object.
-        return (expr == pattern)
-            ? std::vector<PatternBinding>{bindings}
-            : std::vector<PatternBinding>{};
+        return (expr == pattern) ? std::vector<PatternBinding>{bindings} :
+                                   std::vector<PatternBinding>{};
     }
 
     if (auto* nt = dynamic_cast<NamedTensor*>(pattern))
-        return (expr == pattern)
-            ? std::vector<PatternBinding>{bindings}
-            : std::vector<PatternBinding>{};
+        return (expr == pattern) ? std::vector<PatternBinding>{bindings} :
+                                   std::vector<PatternBinding>{};
 
     // --- Sum ---
     if (auto* ps = dynamic_cast<Sum*>(pattern))
@@ -254,8 +252,7 @@ static auto match_impl(
     return {}; // no match for unhandled types
 }
 
-auto match_pattern(
-    Expr* pattern, Expr* expr, PatternBinding const& bindings)
+auto match_pattern(Expr* pattern, Expr* expr, PatternBinding const& bindings)
     -> std::vector<PatternBinding>
 {
     return match_impl(pattern, expr, bindings);
@@ -266,7 +263,9 @@ auto match_pattern(
 // ===========================================================================
 
 static auto find_matches_impl(
-    Expr* pattern, Expr* root, int& budget,
+    Expr* pattern,
+    Expr* root,
+    int& budget,
     std::vector<PatternBinding>& results) -> void
 {
     if (--budget < 0)
@@ -343,9 +342,10 @@ auto apply_identity_auto(Identity const& id, Expr* expr, int max_nodes)
     auto matches = find_matches(id, expr, max_nodes);
     if (matches.empty())
         throw std::invalid_argument(
-            "apply_identity_auto: no match for identity '" + id.name() +
-            "' in expression");
-    return apply_identity(id, PatternMapping{matches[0].begin(), matches[0].end()});
+            "apply_identity_auto: no match for identity '" + id.name()
+            + "' in expression");
+    return apply_identity(
+        id, PatternMapping{matches[0].begin(), matches[0].end()});
 }
 
 } // namespace tender

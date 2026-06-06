@@ -195,6 +195,21 @@ auto TensorProduct::latex() const -> std::string
             rhs_needs_parens ? "(" + rhs_->latex() + ")" : rhs_->latex();
         return "(" + lhs_->latex() + ") " + rhs_tex;
     }
+    if (lhs_->rank() >= 1 && rhs_->rank() == 0)
+    {
+        // Tensor × scalar: render without \otimes for readability.
+        // Atomic scalars (single-token symbols, functions, powers) need no
+        // parens.
+        bool rhs_atomic = dynamic_cast<RationalConst const*>(rhs_)
+                          || dynamic_cast<NamedConst const*>(rhs_)
+                          || dynamic_cast<SymbolicVar const*>(rhs_)
+                          || dynamic_cast<NamedTensor const*>(rhs_)
+                          || dynamic_cast<FunctionApply const*>(rhs_)
+                          || dynamic_cast<Pow const*>(rhs_);
+        std::string rhs_tex =
+            rhs_atomic ? rhs_->latex() : "(" + rhs_->latex() + ")";
+        return lhs_->latex() + " " + rhs_tex;
+    }
     return lhs_->latex() + " \\otimes " + rhs_->latex();
 }
 
@@ -805,9 +820,22 @@ auto derivative_of_pow(ResourceList& rl, Expr* base, Rational exp) -> Expr*
 // Wrap a Sum sub-expression in parentheses so binary operators render cleanly.
 static auto latex_operand(Expr const* e) -> std::string
 {
-    if (dynamic_cast<Sum const*>(e))
+    if (dynamic_cast<Sum const*>(e) || dynamic_cast<CrossProduct const*>(e))
         return "(" + e->latex() + ")";
     return e->latex();
+}
+
+// True for expressions that render as a single atomic token (no space-separated
+// sub-expressions), so they don't need parentheses when used as a scalar
+// factor.
+static auto is_atomic_scalar(Expr const* e) -> bool
+{
+    return dynamic_cast<RationalConst const*>(e)
+           || dynamic_cast<NamedConst const*>(e)
+           || dynamic_cast<SymbolicVar const*>(e)
+           || dynamic_cast<NamedTensor const*>(e)
+           || dynamic_cast<FunctionApply const*>(e)
+           || dynamic_cast<Pow const*>(e);
 }
 
 // ===========================================================================

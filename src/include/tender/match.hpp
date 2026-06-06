@@ -26,8 +26,7 @@ auto match_pattern(Expr* pattern, Expr* expr, PatternBinding const& bindings)
 // Walk `expr` in pre-order and collect every sub-expression position where
 // `id.lhs()` matches.  Returns one binding per match site.
 // Throws std::runtime_error if more than `max_nodes` nodes are visited.
-auto find_matches(
-    Identity const& id, Expr* expr, int max_nodes = 10'000)
+auto find_matches(Identity const& id, Expr* expr, int max_nodes = 10'000)
     -> std::vector<PatternBinding>;
 
 // Convenience: apply `id` using the first match found in `expr`.

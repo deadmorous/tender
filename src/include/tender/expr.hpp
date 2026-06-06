@@ -254,8 +254,14 @@ public:
     {
         return skew_symmetric_;
     }
-    auto declare_symmetric() -> void { symmetric_ = true; }
-    auto declare_skew_symmetric() -> void { skew_symmetric_ = true; }
+    auto declare_symmetric() -> void
+    {
+        symmetric_ = true;
+    }
+    auto declare_skew_symmetric() -> void
+    {
+        skew_symmetric_ = true;
+    }
 
 private:
     std::string symbol_;

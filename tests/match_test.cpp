@@ -45,7 +45,7 @@ TEST(MatchPattern, SamePatternVarMustBindConsistently)
 
     // Pattern: a·a  against u·v — should fail (a can't be both u and v)
     auto* pattern = rl.make<Contract>(a, a);
-    auto* expr    = rl.make<Contract>(u, v);
+    auto* expr = rl.make<Contract>(u, v);
     EXPECT_TRUE(match_pattern(pattern, expr, {}).empty());
 }
 
@@ -58,7 +58,7 @@ TEST(MatchPattern, SamePatternVarBindsConsistentlyOk)
 
     // Pattern: a·a  against v·v — should succeed
     auto* pattern = rl.make<Contract>(a, a);
-    auto* expr    = rl.make<Contract>(v, v);
+    auto* expr = rl.make<Contract>(v, v);
     auto bindings = match_pattern(pattern, expr, {});
     ASSERT_EQ(static_cast<int>(bindings.size()), 1);
     EXPECT_EQ(bindings[0].at(a), v);
@@ -83,7 +83,7 @@ TEST(MatchPattern, CrossProductStructure)
     auto* v = make_named_tensor(rl, "v", 1, {});
 
     auto* pattern = rl.make<CrossProduct>(a, b);
-    auto* expr    = rl.make<CrossProduct>(u, v);
+    auto* expr = rl.make<CrossProduct>(u, v);
     auto bindings = match_pattern(pattern, expr, {});
     ASSERT_EQ(static_cast<int>(bindings.size()), 1);
     EXPECT_EQ(bindings[0].at(a), u);
@@ -94,15 +94,18 @@ TEST(MatchPattern, CrossProductStructure)
 TEST(MatchPattern, BacCabLhsPattern)
 {
     auto rl = make_rl();
-    auto* a = make_pattern_var(rl, "a"); a->constrain_rank(1);
-    auto* b = make_pattern_var(rl, "b"); b->constrain_rank(1);
-    auto* c = make_pattern_var(rl, "c"); c->constrain_rank(1);
+    auto* a = make_pattern_var(rl, "a");
+    a->constrain_rank(1);
+    auto* b = make_pattern_var(rl, "b");
+    b->constrain_rank(1);
+    auto* c = make_pattern_var(rl, "c");
+    c->constrain_rank(1);
     auto* u = make_named_tensor(rl, "u", 1, {});
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* w = make_named_tensor(rl, "w", 1, {});
 
     auto* pattern = rl.make<CrossProduct>(a, rl.make<CrossProduct>(b, c));
-    auto* expr    = rl.make<CrossProduct>(u, rl.make<CrossProduct>(v, w));
+    auto* expr = rl.make<CrossProduct>(u, rl.make<CrossProduct>(v, w));
     auto bindings = match_pattern(pattern, expr, {});
     ASSERT_EQ(static_cast<int>(bindings.size()), 1);
     EXPECT_EQ(bindings[0].at(a), u);
@@ -117,7 +120,8 @@ TEST(MatchPattern, BacCabLhsPattern)
 TEST(FindMatches, MatchAtRoot)
 {
     auto rl = make_rl();
-    auto* a = make_pattern_var(rl, "a"); a->constrain_rank(1);
+    auto* a = make_pattern_var(rl, "a");
+    a->constrain_rank(1);
     auto* v = make_named_tensor(rl, "v", 1, {});
 
     Identity id{"test", a, a};
@@ -129,8 +133,10 @@ TEST(FindMatches, MatchAtRoot)
 TEST(FindMatches, MatchDeepInTree)
 {
     auto rl = make_rl();
-    auto* a = make_pattern_var(rl, "a"); a->constrain_rank(1);
-    auto* b = make_pattern_var(rl, "b"); b->constrain_rank(1);
+    auto* a = make_pattern_var(rl, "a");
+    a->constrain_rank(1);
+    auto* b = make_pattern_var(rl, "b");
+    b->constrain_rank(1);
     auto* u = make_named_tensor(rl, "u", 1, {});
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* w = make_named_tensor(rl, "w", 1, {});
@@ -155,8 +161,10 @@ TEST(FindMatches, MatchDeepInTree)
 TEST(FindMatches, MatchInsideSum)
 {
     auto rl = make_rl();
-    auto* a = make_pattern_var(rl, "a"); a->constrain_rank(1);
-    auto* b = make_pattern_var(rl, "b"); b->constrain_rank(1);
+    auto* a = make_pattern_var(rl, "a");
+    a->constrain_rank(1);
+    auto* b = make_pattern_var(rl, "b");
+    b->constrain_rank(1);
     auto* u = make_named_tensor(rl, "u", 1, {});
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* w = make_named_tensor(rl, "w", 1, {}); // rank-1 placeholder
@@ -182,7 +190,8 @@ TEST(FindMatches, MatchInsideSum)
 TEST(FindMatches, BudgetExceeded)
 {
     auto rl = make_rl();
-    auto* a = make_pattern_var(rl, "a"); a->constrain_rank(1);
+    auto* a = make_pattern_var(rl, "a");
+    a->constrain_rank(1);
     auto* v = make_named_tensor(rl, "v", 1, {});
 
     Identity id{"test", a, a};
@@ -196,10 +205,14 @@ TEST(FindMatches, BudgetExceeded)
 TEST(ApplyIdentityAuto, FindsAndApplies)
 {
     auto rl = make_rl();
-    // Pattern: a×(b×c) = b(a·c) − c(a·b)  — but just test that it finds something
-    auto* a = make_pattern_var(rl, "a"); a->constrain_rank(1);
-    auto* b = make_pattern_var(rl, "b"); b->constrain_rank(1);
-    auto* c = make_pattern_var(rl, "c"); c->constrain_rank(1);
+    // Pattern: a×(b×c) = b(a·c) − c(a·b)  — but just test that it finds
+    // something
+    auto* a = make_pattern_var(rl, "a");
+    a->constrain_rank(1);
+    auto* b = make_pattern_var(rl, "b");
+    b->constrain_rank(1);
+    auto* c = make_pattern_var(rl, "c");
+    c->constrain_rank(1);
     auto* u = make_named_tensor(rl, "u", 1, {});
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* w = make_named_tensor(rl, "w", 1, {});
@@ -218,7 +231,8 @@ TEST(ApplyIdentityAuto, FindsAndApplies)
 TEST(ApplyIdentityAuto, NoMatchThrows)
 {
     auto rl = make_rl();
-    auto* a = make_pattern_var(rl, "a"); a->constrain_rank(1);
+    auto* a = make_pattern_var(rl, "a");
+    a->constrain_rank(1);
     auto* u = make_named_tensor(rl, "u", 1, {});
     auto* s = make_named_tensor(rl, "s", 0, {}); // scalar — won't match rank-1
 
