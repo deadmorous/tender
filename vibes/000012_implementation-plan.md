@@ -44,6 +44,43 @@ Each phase below cites the vibes where its design decisions live.
 
 ---
 
+## Design note — Expression dispatch and downcasting
+
+_Recorded 2026-06-06 after Phase 7._
+
+### Current situation
+
+`dynamic_cast` is already pervasive in production code: `make_scale`,
+`make_sum`, `make_product`, `deriv`, `depends_on_impl`, `expand_poly_impl`
+all use it to dispatch on concrete type.  This is fine for now.  In tests,
+`dynamic_cast` is permanently acceptable for structural assertions.
+
+### Planned replacement: discriminator + static_cast
+
+After Phase 9, when the set of expression node types stabilises, we will
+introduce:
+
+- `enum class ExprKind { RationalConst, NamedConst, SymbolicVar, Parameter,
+  NamedTensor, IdentityTensor, LeviCivita, Scale, Sum, TensorProduct,
+  Contract, DoubleContract, DoubleContractReversed, CrossProduct, Trace,
+  FunctionApply, Pow, Product, MaterialDeriv, PolynomialExpr, PatternVar }`;
+- `kind()` accessor on `Expr` (non-virtual; set in a protected constructor);
+- switch-based dispatch + `static_cast<Concrete*>(e)` — analogous to LLVM's
+  `isa<>` / `cast<>` / `dyn_cast<>`.
+
+This is a straight mechanical refactor: all semantics stay the same, only the
+cast mechanism changes.
+
+### Expr interface growth
+
+The `Expr` interface will stay lean.  Heavy algorithms (deriv, substitute,
+expand, simplify) stay as external free functions that dispatch over the full
+node set.  A small number of _canonical participation_ operations — where
+every node has a uniform answer — may be added as virtual methods (e.g.
+`collect_params()`).  These are added only when a concrete need arises.
+
+---
+
 ## Phase 0 — Project scaffold
 
 **Goal**: a compilable, testable skeleton. Nothing mathematical yet.

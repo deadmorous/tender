@@ -183,6 +183,14 @@ auto Sum::python() const -> std::string
 
 auto TensorProduct::latex() const -> std::string
 {
+    if (lhs_->rank() == 0 && rhs_->rank() >= 1)
+    {
+        // Scalar × tensor: render without \otimes for readability.
+        bool rhs_needs_parens = dynamic_cast<Sum const*>(rhs_) != nullptr;
+        std::string rhs_tex =
+            rhs_needs_parens ? "(" + rhs_->latex() + ")" : rhs_->latex();
+        return "(" + lhs_->latex() + ") " + rhs_tex;
+    }
     return lhs_->latex() + " \\otimes " + rhs_->latex();
 }
 
@@ -897,10 +905,6 @@ auto DoubleContractReversed::python() const -> std::string
 CrossProduct::CrossProduct(Expr* lhs, Expr* rhs) :
   lhs_(lhs), rhs_(rhs), rank_(lhs->rank() + rhs->rank() - 1)
 {
-    if (dynamic_cast<CrossProduct*>(lhs) || dynamic_cast<CrossProduct*>(rhs))
-        throw std::invalid_argument(
-            "CrossProduct: chaining is ambiguous — wrap the intermediate "
-            "result with named() to make parenthesisation explicit");
 }
 
 auto CrossProduct::latex() const -> std::string
@@ -968,6 +972,10 @@ auto make_cross_product(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*
     if (lhs->rank() < 1 || rhs->rank() < 1)
         throw std::invalid_argument(
             "make_cross_product: both operands must have rank ≥ 1");
+    if (dynamic_cast<CrossProduct*>(lhs) || dynamic_cast<CrossProduct*>(rhs))
+        throw std::invalid_argument(
+            "CrossProduct: chaining is ambiguous — wrap the intermediate "
+            "result with named() to make parenthesisation explicit");
     return rl.make<CrossProduct>(lhs, rhs);
 }
 

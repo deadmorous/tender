@@ -628,9 +628,9 @@ private:
 };
 
 // Cross product (a×b = −a·ε·b): rank = lhs.rank + rhs.rank − 1.
-// Throws std::invalid_argument if either operand is itself a CrossProduct —
-// cross products are non-associative; nested calls require make the
-// intermediate result explicit via named() first.
+// make_cross_product() rejects chaining (pass a nested CrossProduct as an
+// operand); use rl.make<CrossProduct> directly only in pattern-construction
+// code where nesting is intentional.
 class CrossProduct : public Expr
 {
 public:
