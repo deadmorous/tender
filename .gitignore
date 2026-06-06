@@ -2,6 +2,7 @@ build*/
 .cache/
 .idea/
 .qtcreator/
+Testing/
 __pycache__/
 *.pyc
 *.pyo
