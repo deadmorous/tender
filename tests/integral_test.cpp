@@ -171,6 +171,59 @@ TEST(DivergenceNode, Python)
 }
 
 // ===========================================================================
+// Rotor node
+// ===========================================================================
+
+TEST(RotorNode, RankMatchesArg)
+{
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* r = make_rotor(rl, v);
+    EXPECT_EQ(r->rank(), 1);
+}
+
+TEST(RotorNode, RankForTensor)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* r = make_rotor(rl, A);
+    EXPECT_EQ(r->rank(), 2);
+}
+
+TEST(RotorNode, ScalarArgThrows)
+{
+    auto rl = make_rl();
+    auto* f = make_named_tensor(rl, "f", 0, {});
+    EXPECT_THROW(make_rotor(rl, f), std::invalid_argument);
+}
+
+TEST(RotorNode, ArgAccessor)
+{
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* r = make_rotor(rl, v);
+    auto* rr = dynamic_cast<Rotor*>(r);
+    ASSERT_NE(rr, nullptr);
+    EXPECT_EQ(rr->arg(), v);
+}
+
+TEST(RotorNode, Latex)
+{
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* r = make_rotor(rl, v);
+    EXPECT_NE(r->latex().find("times"), std::string::npos);
+}
+
+TEST(RotorNode, Python)
+{
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* r = make_rotor(rl, v);
+    EXPECT_NE(r->python().find("rotor"), std::string::npos);
+}
+
+// ===========================================================================
 // Integral node
 // ===========================================================================
 

@@ -84,6 +84,32 @@ auto make_divergence(ResourceList& rl, Expr* arg) -> Expr*
 }
 
 // ===========================================================================
+// Rotor
+// ===========================================================================
+
+Rotor::Rotor(Expr* arg) : arg_(arg)
+{
+    if (arg->rank() < 1)
+        throw std::invalid_argument(
+            "Rotor: argument must have rank >= 1, got rank 0");
+}
+
+auto Rotor::latex() const -> std::string
+{
+    return "\\nabla \\times " + arg_->latex();
+}
+
+auto Rotor::python() const -> std::string
+{
+    return "rotor(" + arg_->python() + ")";
+}
+
+auto make_rotor(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return rl.make<Rotor>(arg);
+}
+
+// ===========================================================================
 // Integral
 // ===========================================================================
 

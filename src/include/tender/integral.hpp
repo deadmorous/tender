@@ -151,6 +151,32 @@ private:
 auto make_divergence(ResourceList& rl, Expr* arg) -> Expr*;
 
 // ===========================================================================
+// Rotor node — symbolic ∇ × expr; rank = arg->rank()
+// ===========================================================================
+
+class Rotor : public Expr
+{
+public:
+    explicit Rotor(Expr* arg);
+    auto rank() const noexcept -> int override
+    {
+        return arg_->rank();
+    }
+    auto latex() const -> std::string override;
+    auto python() const -> std::string override;
+    auto arg() const noexcept -> Expr*
+    {
+        return arg_;
+    }
+
+private:
+    Expr* arg_;
+};
+
+// Throws std::invalid_argument if arg->rank() < 1.
+auto make_rotor(ResourceList& rl, Expr* arg) -> Expr*;
+
+// ===========================================================================
 // Integral node — ∫_domain integrand d(measure); rank = integrand->rank()
 // ===========================================================================
 
