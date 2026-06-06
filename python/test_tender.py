@@ -176,6 +176,15 @@ def test_cross_product_chaining_raises():
         _ = ab % c
 
 
+def test_cross_free_function_allows_nesting():
+    # cross() is binary and unambiguous — nesting must work for identity patterns
+    a = tensor("a", 1)
+    b = tensor("b", 1)
+    c = tensor("c", 1)
+    result = cross(a, cross(b, c))
+    assert result.rank == 1
+
+
 def test_truediv_int():
     v = tensor("v", 1)
     half_v = v / 2

@@ -392,7 +392,8 @@ NB_MODULE(_tender, m)
     }, nb::rv_policy::reference, "a"_a, "b"_a);
 
     m.def("cross", [](Expr* a, Expr* b) -> Expr* {
-        return make_cross_product(g_rl, a, b);
+        // Free function: nesting is explicit and unambiguous; bypass the guard.
+        return g_rl.make<CrossProduct>(a, b);
     }, nb::rv_policy::reference, "a"_a, "b"_a);
 
     m.def("trace", [](Expr* a) -> Expr* {
