@@ -16,6 +16,8 @@ Run:
     python examples/bac_cab.py
 """
 
+import pathlib
+
 from tender import (
     tensor,
     make_pattern_var,
@@ -29,6 +31,7 @@ from tender import (
     State,
     Derivation,
     show,
+    to_latex_document,
     Contract,
     Sum,
 )
@@ -126,3 +129,17 @@ print(doc(bac_cab))
 from tender.lib.identities.epsilon import bac_cab as lib_bac_cab
 print()
 print("Standard library entry (same identity):", lib_bac_cab.name)
+
+# ---------------------------------------------------------------------------
+# Write a compilable LaTeX document
+# ---------------------------------------------------------------------------
+tex = to_latex_document(
+    history,
+    title="BAC-CAB identity — application",
+)
+out_dir = pathlib.Path(__file__).parent / "out"
+out_dir.mkdir(exist_ok=True)
+out = out_dir / "bac_cab.tex"
+out.write_text(tex)
+print(f"\nLaTeX document written to {out}")
+print("Compile with: pdflatex -output-directory out out/bac_cab.tex")

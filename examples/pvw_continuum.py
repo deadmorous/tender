@@ -149,7 +149,9 @@ tex = to_latex_document(
     full_history,
     title="Principle of Virtual Work — symbolic derivation",
 )
-out = pathlib.Path(__file__).with_suffix(".tex")
+out_dir = pathlib.Path(__file__).parent / "out"
+out_dir.mkdir(exist_ok=True)
+out = out_dir / "pvw_continuum.tex"
 out.write_text(tex)
 print(f"\nLaTeX document written to {out}")
-print("Compile with: pdflatex", out.name)
+print("Compile with: pdflatex -output-directory out out/pvw_continuum.tex")

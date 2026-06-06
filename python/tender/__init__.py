@@ -149,6 +149,28 @@ def doc(entry, format="latex"):
     return tex
 
 
+def show_jupyter(history):
+    """Display a derivation history as formatted LaTeX equations in a Jupyter cell.
+
+    Each step is rendered as a displayed equation with its step label on the
+    left, matching the layout produced by :func:`to_latex_document`.
+
+    Parameters
+    ----------
+    history : list[State]
+        The sequence of states returned by :meth:`Derivation.apply`.
+    """
+    from IPython.display import display, Latex
+
+    blocks = []
+    for state in history:
+        label = state.label or "initial"
+        blocks.append(
+            r"\[" + _label_to_math(label) + r"\quad " + state.expr.latex() + r"\]"
+        )
+    display(Latex("\n".join(blocks)))
+
+
 def _label_to_math(label):
     """Render a step label as a LaTeX math-mode fragment.
 
@@ -230,7 +252,7 @@ __all__ = [
     # Integral / domain
     "make_surface_domain", "make_volume_domain", "integral",
     # Derivation rendering
-    "show", "show_final",
+    "show", "show_final", "show_jupyter",
     # LaTeX document export
     "to_latex_document",
     # Documentation
