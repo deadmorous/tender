@@ -38,6 +38,35 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  python-bindings:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q cmake ninja-build gcc-14 g++-14 python3-dev python3-pip
+          pip3 install pytest
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-14 \
+            -DCMAKE_CXX_COMPILER=g++-14 \
+            -DTENDER_BUILD_TESTS=OFF \
+            -DTENDER_BUILD_PYTHON=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Python tests
+        run: |
+          cd build/python
+          PYTHONPATH=. pytest test_tender.py -v
+
   coverage:
     runs-on: ubuntu-24.04
 
