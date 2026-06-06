@@ -342,6 +342,179 @@ private:
 };
 
 // ===========================================================================
+// Geometric operation nodes (Phase 4)
+// ===========================================================================
+
+// Identity tensor: rank 2. make_contract(I, a) → a.
+class IdentityTensor : public Expr
+{
+public:
+    IdentityTensor() noexcept = default;
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 2;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+};
+
+// Levi-Civita permutation tensor: rank 3.
+class LeviCivitaTensor : public Expr
+{
+public:
+    LeviCivitaTensor() noexcept = default;
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 3;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+};
+
+// Trace of a rank-2 expression: rank 0.
+// Produced by the make_double_contract(I, A) simplification.
+class Trace : public Expr
+{
+public:
+    explicit Trace(Expr* arg);
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 0;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto arg() const noexcept -> Expr*
+    {
+        return arg_;
+    }
+
+private:
+    Expr* arg_;
+};
+
+// Single contraction (·): rank = lhs.rank + rhs.rank − 2.
+// Constructed only when no simplification applies (use make_contract).
+class Contract : public Expr
+{
+public:
+    Contract(Expr* lhs, Expr* rhs) :
+      lhs_(lhs), rhs_(rhs), rank_(lhs->rank() + rhs->rank() - 2)
+    {
+    }
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return rank_;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto lhs() const noexcept -> Expr*
+    {
+        return lhs_;
+    }
+    [[nodiscard]] auto rhs() const noexcept -> Expr*
+    {
+        return rhs_;
+    }
+
+private:
+    Expr* lhs_;
+    Expr* rhs_;
+    int rank_;
+};
+
+// Double contraction — Frobenius (A:B = AᵢⱼBᵢⱼ): rank = lhs.rank + rhs.rank
+// − 4. Constructed only when no simplification applies (use
+// make_double_contract).
+class DoubleContract : public Expr
+{
+public:
+    DoubleContract(Expr* lhs, Expr* rhs) :
+      lhs_(lhs), rhs_(rhs), rank_(lhs->rank() + rhs->rank() - 4)
+    {
+    }
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return rank_;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto lhs() const noexcept -> Expr*
+    {
+        return lhs_;
+    }
+    [[nodiscard]] auto rhs() const noexcept -> Expr*
+    {
+        return rhs_;
+    }
+
+private:
+    Expr* lhs_;
+    Expr* rhs_;
+    int rank_;
+};
+
+// Reversed double contraction (A··B = AᵢⱼBⱼᵢ): rank = lhs.rank + rhs.rank − 4.
+class DoubleContractReversed : public Expr
+{
+public:
+    DoubleContractReversed(Expr* lhs, Expr* rhs) :
+      lhs_(lhs), rhs_(rhs), rank_(lhs->rank() + rhs->rank() - 4)
+    {
+    }
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return rank_;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto lhs() const noexcept -> Expr*
+    {
+        return lhs_;
+    }
+    [[nodiscard]] auto rhs() const noexcept -> Expr*
+    {
+        return rhs_;
+    }
+
+private:
+    Expr* lhs_;
+    Expr* rhs_;
+    int rank_;
+};
+
+// Cross product (a×b = −a·ε·b): rank = lhs.rank + rhs.rank − 1.
+// Throws std::invalid_argument if either operand is itself a CrossProduct —
+// cross products are non-associative; nested calls require make the
+// intermediate result explicit via named() first.
+class CrossProduct : public Expr
+{
+public:
+    CrossProduct(Expr* lhs, Expr* rhs);
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return rank_;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto lhs() const noexcept -> Expr*
+    {
+        return lhs_;
+    }
+    [[nodiscard]] auto rhs() const noexcept -> Expr*
+    {
+        return rhs_;
+    }
+
+private:
+    Expr* lhs_;
+    Expr* rhs_;
+    int rank_;
+};
+
+// ===========================================================================
 // Factory functions — scalar nodes (Phase 2)
 // ===========================================================================
 
@@ -370,5 +543,32 @@ auto make_no_sum(ResourceList& rl, Expr* body, Index* index) -> Expr*;
 auto convolve(
     ResourceList& rl, Expr* a, std::size_t slot_a, Expr* b, std::size_t slot_b)
     -> Expr*;
+
+// ===========================================================================
+// Factory functions — geometric operations (Phase 4)
+// ===========================================================================
+
+auto make_identity(ResourceList& rl) -> Expr*;
+auto make_levi_civita(ResourceList& rl) -> Expr*;
+
+// Trace of a rank-2 expression. Throws if arg->rank() != 2.
+auto make_trace(ResourceList& rl, Expr* arg) -> Expr*;
+
+// Single contraction (·): rank = lhs + rhs − 2. Requires both rank ≥ 1.
+// Always-on simplifications: I·a → a, a·I → a, 0·a → 0, a·0 → 0.
+auto make_contract(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*;
+
+// Double contraction (A:B = AᵢⱼBᵢⱼ): rank = lhs + rhs − 4. Requires both
+// rank ≥ 2. Always-on simplification: I:A → tr(A) when A has rank 2.
+auto make_double_contract(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*;
+
+// Reversed double contraction (A··B = AᵢⱼBⱼᵢ): rank = lhs + rhs − 4.
+// Requires both rank ≥ 2.
+auto make_double_contract_reversed(ResourceList& rl, Expr* lhs, Expr* rhs)
+    -> Expr*;
+
+// Cross product (a×b = −a·ε·b): rank = lhs + rhs − 1. Requires both rank ≥ 1.
+// Throws if either operand is itself a CrossProduct (chaining guard).
+auto make_cross_product(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*;
 
 } // namespace tender

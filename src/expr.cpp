@@ -339,8 +339,17 @@ auto make_sum(ResourceList& rl, std::vector<Expr*> terms) -> Expr*
 // Factory: make_tensor_product
 // ===========================================================================
 
+static auto is_zero_expr(Expr const* e) -> bool
+{
+    if (auto const* rc = dynamic_cast<RationalConst const*>(e))
+        return rc->value().is_zero();
+    return false;
+}
+
 auto make_tensor_product(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*
 {
+    if (is_zero_expr(lhs) || is_zero_expr(rhs))
+        return make_rational(rl, Rational{0});
     return rl.make<TensorProduct>(lhs, rhs);
 }
 
@@ -532,6 +541,191 @@ auto convolve(
 
     return rl.make<Contraction>(
         a, slot_a, b, slot_b, result_rank, std::move(result_slots));
+}
+
+// ===========================================================================
+// Phase 4 — LaTeX helper for binary operation nodes
+// ===========================================================================
+
+// Wrap a Sum sub-expression in parentheses so binary operators render cleanly.
+static auto latex_operand(Expr const* e) -> std::string
+{
+    if (dynamic_cast<Sum const*>(e))
+        return "(" + e->latex() + ")";
+    return e->latex();
+}
+
+// ===========================================================================
+// IdentityTensor
+// ===========================================================================
+
+auto IdentityTensor::latex() const -> std::string
+{
+    return "\\mathbf{I}";
+}
+
+auto IdentityTensor::python() const -> std::string
+{
+    return "I";
+}
+
+// ===========================================================================
+// LeviCivitaTensor
+// ===========================================================================
+
+auto LeviCivitaTensor::latex() const -> std::string
+{
+    return "\\boldsymbol{\\varepsilon}";
+}
+
+auto LeviCivitaTensor::python() const -> std::string
+{
+    return "eps";
+}
+
+// ===========================================================================
+// Trace
+// ===========================================================================
+
+Trace::Trace(Expr* arg) : arg_(arg)
+{
+    if (arg->rank() != 2)
+        throw std::invalid_argument(
+            "Trace: argument must have rank 2, got rank "
+            + std::to_string(arg->rank()));
+}
+
+auto Trace::latex() const -> std::string
+{
+    return "\\mathrm{tr}(" + arg_->latex() + ")";
+}
+
+auto Trace::python() const -> std::string
+{
+    return "trace(" + arg_->python() + ")";
+}
+
+// ===========================================================================
+// Contract
+// ===========================================================================
+
+auto Contract::latex() const -> std::string
+{
+    return latex_operand(lhs_) + " \\cdot " + latex_operand(rhs_);
+}
+
+auto Contract::python() const -> std::string
+{
+    return "dot(" + lhs_->python() + ", " + rhs_->python() + ")";
+}
+
+// ===========================================================================
+// DoubleContract
+// ===========================================================================
+
+auto DoubleContract::latex() const -> std::string
+{
+    return latex_operand(lhs_) + " : " + latex_operand(rhs_);
+}
+
+auto DoubleContract::python() const -> std::string
+{
+    return "ddot(" + lhs_->python() + ", " + rhs_->python() + ")";
+}
+
+// ===========================================================================
+// DoubleContractReversed
+// ===========================================================================
+
+auto DoubleContractReversed::latex() const -> std::string
+{
+    return latex_operand(lhs_) + " \\cdot\\!\\cdot " + latex_operand(rhs_);
+}
+
+auto DoubleContractReversed::python() const -> std::string
+{
+    return "ddot_rev(" + lhs_->python() + ", " + rhs_->python() + ")";
+}
+
+// ===========================================================================
+// CrossProduct
+// ===========================================================================
+
+CrossProduct::CrossProduct(Expr* lhs, Expr* rhs) :
+  lhs_(lhs), rhs_(rhs), rank_(lhs->rank() + rhs->rank() - 1)
+{
+    if (dynamic_cast<CrossProduct*>(lhs) || dynamic_cast<CrossProduct*>(rhs))
+        throw std::invalid_argument(
+            "CrossProduct: chaining is ambiguous — wrap the intermediate "
+            "result with named() to make parenthesisation explicit");
+}
+
+auto CrossProduct::latex() const -> std::string
+{
+    return latex_operand(lhs_) + " \\times " + latex_operand(rhs_);
+}
+
+auto CrossProduct::python() const -> std::string
+{
+    return "cross(" + lhs_->python() + ", " + rhs_->python() + ")";
+}
+
+// ===========================================================================
+// Factory functions — Phase 4
+// ===========================================================================
+
+auto make_identity(ResourceList& rl) -> Expr*
+{
+    return rl.make<IdentityTensor>();
+}
+
+auto make_levi_civita(ResourceList& rl) -> Expr*
+{
+    return rl.make<LeviCivitaTensor>();
+}
+
+auto make_trace(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return rl.make<Trace>(arg);
+}
+
+auto make_contract(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*
+{
+    if (lhs->rank() < 1 || rhs->rank() < 1)
+        throw std::invalid_argument(
+            "make_contract: both operands must have rank ≥ 1");
+    if (dynamic_cast<IdentityTensor*>(lhs))
+        return rhs;
+    if (dynamic_cast<IdentityTensor*>(rhs))
+        return lhs;
+    return rl.make<Contract>(lhs, rhs);
+}
+
+auto make_double_contract(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*
+{
+    if (lhs->rank() < 2 || rhs->rank() < 2)
+        throw std::invalid_argument(
+            "make_double_contract: both operands must have rank ≥ 2");
+    if (dynamic_cast<IdentityTensor*>(lhs) && rhs->rank() == 2)
+        return make_trace(rl, rhs);
+    return rl.make<DoubleContract>(lhs, rhs);
+}
+
+auto make_double_contract_reversed(ResourceList& rl, Expr* lhs, Expr* rhs)
+    -> Expr*
+{
+    if (lhs->rank() < 2 || rhs->rank() < 2)
+        throw std::invalid_argument(
+            "make_double_contract_reversed: both operands must have rank ≥ 2");
+    return rl.make<DoubleContractReversed>(lhs, rhs);
+}
+
+auto make_cross_product(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*
+{
+    if (lhs->rank() < 1 || rhs->rank() < 1)
+        throw std::invalid_argument(
+            "make_cross_product: both operands must have rank ≥ 1");
+    return rl.make<CrossProduct>(lhs, rhs);
 }
 
 } // namespace tender
