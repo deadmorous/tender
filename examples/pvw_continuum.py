@@ -28,6 +28,8 @@ Run:
     python examples/pvw_continuum.py
 """
 
+import pathlib
+
 from tender import (
     tensor,
     make_volume_domain,
@@ -40,6 +42,7 @@ from tender import (
     apply_integration_by_parts_step,
     localize_step,
     show,
+    to_latex_document,
     Sum,
     Scale,
     Contract,
@@ -121,3 +124,16 @@ print("Derivation verified:")
 print("  • IBP applied correctly")
 print("  • Divergence of sigma appears in the volume equilibrium equation")
 print("  • Surface traction BC recovered via ∂V localization")
+
+# ---------------------------------------------------------------------------
+# Write a compilable LaTeX document
+# ---------------------------------------------------------------------------
+full_history = history + surface_history[1:]   # merge both derivation chains
+tex = to_latex_document(
+    full_history,
+    title="Principle of Virtual Work — symbolic derivation",
+)
+out = pathlib.Path(__file__).with_suffix(".tex")
+out.write_text(tex)
+print(f"\nLaTeX document written to {out}")
+print("Compile with: pdflatex", out.name)

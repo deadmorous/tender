@@ -8,18 +8,18 @@ target_link_libraries(_tender PRIVATE tender::tender)
 set_target_properties(_tender PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/tender)
 
-# Copy the Python package source into the build tree.
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/tender/__init__.py
-    ${CMAKE_CURRENT_BINARY_DIR}/tender/__init__.py
-    COPYONLY)
-
-# Copy the test file to the build tree so pytest runs from there,
-# avoiding sys.path conflicts with the source python/ directory.
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/test_tender.py
-    ${CMAKE_CURRENT_BINARY_DIR}/test_tender.py
-    COPYONLY)
+# Keep Python source files in sync with the build tree at build time
+# (not just at configure time like configure_file would do).
+foreach(_py tender/__init__.py test_tender.py)
+    add_custom_command(
+        OUTPUT  ${CMAKE_CURRENT_BINARY_DIR}/${_py}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/${_py}
+                ${CMAKE_CURRENT_BINARY_DIR}/${_py}
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${_py}
+        COMMENT "Syncing ${_py}")
+    target_sources(_tender PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/${_py})
+endforeach()
 
 # Optional: run Python tests if pytest is available.
 find_program(PYTEST_EXECUTABLE pytest)

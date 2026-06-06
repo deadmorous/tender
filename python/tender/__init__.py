@@ -112,6 +112,59 @@ cylindrical_cs = _cylindrical_cs_singleton()
 spherical_cs = _spherical_cs_singleton()
 nabla = Nabla()
 
+def _label_to_math(label):
+    """Render a step label as a LaTeX math-mode fragment.
+
+    Plain identifiers (not part of a \\command) are wrapped in \\mathrm{} so
+    they appear upright.  LaTeX commands (\\partial, etc.) are passed through
+    unchanged.  Returns a string suitable for use inside \\[...\\].
+    """
+    import re
+
+    if "\\" not in label:
+        # No LaTeX commands — use text mode directly.
+        return r"\text{[" + label + r":] }"
+
+    # Match \command sequences first (pass through), then bare alpha runs
+    # (wrap in \mathrm{}).  The alternation consumes \partial as one token,
+    # preventing "artial" from being re-matched as a separate identifier.
+    def _repl(m):
+        s = m.group(0)
+        return s if s.startswith("\\") else r"\mathrm{" + s + "}"
+
+    math_label = re.sub(r"\\[A-Za-z]+|[A-Za-z]+", _repl, label)
+    return r"\text{[}" + math_label + r"\text{:] }"
+
+
+def to_latex_document(history, title=None):
+    """Generate a standalone compilable LaTeX document from a derivation history.
+
+    Each state in history is rendered as a display equation prefixed with
+    the step label.  Requires amsmath and amssymb.
+
+    Example::
+
+        history = Derivation([...]).apply(State(expr))
+        tex = to_latex_document(history, title="PVW derivation")
+        with open("derivation.tex", "w") as f:
+            f.write(tex)
+    """
+    lines = [
+        r"\documentclass{article}",
+        r"\usepackage{amsmath,amssymb}",
+        r"\begin{document}",
+    ]
+    if title:
+        lines.append(r"\section*{" + title + "}")
+    for state in history:
+        label = state.label or "initial"
+        lines.append(
+            r"\[" + _label_to_math(label) + r"\quad " + state.expr.latex() + r"\]"
+        )
+    lines.append(r"\end{document}")
+    return "\n".join(lines)
+
+
 __all__ = [
     # Types
     "Rational", "Expr", "RationalConst", "NamedConst", "SymbolicVar",
@@ -141,6 +194,8 @@ __all__ = [
     "make_surface_domain", "make_volume_domain", "integral",
     # Derivation rendering
     "show", "show_final",
+    # LaTeX document export
+    "to_latex_document",
     # Step factories
     "simplify_identity_step", "expand_step", "expand_poly_step",
     "substitute_step", "diff_step",

@@ -15,6 +15,10 @@ static auto sym_to_latex(std::string const& sym) -> std::string
 {
     if (sym.size() == 1)
         return sym;
+    // If the symbol already contains LaTeX commands, pass it through as-is
+    // so that e.g. \boldsymbol{\sigma} is not wrapped in \text{}.
+    if (sym.find('\\') != std::string::npos)
+        return sym;
     return "\\text{" + sym + "}";
 }
 
