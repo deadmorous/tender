@@ -8,3 +8,4 @@ endfunction()
 
 tender_add_test(smoke_test)
 tender_add_test(rational_test)
+tender_add_test(expr_test)
