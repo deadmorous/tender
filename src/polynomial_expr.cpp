@@ -24,14 +24,6 @@ static auto coeff_latex(Rational const& c, bool has_factor) -> std::string
            + std::to_string(abs_c.den()) + "}";
 }
 
-static auto coeff_python(Rational const& c, bool has_factor) -> std::string
-{
-    Rational const abs_c(c.num() < 0 ? -c.num() : c.num(), c.den());
-    if (has_factor && abs_c == Rational{1})
-        return "";
-    return abs_c.to_string();
-}
-
 // Wrap var latex/python in parens when it is a Sum (precedence guard).
 static auto parenthesise_if_sum(Expr const* var, std::string s) -> std::string
 {

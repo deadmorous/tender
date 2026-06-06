@@ -298,3 +298,105 @@ TEST(BacCab, FromDerivationRoundtrip)
     EXPECT_EQ(id.lhs(), lhs_pat);
     EXPECT_EQ(id.rhs(), rhs_pat);
 }
+
+// ===========================================================================
+// apply_identity — substitute_pattern coverage for additional node types
+// ===========================================================================
+
+TEST(SubstitutePattern, DoubleContractInRhs)
+{
+    // Identity: A:B → A:B  (trivial, tests DoubleContract traversal)
+    auto rl = make_rl();
+    auto* a = make_pattern_var(rl, "A")->constrain_rank(2);
+    auto* b = make_pattern_var(rl, "B")->constrain_rank(2);
+    auto* rhs_pat = make_double_contract(rl, a, b);
+    Identity id{"dc_id", a, rhs_pat};
+
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    PatternMapping mapping = {{a, A}, {b, B}};
+    auto step = apply_identity(id, mapping);
+
+    auto history = Derivation{{step}}.apply(rl, State{A});
+    auto* dc = dynamic_cast<DoubleContract*>(history[1].expr());
+    ASSERT_NE(dc, nullptr);
+    EXPECT_EQ(dc->lhs(), A);
+    EXPECT_EQ(dc->rhs(), B);
+}
+
+TEST(SubstitutePattern, CrossProductInRhs)
+{
+    // Identity: a → a×b  (tests CrossProduct path in substitute_pattern)
+    auto rl = make_rl();
+    auto* a = make_pattern_var(rl, "a")->constrain_rank(1);
+    auto* b = make_pattern_var(rl, "b")->constrain_rank(1);
+    // RHS: a×b — build with rl.make to bypass guard (a and b are PatternVars, not
+    // CrossProducts, so make_cross_product would also work here)
+    auto* rhs_pat = make_cross_product(rl, a, b);
+    Identity id{"cp_id", a, rhs_pat};
+
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    PatternMapping mapping = {{a, u}, {b, v}};
+    auto step = apply_identity(id, mapping);
+
+    auto history = Derivation{{step}}.apply(rl, State{u});
+    auto* cp = dynamic_cast<CrossProduct*>(history[1].expr());
+    ASSERT_NE(cp, nullptr);
+    EXPECT_EQ(cp->lhs(), u);
+    EXPECT_EQ(cp->rhs(), v);
+}
+
+TEST(SubstitutePattern, FunctionApplyInRhs)
+{
+    auto rl = make_rl();
+    auto* x = make_pattern_var(rl, "x")->constrain_rank(0);
+    auto* rhs_pat = make_sin(rl, x);
+    Identity id{"sin_id", x, rhs_pat};
+
+    auto* t = make_parameter(rl, "t");
+    PatternMapping mapping = {{x, t}};
+    auto step = apply_identity(id, mapping);
+
+    auto history = Derivation{{step}}.apply(rl, State{t});
+    auto* fa = dynamic_cast<FunctionApply*>(history[1].expr());
+    ASSERT_NE(fa, nullptr);
+    EXPECT_EQ(fa->arg(), t);
+}
+
+TEST(SubstitutePattern, PowInRhs)
+{
+    auto rl = make_rl();
+    auto* x = make_pattern_var(rl, "x")->constrain_rank(0);
+    auto* rhs_pat = make_pow(rl, x, Rational{2});
+    Identity id{"sq_id", x, rhs_pat};
+
+    auto* t = make_parameter(rl, "t");
+    PatternMapping mapping = {{x, t}};
+    auto step = apply_identity(id, mapping);
+
+    auto history = Derivation{{step}}.apply(rl, State{t});
+    auto* pw = dynamic_cast<Pow*>(history[1].expr());
+    ASSERT_NE(pw, nullptr);
+    EXPECT_EQ(pw->base(), t);
+}
+
+TEST(SubstitutePattern, ProductInRhs)
+{
+    auto rl = make_rl();
+    auto* x = make_pattern_var(rl, "x")->constrain_rank(0);
+    auto* y = make_pattern_var(rl, "y")->constrain_rank(0);
+    auto* rhs_pat = make_product(rl, x, y);
+    Identity id{"prod_id", x, rhs_pat};
+
+    auto* s = make_symbolic_var(rl, "s");
+    auto* t = make_parameter(rl, "t");
+    PatternMapping mapping = {{x, s}, {y, t}};
+    auto step = apply_identity(id, mapping);
+
+    auto history = Derivation{{step}}.apply(rl, State{s});
+    auto* pr = dynamic_cast<Product*>(history[1].expr());
+    ASSERT_NE(pr, nullptr);
+    EXPECT_EQ(pr->lhs(), s);
+    EXPECT_EQ(pr->rhs(), t);
+}

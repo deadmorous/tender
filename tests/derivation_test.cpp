@@ -332,3 +332,75 @@ TEST(NamedStep, NameAndFunctionWork)
     ASSERT_NE(rc, nullptr);
     EXPECT_EQ(rc->value(), Rational{5});
 }
+
+// ===========================================================================
+// expand_poly_step — additional node types (Sum, TensorProduct, Contract, Product)
+
+// ===========================================================================
+// expand_poly_step — additional node types
+// ===========================================================================
+
+TEST(ExpandPolyStep, ExpandInsideSum)
+{
+    auto rl = make_rl();
+    auto* t = make_parameter(rl, "t");
+    Polynomial p{{{Rational{1}, 2}}};
+    auto* pe = make_polynomial_expr(rl, p, t);
+    auto* c = make_rational(rl, Rational{3});
+    auto* expr = make_sum(rl, {pe, c});
+    auto history = Derivation{{expand_poly_step()}}.apply(rl, State{expr});
+    ASSERT_EQ(history.size(), 2u);
+    // Sum is rebuilt; the PolynomialExpr term is expanded
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(dynamic_cast<PolynomialExpr*>(s->terms()[0]), nullptr);
+}
+
+TEST(ExpandPolyStep, ExpandInsideTensorProduct)
+{
+    auto rl = make_rl();
+    auto* t = make_parameter(rl, "t");
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    Polynomial p{{{Rational{1}, 1}}};  // p(t) = t
+    auto* pe = make_polynomial_expr(rl, p, t);
+    // tp(pe, v): pe is rank-0, v is rank-1 → rank-1 TensorProduct
+    auto* expr = make_tensor_product(rl, pe, v);
+    auto history = Derivation{{expand_poly_step()}}.apply(rl, State{expr});
+    ASSERT_EQ(history.size(), 2u);
+    auto* tp = dynamic_cast<TensorProduct*>(history[1].expr());
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(dynamic_cast<PolynomialExpr*>(tp->lhs()), nullptr);
+}
+
+TEST(ExpandPolyStep, ExpandInsideContract)
+{
+    auto rl = make_rl();
+    auto* t = make_parameter(rl, "t");
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    Polynomial p{{{Rational{1}, 1}}};
+    auto* pe = make_polynomial_expr(rl, p, t);
+    // Contract(tp(pe, v), v): tp(pe,v) is rank-1, v is rank-1 → rank-0
+    auto* tv = make_tensor_product(rl, pe, v);
+    auto* expr = make_contract(rl, tv, v);
+    auto history = Derivation{{expand_poly_step()}}.apply(rl, State{expr});
+    ASSERT_EQ(history.size(), 2u);
+    // Contract rebuilt; PolynomialExpr inside TensorProduct is expanded
+    auto* co = dynamic_cast<Contract*>(history[1].expr());
+    ASSERT_NE(co, nullptr);
+}
+
+TEST(ExpandPolyStep, ExpandInsideProduct)
+{
+    auto rl = make_rl();
+    auto* t = make_parameter(rl, "t");
+    Polynomial p{{{Rational{1}, 1}}};
+    auto* pe = make_polynomial_expr(rl, p, t);
+    auto* x = make_symbolic_var(rl, "x");
+    // Product(pe, x): both rank-0, pe is not RationalConst → Product node
+    auto* expr = make_product(rl, pe, x);
+    auto history = Derivation{{expand_poly_step()}}.apply(rl, State{expr});
+    ASSERT_EQ(history.size(), 2u);
+    auto* pr = dynamic_cast<Product*>(history[1].expr());
+    ASSERT_NE(pr, nullptr);
+    EXPECT_EQ(dynamic_cast<PolynomialExpr*>(pr->lhs()), nullptr);
+}

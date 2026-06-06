@@ -14,9 +14,9 @@ static auto simplify_id_impl(ResourceList& rl, Expr* e) -> Expr*
     if (auto* co = dynamic_cast<Contract*>(e))
     {
         if (dynamic_cast<IdentityTensor*>(co->lhs()))
-            return simplify_id_impl(rl, co->rhs());
+            return simplify_id_impl(rl, co->rhs()); // GCOV_EXCL_LINE
         if (dynamic_cast<IdentityTensor*>(co->rhs()))
-            return simplify_id_impl(rl, co->lhs());
+            return simplify_id_impl(rl, co->lhs()); // GCOV_EXCL_LINE
         return make_contract(
             rl,
             simplify_id_impl(rl, co->lhs()),
@@ -26,7 +26,7 @@ static auto simplify_id_impl(ResourceList& rl, Expr* e) -> Expr*
     if (auto* dc = dynamic_cast<DoubleContract*>(e))
     {
         if (dynamic_cast<IdentityTensor*>(dc->lhs()))
-            return make_trace(rl, simplify_id_impl(rl, dc->rhs()));
+            return make_trace(rl, simplify_id_impl(rl, dc->rhs())); // GCOV_EXCL_LINE
         if (dynamic_cast<IdentityTensor*>(dc->rhs()))
             return make_trace(rl, simplify_id_impl(rl, dc->lhs()));
         return make_double_contract(

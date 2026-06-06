@@ -343,6 +343,315 @@ TEST(Expand, NestedExpansion)
     EXPECT_NE(dynamic_cast<Scale*>(s->terms()[1]), nullptr);
 }
 
+TEST(SimplifyIdentity, NonIdentityDoubleContract)
+{
+    // DoubleContract(A, B) where neither is I — passthrough (recursive rebuild)
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    // make_double_contract(A, B): A is not IdentityTensor → creates DoubleContract node
+    auto* expr = make_double_contract(rl, A, B);
+    auto history = Derivation{{simplify_identity_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<DoubleContract*>(history[1].expr()), nullptr);
+}
+
+TEST(SimplifyIdentity, DoubleContractReversedIdentityRight)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* I = make_identity(rl);
+    auto* expr = make_double_contract_reversed(rl, A, I);
+    auto history = Derivation{{simplify_identity_step()}}.apply(rl, State{expr});
+    auto* tr = dynamic_cast<Trace*>(history[1].expr());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->arg(), A);
+}
+
+TEST(SimplifyIdentity, NonIdentityDoubleContractReversed)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* expr = make_double_contract_reversed(rl, A, B);
+    auto history = Derivation{{simplify_identity_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<DoubleContractReversed*>(history[1].expr()), nullptr);
+}
+
+TEST(SimplifyIdentity, InsideTensorProduct)
+{
+    // Simplify recurses into TensorProduct children
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    // TensorProduct(u, w): no identity inside; result is still a TensorProduct
+    auto* expr = make_tensor_product(rl, u, w);
+    auto history = Derivation{{simplify_identity_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<TensorProduct*>(history[1].expr()), nullptr);
+}
+
+TEST(SimplifyIdentity, InsideCrossProduct)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    auto* expr = make_cross_product(rl, u, w);
+    auto history = Derivation{{simplify_identity_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<CrossProduct*>(history[1].expr()), nullptr);
+}
+
+TEST(SimplifyIdentity, InsideProduct)
+{
+    // Product of two rank-0 expressions
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    auto* expr = make_product(rl, x, y);
+    auto history = Derivation{{simplify_identity_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<Product*>(history[1].expr()), nullptr);
+}
+
+TEST(SimplifyIdentity, InsidePow)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* expr = make_pow(rl, x, Rational{2});
+    auto history = Derivation{{simplify_identity_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<Pow*>(history[1].expr()), nullptr);
+}
+
+TEST(SimplifyIdentity, InsideFunctionApply)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* expr = make_sin(rl, x);
+    auto history = Derivation{{simplify_identity_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<FunctionApply*>(history[1].expr()), nullptr);
+}
+
+// ===========================================================================
+// substitute_step — additional node types
+// ===========================================================================
+
+TEST(Substitute, InsideTensorProduct)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    auto* expr = make_tensor_product(rl, u, v);
+    auto history = Derivation{{substitute_step(v, w)}}.apply(rl, State{expr});
+    auto* tp = dynamic_cast<TensorProduct*>(history[1].expr());
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(tp->rhs(), w);
+}
+
+TEST(Substitute, InsideDoubleContract)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* C = make_named_tensor(rl, "C", 2, {});
+    auto* expr = make_double_contract(rl, A, B);
+    auto history = Derivation{{substitute_step(B, C)}}.apply(rl, State{expr});
+    auto* dc = dynamic_cast<DoubleContract*>(history[1].expr());
+    ASSERT_NE(dc, nullptr);
+    EXPECT_EQ(dc->rhs(), C);
+}
+
+TEST(Substitute, InsideDoubleContractReversed)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* C = make_named_tensor(rl, "C", 2, {});
+    auto* expr = make_double_contract_reversed(rl, A, B);
+    auto history = Derivation{{substitute_step(A, C)}}.apply(rl, State{expr});
+    auto* dcr = dynamic_cast<DoubleContractReversed*>(history[1].expr());
+    ASSERT_NE(dcr, nullptr);
+    EXPECT_EQ(dcr->lhs(), C);
+}
+
+TEST(Substitute, InsideCrossProduct)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    auto* expr = make_cross_product(rl, u, v);
+    auto history = Derivation{{substitute_step(v, w)}}.apply(rl, State{expr});
+    auto* cp = dynamic_cast<CrossProduct*>(history[1].expr());
+    ASSERT_NE(cp, nullptr);
+    EXPECT_EQ(cp->rhs(), w);
+}
+
+TEST(Substitute, InsideProduct)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    auto* z = make_symbolic_var(rl, "z");
+    auto* expr = make_product(rl, x, y);
+    auto history = Derivation{{substitute_step(y, z)}}.apply(rl, State{expr});
+    auto* pr = dynamic_cast<Product*>(history[1].expr());
+    ASSERT_NE(pr, nullptr);
+    EXPECT_EQ(pr->rhs(), z);
+}
+
+TEST(Substitute, InsideTrace)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* expr = make_trace(rl, A);
+    auto history = Derivation{{substitute_step(A, B)}}.apply(rl, State{expr});
+    auto* tr = dynamic_cast<Trace*>(history[1].expr());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->arg(), B);
+}
+
+TEST(Substitute, InsidePow)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    auto* expr = make_pow(rl, x, Rational{3});
+    auto history = Derivation{{substitute_step(x, y)}}.apply(rl, State{expr});
+    auto* pw = dynamic_cast<Pow*>(history[1].expr());
+    ASSERT_NE(pw, nullptr);
+    EXPECT_EQ(pw->base(), y);
+}
+
+TEST(Substitute, InsideFunctionApply)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    auto* expr = make_sin(rl, x);
+    auto history = Derivation{{substitute_step(x, y)}}.apply(rl, State{expr});
+    auto* fa = dynamic_cast<FunctionApply*>(history[1].expr());
+    ASSERT_NE(fa, nullptr);
+    EXPECT_EQ(fa->arg(), y);
+}
+
+TEST(Substitute, NoChangeWhenUnmatchedLeaf)
+{
+    // Covers the Scale branch where inner stays the same (no rebuild)
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    auto* z = make_symbolic_var(rl, "z");
+    auto* expr = make_scale(rl, Rational{2}, x);
+    // Replace y with z in 2*x — no match, same pointer returned
+    auto history = Derivation{{substitute_step(y, z)}}.apply(rl, State{expr});
+    EXPECT_EQ(history[1].expr(), expr);
+}
+
+// ===========================================================================
+// expand_step — additional node types
+// ===========================================================================
+
+TEST(Expand, ScaleOverNonSumIsUnchanged)
+{
+    // Scale(c, leaf) — no Sum inside, inner stays as leaf, returns Scale(c, leaf)
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* expr = make_scale(rl, Rational{3}, v);
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* sc = dynamic_cast<Scale*>(history[1].expr());
+    ASSERT_NE(sc, nullptr);
+    EXPECT_EQ(sc->expr(), v);
+}
+
+TEST(Expand, DoubleContractOverSum)
+{
+    // A : (B + C)  →  A:B + A:C
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* C = make_named_tensor(rl, "C", 2, {});
+    auto* expr = make_double_contract(rl, A, make_sum(rl, {B, C}));
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(s->terms().size(), 2u);
+    EXPECT_NE(dynamic_cast<DoubleContract*>(s->terms()[0]), nullptr);
+    EXPECT_NE(dynamic_cast<DoubleContract*>(s->terms()[1]), nullptr);
+}
+
+TEST(Expand, DoubleContractReversedOverSum)
+{
+    // (A + B) :: C  →  A::C + B::C
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* C = make_named_tensor(rl, "C", 2, {});
+    auto* expr = make_double_contract_reversed(rl, make_sum(rl, {A, B}), C);
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->terms().size(), 2u);
+}
+
+TEST(Expand, CrossProductOverSum)
+{
+    // (u + v) × w  →  u×w + v×w
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    auto* expr = make_cross_product(rl, make_sum(rl, {u, v}), w);
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(s->terms().size(), 2u);
+    EXPECT_NE(dynamic_cast<CrossProduct*>(s->terms()[0]), nullptr);
+    EXPECT_NE(dynamic_cast<CrossProduct*>(s->terms()[1]), nullptr);
+}
+
+TEST(Expand, ProductOverSum)
+{
+    // x * (y + z)  →  x*y + x*z  (rank-0 scalars)
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* y = make_symbolic_var(rl, "y");
+    auto* z = make_symbolic_var(rl, "z");
+    auto* expr = make_product(rl, x, make_sum(rl, {y, z}));
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(s->terms().size(), 2u);
+    EXPECT_NE(dynamic_cast<Product*>(s->terms()[0]), nullptr);
+    EXPECT_NE(dynamic_cast<Product*>(s->terms()[1]), nullptr);
+}
+
+TEST(Expand, TracePassthrough)
+{
+    // Trace(A) — no Sum inside, just recursion passthrough
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* expr = make_trace(rl, A);
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<Trace*>(history[1].expr()), nullptr);
+}
+
+TEST(Expand, PowPassthrough)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* expr = make_pow(rl, x, Rational{2});
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<Pow*>(history[1].expr()), nullptr);
+}
+
+TEST(Expand, FunctionApplyPassthrough)
+{
+    auto rl = make_rl();
+    auto* x = make_symbolic_var(rl, "x");
+    auto* expr = make_cos(rl, x);
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    EXPECT_NE(dynamic_cast<FunctionApply*>(history[1].expr()), nullptr);
+}
+
 // ===========================================================================
 // Combined: expand + simplify_identity
 // ===========================================================================
