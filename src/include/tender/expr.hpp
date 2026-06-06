@@ -127,6 +127,17 @@ private:
     std::string symbol_;
 };
 
+// Named scalar parameter (time, load parameter, …). Rank 0.
+// Identity is by name: two Parameters with the same symbol are the same
+// parameter for dependency-tracking and differentiation purposes.
+class Parameter : public SymbolicVar
+{
+public:
+    using SymbolicVar::SymbolicVar;
+    [[nodiscard]] auto python() const -> std::string override;
+    // latex() inherited from SymbolicVar
+};
+
 // ===========================================================================
 // Structural nodes
 // ===========================================================================
@@ -339,6 +350,36 @@ private:
     std::size_t slot_lhs_;
     std::size_t slot_rhs_;
     int rank_;
+};
+
+// ===========================================================================
+// Scalar product node — Phase 6 (for chain rule results)
+// ===========================================================================
+
+// Product of two rank-0 expressions. Created by make_product after rational
+// simplifications are exhausted.
+class Product : public Expr
+{
+public:
+    Product(Expr* lhs, Expr* rhs);
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 0;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto lhs() const noexcept -> Expr*
+    {
+        return lhs_;
+    }
+    [[nodiscard]] auto rhs() const noexcept -> Expr*
+    {
+        return rhs_;
+    }
+
+private:
+    Expr* lhs_;
+    Expr* rhs_;
 };
 
 // ===========================================================================
@@ -615,6 +656,38 @@ private:
 };
 
 // ===========================================================================
+// Phase 6 nodes — material derivative
+// ===========================================================================
+
+// Material (total) time derivative D f/Dt = ∂f/∂t + v·∇f.
+// Stored as an unevaluated named node; expansion requires grad (Phase 10).
+// velocity must have rank 1; rank() == field->rank().
+class MaterialDeriv : public Expr
+{
+public:
+    MaterialDeriv(Expr* velocity, Expr* field);
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return rank_;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto velocity() const noexcept -> Expr*
+    {
+        return velocity_;
+    }
+    [[nodiscard]] auto field() const noexcept -> Expr*
+    {
+        return field_;
+    }
+
+private:
+    Expr* velocity_;
+    Expr* field_;
+    int rank_;
+};
+
+// ===========================================================================
 // Factory functions — scalar nodes (Phase 2)
 // ===========================================================================
 
@@ -705,5 +778,42 @@ auto derivative_of(ResourceList& rl, FunctionKind kind, Expr* arg) -> Expr*;
 
 // Derivative of pow(base, exp) w.r.t. base.
 auto derivative_of_pow(ResourceList& rl, Expr* base, Rational exp) -> Expr*;
+
+// ===========================================================================
+// Factory functions — Phase 6 (parameters, dependency, differentiation)
+// ===========================================================================
+
+// Create a named scalar parameter.
+auto make_parameter(ResourceList& rl, std::string symbol) -> Parameter*;
+
+// Product of two rank-0 expressions. Simplifications: rational constant on
+// either side collapses to make_scale.
+auto make_product(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*;
+
+// Return the built-in time parameter (symbol "t").  dt() and ddt() use it.
+// Users who write expressions in "t" via make_parameter(rl, "t") are
+// equivalent: dependency tracking is name-based.
+auto time_parameter() -> Parameter const*;
+
+// True if e contains a Parameter with the same symbol as p anywhere in its
+// sub-tree. NamedTensor nodes are assumed independent unless they are
+// Parameters themselves.
+auto depends_on(Parameter const* p, Expr const* e) -> bool;
+
+// Symbolic partial derivative ∂e/∂p.  Returns a zero RationalConst(0) if e
+// does not depend on p (rank information is not preserved for zero; this is
+// a known Phase-6 limitation).  Applies product rule, sum rule, and chain
+// rule recursively for all Phase-2 through Phase-6 node types.
+auto deriv(ResourceList& rl, Parameter const* p, Expr* e) -> Expr*;
+
+// Partial time derivative ∂e/∂t using the built-in time parameter.
+auto dt(ResourceList& rl, Expr* e) -> Expr*;
+
+// Second partial time derivative ∂²e/∂t².
+auto ddt(ResourceList& rl, Expr* e) -> Expr*;
+
+// Material (total) time derivative node D f/Dt = ∂f/∂t + v·∇f.
+// velocity must have rank 1; rank() == field->rank().
+auto make_material_deriv(ResourceList& rl, Expr* velocity, Expr* field) -> Expr*;
 
 } // namespace tender

@@ -971,4 +971,308 @@ auto make_cross_product(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*
     return rl.make<CrossProduct>(lhs, rhs);
 }
 
+// ===========================================================================
+// Phase 6 — Parameter
+// ===========================================================================
+
+auto Parameter::python() const -> std::string
+{
+    return "parameter('" + symbol() + "')";
+}
+
+// ===========================================================================
+// Phase 6 — Product
+// ===========================================================================
+
+Product::Product(Expr* lhs, Expr* rhs) : lhs_(lhs), rhs_(rhs)
+{
+    if (lhs->rank() != 0 || rhs->rank() != 0)
+        throw std::invalid_argument(
+            "Product: both operands must be scalar (rank 0)");
+}
+
+auto Product::latex() const -> std::string
+{
+    return lhs_->latex() + " \\cdot " + rhs_->latex();
+}
+
+auto Product::python() const -> std::string
+{
+    return "prod(" + lhs_->python() + ", " + rhs_->python() + ")";
+}
+
+// ===========================================================================
+// Phase 6 — MaterialDeriv
+// ===========================================================================
+
+MaterialDeriv::MaterialDeriv(Expr* velocity, Expr* field) :
+  velocity_(velocity), field_(field), rank_(field->rank())
+{
+    if (velocity->rank() != 1)
+        throw std::invalid_argument(
+            "MaterialDeriv: velocity must have rank 1, got rank "
+            + std::to_string(velocity->rank()));
+}
+
+auto MaterialDeriv::latex() const -> std::string
+{
+    return "\\frac{\\mathrm{D}}{\\mathrm{D}t}\\left(" + field_->latex()
+           + "\\right)";
+}
+
+auto MaterialDeriv::python() const -> std::string
+{
+    return "material_deriv(" + velocity_->python() + ", " + field_->python()
+           + ")";
+}
+
+// ===========================================================================
+// Phase 6 — factories: make_parameter, make_product, time_parameter
+// ===========================================================================
+
+auto make_parameter(ResourceList& rl, std::string symbol) -> Parameter*
+{
+    return rl.make<Parameter>(std::move(symbol));
+}
+
+auto make_product(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*
+{
+    if (auto* lc = dynamic_cast<RationalConst*>(lhs))
+        return make_scale(rl, lc->value(), rhs);
+    if (auto* rc = dynamic_cast<RationalConst*>(rhs))
+        return make_scale(rl, rc->value(), lhs);
+    return rl.make<Product>(lhs, rhs);
+}
+
+static ResourceList s_builtin_rl;
+static Parameter* s_time_param = s_builtin_rl.make<Parameter>("t");
+
+auto time_parameter() -> Parameter const*
+{
+    return s_time_param;
+}
+
+// ===========================================================================
+// Phase 6 — depends_on
+// ===========================================================================
+
+static auto depends_on_impl(std::string const& sym, Expr const* e) -> bool
+{
+    if (auto const* p = dynamic_cast<Parameter const*>(e))
+        return p->symbol() == sym;
+    if (auto const* sc = dynamic_cast<Scale const*>(e))
+        return depends_on_impl(sym, sc->expr());
+    if (auto const* s = dynamic_cast<Sum const*>(e))
+    {
+        for (auto const* t: s->terms())
+            if (depends_on_impl(sym, t))
+                return true;
+        return false;
+    }
+    if (auto const* tp = dynamic_cast<TensorProduct const*>(e))
+        return depends_on_impl(sym, tp->lhs())
+            || depends_on_impl(sym, tp->rhs());
+    if (auto const* fa = dynamic_cast<FunctionApply const*>(e))
+        return depends_on_impl(sym, fa->arg());
+    if (auto const* pw = dynamic_cast<Pow const*>(e))
+        return depends_on_impl(sym, pw->base());
+    if (auto const* a2 = dynamic_cast<ATan2 const*>(e))
+        return depends_on_impl(sym, a2->y())
+            || depends_on_impl(sym, a2->x());
+    if (auto const* pr = dynamic_cast<Product const*>(e))
+        return depends_on_impl(sym, pr->lhs())
+            || depends_on_impl(sym, pr->rhs());
+    if (auto const* tr = dynamic_cast<Trace const*>(e))
+        return depends_on_impl(sym, tr->arg());
+    if (auto const* co = dynamic_cast<Contract const*>(e))
+        return depends_on_impl(sym, co->lhs())
+            || depends_on_impl(sym, co->rhs());
+    if (auto const* dc = dynamic_cast<DoubleContract const*>(e))
+        return depends_on_impl(sym, dc->lhs())
+            || depends_on_impl(sym, dc->rhs());
+    if (auto const* dr = dynamic_cast<DoubleContractReversed const*>(e))
+        return depends_on_impl(sym, dr->lhs())
+            || depends_on_impl(sym, dr->rhs());
+    if (auto const* cp = dynamic_cast<CrossProduct const*>(e))
+        return depends_on_impl(sym, cp->lhs())
+            || depends_on_impl(sym, cp->rhs());
+    if (auto const* md = dynamic_cast<MaterialDeriv const*>(e))
+        return depends_on_impl(sym, md->velocity())
+            || depends_on_impl(sym, md->field());
+    return false;
+}
+
+auto depends_on(Parameter const* p, Expr const* e) -> bool
+{
+    return depends_on_impl(p->symbol(), e);
+}
+
+// ===========================================================================
+// Phase 6 — deriv
+// ===========================================================================
+
+auto deriv(ResourceList& rl, Parameter const* p, Expr* e) -> Expr*
+{
+    if (!depends_on(p, e))
+        return make_rational(rl, Rational{0});
+
+    // Base case: the parameter itself
+    if (dynamic_cast<Parameter*>(e))
+        return make_rational(rl, Rational{1});
+
+    // Scale(c, inner): d/dp = c * d(inner)/dp
+    if (auto* sc = dynamic_cast<Scale*>(e))
+        return make_scale(rl, sc->coeff(), deriv(rl, p, sc->expr()));
+
+    // Sum: linearity
+    if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        std::vector<Expr*> dterms;
+        dterms.reserve(s->terms().size());
+        for (auto* t: s->terms())
+            dterms.push_back(deriv(rl, p, t));
+        return make_sum(rl, std::move(dterms));
+    }
+
+    // TensorProduct: Leibniz rule
+    if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        bool ld = depends_on(p, tp->lhs());
+        bool rd = depends_on(p, tp->rhs());
+        if (ld && rd)
+            return make_sum(
+                rl,
+                {make_tensor_product(rl, deriv(rl, p, tp->lhs()), tp->rhs()),
+                 make_tensor_product(
+                     rl, tp->lhs(), deriv(rl, p, tp->rhs()))});
+        if (ld)
+            return make_tensor_product(rl, deriv(rl, p, tp->lhs()), tp->rhs());
+        return make_tensor_product(rl, tp->lhs(), deriv(rl, p, tp->rhs()));
+    }
+
+    // FunctionApply: chain rule d/dp f(g) = f'(g) * dg/dp
+    if (auto* fa = dynamic_cast<FunctionApply*>(e))
+    {
+        auto* f_prime = derivative_of(rl, fa->kind(), fa->arg());
+        auto* g_prime = deriv(rl, p, fa->arg());
+        return make_product(rl, f_prime, g_prime);
+    }
+
+    // Pow: chain rule d/dp base^n = n*base^(n-1) * d(base)/dp
+    if (auto* pw = dynamic_cast<Pow*>(e))
+    {
+        auto* pw_prime = derivative_of_pow(rl, pw->base(), pw->exponent());
+        auto* base_prime = deriv(rl, p, pw->base());
+        return make_product(rl, pw_prime, base_prime);
+    }
+
+    // Product: Leibniz rule (scalar case)
+    if (auto* pr = dynamic_cast<Product*>(e))
+    {
+        bool ld = depends_on(p, pr->lhs());
+        bool rd = depends_on(p, pr->rhs());
+        if (ld && rd)
+            return make_sum(
+                rl,
+                {make_product(rl, deriv(rl, p, pr->lhs()), pr->rhs()),
+                 make_product(rl, pr->lhs(), deriv(rl, p, pr->rhs()))});
+        if (ld)
+            return make_product(rl, deriv(rl, p, pr->lhs()), pr->rhs());
+        return make_product(rl, pr->lhs(), deriv(rl, p, pr->rhs()));
+    }
+
+    // Trace: d/dp tr(A) = tr(dA/dp)  — valid when dA/dp has rank 2
+    if (auto* tr = dynamic_cast<Trace*>(e))
+        return make_trace(rl, deriv(rl, p, tr->arg()));
+
+    // Contract: Leibniz rule  d/dp (a·b) = da/dp·b + a·db/dp
+    if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        bool ld = depends_on(p, co->lhs());
+        bool rd = depends_on(p, co->rhs());
+        if (ld && rd)
+            return make_sum(
+                rl,
+                {make_contract(rl, deriv(rl, p, co->lhs()), co->rhs()),
+                 make_contract(rl, co->lhs(), deriv(rl, p, co->rhs()))});
+        if (ld)
+            return make_contract(rl, deriv(rl, p, co->lhs()), co->rhs());
+        return make_contract(rl, co->lhs(), deriv(rl, p, co->rhs()));
+    }
+
+    // DoubleContract: Leibniz rule
+    if (auto* dc = dynamic_cast<DoubleContract*>(e))
+    {
+        bool ld = depends_on(p, dc->lhs());
+        bool rd = depends_on(p, dc->rhs());
+        if (ld && rd)
+            return make_sum(
+                rl,
+                {make_double_contract(rl, deriv(rl, p, dc->lhs()), dc->rhs()),
+                 make_double_contract(
+                     rl, dc->lhs(), deriv(rl, p, dc->rhs()))});
+        if (ld)
+            return make_double_contract(
+                rl, deriv(rl, p, dc->lhs()), dc->rhs());
+        return make_double_contract(rl, dc->lhs(), deriv(rl, p, dc->rhs()));
+    }
+
+    // DoubleContractReversed: Leibniz rule
+    if (auto* dr = dynamic_cast<DoubleContractReversed*>(e))
+    {
+        bool ld = depends_on(p, dr->lhs());
+        bool rd = depends_on(p, dr->rhs());
+        if (ld && rd)
+            return make_sum(
+                rl,
+                {make_double_contract_reversed(
+                     rl, deriv(rl, p, dr->lhs()), dr->rhs()),
+                 make_double_contract_reversed(
+                     rl, dr->lhs(), deriv(rl, p, dr->rhs()))});
+        if (ld)
+            return make_double_contract_reversed(
+                rl, deriv(rl, p, dr->lhs()), dr->rhs());
+        return make_double_contract_reversed(
+            rl, dr->lhs(), deriv(rl, p, dr->rhs()));
+    }
+
+    // CrossProduct: Leibniz rule
+    if (auto* cp = dynamic_cast<CrossProduct*>(e))
+    {
+        bool ld = depends_on(p, cp->lhs());
+        bool rd = depends_on(p, cp->rhs());
+        if (ld && rd)
+            return make_sum(
+                rl,
+                {make_cross_product(rl, deriv(rl, p, cp->lhs()), cp->rhs()),
+                 make_cross_product(
+                     rl, cp->lhs(), deriv(rl, p, cp->rhs()))});
+        if (ld)
+            return make_cross_product(
+                rl, deriv(rl, p, cp->lhs()), cp->rhs());
+        return make_cross_product(rl, cp->lhs(), deriv(rl, p, cp->rhs()));
+    }
+
+    return make_rational(rl, Rational{0}); // GCOV_EXCL_LINE
+}
+
+// ===========================================================================
+// Phase 6 — dt, ddt, make_material_deriv
+// ===========================================================================
+
+auto dt(ResourceList& rl, Expr* e) -> Expr*
+{
+    return deriv(rl, s_time_param, e);
+}
+
+auto ddt(ResourceList& rl, Expr* e) -> Expr*
+{
+    return deriv(rl, s_time_param, deriv(rl, s_time_param, e));
+}
+
+auto make_material_deriv(ResourceList& rl, Expr* velocity, Expr* field) -> Expr*
+{
+    return rl.make<MaterialDeriv>(velocity, field);
+}
+
 } // namespace tender
