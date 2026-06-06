@@ -1,0 +1,113 @@
+#pragma once
+
+#include <functional>
+#include <string>
+#include <vector>
+
+#include <tender/expr.hpp>
+
+namespace tender
+{
+
+// ===========================================================================
+// State — immutable wrapper around an Expr*
+// ===========================================================================
+
+class State
+{
+public:
+    // label is the name of the step that produced this state; empty for the
+    // initial state.
+    explicit State(Expr* expr, std::string label = {});
+
+    [[nodiscard]] auto expr() const noexcept -> Expr*
+    {
+        return expr_;
+    }
+    [[nodiscard]] auto label() const noexcept -> std::string const&
+    {
+        return label_;
+    }
+    [[nodiscard]] auto latex() const -> std::string;
+
+private:
+    Expr* expr_;
+    std::string label_;
+};
+
+// ===========================================================================
+// DerivationStep — named Expr* → Expr* transformation
+// ===========================================================================
+
+class DerivationStep
+{
+public:
+    using Fn = std::function<Expr*(ResourceList&, Expr*)>;
+
+    DerivationStep(std::string name, Fn fn);
+
+    [[nodiscard]] auto name() const noexcept -> std::string const&
+    {
+        return name_;
+    }
+
+    // Apply the step; the returned State carries this step's name as label.
+    [[nodiscard]] auto apply(ResourceList& rl, State const& s) const -> State;
+
+private:
+    std::string name_;
+    Fn fn_;
+};
+
+// ===========================================================================
+// Derivation — ordered sequence of steps
+// ===========================================================================
+
+class Derivation
+{
+public:
+    explicit Derivation(std::vector<DerivationStep> steps);
+
+    // Apply every step in order.  Returns initial + one State per step,
+    // so history.size() == steps().size() + 1.
+    [[nodiscard]] auto apply(ResourceList& rl, State const& initial) const
+        -> std::vector<State>;
+
+    // Concatenate two derivations.
+    [[nodiscard]] auto operator+(Derivation const& rhs) const -> Derivation;
+
+    [[nodiscard]] auto steps() const noexcept
+        -> std::vector<DerivationStep> const&
+    {
+        return steps_;
+    }
+
+private:
+    std::vector<DerivationStep> steps_;
+};
+
+// ===========================================================================
+// show — render a history produced by Derivation::apply
+// ===========================================================================
+
+// Render every state, one per line:  "[label]  latex"
+auto show(std::vector<State> const& history) -> std::string;
+
+// Render only the final state's latex.
+auto show_final(std::vector<State> const& history) -> std::string;
+
+// ===========================================================================
+// Built-in step factories
+// ===========================================================================
+
+// d/d(param): apply deriv(rl, param, expr).
+auto diff_step(Parameter const* param) -> DerivationStep;
+
+// Expand any PolynomialExpr nodes encountered in the tree to explicit
+// sum-of-ring-powers form.
+auto expand_poly_step() -> DerivationStep;
+
+// User-defined step with an explicit name and function.
+auto named_step(std::string name, DerivationStep::Fn fn) -> DerivationStep;
+
+} // namespace tender

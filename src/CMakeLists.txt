@@ -1,4 +1,5 @@
 add_library(tender
+    derivation.cpp
     expr.cpp
     index.cpp
     polynomial.cpp
