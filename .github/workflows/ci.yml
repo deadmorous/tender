@@ -67,6 +67,36 @@ jobs:
           cd build/python
           PYTHONPATH=. pytest test_tender.py -v
 
+  notebooks-clean:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check notebooks have no stored output
+        run: |
+          python3 - <<'EOF'
+          import json, pathlib, sys
+
+          failures = []
+          for nb_path in sorted(pathlib.Path(".").rglob("*.ipynb")):
+              nb = json.loads(nb_path.read_text())
+              for i, cell in enumerate(nb.get("cells", [])):
+                  if cell.get("cell_type") != "code":
+                      continue
+                  if cell.get("outputs", []) != []:
+                      failures.append(f"{nb_path}: cell {i} has stored outputs")
+                  if cell.get("execution_count") is not None:
+                      failures.append(f"{nb_path}: cell {i} has execution_count set")
+          if failures:
+              print("Notebooks with stored output (run nbstripout and recommit):")
+              for msg in failures:
+                  print(" ", msg)
+              sys.exit(1)
+          nb_count = len(list(pathlib.Path(".").rglob("*.ipynb")))
+          print(f"All {nb_count} notebook(s) clean.")
+          EOF
+
   coverage:
     runs-on: ubuntu-24.04
 
