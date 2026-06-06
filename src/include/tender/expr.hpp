@@ -342,6 +342,106 @@ private:
 };
 
 // ===========================================================================
+// Standard scalar function nodes (Phase 5)
+// ===========================================================================
+
+// Which unary scalar function is applied.
+enum class FunctionKind
+{
+    Exp,
+    Log,
+    Sin,
+    Cos,
+    Tan,
+    ASin,
+    ACos,
+    ATan,
+    Sinh,
+    Cosh,
+    Tanh,
+    Sqrt,
+};
+
+// Application of a unary scalar function to a rank-0 expression.
+// Throws std::invalid_argument if arg->rank() != 0.
+class FunctionApply : public Expr
+{
+public:
+    FunctionApply(FunctionKind kind, Expr* arg);
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 0;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto kind() const noexcept -> FunctionKind
+    {
+        return kind_;
+    }
+    [[nodiscard]] auto arg() const noexcept -> Expr*
+    {
+        return arg_;
+    }
+
+private:
+    FunctionKind kind_;
+    Expr* arg_;
+};
+
+// Power: base^exp with a Rational exponent. Rank 0.
+// Throws std::invalid_argument if base->rank() != 0.
+// Simplifications are applied by the factory make_pow (not the constructor).
+class Pow : public Expr
+{
+public:
+    Pow(Expr* base, Rational exp);
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 0;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto base() const noexcept -> Expr*
+    {
+        return base_;
+    }
+    [[nodiscard]] auto exponent() const noexcept -> Rational const&
+    {
+        return exp_;
+    }
+
+private:
+    Expr* base_;
+    Rational exp_;
+};
+
+// Two-argument arctangent atan2(y, x). Rank 0.
+// Throws std::invalid_argument if y->rank() != 0 or x->rank() != 0.
+class ATan2 : public Expr
+{
+public:
+    ATan2(Expr* y, Expr* x);
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 0;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto y() const noexcept -> Expr*
+    {
+        return y_;
+    }
+    [[nodiscard]] auto x() const noexcept -> Expr*
+    {
+        return x_;
+    }
+
+private:
+    Expr* y_;
+    Expr* x_;
+};
+
+// ===========================================================================
 // Geometric operation nodes (Phase 4)
 // ===========================================================================
 
@@ -570,5 +670,40 @@ auto make_double_contract_reversed(ResourceList& rl, Expr* lhs, Expr* rhs)
 // Cross product (a×b = −a·ε·b): rank = lhs + rhs − 1. Requires both rank ≥ 1.
 // Throws if either operand is itself a CrossProduct (chaining guard).
 auto make_cross_product(ResourceList& rl, Expr* lhs, Expr* rhs) -> Expr*;
+
+// ===========================================================================
+// Factory functions — standard scalar functions (Phase 5)
+// ===========================================================================
+
+// Generic factory — validates arg->rank() == 0.
+auto make_function(ResourceList& rl, FunctionKind kind, Expr* arg) -> Expr*;
+
+// Convenience wrappers.
+auto make_exp(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_log(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_sin(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_cos(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_tan(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_asin(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_acos(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_atan(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_sinh(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_cosh(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_tanh(ResourceList& rl, Expr* arg) -> Expr*;
+auto make_sqrt(ResourceList& rl, Expr* arg) -> Expr*;
+
+// Power: base^exp. Simplifications: pow(x,0)→1, pow(x,1)→x.
+// Throws if base->rank() != 0.
+auto make_pow(ResourceList& rl, Expr* base, Rational exp) -> Expr*;
+
+// Two-argument arctangent. Throws if y->rank() != 0 or x->rank() != 0.
+auto make_atan2(ResourceList& rl, Expr* y, Expr* x) -> Expr*;
+
+// Derivative of kind(arg) w.r.t. arg (outer derivative for chain rule).
+// Returns an Expr* in the given ResourceList.
+auto derivative_of(ResourceList& rl, FunctionKind kind, Expr* arg) -> Expr*;
+
+// Derivative of pow(base, exp) w.r.t. base.
+auto derivative_of_pow(ResourceList& rl, Expr* base, Rational exp) -> Expr*;
 
 } // namespace tender

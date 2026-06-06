@@ -4,4 +4,5 @@
 
 #include <tender/expr.hpp>
 #include <tender/index.hpp>
+#include <tender/polynomial.hpp>
 #include <tender/rational.hpp>

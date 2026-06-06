@@ -544,6 +544,249 @@ auto convolve(
 }
 
 // ===========================================================================
+// Phase 5 — standard scalar function nodes
+// ===========================================================================
+
+static auto function_latex_name(FunctionKind k) -> char const*
+{
+    switch (k)
+    {
+        case FunctionKind::Exp: return "\\exp";
+        case FunctionKind::Log: return "\\ln";
+        case FunctionKind::Sin: return "\\sin";
+        case FunctionKind::Cos: return "\\cos";
+        case FunctionKind::Tan: return "\\tan";
+        case FunctionKind::ASin: return "\\arcsin";
+        case FunctionKind::ACos: return "\\arccos";
+        case FunctionKind::ATan: return "\\arctan";
+        case FunctionKind::Sinh: return "\\sinh";
+        case FunctionKind::Cosh: return "\\cosh";
+        case FunctionKind::Tanh: return "\\tanh";
+        case FunctionKind::Sqrt: return "\\sqrt";
+    }
+    return ""; // GCOV_EXCL_LINE
+}
+
+static auto function_python_name(FunctionKind k) -> char const*
+{
+    switch (k)
+    {
+        case FunctionKind::Exp: return "exp";
+        case FunctionKind::Log: return "log";
+        case FunctionKind::Sin: return "sin";
+        case FunctionKind::Cos: return "cos";
+        case FunctionKind::Tan: return "tan";
+        case FunctionKind::ASin: return "asin";
+        case FunctionKind::ACos: return "acos";
+        case FunctionKind::ATan: return "atan";
+        case FunctionKind::Sinh: return "sinh";
+        case FunctionKind::Cosh: return "cosh";
+        case FunctionKind::Tanh: return "tanh";
+        case FunctionKind::Sqrt: return "sqrt";
+    }
+    return ""; // GCOV_EXCL_LINE
+}
+
+FunctionApply::FunctionApply(FunctionKind kind, Expr* arg) :
+  kind_(kind), arg_(arg)
+{
+    if (arg->rank() != 0)
+        throw std::invalid_argument(
+            "FunctionApply: argument must be a scalar (rank 0), got rank "
+            + std::to_string(arg->rank()));
+}
+
+auto FunctionApply::latex() const -> std::string
+{
+    std::string name = function_latex_name(kind_);
+    if (kind_ == FunctionKind::Sqrt)
+        return name + "{" + arg_->latex() + "}";
+    return name + "(" + arg_->latex() + ")";
+}
+
+auto FunctionApply::python() const -> std::string
+{
+    return std::string{function_python_name(kind_)} + "(" + arg_->python()
+           + ")";
+}
+
+Pow::Pow(Expr* base, Rational exp) : base_(base), exp_(std::move(exp))
+{
+    if (base->rank() != 0)
+        throw std::invalid_argument(
+            "Pow: base must be a scalar (rank 0), got rank "
+            + std::to_string(base->rank()));
+}
+
+auto Pow::latex() const -> std::string
+{
+    return base_->latex() + "^{" + rational_to_latex(exp_) + "}";
+}
+
+auto Pow::python() const -> std::string
+{
+    return "pow(" + base_->python() + ", " + exp_.to_string() + ")";
+}
+
+ATan2::ATan2(Expr* y, Expr* x) : y_(y), x_(x)
+{
+    if (y->rank() != 0 || x->rank() != 0)
+        throw std::invalid_argument(
+            "ATan2: both arguments must be scalar (rank 0)");
+}
+
+auto ATan2::latex() const -> std::string
+{
+    return "\\operatorname{atan2}(" + y_->latex() + ", " + x_->latex() + ")";
+}
+
+auto ATan2::python() const -> std::string
+{
+    return "atan2(" + y_->python() + ", " + x_->python() + ")";
+}
+
+// ===========================================================================
+// Phase 5 — factory functions
+// ===========================================================================
+
+auto make_function(ResourceList& rl, FunctionKind kind, Expr* arg) -> Expr*
+{
+    return rl.make<FunctionApply>(kind, arg);
+}
+
+auto make_exp(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Exp, arg);
+}
+auto make_log(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Log, arg);
+}
+auto make_sin(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Sin, arg);
+}
+auto make_cos(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Cos, arg);
+}
+auto make_tan(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Tan, arg);
+}
+auto make_asin(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::ASin, arg);
+}
+auto make_acos(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::ACos, arg);
+}
+auto make_atan(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::ATan, arg);
+}
+auto make_sinh(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Sinh, arg);
+}
+auto make_cosh(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Cosh, arg);
+}
+auto make_tanh(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Tanh, arg);
+}
+auto make_sqrt(ResourceList& rl, Expr* arg) -> Expr*
+{
+    return make_function(rl, FunctionKind::Sqrt, arg);
+}
+
+auto make_pow(ResourceList& rl, Expr* base, Rational exp) -> Expr*
+{
+    if (base->rank() != 0)
+        throw std::invalid_argument(
+            "make_pow: base must be a scalar (rank 0), got rank "
+            + std::to_string(base->rank()));
+    if (exp.is_zero())
+        return make_rational(rl, Rational{1});
+    if (exp == Rational{1})
+        return base;
+    return rl.make<Pow>(base, std::move(exp));
+}
+
+auto make_atan2(ResourceList& rl, Expr* y, Expr* x) -> Expr*
+{
+    return rl.make<ATan2>(y, x);
+}
+
+auto derivative_of(ResourceList& rl, FunctionKind kind, Expr* arg) -> Expr*
+{
+    switch (kind)
+    {
+        case FunctionKind::Exp:
+            // d/dx exp(x) = exp(x)
+            return make_exp(rl, arg);
+        case FunctionKind::Log:
+            // d/dx ln(x) = x^(-1)
+            return make_pow(rl, arg, Rational{-1});
+        case FunctionKind::Sin:
+            // d/dx sin(x) = cos(x)
+            return make_cos(rl, arg);
+        case FunctionKind::Cos:
+            // d/dx cos(x) = -sin(x)
+            return make_scale(rl, Rational{-1}, make_sin(rl, arg));
+        case FunctionKind::Tan:
+            // d/dx tan(x) = cos(x)^(-2) = sec^2(x)
+            return make_pow(rl, make_cos(rl, arg), Rational{-2});
+        case FunctionKind::ASin:
+            // d/dx asin(x) = (1 - x^2)^(-1/2)
+            return make_pow(
+                rl,
+                make_sum(
+                    rl,
+                    {make_rational(rl, Rational{1}),
+                     make_scale(
+                         rl, Rational{-1}, make_pow(rl, arg, Rational{2}))}),
+                Rational{-1, 2});
+        case FunctionKind::ACos:
+            // d/dx acos(x) = -(1 - x^2)^(-1/2)
+            return make_scale(
+                rl, Rational{-1}, derivative_of(rl, FunctionKind::ASin, arg));
+        case FunctionKind::ATan:
+            // d/dx atan(x) = (1 + x^2)^(-1)
+            return make_pow(
+                rl,
+                make_sum(
+                    rl,
+                    {make_rational(rl, Rational{1}),
+                     make_pow(rl, arg, Rational{2})}),
+                Rational{-1});
+        case FunctionKind::Sinh:
+            // d/dx sinh(x) = cosh(x)
+            return make_cosh(rl, arg);
+        case FunctionKind::Cosh:
+            // d/dx cosh(x) = sinh(x)
+            return make_sinh(rl, arg);
+        case FunctionKind::Tanh:
+            // d/dx tanh(x) = cosh(x)^(-2) = sech^2(x)
+            return make_pow(rl, make_cosh(rl, arg), Rational{-2});
+        case FunctionKind::Sqrt:
+            // d/dx sqrt(x) = (1/2) * x^(-1/2)
+            return make_scale(
+                rl, Rational{1, 2}, make_pow(rl, arg, Rational{-1, 2}));
+    }
+    return nullptr; // GCOV_EXCL_LINE
+}
+
+auto derivative_of_pow(ResourceList& rl, Expr* base, Rational exp) -> Expr*
+{
+    // d/dbase pow(base, exp) = exp * pow(base, exp - 1)
+    return make_scale(rl, exp, make_pow(rl, base, exp - Rational{1}));
+}
+
+// ===========================================================================
 // Phase 4 — LaTeX helper for binary operation nodes
 // ===========================================================================
 
