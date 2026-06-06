@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # --- Options ---
 
 option(TENDER_BUILD_TESTS "Build test targets" ON)
+option(TENDER_BUILD_BENCHMARKS "Build benchmark targets" ON)
 option(TENDER_BUILD_PYTHON "Build Python bindings (requires nanobind)" OFF)
 
 # --- Third-party dependencies ---
@@ -55,4 +56,8 @@ add_subdirectory(src)
 
 if(TENDER_BUILD_TESTS)
     add_subdirectory(tests)
+endif()
+
+if(TENDER_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()

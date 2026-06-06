@@ -7,3 +7,4 @@ function(tender_add_test name)
 endfunction()
 
 tender_add_test(smoke_test)
+tender_add_test(rational_test)
