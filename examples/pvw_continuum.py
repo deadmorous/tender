@@ -114,11 +114,12 @@ print()
 # ---------------------------------------------------------------------------
 vol_result = vol_history[-1].expr
 
-# The volume localization result must be a Sum (several terms for all δu).
-assert isinstance(vol_result, Sum), \
-    f"Expected Sum after volume localization, got {type(vol_result).__name__}"
+# The volume localization result is (coeff)·δu — a single Contract node
+# whose LHS gathers all volume terms.
+assert isinstance(vol_result, Contract), \
+    f"Expected Contract after volume localization, got {type(vol_result).__name__}"
 
-# One of the top-level terms must contain Divergence(sigma).
+# The LHS coefficient must contain Divergence(sigma).
 def contains_divergence(e):
     if isinstance(e, Divergence):
         return True
@@ -130,8 +131,8 @@ def contains_divergence(e):
         return contains_divergence(e.lhs) or contains_divergence(e.rhs)
     return False
 
-found = any(contains_divergence(t) for t in vol_result.terms)
-assert found, "∇·σ term not found in volume equilibrium equation"
+assert contains_divergence(vol_result.lhs), \
+    "∇·σ term not found in volume equilibrium equation"
 
 print("Derivation verified:")
 print("  • IBP applied correctly")

@@ -267,30 +267,44 @@ auto apply_divergence_theorem_step(VolumeDomain* domain) -> DerivationStep
 // localize_step
 // ===========================================================================
 
+// Try to extract the integrand from a single (non-Sum) term if it is an
+// Integral over `domain` (possibly wrapped in Scale).
+// Returns the extracted integrand (with scale folded in) or nullptr.
+static auto try_extract_integrand(
+    ResourceList& rl, Expr* t, Domain* domain) -> Expr*
+{
+    Rational sc{1};
+    if (auto* s = dynamic_cast<Scale*>(t)) { sc = s->coeff(); t = s->expr(); }
+    if (auto* integ = dynamic_cast<Integral*>(t))
+        if (integ->domain() == domain)
+        {
+            Expr* inner = integ->integrand();
+            return (sc == Rational{1}) ? inner : make_scale(rl, sc, inner);
+        }
+    return nullptr;
+}
+
 static auto localize_impl(ResourceList& rl, Expr* e, Domain* domain) -> Expr*
 {
-    if (auto* integ = dynamic_cast<Integral*>(e))
-    {
-        if (integ->domain() == domain)
-            return integ->integrand();
-        return e;
-    }
-
+    // For a Sum: keep only the terms that are Integrals over `domain`,
+    // extracting their integrands.  Terms from other domains are discarded —
+    // by the support argument of the fundamental lemma, choosing test functions
+    // with support strictly inside `domain` makes all other domain integrals
+    // vanish, so they do not appear in the localized equation.
     if (auto* s = dynamic_cast<Sum*>(e))
     {
         std::vector<Expr*> terms;
-        terms.reserve(s->terms().size());
         for (auto* t: s->terms())
-            terms.push_back(localize_impl(rl, t, domain));
+            if (auto* extracted = try_extract_integrand(rl, t, domain))
+                terms.push_back(extracted);
+        if (terms.empty())
+            return e; // nothing matched — leave unchanged
         return make_sum(rl, std::move(terms));
     }
 
-    if (auto* sc = dynamic_cast<Scale*>(e))
-    {
-        auto* inner = localize_impl(rl, sc->expr(), domain);
-        return make_scale(rl, sc->coeff(), inner);
-    }
-
+    // Single term: extract if it matches, leave unchanged otherwise.
+    if (auto* extracted = try_extract_integrand(rl, e, domain))
+        return extracted;
     return e;
 }
 

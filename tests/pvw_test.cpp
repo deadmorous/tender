@@ -172,24 +172,23 @@ TEST(PVW, LocalizeVolumeGivesEquilibrium)
              make_integral(rl, V, make_contract(rl, f_body, delta_u))),
          make_integral(rl, V, make_contract(rl, rho_udd, delta_u))});
 
-    // Localize over V: strips all Integral(V, ...) → their integrands.
+    // Localize over V: extracts volume integrands and discards the ∂V term
+    // (test functions with support inside V make the surface integral vanish).
     auto step = localize_step(V);
     auto* localized = step.apply(rl, State{post_ibp}).expr();
 
-    // After localizing over V, the result is a Sum that:
-    // - keeps the surface integral untouched
-    // - exposes the volume integrands as top-level terms
+    // Result is a Sum of the three volume integrands only — no surface term.
     auto* s = dynamic_cast<Sum*>(localized);
     ASSERT_NE(s, nullptr);
+    EXPECT_EQ(static_cast<int>(s->terms().size()), 3);
 
-    // The surface integral over ∂V is still present (not localized yet).
-    EXPECT_NE(first_integral_over(localized, dV), nullptr);
+    // The surface integral over ∂V must NOT be present.
+    EXPECT_EQ(first_integral_over(localized, dV), nullptr);
 
     // One of the exposed terms must contain Divergence(sigma).
     bool found_div_sigma = false;
     for (auto* term: s->terms())
     {
-        // Unwrap Scale if present.
         Expr* inner = term;
         if (auto* sc = dynamic_cast<Scale*>(inner))
             inner = sc->expr();

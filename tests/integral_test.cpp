@@ -462,7 +462,7 @@ TEST(Localize, StripsIntegralWrapper)
     EXPECT_EQ(result, f);
 }
 
-TEST(Localize, OnlyStripsTargetDomain)
+TEST(Localize, DiscardsOtherDomainTerms)
 {
     auto rl = make_rl();
     auto* n = make_named_tensor(rl, "n", 1, {});
@@ -472,22 +472,14 @@ TEST(Localize, OnlyStripsTargetDomain)
     auto* g = make_named_tensor(rl, "g", 0, {});
 
     // Sum of Integral over V and Integral over ∂V
-    auto* vol_term = make_integral(rl, V, f);
-    auto* surf_term = make_integral(rl, dV, g);
-    auto* sum_expr = make_sum(rl, {vol_term, surf_term});
+    auto* sum_expr = make_sum(rl, {make_integral(rl, V, f),
+                                   make_integral(rl, dV, g)});
 
-    // Localize over V: strips vol_term, leaves surf_term
+    // Localize over V: extracts f and discards the ∂V term entirely.
+    // (Test functions with support inside V make the ∂V integral vanish.)
     auto step = localize_step(V);
     auto* result = step.apply(rl, State{sum_expr}).expr();
-
-    // Result is Sum(f, Integral(∂V, g))
-    auto* s = dynamic_cast<Sum*>(result);
-    ASSERT_NE(s, nullptr);
-    ASSERT_EQ(static_cast<int>(s->terms().size()), 2);
-    EXPECT_EQ(s->terms()[0], f); // f extracted from Integral(V, f)
-    EXPECT_NE(
-        dynamic_cast<Integral*>(s->terms()[1]),
-        nullptr); // Integral(∂V, g) untouched
+    EXPECT_EQ(result, f);
 }
 
 TEST(Localize, StepName)

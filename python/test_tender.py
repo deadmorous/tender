@@ -562,8 +562,8 @@ def test_collect_step_name():
 
 
 def test_collect_then_localize_pvw_pattern():
-    """IBP → collect(δu) → localize(V) gives clean volume equilibrium."""
-    from tender import Integral, Contract
+    """collect(du) → localize(V) gives only the volume integrand; ∂V discarded."""
+    from tender import Contract
     n  = tensor("n", 1)
     V  = make_volume_domain("V", n)
     dV = V.surface_boundary
@@ -577,9 +577,7 @@ def test_collect_then_localize_pvw_pattern():
         localize_step(V),
     ]).apply(State(expr))
     result = history[-1].expr
-    # After localize(V), surface integral remains and volume term is pointwise
-    from tender import Sum as TSum
-    assert isinstance(result, TSum)
-    terms = result.terms
-    assert any(isinstance(t, Integral) for t in terms)
-    assert any(isinstance(t, Contract) for t in terms)
+    # localize(V) discards the ∂V term; result is just g·du
+    assert isinstance(result, Contract)
+    assert result.lhs is g
+    assert result.rhs is du
