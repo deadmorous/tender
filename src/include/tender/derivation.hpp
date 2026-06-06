@@ -107,6 +107,27 @@ auto diff_step(Parameter const* param) -> DerivationStep;
 // sum-of-ring-powers form.
 auto expand_poly_step() -> DerivationStep;
 
+// Collapse identity-tensor contractions throughout the tree:
+//   Contract(I, e)          → e
+//   Contract(e, I)          → e
+//   DoubleContract(I, A)    → Trace(A)
+//   DoubleContract(A, I)    → Trace(A)
+//   DoubleContractReversed  → same rules
+auto simplify_identity_step() -> DerivationStep;
+
+// Replace every occurrence of `what` (by pointer identity) with `with_what`.
+auto substitute_step(Expr* what, Expr* with_what) -> DerivationStep;
+
+// Distribute binary operations over Sum, expanding products into sums of
+// products:
+//   Scale(c, Sum(…))              → Sum(Scale(c, t), …)
+//   Contract(Sum(…), r)           → Sum(Contract(t, r), …)
+//   Contract(l, Sum(…))           → Sum(Contract(l, t), …)
+//   TensorProduct — same pattern
+//   DoubleContract / DoubleContractReversed — same pattern
+//   Product — same pattern
+auto expand_step() -> DerivationStep;
+
 // User-defined step with an explicit name and function.
 auto named_step(std::string name, DerivationStep::Fn fn) -> DerivationStep;
 
