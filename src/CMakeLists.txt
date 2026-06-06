@@ -1,4 +1,5 @@
 add_library(tender
+    coord_system.cpp
     derivation.cpp
     expr.cpp
     identity.cpp
