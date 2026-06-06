@@ -1,5 +1,6 @@
 #include <tender/integral.hpp>
 
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -299,6 +300,125 @@ auto localize_step(Domain* domain) -> DerivationStep
         "localize(" + domain->name() + ")",
         [domain](ResourceList& rl, Expr* e) -> Expr*
         { return localize_impl(rl, e, domain); }};
+}
+
+// ===========================================================================
+// collect_step
+// ===========================================================================
+
+// Try to extract the coefficient of v from a single (non-Sum) term.
+// Returns nullptr if v is not an immediate contraction factor of term.
+// The domain pointer is set to the Domain* if term is wrapped in an Integral,
+// or left as nullptr for pointwise terms.
+// Folds any Scale coefficient into the returned coefficient expression.
+static auto extract_coeff(
+    ResourceList& rl, Expr* term, Expr* v,
+    Domain*& domain_out) -> Expr*
+{
+    Rational scale{1};
+    Expr* inner = term;
+
+    // Peel off a Scale wrapper (from the outermost level).
+    if (auto* sc = dynamic_cast<Scale*>(inner))
+    {
+        scale = sc->coeff();
+        inner = sc->expr();
+    }
+
+    // Peel off an Integral wrapper.
+    Domain* dom = nullptr;
+    if (auto* integ = dynamic_cast<Integral*>(inner))
+    {
+        dom = integ->domain();
+        inner = integ->integrand();
+        // Integrand may itself be scaled.
+        if (auto* sc = dynamic_cast<Scale*>(inner))
+        {
+            scale = scale * sc->coeff();
+            inner = sc->expr();
+        }
+    }
+
+    // inner must now be Contract(A, v) or Contract(v, A).
+    Expr* coeff = nullptr;
+    if (auto* c = dynamic_cast<Contract*>(inner))
+    {
+        if (c->rhs() == v)
+            coeff = c->lhs();
+        else if (c->lhs() == v)
+            coeff = c->rhs();
+    }
+
+    if (!coeff)
+        return nullptr;
+
+    domain_out = dom;
+    if (scale != Rational{1})
+        coeff = make_scale(rl, scale, coeff);
+    return coeff;
+}
+
+static auto collect_impl(ResourceList& rl, Expr* e, Expr* v) -> Expr*
+{
+    // Gather top-level terms.
+    std::vector<Expr*> all_terms;
+    if (auto* s = dynamic_cast<Sum*>(e))
+        all_terms = s->terms();
+    else
+        all_terms = {e};
+
+    // Map each domain pointer to its list of collected coefficients.
+    // nullptr key = pointwise (no integral wrapper).
+    std::vector<Domain*>              domain_order; // preserves first-seen order
+    std::map<Domain*, std::vector<Expr*>> groups;
+    std::vector<Expr*>                residuals;
+
+    for (Expr* t: all_terms)
+    {
+        Domain* dom = nullptr;
+        Expr* coeff = extract_coeff(rl, t, v, dom);
+        if (!coeff)
+        {
+            residuals.push_back(t);
+            continue;
+        }
+        if (groups.find(dom) == groups.end())
+            domain_order.push_back(dom);
+        groups[dom].push_back(coeff);
+    }
+
+    // Reassemble grouped terms, keeping domain order stable.
+    std::vector<Expr*> result_terms;
+    result_terms.reserve(domain_order.size() + residuals.size());
+
+    for (Domain* dom: domain_order)
+    {
+        auto& coeffs = groups[dom];
+        Expr* coeff_expr = (coeffs.size() == 1)
+            ? coeffs[0]
+            : make_sum(rl, coeffs);
+        Expr* contracted = make_contract(rl, coeff_expr, v);
+        if (dom)
+            result_terms.push_back(make_integral(rl, dom, contracted));
+        else
+            result_terms.push_back(contracted);
+    }
+
+    for (Expr* r: residuals)
+        result_terms.push_back(r);
+
+    return make_sum(rl, std::move(result_terms));
+}
+
+auto collect_step(Expr* v) -> DerivationStep
+{
+    if (v->rank() == 0)
+        throw std::invalid_argument(
+            "collect_step: variation must have rank >= 1");
+    return DerivationStep{
+        "collect(" + v->latex() + ")",
+        [v](ResourceList& rl, Expr* e) -> Expr*
+        { return collect_impl(rl, e, v); }};
 }
 
 } // namespace tender

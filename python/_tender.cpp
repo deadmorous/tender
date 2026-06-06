@@ -505,6 +505,10 @@ NB_MODULE(_tender, m)
         return localize_step(domain);
     }, "domain"_a);
 
+    m.def("collect_step", [](Expr* v) {
+        return collect_step(v);
+    }, "v"_a);
+
     m.def("apply_identity",
         [](Identity const& id, nb::dict mapping) {
             PatternMapping pm;

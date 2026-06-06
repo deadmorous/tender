@@ -230,4 +230,11 @@ auto apply_divergence_theorem_step(VolumeDomain* domain) -> DerivationStep;
 // is supplied by the user.
 auto localize_step(Domain* domain) -> DerivationStep;
 
+// Collect-on-variation: groups all top-level Sum terms that contain v as
+// a contraction factor, sorting them by domain of integration.  Each group
+// is reassembled as Integral(D, Sum(coeffs)·v) (or Sum(coeffs)·v for
+// pointwise terms).  Terms that do not have v as an immediate factor are
+// left unchanged.  v must have rank >= 1.
+auto collect_step(Expr* v) -> DerivationStep;
+
 } // namespace tender

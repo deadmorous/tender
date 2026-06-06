@@ -40,6 +40,7 @@ from tender import (
     State,
     Derivation,
     apply_integration_by_parts_step,
+    collect_step,
     localize_step,
     show,
     to_latex_document,
@@ -78,32 +79,40 @@ pvw = (
 # ---------------------------------------------------------------------------
 # Derivation
 # ---------------------------------------------------------------------------
-history = Derivation([
-    apply_integration_by_parts_step(V),    # Step 1 — IBP on σ:∇δu term
-    localize_step(V),                      # Step 2 — pointwise over V
+# Step 1 — IBP on the σ:∇δu term.
+ibp_history = Derivation([
+    apply_integration_by_parts_step(V),
 ]).apply(State(pvw))
 
+# Step 2 — collect all δu-containing terms by domain.
+# This groups ∫_∂V terms together and ∫_V terms together, giving:
+#   ∫_∂V (σ·n − t)·δu dS  +  ∫_V (−∇·σ − f + ρü)·δu dV
+collected_history = Derivation([
+    collect_step(delta_u),
+]).apply(ibp_history[-1])
+
+# Step 3a — localize over V: extracts pointwise volume equilibrium.
+vol_history = Derivation([
+    localize_step(V),
+]).apply(collected_history[-1])
+
+# Step 3b — localize over ∂V: extracts pointwise traction BC.
+# Applied to the collected (not yet localized) state so that only
+# the surface terms are present after stripping the ∫_∂V wrapper.
+srf_history = Derivation([
+    localize_step(dV),
+]).apply(collected_history[-1])
+
+history = ibp_history + collected_history[1:] + vol_history[1:]
 print(show(history))
 
-# ---------------------------------------------------------------------------
-# Step 3 — localize over ∂V (applied to the surface part only)
-# ---------------------------------------------------------------------------
-# After step 2, the volume terms have been extracted as integrands.
-# The surface integral ∫_∂V (σ·n − t)·δu dS remains in the sum.
-# Localizing over ∂V gives the traction BC.
-after_vol_loc = history[-1]
-
-surface_history = Derivation([
-    localize_step(dV),                     # Step 3 — pointwise over ∂V
-]).apply(after_vol_loc)
-
-print("[localize(\\partial V)]", surface_history[-1].expr.latex())
+print("[localize(\\partial V)]", srf_history[-1].expr.latex())
 print()
 
 # ---------------------------------------------------------------------------
 # Structural assertions (these prove the derivation is symbolically correct)
 # ---------------------------------------------------------------------------
-vol_result = history[-1].expr
+vol_result = vol_history[-1].expr
 
 # The volume localization result must be a Sum (several terms for all δu).
 assert isinstance(vol_result, Sum), \
@@ -111,10 +120,14 @@ assert isinstance(vol_result, Sum), \
 
 # One of the top-level terms must contain Divergence(sigma).
 def contains_divergence(e):
+    if isinstance(e, Divergence):
+        return True
     if isinstance(e, Scale):
         return contains_divergence(e.expr)
+    if isinstance(e, Sum):
+        return any(contains_divergence(t) for t in e.terms)
     if isinstance(e, Contract):
-        return isinstance(e.lhs, Divergence) or contains_divergence(e.lhs)
+        return contains_divergence(e.lhs) or contains_divergence(e.rhs)
     return False
 
 found = any(contains_divergence(t) for t in vol_result.terms)
@@ -128,7 +141,9 @@ print("  • Surface traction BC recovered via ∂V localization")
 # ---------------------------------------------------------------------------
 # Write a compilable LaTeX document
 # ---------------------------------------------------------------------------
-full_history = history + surface_history[1:]   # merge both derivation chains
+# Main chain: IBP → collect → localize(V)
+# Then append the surface BC step from the separate srf_history branch.
+full_history = history + srf_history[1:]
 tex = to_latex_document(
     full_history,
     title="Principle of Virtual Work — symbolic derivation",

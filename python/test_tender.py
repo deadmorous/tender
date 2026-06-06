@@ -13,7 +13,7 @@ from tender import (
     make_surface_domain, make_volume_domain, integral,
     State, Derivation,
     simplify_identity_step, expand_step, substitute_step,
-    apply_integration_by_parts_step, localize_step,
+    apply_integration_by_parts_step, localize_step, collect_step,
     show,
     Rational,
     Sum, Scale, Contract, DoubleContract, CrossProduct,
@@ -499,3 +499,87 @@ def test_state_repr_latex():
 def test_expr_repr_not_empty():
     v = tensor("v", 1)
     assert repr(v) != ""
+
+
+# ===========================================================================
+# collect_step
+# ===========================================================================
+
+def test_collect_step_scalar_raises():
+    s = tensor("s", 0)
+    with pytest.raises(Exception):
+        collect_step(s)
+
+
+def test_collect_step_groups_pointwise():
+    from tender import Contract, Sum as TSum
+    A = tensor("A", 1)
+    B = tensor("B", 1)
+    v = tensor("v", 1)
+    expr = dot(A, v) + dot(B, v)
+    step = collect_step(v)
+    result = Derivation([step]).apply(State(expr))[-1].expr
+    assert isinstance(result, Contract)
+    assert isinstance(result.lhs, TSum)
+    assert len(result.lhs.terms) == 2
+
+
+def test_collect_step_groups_by_domain():
+    from tender import Integral, Contract, Sum as TSum
+    n = tensor("n", 1)
+    V = make_volume_domain("V", n)
+    dV = V.surface_boundary
+    A = tensor("A", 1)
+    B = tensor("B", 1)
+    v = tensor("v", 1)
+    expr = integral(V, dot(A, v)) + integral(V, dot(B, v))
+    step = collect_step(v)
+    result = Derivation([step]).apply(State(expr))[-1].expr
+    assert isinstance(result, Integral)
+    assert isinstance(result.integrand, Contract)
+    assert isinstance(result.integrand.lhs, TSum)
+
+
+def test_collect_step_separates_domains():
+    from tender import Sum as TSum
+    n = tensor("n", 1)
+    V = make_volume_domain("V", n)
+    dV = V.surface_boundary
+    A = tensor("A", 1)
+    B = tensor("B", 1)
+    v = tensor("v", 1)
+    expr = integral(V, dot(A, v)) + integral(dV, dot(B, v))
+    step = collect_step(v)
+    result = Derivation([step]).apply(State(expr))[-1].expr
+    assert isinstance(result, TSum)
+    assert len(result.terms) == 2
+
+
+def test_collect_step_name():
+    v = tensor("v", 1)
+    step = collect_step(v)
+    assert step.name == "collect(v)"
+
+
+def test_collect_then_localize_pvw_pattern():
+    """IBP → collect(δu) → localize(V) gives clean volume equilibrium."""
+    from tender import Integral, Contract
+    n  = tensor("n", 1)
+    V  = make_volume_domain("V", n)
+    dV = V.surface_boundary
+    f  = tensor("f", 1)
+    g  = tensor("g", 1)
+    du = tensor("du", 1)
+    # Simulate IBP result: ∫_∂V f·du dS + ∫_V g·du dV
+    expr = integral(dV, dot(f, du)) + integral(V, dot(g, du))
+    history = Derivation([
+        collect_step(du),
+        localize_step(V),
+    ]).apply(State(expr))
+    result = history[-1].expr
+    # After localize(V), surface integral remains and volume term is pointwise
+    from tender import Sum as TSum
+    assert isinstance(result, TSum)
+    terms = result.terms
+    assert any(isinstance(t, Integral) for t in terms)
+    assert any(isinstance(t, Contract) for t in terms)

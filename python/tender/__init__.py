@@ -93,6 +93,7 @@ from ._tender import (
     apply_integration_by_parts_step,
     apply_divergence_theorem_step,
     localize_step,
+    collect_step,
     apply_identity,
     # Singleton getters (private)
     _identity_singleton,
@@ -200,5 +201,5 @@ __all__ = [
     "simplify_identity_step", "expand_step", "expand_poly_step",
     "substitute_step", "diff_step",
     "apply_integration_by_parts_step", "apply_divergence_theorem_step",
-    "localize_step", "apply_identity",
+    "localize_step", "collect_step", "apply_identity",
 ]

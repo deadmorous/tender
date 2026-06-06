@@ -498,3 +498,148 @@ TEST(Localize, StepName)
     auto step = localize_step(V);
     EXPECT_EQ(step.name(), "localize(V)");
 }
+
+// ===========================================================================
+// collect_step
+// ===========================================================================
+
+TEST(CollectStep, ScalarVariationThrows)
+{
+    auto rl = make_rl();
+    auto* s = make_named_tensor(rl, "s", 0, {});
+    EXPECT_THROW(collect_step(s), std::invalid_argument);
+}
+
+TEST(CollectStep, StepName)
+{
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto step = collect_step(v);
+    EXPECT_EQ(step.name(), "collect(v)");
+}
+
+// Sum(A·v, B·v)  →  (A+B)·v  (both pointwise)
+TEST(CollectStep, TwoPointwiseTermsGrouped)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 1, {});
+    auto* B = make_named_tensor(rl, "B", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+
+    auto* Av = make_contract(rl, A, v);
+    auto* Bv = make_contract(rl, B, v);
+    auto* sum = make_sum(rl, {Av, Bv});
+
+    auto step = collect_step(v);
+    auto* result = step.apply(rl, State{sum}).expr();
+
+    // Result should be a single Contract(Sum(A,B), v)
+    auto* c = dynamic_cast<Contract*>(result);
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->rhs(), v);
+    auto* inner = dynamic_cast<Sum*>(c->lhs());
+    ASSERT_NE(inner, nullptr);
+    EXPECT_EQ(static_cast<int>(inner->terms().size()), 2);
+}
+
+// Sum(∫_V A·v dV, ∫_V B·v dV)  →  ∫_V (A+B)·v dV
+TEST(CollectStep, TwoVolumeIntegralsGrouped)
+{
+    auto rl = make_rl();
+    auto* n = make_named_tensor(rl, "n", 1, {});
+    auto* V = make_volume_domain(rl, "V", n);
+    auto* A = make_named_tensor(rl, "A", 1, {});
+    auto* B = make_named_tensor(rl, "B", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+
+    auto* intAv = make_integral(rl, V, make_contract(rl, A, v));
+    auto* intBv = make_integral(rl, V, make_contract(rl, B, v));
+    auto* sum   = make_sum(rl, {intAv, intBv});
+
+    auto step = collect_step(v);
+    auto* result = step.apply(rl, State{sum}).expr();
+
+    auto* integ = dynamic_cast<Integral*>(result);
+    ASSERT_NE(integ, nullptr);
+    EXPECT_EQ(integ->domain(), V);
+    auto* c = dynamic_cast<Contract*>(integ->integrand());
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->rhs(), v);
+    auto* inner = dynamic_cast<Sum*>(c->lhs());
+    ASSERT_NE(inner, nullptr);
+    EXPECT_EQ(static_cast<int>(inner->terms().size()), 2);
+}
+
+// Sum(∫_V A·v dV, ∫_∂V B·v dS, C·v)  →  ∫_V A·v dV + ∫_∂V B·v dS + C·v
+// (already separated — no grouping needed, order preserved)
+TEST(CollectStep, ThreeDomainsKeptSeparate)
+{
+    auto rl = make_rl();
+    auto* n  = make_named_tensor(rl, "n",  1, {});
+    auto* V  = make_volume_domain(rl, "V", n);
+    auto* dV = V->surface_boundary();
+    auto* A  = make_named_tensor(rl, "A", 1, {});
+    auto* B  = make_named_tensor(rl, "B", 1, {});
+    auto* C  = make_named_tensor(rl, "C", 1, {});
+    auto* v  = make_named_tensor(rl, "v", 1, {});
+
+    auto* intAv  = make_integral(rl, V,  make_contract(rl, A, v));
+    auto* intBv  = make_integral(rl, dV, make_contract(rl, B, v));
+    auto* Cv     = make_contract(rl, C, v);
+    auto* sum    = make_sum(rl, {intAv, intBv, Cv});
+
+    auto step = collect_step(v);
+    auto* result = step.apply(rl, State{sum}).expr();
+
+    auto* s = dynamic_cast<Sum*>(result);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(static_cast<int>(s->terms().size()), 3);
+}
+
+// Residual terms (no v) are preserved unchanged.
+TEST(CollectStep, ResidualTermsPreserved)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 1, {});
+    auto* B = make_named_tensor(rl, "B", 0, {}); // scalar — same rank as A·v
+    auto* v = make_named_tensor(rl, "v", 1, {});
+
+    // A·v + B  (B has no v; both rank 0)
+    auto* Av  = make_contract(rl, A, v);
+    auto* sum = make_sum(rl, {Av, B});
+
+    auto step = collect_step(v);
+    auto* result = step.apply(rl, State{sum}).expr();
+
+    auto* s = dynamic_cast<Sum*>(result);
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(static_cast<int>(s->terms().size()), 2);
+    // Collected term first, then residual
+    EXPECT_NE(dynamic_cast<Contract*>(s->terms()[0]), nullptr);
+    EXPECT_EQ(s->terms()[1], B);
+}
+
+// Scale(-1, ∫_V A·v dV)  →  ∫_V (-A)·v dV  (scale folded into coeff)
+TEST(CollectStep, NegativeScaleIntegral)
+{
+    auto rl = make_rl();
+    auto* n = make_named_tensor(rl, "n", 1, {});
+    auto* V = make_volume_domain(rl, "V", n);
+    auto* A = make_named_tensor(rl, "A", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+
+    auto* intAv = make_integral(rl, V, make_contract(rl, A, v));
+    auto* negIntAv = make_scale(rl, Rational{-1}, intAv);
+
+    auto step = collect_step(v);
+    auto* result = step.apply(rl, State{negIntAv}).expr();
+
+    // Single ∫_V (-A)·v dV
+    auto* integ = dynamic_cast<Integral*>(result);
+    ASSERT_NE(integ, nullptr);
+    auto* c = dynamic_cast<Contract*>(integ->integrand());
+    ASSERT_NE(c, nullptr);
+    auto* sc = dynamic_cast<Scale*>(c->lhs());
+    ASSERT_NE(sc, nullptr);
+    EXPECT_EQ(sc->coeff(), (Rational{-1}));
+}
