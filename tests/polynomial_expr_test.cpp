@@ -37,8 +37,7 @@ TEST(PolynomialExpr, InvalidVarRankThrows)
 {
     auto rl = make_rl();
     auto* v = make_named_tensor(rl, "v", 1, {});
-    EXPECT_THROW(
-        make_polynomial_expr(rl, quad(), v), std::invalid_argument);
+    EXPECT_THROW(make_polynomial_expr(rl, quad(), v), std::invalid_argument);
 }
 
 // ===========================================================================
@@ -70,9 +69,7 @@ TEST(PolynomialExpr, PythonRank0Quadratic)
     auto rl = make_rl();
     auto* x = make_symbolic_var(rl, "x");
     auto* pe = make_polynomial_expr(rl, quad(), x);
-    EXPECT_EQ(
-        pe->python(),
-        "3*symbolic_var('x')**2 - 2*symbolic_var('x') + 1");
+    EXPECT_EQ(pe->python(), "3*symbolic_var('x')**2 - 2*symbolic_var('x') + 1");
 }
 
 TEST(PolynomialExpr, LatexZeroPolynomial)
@@ -204,8 +201,7 @@ TEST(PolynomialExpr, PythonRank2)
     Polynomial p{{{Rational{1}, 2}, {Rational{-1}, 0}}};
     auto* pe = make_polynomial_expr(rl, p, A);
     EXPECT_EQ(
-        pe->python(),
-        "polynomial_expr(tensor('A', 2), [(1, 2), (-1, 0)])");
+        pe->python(), "polynomial_expr(tensor('A', 2), [(1, 2), (-1, 0)])");
 }
 
 // ===========================================================================
@@ -309,7 +305,8 @@ TEST(PolynomialExpr, DerivOfQuadraticWrtT)
     auto* t = make_parameter(rl, "t");
     // p(t) = 3t^2 - 2t + 1 → dp/dt = 6t - 2
     // dp_poly = {6,1},{-2,0}; dp_expr = PolynomialExpr({6t-2}, t)
-    // dv = 1; result = PolynomialExpr({6t-2}, t) * 1 = PolynomialExpr({6t-2}, t)
+    // dv = 1; result = PolynomialExpr({6t-2}, t) * 1 = PolynomialExpr({6t-2},
+    // t)
     auto* pe = make_polynomial_expr(rl, quad(), t);
     auto* d = deriv(rl, t, pe);
     // The derivative is itself a PolynomialExpr (degree 1: 6t - 2)
@@ -377,7 +374,8 @@ TEST(PolynomialExpr, Accessors)
 }
 
 // ===========================================================================
-// coeff_latex — fractional coefficient rendering (line 23-24 of polynomial_expr.cpp)
+// coeff_latex — fractional coefficient rendering (line 23-24 of
+// polynomial_expr.cpp)
 // ===========================================================================
 
 TEST(PolynomialExpr, FractionalCoefficientLatex)
@@ -388,7 +386,8 @@ TEST(PolynomialExpr, FractionalCoefficientLatex)
     auto* x = make_symbolic_var(rl, "x");
     Polynomial p{{{Rational{1, 3}, 1}}};
     auto* pe = make_polynomial_expr(rl, p, x);
-    // rank-0 path delegates to Polynomial::to_latex which also calls coeff_latex
+    // rank-0 path delegates to Polynomial::to_latex which also calls
+    // coeff_latex
     std::string tex = pe->latex();
     EXPECT_NE(tex.find("frac"), std::string::npos);
     EXPECT_NE(tex.find("1"), std::string::npos);
@@ -398,10 +397,11 @@ TEST(PolynomialExpr, FractionalCoefficientLatex)
 TEST(PolynomialExpr, FractionalCoefficientLatexRank2)
 {
     // rank-2 polynomial with fractional coefficient — exercises the coeff_latex
-    // branch (line 23-24) through the rank-2 rendering path in PolynomialExpr::latex
+    // branch (line 23-24) through the rank-2 rendering path in
+    // PolynomialExpr::latex
     auto rl = make_rl();
     auto* A = make_named_tensor(rl, "A", 2, {});
-    Polynomial p{{{Rational{2, 3}, 1}}};  // (2/3) A
+    Polynomial p{{{Rational{2, 3}, 1}}}; // (2/3) A
     auto* pe = make_polynomial_expr(rl, p, A);
     std::string tex = pe->latex();
     EXPECT_NE(tex.find("frac"), std::string::npos);
@@ -420,5 +420,5 @@ TEST(PolynomialExpr, ParenthesisedSumVarPython)
     Polynomial p{{{Rational{1}, 1}}};
     auto* pe = make_polynomial_expr(rl, p, s);
     std::string py = pe->python();
-    EXPECT_NE(py.find("("), std::string::npos);  // sum was parenthesised
+    EXPECT_NE(py.find("("), std::string::npos); // sum was parenthesised
 }

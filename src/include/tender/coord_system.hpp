@@ -4,7 +4,8 @@
 
 #include <memory>
 
-namespace tender {
+namespace tender
+{
 
 // Abstract coordinate system. Holds covariant basis vectors g_i, their
 // contravariant duals g^i (cobasis), and the metric tensor g_ij.
@@ -19,9 +20,9 @@ public:
     // explicit coordinate parameters (e.g. DirectBasisCS).
     virtual auto coord(int i) const -> Parameter* = 0;
 
-    virtual auto basis(int i) const -> Expr* = 0;    // g_i  — rank 1
-    virtual auto cobasis(int i) const -> Expr* = 0;  // g^i  — rank 1
-    virtual auto metric(int i, int j) const -> Expr* = 0;  // g_ij — rank 0
+    virtual auto basis(int i) const -> Expr* = 0;         // g_i  — rank 1
+    virtual auto cobasis(int i) const -> Expr* = 0;       // g^i  — rank 1
+    virtual auto metric(int i, int j) const -> Expr* = 0; // g_ij — rank 0
 
     virtual auto is_orthonormal() const noexcept -> bool = 0;
 };

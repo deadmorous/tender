@@ -859,7 +859,7 @@ auto ddt(ResourceList& rl, Expr* e) -> Expr*;
 auto make_material_deriv(ResourceList& rl, Expr* velocity, Expr* field) -> Expr*;
 
 // Polynomial node. var->rank() must be 0 or 2.
-auto make_polynomial_expr(
-    ResourceList& rl, Polynomial poly, Expr* var) -> PolynomialExpr*;
+auto make_polynomial_expr(ResourceList& rl, Polynomial poly, Expr* var)
+    -> PolynomialExpr*;
 
 } // namespace tender

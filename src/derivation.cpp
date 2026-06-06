@@ -73,8 +73,7 @@ auto show(std::vector<State> const& history) -> std::string
     {
         if (!result.empty())
             result += '\n';
-        std::string const tag =
-            s.label().empty() ? "initial" : s.label();
+        std::string const tag = s.label().empty() ? "initial" : s.label();
         result += "[" + tag + "]  " + s.latex();
     }
     return result;
@@ -138,19 +137,14 @@ auto diff_step(Parameter const* param) -> DerivationStep
     return DerivationStep{
         "diff(" + param->symbol() + ")",
         [param](ResourceList& rl, Expr* e) -> Expr*
-        {
-            return deriv(rl, param, e);
-        }};
+        { return deriv(rl, param, e); }};
 }
 
 auto expand_poly_step() -> DerivationStep
 {
-    return DerivationStep{
-        "expand_poly",
-        [](ResourceList& rl, Expr* e) -> Expr*
-        {
-            return expand_poly_impl(rl, e);
-        }};
+    return DerivationStep{"expand_poly", [](ResourceList& rl, Expr* e) -> Expr* {
+                              return expand_poly_impl(rl, e);
+                          }};
 }
 
 auto named_step(std::string name, DerivationStep::Fn fn) -> DerivationStep

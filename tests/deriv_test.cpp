@@ -524,9 +524,7 @@ TEST(MaterialDeriv, Latex)
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* f = make_named_tensor(rl, "f", 0, {});
     auto* md = make_material_deriv(rl, v, f);
-    EXPECT_EQ(
-        md->latex(),
-        "\\frac{\\mathrm{D}}{\\mathrm{D}t}\\left(f\\right)");
+    EXPECT_EQ(md->latex(), "\\frac{\\mathrm{D}}{\\mathrm{D}t}\\left(f\\right)");
 }
 
 TEST(MaterialDeriv, Python)
@@ -535,9 +533,7 @@ TEST(MaterialDeriv, Python)
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* f = make_named_tensor(rl, "f", 0, {});
     auto* md = make_material_deriv(rl, v, f);
-    EXPECT_EQ(
-        md->python(),
-        "material_deriv(tensor('v', 1), tensor('f', 0))");
+    EXPECT_EQ(md->python(), "material_deriv(tensor('v', 1), tensor('f', 0))");
 }
 
 TEST(MaterialDeriv, VelocityAndFieldAccessors)
@@ -570,7 +566,7 @@ TEST(DependsOn, TensorProductContainingParameter)
     auto rl = make_rl();
     auto* t = make_parameter(rl, "t");
     auto* v = make_named_tensor(rl, "v", 1, {});
-    auto* tv = make_tensor_product(rl, t, v);  // rank-1, contains t
+    auto* tv = make_tensor_product(rl, t, v); // rank-1, contains t
     EXPECT_TRUE(depends_on(t, tv));
 }
 
@@ -579,7 +575,7 @@ TEST(DependsOn, TraceContainingParameter)
     auto rl = make_rl();
     auto* t = make_parameter(rl, "t");
     auto* A = make_named_tensor(rl, "A", 2, {});
-    auto* tA = make_tensor_product(rl, t, A);  // rank-2, contains t
+    auto* tA = make_tensor_product(rl, t, A); // rank-2, contains t
     EXPECT_TRUE(depends_on(t, make_trace(rl, tA)));
 }
 
@@ -589,7 +585,7 @@ TEST(DependsOn, ContractContainingParameter)
     auto* t = make_parameter(rl, "t");
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* w = make_named_tensor(rl, "w", 1, {});
-    auto* tv = make_tensor_product(rl, t, v);  // rank-1, contains t
+    auto* tv = make_tensor_product(rl, t, v); // rank-1, contains t
     EXPECT_TRUE(depends_on(t, make_contract(rl, tv, w)));
 }
 
@@ -599,8 +595,9 @@ TEST(DependsOn, DoubleContractContainingParameter)
     auto* t = make_parameter(rl, "t");
     auto* A = make_named_tensor(rl, "A", 2, {});
     auto* B = make_named_tensor(rl, "B", 2, {});
-    auto* tA = make_tensor_product(rl, t, A);  // rank-2, contains t
-    // make_double_contract(tA, B): tA is not IdentityTensor → DoubleContract node
+    auto* tA = make_tensor_product(rl, t, A); // rank-2, contains t
+    // make_double_contract(tA, B): tA is not IdentityTensor → DoubleContract
+    // node
     EXPECT_TRUE(depends_on(t, make_double_contract(rl, tA, B)));
 }
 
@@ -620,7 +617,7 @@ TEST(DependsOn, CrossProductContainingParameter)
     auto* t = make_parameter(rl, "t");
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* w = make_named_tensor(rl, "w", 1, {});
-    auto* tv = make_tensor_product(rl, t, v);  // rank-1, contains t
+    auto* tv = make_tensor_product(rl, t, v); // rank-1, contains t
     EXPECT_TRUE(depends_on(t, make_cross_product(rl, tv, w)));
 }
 
@@ -676,7 +673,7 @@ TEST(DerivTensor, TraceRule)
     auto rl = make_rl();
     auto* t = make_parameter(rl, "t");
     auto* A = make_named_tensor(rl, "A", 2, {});
-    auto* tA = make_tensor_product(rl, t, A);   // rank-2
+    auto* tA = make_tensor_product(rl, t, A); // rank-2
     auto* d = deriv(rl, t, make_trace(rl, tA));
     auto* tr = dynamic_cast<Trace*>(d);
     ASSERT_NE(tr, nullptr);
@@ -690,7 +687,7 @@ TEST(DerivTensor, ContractOneSide)
     auto* t = make_parameter(rl, "t");
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* w = make_named_tensor(rl, "w", 1, {});
-    auto* tv = make_tensor_product(rl, t, v);   // rank-1, depends on t
+    auto* tv = make_tensor_product(rl, t, v); // rank-1, depends on t
     auto* d = deriv(rl, t, make_contract(rl, tv, w));
     // Result: Contract(deriv(tv), w) = Contract(TensorProduct(1,v), w)
     EXPECT_NE(dynamic_cast<Contract*>(d), nullptr);
@@ -715,10 +712,11 @@ TEST(DerivTensor, DoubleContractRule)
     auto* t = make_parameter(rl, "t");
     auto* A = make_named_tensor(rl, "A", 2, {});
     auto* B = make_named_tensor(rl, "B", 2, {});
-    auto* tA = make_tensor_product(rl, t, A);  // rank-2, contains t
+    auto* tA = make_tensor_product(rl, t, A); // rank-2, contains t
     auto* dc = make_double_contract(rl, tA, B);
     auto* d = deriv(rl, t, dc);
-    // Result: DoubleContract(deriv(tA), B) = DoubleContract(TensorProduct(1,A), B)
+    // Result: DoubleContract(deriv(tA), B) = DoubleContract(TensorProduct(1,A),
+    // B)
     EXPECT_NE(dynamic_cast<DoubleContract*>(d), nullptr);
 }
 
@@ -741,7 +739,7 @@ TEST(DerivTensor, CrossProductRule)
     auto* t = make_parameter(rl, "t");
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto* w = make_named_tensor(rl, "w", 1, {});
-    auto* tv = make_tensor_product(rl, t, v);  // rank-1
+    auto* tv = make_tensor_product(rl, t, v); // rank-1
     auto* d = deriv(rl, t, make_cross_product(rl, tv, w));
     EXPECT_NE(dynamic_cast<CrossProduct*>(d), nullptr);
     EXPECT_EQ(d->rank(), 1);

@@ -26,7 +26,8 @@ static auto simplify_id_impl(ResourceList& rl, Expr* e) -> Expr*
     if (auto* dc = dynamic_cast<DoubleContract*>(e))
     {
         if (dynamic_cast<IdentityTensor*>(dc->lhs()))
-            return make_trace(rl, simplify_id_impl(rl, dc->rhs())); // GCOV_EXCL_LINE
+            return make_trace(
+                rl, simplify_id_impl(rl, dc->rhs())); // GCOV_EXCL_LINE
         if (dynamic_cast<IdentityTensor*>(dc->rhs()))
             return make_trace(rl, simplify_id_impl(rl, dc->lhs()));
         return make_double_contract(
@@ -67,8 +68,7 @@ static auto simplify_id_impl(ResourceList& rl, Expr* e) -> Expr*
 
     if (auto* cp = dynamic_cast<CrossProduct*>(e))
         return rl.make<CrossProduct>(
-            simplify_id_impl(rl, cp->lhs()),
-            simplify_id_impl(rl, cp->rhs()));
+            simplify_id_impl(rl, cp->lhs()), simplify_id_impl(rl, cp->rhs()));
 
     if (auto* pr = dynamic_cast<Product*>(e))
         return make_product(
@@ -91,9 +91,7 @@ static auto simplify_id_impl(ResourceList& rl, Expr* e) -> Expr*
 auto simplify_identity_step() -> DerivationStep
 {
     return DerivationStep{
-        "simplify_identity",
-        [](ResourceList& rl, Expr* e) -> Expr*
-        {
+        "simplify_identity", [](ResourceList& rl, Expr* e) -> Expr* {
             return simplify_id_impl(rl, e);
         }};
 }
@@ -132,54 +130,49 @@ static auto substitute_impl(
     {
         auto* l = substitute_impl(rl, tp->lhs(), what, with_what);
         auto* r = substitute_impl(rl, tp->rhs(), what, with_what);
-        return (l == tp->lhs() && r == tp->rhs())
-            ? e
-            : make_tensor_product(rl, l, r);
+        return (l == tp->lhs() && r == tp->rhs()) ?
+                   e :
+                   make_tensor_product(rl, l, r);
     }
 
     if (auto* co = dynamic_cast<Contract*>(e))
     {
         auto* l = substitute_impl(rl, co->lhs(), what, with_what);
         auto* r = substitute_impl(rl, co->rhs(), what, with_what);
-        return (l == co->lhs() && r == co->rhs())
-            ? e
-            : make_contract(rl, l, r);
+        return (l == co->lhs() && r == co->rhs()) ? e : make_contract(rl, l, r);
     }
 
     if (auto* dc = dynamic_cast<DoubleContract*>(e))
     {
         auto* l = substitute_impl(rl, dc->lhs(), what, with_what);
         auto* r = substitute_impl(rl, dc->rhs(), what, with_what);
-        return (l == dc->lhs() && r == dc->rhs())
-            ? e
-            : make_double_contract(rl, l, r);
+        return (l == dc->lhs() && r == dc->rhs()) ?
+                   e :
+                   make_double_contract(rl, l, r);
     }
 
     if (auto* dcr = dynamic_cast<DoubleContractReversed*>(e))
     {
         auto* l = substitute_impl(rl, dcr->lhs(), what, with_what);
         auto* r = substitute_impl(rl, dcr->rhs(), what, with_what);
-        return (l == dcr->lhs() && r == dcr->rhs())
-            ? e
-            : make_double_contract_reversed(rl, l, r);
+        return (l == dcr->lhs() && r == dcr->rhs()) ?
+                   e :
+                   make_double_contract_reversed(rl, l, r);
     }
 
     if (auto* cp = dynamic_cast<CrossProduct*>(e))
     {
         auto* l = substitute_impl(rl, cp->lhs(), what, with_what);
         auto* r = substitute_impl(rl, cp->rhs(), what, with_what);
-        return (l == cp->lhs() && r == cp->rhs())
-            ? e
-            : rl.make<CrossProduct>(l, r);
+        return (l == cp->lhs() && r == cp->rhs()) ? e :
+                                                    rl.make<CrossProduct>(l, r);
     }
 
     if (auto* pr = dynamic_cast<Product*>(e))
     {
         auto* l = substitute_impl(rl, pr->lhs(), what, with_what);
         auto* r = substitute_impl(rl, pr->rhs(), what, with_what);
-        return (l == pr->lhs() && r == pr->rhs())
-            ? e
-            : make_product(rl, l, r);
+        return (l == pr->lhs() && r == pr->rhs()) ? e : make_product(rl, l, r);
     }
 
     if (auto* tr = dynamic_cast<Trace*>(e))
@@ -206,9 +199,7 @@ static auto substitute_impl(
 auto substitute_step(Expr* what, Expr* with_what) -> DerivationStep
 {
     return DerivationStep{
-        "substitute",
-        [what, with_what](ResourceList& rl, Expr* e) -> Expr*
-        {
+        "substitute", [what, with_what](ResourceList& rl, Expr* e) -> Expr* {
             return substitute_impl(rl, e, what, with_what);
         }};
 }
@@ -226,8 +217,8 @@ static auto distribute_binary(
     Expr* l,
     Expr* r,
     auto rebuild,
-    auto make_left,   // make_left(rl, term, r)  — term from lhs Sum
-    auto make_right)  // make_right(rl, l, term)  — term from rhs Sum
+    auto make_left,  // make_left(rl, term, r)  — term from lhs Sum
+    auto make_right) // make_right(rl, l, term)  — term from rhs Sum
     -> Expr*
 {
     if (auto* sl = dynamic_cast<Sum*>(l))
@@ -280,10 +271,15 @@ static auto expand_impl(ResourceList& rl, Expr* e) -> Expr*
         auto* l = expand_impl(rl, tp->lhs());
         auto* r = expand_impl(rl, tp->rhs());
         return distribute_binary(
-            rl, l, r,
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_tensor_product(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_tensor_product(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_tensor_product(rl2, a, b); });
+            rl,
+            l,
+            r,
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_tensor_product(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_tensor_product(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_tensor_product(rl2, a, b); });
     }
 
     if (auto* co = dynamic_cast<Contract*>(e))
@@ -291,10 +287,15 @@ static auto expand_impl(ResourceList& rl, Expr* e) -> Expr*
         auto* l = expand_impl(rl, co->lhs());
         auto* r = expand_impl(rl, co->rhs());
         return distribute_binary(
-            rl, l, r,
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_contract(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_contract(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_contract(rl2, a, b); });
+            rl,
+            l,
+            r,
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_contract(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_contract(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_contract(rl2, a, b); });
     }
 
     if (auto* dc = dynamic_cast<DoubleContract*>(e))
@@ -302,10 +303,15 @@ static auto expand_impl(ResourceList& rl, Expr* e) -> Expr*
         auto* l = expand_impl(rl, dc->lhs());
         auto* r = expand_impl(rl, dc->rhs());
         return distribute_binary(
-            rl, l, r,
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_double_contract(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_double_contract(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_double_contract(rl2, a, b); });
+            rl,
+            l,
+            r,
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_double_contract(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_double_contract(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_double_contract(rl2, a, b); });
     }
 
     if (auto* dcr = dynamic_cast<DoubleContractReversed*>(e))
@@ -313,10 +319,15 @@ static auto expand_impl(ResourceList& rl, Expr* e) -> Expr*
         auto* l = expand_impl(rl, dcr->lhs());
         auto* r = expand_impl(rl, dcr->rhs());
         return distribute_binary(
-            rl, l, r,
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_double_contract_reversed(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_double_contract_reversed(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_double_contract_reversed(rl2, a, b); });
+            rl,
+            l,
+            r,
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_double_contract_reversed(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_double_contract_reversed(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_double_contract_reversed(rl2, a, b); });
     }
 
     if (auto* cp = dynamic_cast<CrossProduct*>(e))
@@ -324,10 +335,15 @@ static auto expand_impl(ResourceList& rl, Expr* e) -> Expr*
         auto* l = expand_impl(rl, cp->lhs());
         auto* r = expand_impl(rl, cp->rhs());
         return distribute_binary(
-            rl, l, r,
-            [](ResourceList& rl2, Expr* a, Expr* b) { return rl2.make<CrossProduct>(a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return rl2.make<CrossProduct>(a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return rl2.make<CrossProduct>(a, b); });
+            rl,
+            l,
+            r,
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return rl2.make<CrossProduct>(a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return rl2.make<CrossProduct>(a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return rl2.make<CrossProduct>(a, b); });
     }
 
     if (auto* pr = dynamic_cast<Product*>(e))
@@ -335,10 +351,15 @@ static auto expand_impl(ResourceList& rl, Expr* e) -> Expr*
         auto* l = expand_impl(rl, pr->lhs());
         auto* r = expand_impl(rl, pr->rhs());
         return distribute_binary(
-            rl, l, r,
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_product(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_product(rl2, a, b); },
-            [](ResourceList& rl2, Expr* a, Expr* b) { return make_product(rl2, a, b); });
+            rl,
+            l,
+            r,
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_product(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_product(rl2, a, b); },
+            [](ResourceList& rl2, Expr* a, Expr* b)
+            { return make_product(rl2, a, b); });
     }
 
     if (auto* tr = dynamic_cast<Trace*>(e))
@@ -355,12 +376,9 @@ static auto expand_impl(ResourceList& rl, Expr* e) -> Expr*
 
 auto expand_step() -> DerivationStep
 {
-    return DerivationStep{
-        "expand",
-        [](ResourceList& rl, Expr* e) -> Expr*
-        {
-            return expand_impl(rl, e);
-        }};
+    return DerivationStep{"expand", [](ResourceList& rl, Expr* e) -> Expr* {
+                              return expand_impl(rl, e);
+                          }};
 }
 
 } // namespace tender

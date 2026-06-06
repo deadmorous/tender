@@ -1079,34 +1079,33 @@ static auto depends_on_impl(std::string const& sym, Expr const* e) -> bool
     }
     if (auto const* tp = dynamic_cast<TensorProduct const*>(e))
         return depends_on_impl(sym, tp->lhs())
-            || depends_on_impl(sym, tp->rhs());
+               || depends_on_impl(sym, tp->rhs());
     if (auto const* fa = dynamic_cast<FunctionApply const*>(e))
         return depends_on_impl(sym, fa->arg());
     if (auto const* pw = dynamic_cast<Pow const*>(e))
         return depends_on_impl(sym, pw->base());
     if (auto const* a2 = dynamic_cast<ATan2 const*>(e))
-        return depends_on_impl(sym, a2->y())
-            || depends_on_impl(sym, a2->x());
+        return depends_on_impl(sym, a2->y()) || depends_on_impl(sym, a2->x());
     if (auto const* pr = dynamic_cast<Product const*>(e))
         return depends_on_impl(sym, pr->lhs())
-            || depends_on_impl(sym, pr->rhs());
+               || depends_on_impl(sym, pr->rhs());
     if (auto const* tr = dynamic_cast<Trace const*>(e))
         return depends_on_impl(sym, tr->arg());
     if (auto const* co = dynamic_cast<Contract const*>(e))
         return depends_on_impl(sym, co->lhs())
-            || depends_on_impl(sym, co->rhs());
+               || depends_on_impl(sym, co->rhs());
     if (auto const* dc = dynamic_cast<DoubleContract const*>(e))
         return depends_on_impl(sym, dc->lhs())
-            || depends_on_impl(sym, dc->rhs());
+               || depends_on_impl(sym, dc->rhs());
     if (auto const* dr = dynamic_cast<DoubleContractReversed const*>(e))
         return depends_on_impl(sym, dr->lhs())
-            || depends_on_impl(sym, dr->rhs());
+               || depends_on_impl(sym, dr->rhs());
     if (auto const* cp = dynamic_cast<CrossProduct const*>(e))
         return depends_on_impl(sym, cp->lhs())
-            || depends_on_impl(sym, cp->rhs());
+               || depends_on_impl(sym, cp->rhs());
     if (auto const* md = dynamic_cast<MaterialDeriv const*>(e))
         return depends_on_impl(sym, md->velocity())
-            || depends_on_impl(sym, md->field());
+               || depends_on_impl(sym, md->field());
     if (auto const* pe = dynamic_cast<PolynomialExpr const*>(e))
         return depends_on_impl(sym, pe->var());
     return false;
@@ -1153,8 +1152,7 @@ auto deriv(ResourceList& rl, Parameter const* p, Expr* e) -> Expr*
             return make_sum(
                 rl,
                 {make_tensor_product(rl, deriv(rl, p, tp->lhs()), tp->rhs()),
-                 make_tensor_product(
-                     rl, tp->lhs(), deriv(rl, p, tp->rhs()))});
+                 make_tensor_product(rl, tp->lhs(), deriv(rl, p, tp->rhs()))});
         if (ld)
             return make_tensor_product(rl, deriv(rl, p, tp->lhs()), tp->rhs());
         return make_tensor_product(rl, tp->lhs(), deriv(rl, p, tp->rhs()));
@@ -1219,11 +1217,9 @@ auto deriv(ResourceList& rl, Parameter const* p, Expr* e) -> Expr*
             return make_sum(
                 rl,
                 {make_double_contract(rl, deriv(rl, p, dc->lhs()), dc->rhs()),
-                 make_double_contract(
-                     rl, dc->lhs(), deriv(rl, p, dc->rhs()))});
+                 make_double_contract(rl, dc->lhs(), deriv(rl, p, dc->rhs()))});
         if (ld)
-            return make_double_contract(
-                rl, deriv(rl, p, dc->lhs()), dc->rhs());
+            return make_double_contract(rl, deriv(rl, p, dc->lhs()), dc->rhs());
         return make_double_contract(rl, dc->lhs(), deriv(rl, p, dc->rhs()));
     }
 
@@ -1255,11 +1251,9 @@ auto deriv(ResourceList& rl, Parameter const* p, Expr* e) -> Expr*
             return make_sum(
                 rl,
                 {make_cross_product(rl, deriv(rl, p, cp->lhs()), cp->rhs()),
-                 make_cross_product(
-                     rl, cp->lhs(), deriv(rl, p, cp->rhs()))});
+                 make_cross_product(rl, cp->lhs(), deriv(rl, p, cp->rhs()))});
         if (ld)
-            return make_cross_product(
-                rl, deriv(rl, p, cp->lhs()), cp->rhs());
+            return make_cross_product(rl, deriv(rl, p, cp->lhs()), cp->rhs());
         return make_cross_product(rl, cp->lhs(), deriv(rl, p, cp->rhs()));
     }
 

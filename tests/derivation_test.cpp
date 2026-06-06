@@ -49,12 +49,10 @@ TEST(State, ExprAccessor)
 
 TEST(DerivationStep, NameAccessor)
 {
-    auto* step = new DerivationStep{
-        "double",
-        [](ResourceList& rl, Expr* e) -> Expr*
-        {
-            return make_scale(rl, Rational{2}, e);
-        }};
+    auto* step =
+        new DerivationStep{"double", [](ResourceList& rl, Expr* e) -> Expr* {
+                               return make_scale(rl, Rational{2}, e);
+                           }};
     EXPECT_EQ(step->name(), "double");
     delete step;
 }
@@ -65,12 +63,9 @@ TEST(DerivationStep, Apply)
     auto* two = make_rational(rl, Rational{2});
     State s{two};
 
-    DerivationStep step{
-        "negate",
-        [](ResourceList& rl2, Expr* e) -> Expr*
-        {
-            return make_scale(rl2, Rational{-1}, e);
-        }};
+    DerivationStep step{"negate", [](ResourceList& rl2, Expr* e) -> Expr* {
+                            return make_scale(rl2, Rational{-1}, e);
+                        }};
 
     auto result = step.apply(rl, s);
     EXPECT_EQ(result.label(), "negate");
@@ -99,12 +94,10 @@ TEST(Derivation, ApplyOneStep)
     auto rl = make_rl();
     auto* one = make_rational(rl, Rational{1});
     State initial{one};
-    Derivation d{{DerivationStep{
-        "times3",
-        [](ResourceList& rl2, Expr* e) -> Expr*
-        {
-            return make_scale(rl2, Rational{3}, e);
-        }}}};
+    Derivation d{
+        {DerivationStep{"times3", [](ResourceList& rl2, Expr* e) -> Expr* {
+                            return make_scale(rl2, Rational{3}, e);
+                        }}}};
     auto history = d.apply(rl, initial);
     ASSERT_EQ(history.size(), 2u);
     EXPECT_EQ(history[0].expr(), one);
@@ -253,14 +246,11 @@ TEST(Show, TwoLinesForOneStep)
 {
     auto rl = make_rl();
     auto* e = make_rational(rl, Rational{1});
-    auto history =
-        Derivation{{DerivationStep{
-            "id",
-            [](ResourceList&, Expr* x) -> Expr*
-            {
+    auto history = Derivation{
+        {DerivationStep{
+            "id", [](ResourceList&, Expr* x) -> Expr* {
                 return x;
-            }}}}
-            .apply(rl, State{e});
+            }}}}.apply(rl, State{e});
     auto s = show(history);
     // Two lines separated by '\n'
     EXPECT_NE(s.find('\n'), std::string::npos);
@@ -322,9 +312,7 @@ TEST(NamedStep, NameAndFunctionWork)
     auto step = named_step(
         "add_one",
         [](ResourceList& rl2, Expr* e) -> Expr*
-        {
-            return make_sum(rl2, {e, make_rational(rl2, Rational{1})});
-        });
+        { return make_sum(rl2, {e, make_rational(rl2, Rational{1})}); });
     EXPECT_EQ(step.name(), "add_one");
     auto* c = make_rational(rl, Rational{4});
     auto result = step.apply(rl, State{c});
@@ -334,7 +322,8 @@ TEST(NamedStep, NameAndFunctionWork)
 }
 
 // ===========================================================================
-// expand_poly_step — additional node types (Sum, TensorProduct, Contract, Product)
+// expand_poly_step — additional node types (Sum, TensorProduct, Contract,
+// Product)
 
 // ===========================================================================
 // expand_poly_step — additional node types
@@ -361,7 +350,7 @@ TEST(ExpandPolyStep, ExpandInsideTensorProduct)
     auto rl = make_rl();
     auto* t = make_parameter(rl, "t");
     auto* v = make_named_tensor(rl, "v", 1, {});
-    Polynomial p{{{Rational{1}, 1}}};  // p(t) = t
+    Polynomial p{{{Rational{1}, 1}}}; // p(t) = t
     auto* pe = make_polynomial_expr(rl, p, t);
     // tp(pe, v): pe is rank-0, v is rank-1 → rank-1 TensorProduct
     auto* expr = make_tensor_product(rl, pe, v);

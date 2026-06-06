@@ -10,7 +10,9 @@ namespace tender
 // PatternVar
 // ===========================================================================
 
-PatternVar::PatternVar(std::string symbol) : symbol_(std::move(symbol)) {}
+PatternVar::PatternVar(std::string symbol) : symbol_(std::move(symbol))
+{
+}
 
 auto PatternVar::latex() const -> std::string
 {
@@ -50,13 +52,13 @@ Identity::Identity(std::string name, Expr* lhs, Expr* rhs) :
 }
 
 auto Identity::from_derivation(
-    std::string name,
-    std::vector<State> const& history) -> Identity
+    std::string name, std::vector<State> const& history) -> Identity
 {
     if (history.size() < 2)
         throw std::invalid_argument(
             "Identity::from_derivation: history must have at least 2 states");
-    return Identity{std::move(name), history.front().expr(), history.back().expr()};
+    return Identity{
+        std::move(name), history.front().expr(), history.back().expr()};
 }
 
 // ===========================================================================
@@ -117,10 +119,12 @@ static auto substitute_pattern(
             substitute_pattern(rl, cp->rhs(), mapping));
 
     if (auto* fa = dynamic_cast<FunctionApply*>(e))
-        return make_function(rl, fa->kind(), substitute_pattern(rl, fa->arg(), mapping));
+        return make_function(
+            rl, fa->kind(), substitute_pattern(rl, fa->arg(), mapping));
 
     if (auto* pw = dynamic_cast<Pow*>(e))
-        return make_pow(rl, substitute_pattern(rl, pw->base(), mapping), pw->exponent());
+        return make_pow(
+            rl, substitute_pattern(rl, pw->base(), mapping), pw->exponent());
 
     if (auto* pr = dynamic_cast<Product*>(e))
         return make_product(
@@ -150,10 +154,9 @@ auto apply_identity(Identity const& id, PatternMapping const& mapping)
                 int const req = pvar->constraints().required_rank;
                 if (req >= 0 && actual->rank() != req)
                     throw std::invalid_argument(
-                        "apply_identity: expression bound to '"
-                        + pvar->symbol() + "' has wrong rank (expected "
-                        + std::to_string(req) + ", got "
-                        + std::to_string(actual->rank()) + ")");
+                        "apply_identity: expression bound to '" + pvar->symbol()
+                        + "' has wrong rank (expected " + std::to_string(req)
+                        + ", got " + std::to_string(actual->rank()) + ")");
             }
             return substitute_pattern(rl, id.rhs(), mapping);
         }};

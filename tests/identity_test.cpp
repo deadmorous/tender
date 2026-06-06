@@ -38,7 +38,8 @@ TEST(PatternVar, ConstrainRankFluent)
 TEST(PatternVar, ConstrainSymmetricFluent)
 {
     auto rl = make_rl();
-    auto* pv = make_pattern_var(rl, "S")->constrain_rank(2)->constrain_symmetric();
+    auto* pv =
+        make_pattern_var(rl, "S")->constrain_rank(2)->constrain_symmetric();
     EXPECT_TRUE(pv->constraints().symmetric);
     EXPECT_EQ(pv->rank(), 2);
 }
@@ -46,7 +47,8 @@ TEST(PatternVar, ConstrainSymmetricFluent)
 TEST(PatternVar, ConstrainSkewSymmetric)
 {
     auto rl = make_rl();
-    auto* pv = make_pattern_var(rl, "W")->constrain_rank(2)->constrain_skew_symmetric();
+    auto* pv =
+        make_pattern_var(rl, "W")->constrain_rank(2)->constrain_skew_symmetric();
     EXPECT_TRUE(pv->constraints().skew_symmetric);
 }
 
@@ -138,13 +140,14 @@ TEST(ApplyIdentity, RankConstraintViolationThrows)
     auto* pv = make_pattern_var(rl, "v")->constrain_rank(1);
     Identity id{"id", pv, pv};
 
-    auto* scalar = make_rational(rl, Rational{3});  // rank-0
+    auto* scalar = make_rational(rl, Rational{3}); // rank-0
     PatternMapping mapping = {{pv, scalar}};
     auto step = apply_identity(id, mapping);
 
     auto* any_expr = make_rational(rl, Rational{0});
     State dummy{any_expr};
-    EXPECT_THROW([[maybe_unused]] auto _ = step.apply(rl, dummy), std::invalid_argument);
+    EXPECT_THROW(
+        [[maybe_unused]] auto _ = step.apply(rl, dummy), std::invalid_argument);
 }
 
 TEST(ApplyIdentity, SubstitutionInsideContract)
@@ -330,8 +333,8 @@ TEST(SubstitutePattern, CrossProductInRhs)
     auto rl = make_rl();
     auto* a = make_pattern_var(rl, "a")->constrain_rank(1);
     auto* b = make_pattern_var(rl, "b")->constrain_rank(1);
-    // RHS: a×b — build with rl.make to bypass guard (a and b are PatternVars, not
-    // CrossProducts, so make_cross_product would also work here)
+    // RHS: a×b — build with rl.make to bypass guard (a and b are PatternVars,
+    // not CrossProducts, so make_cross_product would also work here)
     auto* rhs_pat = make_cross_product(rl, a, b);
     Identity id{"cp_id", a, rhs_pat};
 

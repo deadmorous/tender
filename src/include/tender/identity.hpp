@@ -17,7 +17,7 @@ namespace tender
 
 struct PatternConstraints
 {
-    int required_rank = -1;   // -1 = any rank
+    int required_rank = -1; // -1 = any rank
     bool symmetric = false;
     bool skew_symmetric = false;
 };
@@ -68,14 +68,22 @@ class Identity
 public:
     Identity(std::string name, Expr* lhs, Expr* rhs);
 
-    [[nodiscard]] auto name() const noexcept -> std::string const& { return name_; }
-    [[nodiscard]] auto lhs() const noexcept -> Expr* { return lhs_; }
-    [[nodiscard]] auto rhs() const noexcept -> Expr* { return rhs_; }
+    [[nodiscard]] auto name() const noexcept -> std::string const&
+    {
+        return name_;
+    }
+    [[nodiscard]] auto lhs() const noexcept -> Expr*
+    {
+        return lhs_;
+    }
+    [[nodiscard]] auto rhs() const noexcept -> Expr*
+    {
+        return rhs_;
+    }
 
     // Promote the first and last states of a derivation history to an identity.
     static auto from_derivation(
-        std::string name,
-        std::vector<State> const& history) -> Identity;
+        std::string name, std::vector<State> const& history) -> Identity;
 
 private:
     std::string name_;
@@ -92,8 +100,8 @@ using PatternMapping = std::unordered_map<PatternVar const*, Expr*>;
 // Returns a DerivationStep that substitutes mapping into id.rhs().
 // Validates rank constraints; symmetry constraints are noted but not yet
 // enforced (deferred until the constraint cache is introduced).
-auto apply_identity(
-    Identity const& id, PatternMapping const& mapping) -> DerivationStep;
+auto apply_identity(Identity const& id, PatternMapping const& mapping)
+    -> DerivationStep;
 
 // ===========================================================================
 // Factory

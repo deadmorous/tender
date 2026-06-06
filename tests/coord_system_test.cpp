@@ -13,9 +13,15 @@ static ResourceList make_rl()
 // WCS
 // ===========================================================================
 
-TEST(WCS, Dim) { EXPECT_EQ(wcs().dim(), 3); }
+TEST(WCS, Dim)
+{
+    EXPECT_EQ(wcs().dim(), 3);
+}
 
-TEST(WCS, IsOrthonormal) { EXPECT_TRUE(wcs().is_orthonormal()); }
+TEST(WCS, IsOrthonormal)
+{
+    EXPECT_TRUE(wcs().is_orthonormal());
+}
 
 TEST(WCS, CoordsAreParameters)
 {
@@ -200,7 +206,10 @@ TEST(DirectBasisCS, CobasisPermutations)
 // CylindricalCS
 // ===========================================================================
 
-TEST(CylindricalCS, Dim) { EXPECT_EQ(cylindrical_cs().dim(), 3); }
+TEST(CylindricalCS, Dim)
+{
+    EXPECT_EQ(cylindrical_cs().dim(), 3);
+}
 
 TEST(CylindricalCS, NotOrthonormal)
 {
@@ -228,7 +237,7 @@ TEST(CylindricalCS, BasisTheta)
     auto const& cs = cylindrical_cs();
     auto* g_theta = dynamic_cast<TensorProduct*>(cs.basis(1));
     ASSERT_NE(g_theta, nullptr);
-    EXPECT_EQ(g_theta->lhs(), cs.coord(0));   // r
+    EXPECT_EQ(g_theta->lhs(), cs.coord(0)); // r
     EXPECT_EQ(g_theta->rank(), 1);
 }
 
@@ -256,22 +265,28 @@ TEST(CylindricalCS, MetricDiag)
 {
     auto const& cs = cylindrical_cs();
     // g_00 = 1, g_22 = 1
-    EXPECT_EQ(dynamic_cast<RationalConst*>(cs.metric(0, 0))->value(), Rational{1});
-    EXPECT_EQ(dynamic_cast<RationalConst*>(cs.metric(2, 2))->value(), Rational{1});
+    EXPECT_EQ(
+        dynamic_cast<RationalConst*>(cs.metric(0, 0))->value(), Rational{1});
+    EXPECT_EQ(
+        dynamic_cast<RationalConst*>(cs.metric(2, 2))->value(), Rational{1});
     // g_11 = r^2
     auto* m11 = dynamic_cast<Pow*>(cs.metric(1, 1));
     ASSERT_NE(m11, nullptr);
     EXPECT_EQ(m11->base(), cs.coord(0));
     EXPECT_EQ(m11->exponent(), Rational{2});
     // off-diagonal = 0
-    EXPECT_EQ(dynamic_cast<RationalConst*>(cs.metric(0, 1))->value(), Rational{0});
+    EXPECT_EQ(
+        dynamic_cast<RationalConst*>(cs.metric(0, 1))->value(), Rational{0});
 }
 
 // ===========================================================================
 // SphericalCS
 // ===========================================================================
 
-TEST(SphericalCS, Dim) { EXPECT_EQ(spherical_cs().dim(), 3); }
+TEST(SphericalCS, Dim)
+{
+    EXPECT_EQ(spherical_cs().dim(), 3);
+}
 
 TEST(SphericalCS, CoordSymbols)
 {
@@ -282,7 +297,8 @@ TEST(SphericalCS, CoordSymbols)
 }
 
 // g^phi = (1/(r sin(theta))) e_phi — TensorProduct(Product(Pow(r,-1),
-//                                                          Pow(sin(theta),-1)), e_phi)
+//                                                          Pow(sin(theta),-1)),
+//                                                          e_phi)
 TEST(SphericalCS, CobasisPhi)
 {
     auto const& cs = spherical_cs();
@@ -315,9 +331,9 @@ TEST(Grad, CylindricalGradStructure)
     auto rl = make_rl();
     auto const& cs = cylindrical_cs();
 
-    auto* r     = cs.coord(0);
+    auto* r = cs.coord(0);
     auto* theta = cs.coord(1);
-    auto* z     = cs.coord(2);
+    auto* z = cs.coord(2);
 
     // f = r*theta + z
     auto* f = make_sum(rl, {make_product(rl, r, theta), z});
@@ -335,11 +351,11 @@ TEST(Grad, CylindricalFirstTerm)
     auto rl = make_rl();
     auto const& cs = cylindrical_cs();
 
-    auto* r     = cs.coord(0);
+    auto* r = cs.coord(0);
     auto* theta = cs.coord(1);
-    auto* f     = make_product(rl, r, theta);
-    auto* g     = grad(rl, f, cs);
-    auto* s     = dynamic_cast<Sum*>(g);
+    auto* f = make_product(rl, r, theta);
+    auto* g = grad(rl, f, cs);
+    auto* s = dynamic_cast<Sum*>(g);
     ASSERT_NE(s, nullptr);
 
     // First term: TensorProduct(theta_param, e_r)
@@ -358,11 +374,11 @@ TEST(Grad, CylindricalSecondTerm)
     auto rl = make_rl();
     auto const& cs = cylindrical_cs();
 
-    auto* r     = cs.coord(0);
+    auto* r = cs.coord(0);
     auto* theta = cs.coord(1);
-    auto* f     = make_product(rl, r, theta);
-    auto* g     = grad(rl, f, cs);
-    auto* s     = dynamic_cast<Sum*>(g);
+    auto* f = make_product(rl, r, theta);
+    auto* g = grad(rl, f, cs);
+    auto* s = dynamic_cast<Sum*>(g);
     ASSERT_NE(s, nullptr);
 
     // Second term: TensorProduct(r_param, cobasis(1))
@@ -388,7 +404,7 @@ TEST(Grad, WCSGradOfX)
     auto* coeff = dynamic_cast<RationalConst*>(tp->lhs());
     ASSERT_NE(coeff, nullptr);
     EXPECT_EQ(coeff->value(), Rational{1});
-    EXPECT_EQ(tp->rhs(), cs.cobasis(0));  // e_x in WCS
+    EXPECT_EQ(tp->rhs(), cs.cobasis(0)); // e_x in WCS
 }
 
 // grad(x+y+z) in WCS = e_x + e_y + e_z (all three non-zero terms → Sum)

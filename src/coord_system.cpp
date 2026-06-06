@@ -4,7 +4,8 @@
 #include <stdexcept>
 #include <vector>
 
-namespace tender {
+namespace tender
+{
 
 // ===========================================================================
 // WCS — World Cartesian System
@@ -29,19 +30,37 @@ public:
         basis_[1] = mk_bv("j", "\\mathbf{j}");
         basis_[2] = mk_bv("k", "\\mathbf{k}");
 
-        cobasis_ = basis_;  // orthonormal: g^i = g_i
+        cobasis_ = basis_; // orthonormal: g^i = g_i
 
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j)
                 metric_[i][j] = make_rational(rl_, Rational{i == j ? 1 : 0});
     }
 
-    auto dim() const noexcept -> int override { return 3; }
-    auto coord(int i) const -> Parameter* override { return coords_[i]; }
-    auto basis(int i) const -> Expr* override { return basis_[i]; }
-    auto cobasis(int i) const -> Expr* override { return cobasis_[i]; }
-    auto metric(int i, int j) const -> Expr* override { return metric_[i][j]; }
-    auto is_orthonormal() const noexcept -> bool override { return true; }
+    auto dim() const noexcept -> int override
+    {
+        return 3;
+    }
+    auto coord(int i) const -> Parameter* override
+    {
+        return coords_[i];
+    }
+    auto basis(int i) const -> Expr* override
+    {
+        return basis_[i];
+    }
+    auto cobasis(int i) const -> Expr* override
+    {
+        return cobasis_[i];
+    }
+    auto metric(int i, int j) const -> Expr* override
+    {
+        return metric_[i][j];
+    }
+    auto is_orthonormal() const noexcept -> bool override
+    {
+        return true;
+    }
 
 private:
     ResourceList rl_;
@@ -87,12 +106,30 @@ public:
         cobasis_[2] = make_tensor_product(rl_, inv_vol, e1xe2);
     }
 
-    auto dim() const noexcept -> int override { return 3; }
-    auto coord(int) const -> Parameter* override { return nullptr; }
-    auto basis(int i) const -> Expr* override { return basis_[i]; }
-    auto cobasis(int i) const -> Expr* override { return cobasis_[i]; }
-    auto metric(int i, int j) const -> Expr* override { return metric_[i][j]; }
-    auto is_orthonormal() const noexcept -> bool override { return false; }
+    auto dim() const noexcept -> int override
+    {
+        return 3;
+    }
+    auto coord(int) const -> Parameter* override
+    {
+        return nullptr;
+    }
+    auto basis(int i) const -> Expr* override
+    {
+        return basis_[i];
+    }
+    auto cobasis(int i) const -> Expr* override
+    {
+        return cobasis_[i];
+    }
+    auto metric(int i, int j) const -> Expr* override
+    {
+        return metric_[i][j];
+    }
+    auto is_orthonormal() const noexcept -> bool override
+    {
+        return false;
+    }
 
 private:
     ResourceList rl_;
@@ -116,9 +153,9 @@ class CylindricalCSImpl : public CoordSystem
 public:
     CylindricalCSImpl()
     {
-        auto* r     = make_parameter(rl_, "r");
+        auto* r = make_parameter(rl_, "r");
         auto* theta = make_parameter(rl_, "theta");
-        auto* z     = make_parameter(rl_, "z");
+        auto* z = make_parameter(rl_, "z");
         coords_[0] = r;
         coords_[1] = theta;
         coords_[2] = z;
@@ -129,9 +166,9 @@ public:
             e->set_name(name);
             return e;
         };
-        auto* e_r     = mk_bv("e_r",     "\\mathbf{e}_r");
+        auto* e_r = mk_bv("e_r", "\\mathbf{e}_r");
         auto* e_theta = mk_bv("e_theta", "\\mathbf{e}_\\theta");
-        auto* e_z     = mk_bv("e_z",     "\\mathbf{e}_z");
+        auto* e_z = mk_bv("e_z", "\\mathbf{e}_z");
 
         // Covariant basis: g_r = e_r, g_theta = r e_theta, g_z = e_z
         basis_[0] = e_r;
@@ -153,12 +190,30 @@ public:
         cobasis_[2] = e_z;
     }
 
-    auto dim() const noexcept -> int override { return 3; }
-    auto coord(int i) const -> Parameter* override { return coords_[i]; }
-    auto basis(int i) const -> Expr* override { return basis_[i]; }
-    auto cobasis(int i) const -> Expr* override { return cobasis_[i]; }
-    auto metric(int i, int j) const -> Expr* override { return metric_[i][j]; }
-    auto is_orthonormal() const noexcept -> bool override { return false; }
+    auto dim() const noexcept -> int override
+    {
+        return 3;
+    }
+    auto coord(int i) const -> Parameter* override
+    {
+        return coords_[i];
+    }
+    auto basis(int i) const -> Expr* override
+    {
+        return basis_[i];
+    }
+    auto cobasis(int i) const -> Expr* override
+    {
+        return cobasis_[i];
+    }
+    auto metric(int i, int j) const -> Expr* override
+    {
+        return metric_[i][j];
+    }
+    auto is_orthonormal() const noexcept -> bool override
+    {
+        return false;
+    }
 
 private:
     ResourceList rl_;
@@ -183,9 +238,9 @@ class SphericalCSImpl : public CoordSystem
 public:
     SphericalCSImpl()
     {
-        auto* r     = make_parameter(rl_, "r");
+        auto* r = make_parameter(rl_, "r");
         auto* theta = make_parameter(rl_, "theta");
-        auto* phi   = make_parameter(rl_, "phi");
+        auto* phi = make_parameter(rl_, "phi");
         coords_[0] = r;
         coords_[1] = theta;
         coords_[2] = phi;
@@ -196,20 +251,21 @@ public:
             e->set_name(name);
             return e;
         };
-        auto* e_r     = mk_bv("e_r",   "\\mathbf{e}_r");
-        auto* e_theta = mk_bv("e_th",  "\\mathbf{e}_\\theta");
-        auto* e_phi   = mk_bv("e_phi", "\\mathbf{e}_\\phi");
+        auto* e_r = mk_bv("e_r", "\\mathbf{e}_r");
+        auto* e_theta = mk_bv("e_th", "\\mathbf{e}_\\theta");
+        auto* e_phi = mk_bv("e_phi", "\\mathbf{e}_\\phi");
 
         // Covariant basis: g_r = e_r, g_theta = r e_theta,
         //                  g_phi = r sin(theta) e_phi
         auto* sin_theta = make_sin(rl_, theta);
         basis_[0] = e_r;
         basis_[1] = make_tensor_product(rl_, r, e_theta);
-        basis_[2] = make_tensor_product(rl_, make_product(rl_, r, sin_theta), e_phi);
+        basis_[2] =
+            make_tensor_product(rl_, make_product(rl_, r, sin_theta), e_phi);
 
         // Metric: diag(1, r^2, r^2 sin^2(theta))
-        auto* r_sq  = make_pow(rl_, r, Rational{2});
-        auto* s_sq  = make_pow(rl_, sin_theta, Rational{2});
+        auto* r_sq = make_pow(rl_, r, Rational{2});
+        auto* s_sq = make_pow(rl_, sin_theta, Rational{2});
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j)
                 metric_[i][j] = make_rational(rl_, Rational{0});
@@ -229,12 +285,30 @@ public:
         cobasis_[2] = make_tensor_product(rl_, inv_rs, e_phi);
     }
 
-    auto dim() const noexcept -> int override { return 3; }
-    auto coord(int i) const -> Parameter* override { return coords_[i]; }
-    auto basis(int i) const -> Expr* override { return basis_[i]; }
-    auto cobasis(int i) const -> Expr* override { return cobasis_[i]; }
-    auto metric(int i, int j) const -> Expr* override { return metric_[i][j]; }
-    auto is_orthonormal() const noexcept -> bool override { return false; }
+    auto dim() const noexcept -> int override
+    {
+        return 3;
+    }
+    auto coord(int i) const -> Parameter* override
+    {
+        return coords_[i];
+    }
+    auto basis(int i) const -> Expr* override
+    {
+        return basis_[i];
+    }
+    auto cobasis(int i) const -> Expr* override
+    {
+        return cobasis_[i];
+    }
+    auto metric(int i, int j) const -> Expr* override
+    {
+        return metric_[i][j];
+    }
+    auto is_orthonormal() const noexcept -> bool override
+    {
+        return false;
+    }
 
 private:
     ResourceList rl_;
@@ -265,7 +339,7 @@ auto grad(ResourceList& rl, Expr* f, CoordSystem const& cs) -> Expr*
             throw std::invalid_argument(
                 "grad: coordinate system has no explicit coordinates");
         auto* df_dq = deriv(rl, q, f);
-        auto* g_i   = cs.cobasis(i);
+        auto* g_i = cs.cobasis(i);
         terms.push_back(make_tensor_product(rl, df_dq, g_i));
     }
     return make_sum(rl, std::move(terms));
