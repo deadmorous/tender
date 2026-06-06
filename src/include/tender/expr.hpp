@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <tender/index.hpp>
+#include <tender/polynomial.hpp>
 #include <tender/rational.hpp>
 
 namespace tender
@@ -688,6 +689,47 @@ private:
 };
 
 // ===========================================================================
+// Phase 6 — polynomial over a ring embedded in the expression tree
+// ===========================================================================
+
+// A polynomial with exact Rational coefficients evaluated at a ring element
+// `var`.  Supported rings:
+//   rank 0 — scalar field:  x^n  via make_pow
+//   rank 2 — tensor ring:   A^n  via repeated make_contract; A^0 = I
+//
+// expand(rl) materialises the sum of ring-power terms as an Expr*.
+// rank() == var->rank().  Throws if var->rank() is not 0 or 2.
+class PolynomialExpr : public Expr
+{
+public:
+    PolynomialExpr(Polynomial poly, Expr* var);
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return rank_;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+
+    [[nodiscard]] auto poly() const noexcept -> Polynomial const&
+    {
+        return poly_;
+    }
+    [[nodiscard]] auto var() const noexcept -> Expr*
+    {
+        return var_;
+    }
+
+    // Expand to a fully explicit Expr* sum in rl.
+    [[nodiscard]] auto expand(ResourceList& rl) const -> Expr*;
+
+private:
+    Polynomial poly_;
+    Expr* var_;
+    int rank_;
+};
+
+// ===========================================================================
 // Factory functions — scalar nodes (Phase 2)
 // ===========================================================================
 
@@ -815,5 +857,9 @@ auto ddt(ResourceList& rl, Expr* e) -> Expr*;
 // Material (total) time derivative node D f/Dt = ∂f/∂t + v·∇f.
 // velocity must have rank 1; rank() == field->rank().
 auto make_material_deriv(ResourceList& rl, Expr* velocity, Expr* field) -> Expr*;
+
+// Polynomial node. var->rank() must be 0 or 2.
+auto make_polynomial_expr(
+    ResourceList& rl, Polynomial poly, Expr* var) -> PolynomialExpr*;
 
 } // namespace tender

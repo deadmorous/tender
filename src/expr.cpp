@@ -1099,6 +1099,8 @@ static auto depends_on_impl(std::string const& sym, Expr const* e) -> bool
     if (auto const* md = dynamic_cast<MaterialDeriv const*>(e))
         return depends_on_impl(sym, md->velocity())
             || depends_on_impl(sym, md->field());
+    if (auto const* pe = dynamic_cast<PolynomialExpr const*>(e))
+        return depends_on_impl(sym, pe->var());
     return false;
 }
 
@@ -1251,6 +1253,19 @@ auto deriv(ResourceList& rl, Parameter const* p, Expr* e) -> Expr*
             return make_cross_product(
                 rl, deriv(rl, p, cp->lhs()), cp->rhs());
         return make_cross_product(rl, cp->lhs(), deriv(rl, p, cp->rhs()));
+    }
+
+    // PolynomialExpr: chain rule  d/dp [p(v)] = p'(v) · dv/dp
+    // Only rank-0 variables are supported; rank-2 NamedTensor vars always
+    // report no parameter dependency so can never reach here.
+    if (auto* pe = dynamic_cast<PolynomialExpr*>(e))
+    {
+        auto dp = pe->poly().diff();
+        if (dp.is_zero())
+            return make_rational(rl, Rational{0});
+        auto* dp_expr = rl.make<PolynomialExpr>(std::move(dp), pe->var());
+        auto* dv = deriv(rl, p, pe->var());
+        return make_product(rl, dp_expr, dv);
     }
 
     return make_rational(rl, Rational{0}); // GCOV_EXCL_LINE

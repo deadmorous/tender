@@ -1,6 +1,6 @@
 # Polynomial Extensions
 
-## Status: open questions
+## Status: design resolved — PolynomialExpr implemented
 
 ---
 
@@ -9,98 +9,108 @@
 The Phase 5 `Polynomial` class stores exact `Rational` coefficients and
 integer exponents for a single anonymous variable.  It supports arithmetic,
 formal differentiation, rational-point evaluation, and LaTeX/Python output.
-Three independent directions for future generalisation were identified; none
-has been implemented yet.
+A key limitation was identified: `Polynomial` is self-contained and cannot
+be embedded in an `Expr` tree, making it unusable inside expressions.
 
 ---
 
-## Direction 1 — Symbolic (Expr*) coefficients
+## Core insight — ring/field abstraction
 
-**Motivation.** Coefficients that are themselves symbolic expressions arise
-naturally: e.g., a polynomial whose leading coefficient is a material constant
-`E`, or a Lagrange basis polynomial whose nodes are symbolic parameters.
+A polynomial over an associative ring is evaluable at any ring element.
+The ring structure determines what "power" means:
 
-**Issue.** The current API is entirely self-contained — arithmetic requires no
-`ResourceList`.  Changing coefficients to `Expr*` makes every operation
-(`+`, `*`, `diff`) produce new `Expr*` objects, which requires a `ResourceList`
-to be threaded through the entire arithmetic interface.  That is a large,
-breaking API change.
+| Ring element          | Product operation   | Unit element  | Negative powers? |
+|-----------------------|---------------------|---------------|-----------------|
+| Scalar (`Expr`, rank 0) | `make_scale` / `make_product` | `RationalConst(1)` | Yes — via existing `Pow` node |
+| Rank-2 tensor         | Single contraction `make_contract` | `IdentityTensor` | Not yet — needs tensor inverse |
 
-**Preferred path.** Keep the exact-rational `Polynomial` as-is.  Introduce a
-parallel type (working name `ExprPolynomial`) when a concrete use case arises,
-rather than generalising prematurely.  The two types can share the same
-rendering logic and formal-derivative structure.
+Two types now exist with complementary roles:
 
----
+- `Polynomial` — standalone value type (no `ResourceList`): exact-rational
+  coefficient arithmetic, formal differentiation, evaluation at `Rational`.
+  Remains useful wherever a ResourceList-free computation is needed.
 
-## Direction 2 — Evaluating polynomials over a ring (including tensors)
-
-**Motivation.** A polynomial over a ring can be evaluated at any element of
-that ring.  Two sub-cases are relevant:
-
-1. **Scalar `Expr*` argument.**  Evaluating `p` at a symbolic scalar `x`
-   produces an `Expr*` tree built from `make_pow`, `make_scale`, and `make_sum`.
-   This is a straightforward addition alongside the existing `eval(Rational)`:
-   a new overload `eval(ResourceList& rl, Expr* arg) -> Expr*` that works today
-   without any new infrastructure.
-
-2. **Rank-2 tensor argument (matrix polynomial).**  Evaluating `p` at a matrix
-   **A** requires interpreting `A^n` as repeated single contraction
-   **A**·**A**·…·**A**, not as `make_pow(A, n)` (which is undefined for
-   non-scalar arguments).  This needs a dedicated "tensor power" primitive
-   that does not exist yet.  Applications include the Cayley-Hamilton theorem,
-   matrix exponentials approximated by truncated series, and spectral
-   projectors in structural mechanics.
-
-**Preferred path.** Add `eval(ResourceList& rl, Expr* arg) -> Expr*` as a
-near-term convenience for the scalar case.  The matrix-polynomial evaluation
-is a later-phase feature gated on a tensor-power primitive.
+- `PolynomialExpr : public Expr` — embeds a `Polynomial` plus a `var`
+  expression into the tree.  `rank()` equals `var->rank()`.  Provides
+  `expand(ResourceList&) -> Expr*` which materialises the sum of ring-power
+  terms.
 
 ---
 
-## Direction 3 — Multivariate polynomials
+## PolynomialExpr design
 
-**Motivation.** Many practical applications require polynomials in more than
-one variable:
+### Construction
 
-- **FEM shape functions**: e.g., bilinear quad shape functions are polynomials
-  in two coordinates (ξ, η), such as `N₁ = (1−ξ)(1−η)/4`.
-- **Polynomial bases for approximation**: Legendre, Bernstein, or monomial
-  bases in 2-D or 3-D.
-- **Tensor-valued polynomial fields**: displacement fields in isoparametric
-  elements are vector-valued multivariate polynomials.
+```cpp
+PolynomialExpr(Polynomial poly, Expr* var)
+```
 
-**Design options.**
+- `var->rank()` must be 0 or 2 (only supported rings).
+- `Polynomial` already rejects negative exponents; rank-2 negative exponents
+  would additionally require a tensor inverse (not yet implemented — deferred
+  to a future phase).
 
-| Option | Description | Trade-off |
-|---|---|---|
-| Sparse monomial map | `map<vector<int>, Rational>` keyed by multi-index | General; expensive for dense low-degree cases |
-| Tensor-product form | Store as a product of univariate polynomials | Efficient for quad/hex elements; not general |
-| Recursive nesting | `Polynomial<Polynomial<Rational>>` | Clean algebra; awkward for > 2 variables |
+### Power semantics
 
-The sparse monomial representation is the most general and the natural fit for
-FEM: shape function libraries typically enumerate monomials up to a given total
-degree.  The number of variables and the variable names (or indices) would be
-fixed at construction time.
+Implemented by a private `ring_power(rl, var, n)` helper:
 
-**Current gap.** The univariate `Polynomial` provides no path to multivariate
-extension without a redesign of the storage and arithmetic.  The `eval` and
-`diff` APIs would need to become indexed (`eval(variable_index, value)`,
-`diff(variable_index)`), or take maps from variable name to value/argument.
+```
+rank 0, n ≥ 0: make_pow(rl, var, n)        → existing Pow node
+rank 0, n < 0: make_pow(rl, var, n)        → existing Pow node (field)
+rank 2, n = 0: make_identity(rl)           → I
+rank 2, n = 1: var
+rank 2, n ≥ 2: make_contract(rl, var, var^{n-1})   → repeated ·
+```
 
-**Preferred path.** Design a separate `MultivariatePolynomial` class rather
-than retrofitting `Polynomial`.  The univariate class remains useful as a
-building block (e.g., as the coefficients of a multivariate polynomial in
-one distinguished variable) and for cases where the single-variable assumption
-genuinely holds.
+### expand(rl) → Expr*
+
+Builds `∑ coeff_i * ring_power(var, exp_i)`.  For a zero polynomial, returns
+`RationalConst(0)`.
+
+### Rendering
+
+LaTeX — rank 0: delegates to `Polynomial::to_latex(var->latex())` with
+parenthesisation around `Sum` variables.  Rank 2: same but the constant term
+(exponent 0) renders as `coeff \mathbf{I}` instead of bare `coeff`.
+
+Python — rank 0: delegates to `Polynomial::to_python(var->python())`.
+Rank 2: serialises as `polynomial_expr(var, [(coeff, exp), …])`.
+
+### Dependency tracking and differentiation
+
+`depends_on(p, poly_expr)` delegates to `depends_on(p, poly_expr->var())`.
+
+`deriv(rl, p, poly_expr)` applies the chain rule for rank-0 variables:
+
+```
+d/dp p(v) = p'(v) · dv/dp
+```
+
+where `p'` is `poly.diff()` as a `Polynomial` (coefficient-only, no
+ResourceList), wrapped in a fresh `PolynomialExpr` node, and multiplied by
+`deriv(rl, p, var)` via `make_product`.  Rank-2 variables reach the zero
+shortcut before this case because `NamedTensor` always reports no parameter
+dependencies.
+
+---
+
+## Status of original directions
+
+| Direction | Status |
+|---|---|
+| Symbolic coefficients (`Expr*`) | Still deferred — wait for concrete use case |
+| `eval(rl, Expr*)` scalar | **Subsumed by `PolynomialExpr` + `expand()`** |
+| Matrix polynomial | **Subsumed by `PolynomialExpr` with rank-2 var** |
+| Multivariate polynomial | Still deferred — separate `MultivariatePolynomial` class |
 
 ---
 
 ## Summary table
 
-| Extension | Blocking dependency | Priority driver |
+| Feature | Blocking dependency | Status |
 |---|---|---|
-| `eval(rl, Expr*)` for scalars | None — ready to add | Symbolic evaluation, parametric FEM |
-| Symbolic coefficients (`Expr*`) | Concrete use case | Parametric coefficients |
-| Matrix polynomial (`eval` at rank-2) | Tensor-power primitive | Cayley-Hamilton, matrix functions |
-| Multivariate polynomial | Design decision on storage | FEM shape functions |
+| `PolynomialExpr` with scalar var | None | **Implemented** |
+| `PolynomialExpr` with rank-2 var | None | **Implemented** |
+| Negative exponents for rank-2 | Tensor inverse primitive | Deferred |
+| Symbolic coefficients | Concrete use case | Deferred |
+| Multivariate polynomial | Design decision on storage | Deferred |
