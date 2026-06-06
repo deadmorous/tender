@@ -127,8 +127,8 @@ TEST(ApplyIdentity, SimpleScalarSubstitution)
     auto step = apply_identity(id, mapping);
     EXPECT_EQ(step.name(), "apply(shift)");
 
-    auto* any_expr = make_rational(rl, Rational{0});
-    auto result = step.apply(rl, State{any_expr});
+    // Expression must match the LHS (pv bound to actual, so pass actual).
+    auto result = step.apply(rl, State{actual});
     // result.expr() should be Sum(t, 1)
     EXPECT_NE(dynamic_cast<Sum*>(result.expr()), nullptr);
     EXPECT_EQ(result.expr()->rank(), 0);
@@ -150,10 +150,42 @@ TEST(ApplyIdentity, RankConstraintViolationThrows)
         [[maybe_unused]] auto _ = step.apply(rl, dummy), std::invalid_argument);
 }
 
+TEST(ApplyIdentity, MismatchedExpressionThrows)
+{
+    // Regression: apply_identity with a mapping that is valid in isolation but
+    // does not match the LHS against the actual current expression must throw.
+    //
+    // BAC-CAB LHS: a×(b×c).  If the expression is (v×w)×u instead of
+    // u×(v×w), the mapping {a→u, b→v, c→w} is structurally wrong.
+    auto rl = make_rl();
+    auto* a = make_pattern_var(rl, "a")->constrain_rank(1);
+    auto* b = make_pattern_var(rl, "b")->constrain_rank(1);
+    auto* c = make_pattern_var(rl, "c")->constrain_rank(1);
+    auto* lhs_pat = rl.make<CrossProduct>(a, rl.make<CrossProduct>(b, c));
+    auto* rhs_pat = a; // doesn't matter for this test
+    Identity id{"bac_cab", lhs_pat, rhs_pat};
+
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+
+    // Correct expression for this mapping: u×(v×w)
+    auto* correct = rl.make<CrossProduct>(u, rl.make<CrossProduct>(v, w));
+    PatternMapping mapping = {{a, u}, {b, v}, {c, w}};
+    auto step = apply_identity(id, mapping);
+    EXPECT_NO_THROW([[maybe_unused]] auto _ = step.apply(rl, State{correct}));
+
+    // Wrong expression: (v×w)×u — the LHS operands are swapped
+    auto* wrong = rl.make<CrossProduct>(rl.make<CrossProduct>(v, w), u);
+    EXPECT_THROW(
+        [[maybe_unused]] auto _ = step.apply(rl, State{wrong}),
+        std::invalid_argument);
+}
+
 TEST(ApplyIdentity, SubstitutionInsideContract)
 {
-    // Identity: contract(a, b) → scalar
-    // Substituted: a→u, b→v  ⟹ result is Contract(u, v)
+    // Identity: a → a·b  (tests Contract path in substitute_pattern)
+    // LHS is just `a`, so the expression must be whatever a is bound to.
     auto rl = make_rl();
     auto* a = make_pattern_var(rl, "a")->constrain_rank(1);
     auto* b = make_pattern_var(rl, "b")->constrain_rank(1);
@@ -165,8 +197,8 @@ TEST(ApplyIdentity, SubstitutionInsideContract)
     PatternMapping mapping = {{a, u}, {b, v}};
     auto step = apply_identity(id, mapping);
 
-    auto* any_expr = make_rational(rl, Rational{0});
-    auto result = step.apply(rl, State{any_expr});
+    // LHS is `a` bound to `u`, so the current expression must be u.
+    auto result = step.apply(rl, State{u});
     EXPECT_NE(dynamic_cast<Contract*>(result.expr()), nullptr);
     EXPECT_EQ(result.expr()->rank(), 0);
 }

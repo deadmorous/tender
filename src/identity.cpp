@@ -3,6 +3,8 @@
 #include <stdexcept>
 #include <string>
 
+#include <tender/match.hpp>
+
 namespace tender
 {
 
@@ -147,7 +149,7 @@ auto apply_identity(Identity const& id, PatternMapping const& mapping)
 {
     return DerivationStep{
         "apply(" + id.name() + ")",
-        [id, mapping](ResourceList& rl, Expr* /* e */) -> Expr*
+        [id, mapping](ResourceList& rl, Expr* e) -> Expr*
         {
             for (auto const& [pvar, actual]: mapping)
             {
@@ -158,6 +160,12 @@ auto apply_identity(Identity const& id, PatternMapping const& mapping)
                         + "' has wrong rank (expected " + std::to_string(req)
                         + ", got " + std::to_string(actual->rank()) + ")");
             }
+            PatternBinding initial{mapping.begin(), mapping.end()};
+            if (match_pattern(id.lhs(), e, initial).empty())
+                throw std::invalid_argument(
+                    "apply_identity: the provided binding does not match the LHS "
+                    "of '"
+                    + id.name() + "' against the current expression");
             return substitute_pattern(rl, id.rhs(), mapping);
         }};
 }

@@ -683,3 +683,27 @@ def test_collect_then_localize_pvw_pattern():
     assert isinstance(result, Contract)
     assert result.lhs is g
     assert result.rhs is du
+
+
+def test_apply_identity_wrong_expression_raises():
+    # Regression: apply_identity must validate the binding against the actual
+    # expression, not silently substitute into the wrong one.
+    # BAC-CAB LHS: a×(b×c).  Using mapping {a:u, b:v, c:w} on (v×w)×u
+    # (operands swapped) must raise, not produce a silently wrong result.
+    from tender.lib.identities.epsilon import bac_cab
+    u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
+    a, b, c = [make_pattern_var(n) for n in ("a", "b", "c")]
+    for pv in (a, b, c):
+        pv.constrain_rank(1)
+
+    step = apply_identity(bac_cab, {a: u, b: v, c: w})
+
+    correct = cross(u, cross(v, w))
+    wrong   = cross(cross(v, w), u)
+
+    # Correct expression: no error
+    Derivation([step]).apply(State(correct))
+
+    # Swapped expression: must raise
+    with pytest.raises(Exception):
+        Derivation([step]).apply(State(wrong))
