@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q clang-format cmake ninja-build
+          sudo apt-get install -y -q clang-format cmake ninja-build gcc-14 g++-14
 
       - name: Check formatting
         run: |
@@ -27,6 +27,8 @@ jobs:
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-14 \
+            -DCMAKE_CXX_COMPILER=g++-14 \
             -DTENDER_BUILD_TESTS=ON \
             -DTENDER_BUILD_PYTHON=OFF
 
