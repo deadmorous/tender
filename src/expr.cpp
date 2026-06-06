@@ -351,4 +351,184 @@ auto named(std::string n, Expr* e) -> Expr*
     return e;
 }
 
+// ===========================================================================
+// NamedTensor
+// ===========================================================================
+
+NamedTensor::NamedTensor(std::string symbol, int rank, SlotList slots) :
+  symbol_(std::move(symbol)), rank_(rank)
+{
+    set_slots(std::move(slots));
+}
+
+static auto slot_decorations(SlotList const& sl) -> std::string
+{
+    std::string upper_part;
+    std::string lower_part;
+    for (auto const& s: sl)
+    {
+        if (s.level == SlotLevel::Upper)
+            upper_part += s.display;
+        else
+            lower_part += s.display;
+    }
+    std::string result;
+    if (!upper_part.empty())
+        result += "^{" + upper_part + "}";
+    if (!lower_part.empty())
+        result += "_{" + lower_part + "}";
+    return result;
+}
+
+auto NamedTensor::latex() const -> std::string
+{
+    std::string base = sym_to_latex(has_name() ? name() : symbol_);
+    return base + slot_decorations(slots());
+}
+
+auto NamedTensor::python() const -> std::string
+{
+    return "tensor('" + symbol_ + "', " + std::to_string(rank_) + ")";
+}
+
+// ===========================================================================
+// ExplicitSum
+// ===========================================================================
+
+ExplicitSum::ExplicitSum(Expr* body, Index* index) : body_(body), index_(index)
+{
+    // Find the first upper and first lower slot bound to index.
+    std::size_t upper_pos = SIZE_MAX;
+    std::size_t lower_pos = SIZE_MAX;
+    auto const& bslots = body->slots();
+    for (std::size_t i = 0; i < bslots.size(); ++i)
+    {
+        if (bslots[i].index != index_)
+            continue;
+        if (bslots[i].level == SlotLevel::Upper && upper_pos == SIZE_MAX)
+            upper_pos = i;
+        else if (bslots[i].level == SlotLevel::Lower && lower_pos == SIZE_MAX)
+            lower_pos = i;
+    }
+    if (upper_pos == SIZE_MAX || lower_pos == SIZE_MAX)
+        throw std::invalid_argument(
+            "ExplicitSum: body must have one upper and one lower slot "
+            "bound to the given index");
+    rank_ = body->rank() - 2;
+    SlotList remaining;
+    for (std::size_t i = 0; i < bslots.size(); ++i)
+        if (i != upper_pos && i != lower_pos)
+            remaining.push_back(bslots[i]);
+    set_slots(std::move(remaining));
+}
+
+auto ExplicitSum::latex() const -> std::string
+{
+    return "\\sum_{" + index_->letter() + "} " + body_->latex();
+}
+
+auto ExplicitSum::python() const -> std::string
+{
+    return "explicit_sum(index=" + index_->letter() + ", " + body_->python()
+           + ")";
+}
+
+// ===========================================================================
+// NoSum
+// ===========================================================================
+
+NoSum::NoSum(Expr* body, Index* index) : body_(body), index_(index)
+{
+    rank_ = body->rank();
+    set_slots(body->slots());
+}
+
+auto NoSum::latex() const -> std::string
+{
+    return body_->latex();
+}
+
+auto NoSum::python() const -> std::string
+{
+    return "no_sum(index=" + index_->letter() + ", " + body_->python() + ")";
+}
+
+// ===========================================================================
+// Contraction
+// ===========================================================================
+
+Contraction::Contraction(
+    Expr* lhs,
+    std::size_t slot_lhs,
+    Expr* rhs,
+    std::size_t slot_rhs,
+    int rank,
+    SlotList slots) :
+  lhs_(lhs), rhs_(rhs), slot_lhs_(slot_lhs), slot_rhs_(slot_rhs), rank_(rank)
+{
+    set_slots(std::move(slots));
+}
+
+auto Contraction::latex() const -> std::string
+{
+    return lhs_->latex() + " " + rhs_->latex();
+}
+
+auto Contraction::python() const -> std::string
+{
+    return "convolve(" + lhs_->python() + ", " + std::to_string(slot_lhs_)
+           + ", " + rhs_->python() + ", " + std::to_string(slot_rhs_) + ")";
+}
+
+// ===========================================================================
+// Factory functions — indexed nodes (Phase 3)
+// ===========================================================================
+
+auto make_named_tensor(
+    ResourceList& rl, std::string sym, int rank, SlotList slots) -> Expr*
+{
+    return rl.make<NamedTensor>(std::move(sym), rank, std::move(slots));
+}
+
+auto make_explicit_sum(ResourceList& rl, Expr* body, Index* index) -> Expr*
+{
+    return rl.make<ExplicitSum>(body, index);
+}
+
+auto make_no_sum(ResourceList& rl, Expr* body, Index* index) -> Expr*
+{
+    return rl.make<NoSum>(body, index);
+}
+
+auto convolve(
+    ResourceList& rl, Expr* a, std::size_t slot_a, Expr* b, std::size_t slot_b)
+    -> Expr*
+{
+    auto const& sa = a->slots();
+    auto const& sb = b->slots();
+    if (slot_a >= sa.size())
+        throw std::invalid_argument(
+            "convolve: slot_a out of range for first operand");
+    if (slot_b >= sb.size())
+        throw std::invalid_argument(
+            "convolve: slot_b out of range for second operand");
+    if (sa[slot_a].level == sb[slot_b].level)
+        throw std::invalid_argument(
+            "convolve: both slots have the same level (need one upper, "
+            "one lower)");
+
+    int const result_rank = a->rank() + b->rank() - 2;
+
+    SlotList result_slots;
+    for (std::size_t i = 0; i < sa.size(); ++i)
+        if (i != slot_a)
+            result_slots.push_back(sa[i]);
+    for (std::size_t i = 0; i < sb.size(); ++i)
+        if (i != slot_b)
+            result_slots.push_back(sb[i]);
+
+    return rl.make<Contraction>(
+        a, slot_a, b, slot_b, result_rank, std::move(result_slots));
+}
+
 } // namespace tender

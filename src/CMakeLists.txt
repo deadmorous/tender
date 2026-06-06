@@ -1,5 +1,6 @@
 add_library(tender
-    expr.cpp)
+    expr.cpp
+    index.cpp)
 add_library(tender::tender ALIAS tender)
 
 target_include_directories(tender PUBLIC
