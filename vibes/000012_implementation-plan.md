@@ -41,6 +41,9 @@ Each phase below cites the vibes where its design decisions live.
 | 000009 | Standard functions, Polynomial, differentiation rules |
 | 000010 | Libraries, rotation tensors, bootstrap philosophy |
 | 000011 | Numeric types, rational engine, named constants |
+| 000015 | Phase 13 identity library — scope and implementation |
+| 000016 | Rewrite search — BFS over sub-expression rewrites |
+| 000017 | Phase 13.5 — identity derivation and library growth |
 
 ---
 
@@ -461,6 +464,64 @@ Standard identity library submodules:
 **Exit criterion**: `apply_identity(bac_cab)` with auto-targeting finds the
 correct binding on a concrete expression; spectral theorem can be invoked and
 introduces the correct named objects.
+
+---
+
+## Phase 13.5 — Identity derivation and library growth
+
+**Goal**: build the identity library from the ground up — starting from
+definitional axioms and deriving all other results mechanically.
+
+### Deliverables
+
+1. **Definitional layer** — a new `tender.lib.identities.definitions` module
+   containing the smallest set of axiomatic rules:
+   - `dot_comm` — `a·b = b·a`
+   - `cross_antisym` — `a×b = -(b×a)` (already in `epsilon.py`; move here)
+   - `eps_sq` — `ε:ε = 6`
+   - `eps_dot_eps` — `(ε·a):(ε·b) = 2(a·b)`
+   - `identity_dot_vec`, `identity_double_contract` (already exist; keep)
+
+2. **Derived identity tier 1** (immediate from definitions):
+   - `cross_self_zero` — `a×a = 0`
+   - BAC-CAB re-derived (currently asserted; now produced by `search_apply` +
+     `Identity.from_derivation`)
+   - scalar triple product cyclic shifts
+   - `(a×b)·(c×d) = (a·c)(b·d) − (a·d)(b·c)` (Lagrange identity)
+
+3. **`derive_identity` convenience function** — wraps `search_apply` +
+   `Identity.from_derivation` in one call:
+   ```python
+   id = derive_identity("double-cross", cross(cross(a, b), c),
+                        target=bac_cab)
+   ```
+
+4. **Pattern-variable promotion in `Identity.from_derivation`** — accept a
+   `substitute` mapping from concrete expressions to `PatternVar`s, replacing
+   both endpoints of the derivation history.
+
+5. **User extension workflow** — a documented, tested template for creating
+   custom identity modules that plug into `search_apply`'s default rule set.
+
+6. **Updated examples** — `bac_cab.py` and `bac_cab_search.py` updated to
+   import from the new library layout; a new `triple_product.py` example
+   demonstrating derivation of cyclic-shift identities.
+
+### Identity structure
+
+All derived identities live in `tender.lib.identities.derived` (or in their
+natural sub-module, e.g. `epsilon.py` for cross-product results).  The
+defining axioms live in `tender.lib.identities.definitions`.  The `ALL` list
+exported from `tender.lib` covers both.
+
+### Exit criterion
+
+`search_apply(bac_cab, cross(cross(a, b), c))` produces a two-step derivation
+(anti-comm + BAC-CAB) and `Identity.from_derivation` converts it into a new
+`double_cross` identity; a notebook demonstrates the full workflow including
+user-defined extensions.
+
+**Sources**: vibe 000017
 
 ---
 
