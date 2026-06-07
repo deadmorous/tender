@@ -44,6 +44,7 @@ Each phase below cites the vibes where its design decisions live.
 | 000015 | Phase 13 identity library — scope and implementation |
 | 000016 | Rewrite search — BFS over sub-expression rewrites |
 | 000017 | Phase 13.5 — identity derivation and library growth |
+| 000018 | Phase 13.2 — index/basis bridge, expand-in-basis tooling |
 
 ---
 
@@ -467,6 +468,49 @@ introduces the correct named objects.
 
 ---
 
+## Phase 13.2 — Index/basis bridge
+
+**Goal**: build the tooling that allows derivations to proceed via explicit
+component expansion in a coordinate system, enabling proofs like `a·b = b·a`
+from first principles rather than by assertion.
+
+### Deliverables
+
+1. **Python bindings** for `Index`, `IndexSpace`, `CoordSystem`, `wcs()`,
+   `direct_basis_cs`, `explicit_sum`, `no_sum`
+
+2. **`expand_in_basis_step(tensor, cs, covariant=True)`** — replaces a named
+   tensor with its explicit 3-term component expansion in `cs`; component
+   scalars are fresh `NamedTensor` nodes
+
+3. **`simplify_basis_dot_step(cs)`** — replaces `Contract(e_i, e^j)` pairs
+   with their scalar value (`1` or `0` for WCS; `metric(i,j)` in general)
+
+4. **`collect_zero_terms_step()`** — removes `Scale(0, ...)` terms from sums
+   and unwraps single-element sums
+
+5. **`reassemble_from_components_step(cs)`** — inverse of expansion; recognises
+   a sum of `(scalar × basis_vector)` terms as a tensor, emitting
+   `IdentityTensor` when the coefficients match, or a fresh `NamedTensor`
+   otherwise; needed because tensor-valued results (e.g. `δ_i^j δ_j^k = δ_i^k`)
+   leave multiple non-zero terms that cannot be collected into a scalar
+
+6. **Scalar commutativity** — either a step or an identity rule allowing
+   `Product(s, t)` for rank-0 operands to be reordered
+
+7. **Example derivation** of `a·b = b·a` in WCS demonstrating the full
+   pipeline: expand both vectors, distribute, evaluate basis dots, collect
+
+### Exit criterion
+
+A Python script (and notebook) proves `a·b = b·a` step-by-step using only
+the tools above (no `dot_comm` axiom); all intermediate states are valid
+`State` objects in a `Derivation` history.
+
+**Sources**: vibe 000018
+
+---
+
 ## Phase 13.5 — Identity derivation and library growth
 
 **Goal**: build the identity library from the ground up — starting from
@@ -476,11 +520,16 @@ definitional axioms and deriving all other results mechanically.
 
 1. **Definitional layer** — a new `tender.lib.identities.definitions` module
    containing the smallest set of axiomatic rules:
-   - `dot_comm` — `a·b = b·a`
-   - `cross_antisym` — `a×b = -(b×a)` (already in `epsilon.py`; move here)
-   - `eps_sq` — `ε:ε = 6`
-   - `eps_dot_eps` — `(ε·a):(ε·b) = 2(a·b)`
-   - `identity_dot_vec`, `identity_double_contract` (already exist; keep)
+   - `dot_bilinear` — `(a+b)·c = a·c + b·c` (and symmetric counterpart)
+   - `tp_contract_right` — `(u⊗v)·w = u*(v·w)` (dyad contracts from right)
+   - `tp_contract_left` — `w·(u⊗v) = (w·u)*v` (dyad contracts from left)
+   - `trace_dyad` — `tr(a ⊗ b) = a·b` (defines trace; linearity extends it)
+   - `identity_dot_vec` — `I·a = a` (defines **I** on vectors; already exists)
+   - `cross_def` — `a×b = ε:(a⊗b)` (defines cross product)
+   - `eps_antisym` — anti-symmetry of **ε** under any index swap
+   - `eps_norm` — `ε₁₂₃ = 1` (normalization; with antisymmetry determines all components)
+   - `scalar_comm` — `s·t = t·s` for rank-0 operands (axiom; see vibe 000018)
+   - Note: `a·b = b·a`, `eps_contract`, `eps_sq`, `ε·a = -(I×a)` are all *derived*
 
 2. **Derived identity tier 1** (immediate from definitions):
    - `cross_self_zero` — `a×a = 0`
