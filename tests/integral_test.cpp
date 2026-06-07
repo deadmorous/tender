@@ -507,7 +507,7 @@ TEST(CollectStep, StepName)
     auto rl = make_rl();
     auto* v = make_named_tensor(rl, "v", 1, {});
     auto step = collect_step(v);
-    EXPECT_EQ(step.name(), "collect(v)");
+    EXPECT_EQ(step.name(), "collect(\\mathbf{v})");
 }
 
 // Sum(A·v, B·v)  →  (A+B)·v  (both pointwise)

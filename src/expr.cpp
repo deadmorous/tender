@@ -33,6 +33,25 @@ static auto sym_to_latex(std::string const& sym) -> std::string
     return "\\text{" + sym + "}";
 }
 
+// Bold variant: for rank-1+ tensors.  Symbols with a backslash are already
+// formatted (e.g. \boldsymbol{\sigma}); everything else gets \mathbf{}.
+static auto sym_to_latex_bold(std::string const& sym) -> std::string
+{
+    if (sym.find('\\') != std::string::npos)
+        return sym;
+    if (sym.size() == 1)
+        return "\\mathbf{" + sym + "}";
+    auto hat = sym.find('^');
+    if (hat != std::string::npos)
+        return sym_to_latex_bold(sym.substr(0, hat)) + "^{"
+               + sym.substr(hat + 1) + "}";
+    auto us = sym.find('_');
+    if (us != std::string::npos)
+        return sym_to_latex_bold(sym.substr(0, us)) + "_{" + sym.substr(us + 1)
+               + "}";
+    return "\\mathbf{" + sym + "}";
+}
+
 static auto rational_to_latex(Rational const& r) -> std::string
 {
     if (r.den() == 1)
@@ -432,7 +451,9 @@ static auto slot_decorations(SlotList const& sl) -> std::string
 
 auto NamedTensor::latex() const -> std::string
 {
-    std::string base = sym_to_latex(has_name() ? name() : symbol_);
+    std::string const& sym = has_name() ? name() : symbol_;
+    std::string base =
+        (rank_ >= 1) ? sym_to_latex_bold(sym) : sym_to_latex(sym);
     return base + slot_decorations(slots());
 }
 

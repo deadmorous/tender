@@ -19,7 +19,6 @@ from tender import (
     State, Derivation,
     expand_step, expand_in_basis_step,
     simplify_basis_dot_step,
-    collect_zero_terms_step,
     show, to_latex_document,
 )
 
@@ -39,10 +38,8 @@ steps = [
     expand_in_basis_step(b, cs, covariant=False),
     # distribute · over the sums — produces 9 terms (a^i e_i)·(b_j e^j)
     expand_step(),
-    # e_i·e^j → δ_ij  (1 if i==j, 0 otherwise)
+    # e_i·e^j → δ_ij and zero terms are dropped automatically
     simplify_basis_dot_step(cs),
-    # remove the 6 zero terms, leaving a^1 b_1 + a^2 b_2 + a^3 b_3
-    collect_zero_terms_step(),
 ]
 
 history = Derivation(steps).apply(State(expr))

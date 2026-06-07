@@ -660,7 +660,7 @@ def test_collect_step_separates_domains():
 def test_collect_step_name():
     v = tensor("v", 1)
     step = collect_step(v)
-    assert step.name == "collect(v)"
+    assert step.name == "collect(\\mathbf{v})"
 
 
 def test_collect_then_localize_pvw_pattern():

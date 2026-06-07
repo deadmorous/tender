@@ -287,7 +287,7 @@ TEST(TensorProduct, LatexScalarLeft)
     auto rl = make_rl();
     auto* s = make_symbolic_var(rl, "s");        // rank 0
     auto* v = make_named_tensor(rl, "v", 1, {}); // rank 1
-    EXPECT_EQ(make_tensor_product(rl, s, v)->latex(), "(s) v");
+    EXPECT_EQ(make_tensor_product(rl, s, v)->latex(), "(s) \\mathbf{v}");
 }
 
 TEST(TensorProduct, LatexScalarRightAtomicNoParens)
@@ -296,7 +296,7 @@ TEST(TensorProduct, LatexScalarRightAtomicNoParens)
     auto rl = make_rl();
     auto* v = make_named_tensor(rl, "v", 1, {}); // rank 1
     auto* s = make_symbolic_var(rl, "s");        // rank 0
-    EXPECT_EQ(make_tensor_product(rl, v, s)->latex(), "v s");
+    EXPECT_EQ(make_tensor_product(rl, v, s)->latex(), "\\mathbf{v} s");
 }
 
 TEST(TensorProduct, LatexScalarRightCompoundParens)
@@ -308,7 +308,7 @@ TEST(TensorProduct, LatexScalarRightCompoundParens)
     auto* b = make_named_tensor(rl, "b", 1, {});
     auto* dot_ab = rl.make<Contract>(a, b); // rank 0
     auto* tp = make_tensor_product(rl, v, dot_ab);
-    EXPECT_EQ(tp->latex(), "v (a \\cdot b)");
+    EXPECT_EQ(tp->latex(), "\\mathbf{v} (\\mathbf{a} \\cdot \\mathbf{b})");
 }
 
 TEST(TensorProduct, Python)

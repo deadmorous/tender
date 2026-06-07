@@ -161,7 +161,7 @@ TEST(PolynomialExpr, LatexRank2ConstantTermUsesIdentity)
     // A^2 - I  (coeffs 1 for exp 2, -1 for exp 0)
     Polynomial p{{{Rational{1}, 2}, {Rational{-1}, 0}}};
     auto* pe = make_polynomial_expr(rl, p, A);
-    EXPECT_EQ(pe->latex(), "A^{2} - \\mathbf{I}");
+    EXPECT_EQ(pe->latex(), "\\mathbf{A}^{2} - \\mathbf{I}");
 }
 
 TEST(PolynomialExpr, LatexRank2LinearNoConstant)
@@ -171,7 +171,7 @@ TEST(PolynomialExpr, LatexRank2LinearNoConstant)
     // 2A^2 - A
     Polynomial p{{{Rational{2}, 2}, {Rational{-1}, 1}}};
     auto* pe = make_polynomial_expr(rl, p, A);
-    EXPECT_EQ(pe->latex(), "2 A^{2} - A");
+    EXPECT_EQ(pe->latex(), "2 \\mathbf{A}^{2} - \\mathbf{A}");
 }
 
 TEST(PolynomialExpr, LatexRank2ConstantOnlyIsIdentity)
@@ -191,7 +191,7 @@ TEST(PolynomialExpr, LatexRank2UnitConstantIsJustIdentity)
     // A + I  (coeffs 1, 1)
     Polynomial p{{{Rational{1}, 1}, {Rational{1}, 0}}};
     auto* pe = make_polynomial_expr(rl, p, A);
-    EXPECT_EQ(pe->latex(), "A + \\mathbf{I}");
+    EXPECT_EQ(pe->latex(), "\\mathbf{A} + \\mathbf{I}");
 }
 
 TEST(PolynomialExpr, PythonRank2)

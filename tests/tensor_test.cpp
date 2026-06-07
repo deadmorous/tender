@@ -80,7 +80,8 @@ TEST(Trace, RankIsZero)
 TEST(Trace, Latex)
 {
     auto rl = make_rl();
-    EXPECT_EQ(make_trace(rl, mat(rl, "A"))->latex(), "\\mathrm{tr}(A)");
+    EXPECT_EQ(
+        make_trace(rl, mat(rl, "A"))->latex(), "\\mathrm{tr}(\\mathbf{A})");
 }
 
 TEST(Trace, Python)
@@ -146,7 +147,7 @@ TEST(Contract, Latex)
 {
     auto rl = make_rl();
     auto* e = make_contract(rl, mat(rl, "A"), vec(rl, "v"));
-    EXPECT_EQ(e->latex(), "A \\cdot v");
+    EXPECT_EQ(e->latex(), "\\mathbf{A} \\cdot \\mathbf{v}");
 }
 
 TEST(Contract, LatexSumOperandGetsParens)
@@ -157,7 +158,7 @@ TEST(Contract, LatexSumOperandGetsParens)
     auto* u = vec(rl, "u");
     auto* s = make_sum(rl, {v, w});
     auto* e = make_contract(rl, s, u);
-    EXPECT_EQ(e->latex(), "(v + w) \\cdot u");
+    EXPECT_EQ(e->latex(), "(\\mathbf{v} + \\mathbf{w}) \\cdot \\mathbf{u}");
 }
 
 TEST(Contract, Python)
@@ -221,7 +222,7 @@ TEST(DoubleContract, Latex)
 {
     auto rl = make_rl();
     auto* e = make_double_contract(rl, mat(rl, "A"), mat(rl, "B"));
-    EXPECT_EQ(e->latex(), "A : B");
+    EXPECT_EQ(e->latex(), "\\mathbf{A} : \\mathbf{B}");
 }
 
 TEST(DoubleContract, Python)
@@ -254,7 +255,7 @@ TEST(DoubleContractReversed, Latex)
 {
     auto rl = make_rl();
     auto* e = make_double_contract_reversed(rl, mat(rl, "A"), mat(rl, "B"));
-    EXPECT_EQ(e->latex(), "A \\cdot\\!\\cdot B");
+    EXPECT_EQ(e->latex(), "\\mathbf{A} \\cdot\\!\\cdot \\mathbf{B}");
 }
 
 TEST(DoubleContractReversed, Python)
@@ -286,7 +287,7 @@ TEST(CrossProduct, Latex)
 {
     auto rl = make_rl();
     auto* e = make_cross_product(rl, vec(rl, "v"), vec(rl, "w"));
-    EXPECT_EQ(e->latex(), "v \\times w");
+    EXPECT_EQ(e->latex(), "\\mathbf{v} \\times \\mathbf{w}");
 }
 
 TEST(CrossProduct, Python)
@@ -337,7 +338,8 @@ TEST(CrossProduct, LatexNestedRhsParenthesised)
     auto* c = vec(rl, "c");
     auto* bc = rl.make<CrossProduct>(b, c);
     auto* abc = rl.make<CrossProduct>(a, bc);
-    EXPECT_EQ(abc->latex(), "a \\times (b \\times c)");
+    EXPECT_EQ(
+        abc->latex(), "\\mathbf{a} \\times (\\mathbf{b} \\times \\mathbf{c})");
 }
 
 TEST(CrossProduct, LatexNestedLhsParenthesised)
@@ -348,7 +350,8 @@ TEST(CrossProduct, LatexNestedLhsParenthesised)
     auto* c = vec(rl, "c");
     auto* ab = rl.make<CrossProduct>(a, b);
     auto* abc = rl.make<CrossProduct>(ab, c);
-    EXPECT_EQ(abc->latex(), "(a \\times b) \\times c");
+    EXPECT_EQ(
+        abc->latex(), "(\\mathbf{a} \\times \\mathbf{b}) \\times \\mathbf{c}");
 }
 
 // ===========================================================================

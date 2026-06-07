@@ -144,21 +144,21 @@ TEST(NamedTensor, LatexNoSlots)
 {
     auto rl = make_rl();
     auto* A = make_named_tensor(rl, "A", 2, {});
-    EXPECT_EQ(A->latex(), "A");
+    EXPECT_EQ(A->latex(), "\\mathbf{A}");
 }
 
 TEST(NamedTensor, LatexUpperSlot)
 {
     auto rl = make_rl();
     auto* v = make_named_tensor(rl, "v", 1, {{SlotLevel::Upper, "i"}});
-    EXPECT_EQ(v->latex(), "v^{i}");
+    EXPECT_EQ(v->latex(), "\\mathbf{v}^{i}");
 }
 
 TEST(NamedTensor, LatexLowerSlot)
 {
     auto rl = make_rl();
     auto* w = make_named_tensor(rl, "w", 1, {{SlotLevel::Lower, "j"}});
-    EXPECT_EQ(w->latex(), "w_{j}");
+    EXPECT_EQ(w->latex(), "\\mathbf{w}_{j}");
 }
 
 TEST(NamedTensor, LatexMixedSlots)
@@ -166,7 +166,7 @@ TEST(NamedTensor, LatexMixedSlots)
     auto rl = make_rl();
     SlotList sl = {{SlotLevel::Upper, "i"}, {SlotLevel::Lower, "j"}};
     auto* T = make_named_tensor(rl, "T", 2, sl);
-    EXPECT_EQ(T->latex(), "T^{i}_{j}");
+    EXPECT_EQ(T->latex(), "\\mathbf{T}^{i}_{j}");
 }
 
 TEST(NamedTensor, Python)
@@ -224,7 +224,7 @@ TEST(ExplicitSum, Latex)
     SlotList sl = {{SlotLevel::Upper, "i", idx}, {SlotLevel::Lower, "i", idx}};
     auto* T = make_named_tensor(rl, "T", 2, sl);
     auto* e = make_explicit_sum(rl, T, idx);
-    EXPECT_EQ(e->latex(), "\\sum_{i} T^{i}_{i}");
+    EXPECT_EQ(e->latex(), "\\sum_{i} \\mathbf{T}^{i}_{i}");
 }
 
 // ===========================================================================
@@ -315,7 +315,7 @@ TEST(Convolve, Latex)
     auto* v = make_named_tensor(rl, "v", 1, {{SlotLevel::Upper, "i"}});
     auto* w = make_named_tensor(rl, "w", 1, {{SlotLevel::Lower, "i"}});
     auto* e = convolve(rl, v, 0, w, 0);
-    EXPECT_EQ(e->latex(), "v^{i} w_{i}");
+    EXPECT_EQ(e->latex(), "\\mathbf{v}^{i} \\mathbf{w}_{i}");
 }
 
 TEST(Convolve, Python)
