@@ -1003,9 +1003,69 @@ def test_abstract_basis_custom_letter():
 def test_abstract_basis_expansion_rank_error():
     from tender import expand_in_basis_step
     import pytest
+    # rank 0 (scalar) has no indices to expand
+    s = tensor("s", 0)
+    with pytest.raises(ValueError, match="abstract mode requires rank"):
+        expand_in_basis_step(s, wcs, abstract=True)
+
+
+def test_abstract_basis_expansion_rank2_covariant():
+    """Abstract rank-2 all-up: A → A^{ij} e_i ⊗ e_j."""
+    from tender import expand_in_basis_step, SymBasisVec, TensorProduct, NamedTensor
     A = tensor("A", 2)
-    with pytest.raises(ValueError, match="abstract mode only supports rank 1"):
-        expand_in_basis_step(A, wcs, covariant=True, abstract=True)
+    step = expand_in_basis_step(A, wcs, covariant=True, abstract=True)
+    # TP structure: TP(TP(comp, SBV_i), SBV_j)
+    result = Derivation([step]).apply(State(A))[-1].expr
+    assert isinstance(result, TensorProduct)
+    sbv_j = result.rhs
+    assert isinstance(sbv_j, SymBasisVec)
+    assert sbv_j.letter == "j"
+    assert not sbv_j.is_cobasis
+    inner = result.lhs
+    assert isinstance(inner, TensorProduct)
+    sbv_i = inner.rhs
+    assert isinstance(sbv_i, SymBasisVec)
+    assert sbv_i.letter == "i"
+    assert not sbv_i.is_cobasis
+    comp = inner.lhs
+    assert isinstance(comp, NamedTensor)
+    assert comp.symbol == "A^ij"
+    assert comp.rank == 0
+
+
+def test_abstract_basis_expansion_rank2_mixed():
+    """Abstract rank-2 mixed: A → A^{i}_{j} e_i ⊗ e^j."""
+    from tender import expand_in_basis_step, SymBasisVec, TensorProduct, NamedTensor
+    A = tensor("A", 2)
+    step = expand_in_basis_step(A, wcs, covariant=[True, False], abstract=True)
+    result = Derivation([step]).apply(State(A))[-1].expr
+    assert isinstance(result, TensorProduct)
+    sbv_j = result.rhs
+    assert isinstance(sbv_j, SymBasisVec)
+    assert sbv_j.letter == "j"
+    assert sbv_j.is_cobasis  # covariant=False → cobasis
+    comp = result.lhs.lhs
+    assert isinstance(comp, NamedTensor)
+    assert comp.symbol == "A^i_j"
+
+
+def test_abstract_basis_expansion_rank2_covariant_list_mismatch():
+    """covariant list length != rank raises ValueError."""
+    from tender import expand_in_basis_step
+    import pytest
+    A = tensor("A", 2)
+    with pytest.raises(ValueError, match="covariant list length"):
+        expand_in_basis_step(A, wcs, covariant=[True], abstract=True)
+
+
+def test_abstract_comp_sym_latex():
+    """sym_to_latex renders multi-index component symbols correctly."""
+    from tender import tensor
+    # Force a latex call through NamedTensor.latex() (rank 0, uses sym_to_latex)
+    n = tensor("A^i_j", 0)
+    assert n.latex() == "A^{i}_{j}"
+    n2 = tensor("A^ij", 0)
+    assert n2.latex() == "A^{ij}"
 
 
 def test_abstract_dot_simplify():

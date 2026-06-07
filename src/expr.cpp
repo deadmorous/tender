@@ -15,24 +15,38 @@ namespace tender
 
 static auto sym_to_latex(std::string const& sym) -> std::string
 {
-    if (sym.size() == 1)
-        return sym;
-    // If the symbol already contains LaTeX commands, pass it through as-is
-    // so that e.g. \boldsymbol{\sigma} is not wrapped in \text{}.
     if (sym.find('\\') != std::string::npos)
         return sym;
-    // Component notation: "a^1" → "a^{1}", "b_1" → "b_{1}".
-    // Splitting at ^ / _ keeps them in math mode, avoiding pdflatex's
-    // rejection of ^ inside \text{} in display math.
+    if (sym.size() == 1)
+        return sym;
+    // Find the first ^ or _ separator.  Splitting there keeps indices in math
+    // mode (pdflatex rejects ^ inside \text{} in display math).
     auto hat = sym.find('^');
-    if (hat != std::string::npos)
-        return sym_to_latex(sym.substr(0, hat)) + "^{" + sym.substr(hat + 1)
-               + "}";
     auto us = sym.find('_');
-    if (us != std::string::npos)
-        return sym_to_latex(sym.substr(0, us)) + "_{" + sym.substr(us + 1)
-               + "}";
-    return "\\text{" + sym + "}";
+    auto first = std::min(hat, us);
+    if (first == std::string::npos)
+        return "\\text{" + sym + "}";
+    std::string base = sym.substr(0, first);
+    std::string result = (base.size() == 1) ?
+                             base :
+                             (base.empty() ? "" : "\\text{" + base + "}");
+    // Walk separator + index groups to support multi-index symbols:
+    //   "A^ij"  → "A^{ij}"
+    //   "A^i_j" → "A^{i}_{j}"
+    std::size_t pos = first;
+    while (pos < sym.size())
+    {
+        char sep = sym[pos++];
+        auto next_hat = sym.find('^', pos);
+        auto next_us = sym.find('_', pos);
+        auto end = std::min(next_hat, next_us);
+        std::string idx = (end == std::string::npos) ?
+                              sym.substr(pos) :
+                              sym.substr(pos, end - pos);
+        result += (sep == '^') ? "^{" + idx + "}" : "_{" + idx + "}";
+        pos = (end == std::string::npos) ? sym.size() : end;
+    }
+    return result;
 }
 
 // Bold variant: for rank-1+ tensors.  Symbols with a backslash are already

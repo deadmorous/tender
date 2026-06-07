@@ -132,6 +132,39 @@ cylindrical_cs = _cylindrical_cs_singleton()
 spherical_cs = _spherical_cs_singleton()
 nabla = Nabla()
 
+_INDEX_LETTERS = ["i", "j", "k", "l", "m", "n"]
+
+
+def _abstract_index_letters(rank, first_letter=None):
+    first = first_letter or "i"
+    result = [first]
+    for ltr in _INDEX_LETTERS:
+        if len(result) >= rank:
+            break
+        if ltr not in result:
+            result.append(ltr)
+    for ltr in "abcde":
+        if len(result) >= rank:
+            break
+        if ltr not in result:
+            result.append(ltr)
+    return result[:rank]
+
+
+def _abstract_comp_sym(base_sym, cov_list, letters):
+    """Build component symbol with grouped indices: "A^ij_k", "A^i_j", etc."""
+    result = base_sym
+    current_sep = None
+    for cov, ltr in zip(cov_list, letters):
+        sep = "^" if cov else "_"
+        if sep == current_sep:
+            result += ltr
+        else:
+            result += sep + ltr
+            current_sep = sep
+    return result
+
+
 def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False, letter=None):
     """Create a DerivationStep that replaces tensor_expr with its basis expansion.
 
@@ -140,33 +173,49 @@ def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False, letter
       rank-1 contravariant: a →  a_1 e^1 + a_2 e^2 + a_3 e^3
       rank-2 covariant:    A  →  Σ_{i,j} A^{ij} e_i ⊗ e_j
 
-    Abstract mode (abstract=True, rank-1 only):
-      covariant:    a  →  a^i e_i    (single TensorProduct with SymBasisVec)
-      contravariant: a →  a_j e^j
+    Abstract mode (abstract=True):
+      rank-1 covariant:   a → a^i e_i  (TensorProduct with SymBasisVec)
+      rank-1 contravariant: a → a_j e^j
+      rank-2 all-up:    A → A^{ij} e_i ⊗ e_j   (covariant=[True, True])
+      rank-2 mixed:     A → A^{i}_{j} e_i ⊗ e^j (covariant=[True, False])
 
-    In abstract mode, simplify_basis_dot_step collapses the dot product
+    In abstract mode, simplify_basis_dot_step collapses rank-1 dot products
     directly to an IndexedSum (e.g. a^i b_i) without 9-term expansion.
+    For rank ≥ 2, abstract expansion is for display; simplification of
+    contractions falls back to the concrete expansion path.
 
-    letter: index letter for abstract mode (default: "i" for covariant,
-            "j" for contravariant).  Ignored in concrete mode.
+    covariant: bool (applied to all indices) or list[bool] (one per index).
+    letter: first index letter for abstract mode (default "i").
+            Ignored in concrete mode.
     """
     sym = tensor_expr.symbol
     r = tensor_expr.rank
     dim = cs.dim
 
     if abstract:
-        if r != 1:
+        if r < 1:
             raise ValueError(
-                f"expand_in_basis_step: abstract mode only supports rank 1, got {r}"
+                f"expand_in_basis_step: abstract mode requires rank ≥ 1, got {r}"
             )
-        ltr = letter or ("i" if covariant else "j")
-        if covariant:
-            comp = tensor(f"{sym}^{ltr}")
-            vec = make_sym_basis_vec(cs, ltr, False)
+        cov_list = ([covariant] * r) if isinstance(covariant, bool) else list(covariant)
+        if len(cov_list) != r:
+            raise ValueError(
+                f"expand_in_basis_step: covariant list length {len(cov_list)} "
+                f"does not match tensor rank {r}"
+            )
+        # Default first letter: "i" for covariant (or rank > 1), "j" for rank-1 contravariant
+        if letter and isinstance(letter, str):
+            first_ltr = letter
+        elif r == 1 and not cov_list[0]:
+            first_ltr = "j"
         else:
-            comp = tensor(f"{sym}_{ltr}")
-            vec = make_sym_basis_vec(cs, ltr, True)
-        return substitute_step(tensor_expr, comp * vec)
+            first_ltr = "i"
+        letters = _abstract_index_letters(r, first_ltr)
+        comp_sym = _abstract_comp_sym(sym, cov_list, letters)
+        expr = tensor(comp_sym)
+        for cov, ltr in zip(cov_list, letters):
+            expr = expr * make_sym_basis_vec(cs, ltr, not cov)
+        return substitute_step(tensor_expr, expr)
 
     if r == 1:
         if covariant:

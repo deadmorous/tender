@@ -405,3 +405,47 @@ TEST(Sum, RankMismatchThrows)
     auto* v = make_named_tensor(rl, "v", 1, {{SlotLevel::Upper, "i"}});
     EXPECT_THROW(make_sum(rl, {x, v}), std::invalid_argument);
 }
+
+// ===========================================================================
+// sym_to_latex multi-index symbols (via NamedTensor rank-0 .latex())
+// ===========================================================================
+
+TEST(SymToLatex, MultiIndexAllUp)
+{
+    // "A^ij" → "A^{ij}"
+    auto rl = make_rl();
+    auto* n = make_named_tensor(rl, "A^ij", 0, {});
+    EXPECT_EQ(n->latex(), "A^{ij}");
+}
+
+TEST(SymToLatex, MultiIndexMixed)
+{
+    // "A^i_j" → "A^{i}_{j}"
+    auto rl = make_rl();
+    auto* n = make_named_tensor(rl, "A^i_j", 0, {});
+    EXPECT_EQ(n->latex(), "A^{i}_{j}");
+}
+
+TEST(SymToLatex, MultiIndexAllDown)
+{
+    // "A_ij" → "A_{ij}"
+    auto rl = make_rl();
+    auto* n = make_named_tensor(rl, "A_ij", 0, {});
+    EXPECT_EQ(n->latex(), "A_{ij}");
+}
+
+TEST(SymToLatex, MultiIndexThreeIndices)
+{
+    // "A^ij_k" → "A^{ij}_{k}"
+    auto rl = make_rl();
+    auto* n = make_named_tensor(rl, "A^ij_k", 0, {});
+    EXPECT_EQ(n->latex(), "A^{ij}_{k}");
+}
+
+TEST(SymToLatex, EmptyBase)
+{
+    // "^i" — empty base, just an indexed placeholder
+    auto rl = make_rl();
+    auto* n = make_named_tensor(rl, "^i", 0, {});
+    EXPECT_EQ(n->latex(), "^{i}");
+}
