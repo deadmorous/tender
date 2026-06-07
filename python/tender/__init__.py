@@ -97,6 +97,9 @@ from ._tender import (
     apply_identity,
     find_matches,
     apply_identity_auto,
+    matches_at_root,
+    _find_and_rewrite_all,
+    _capture_step,
     declare_symmetric,
     declare_skew_symmetric,
     # Singleton getters (private)
@@ -169,6 +172,91 @@ def show_jupyter(history):
             r"\[" + _label_to_math(label) + r"\quad " + state.expr.latex() + r"\]"
         )
     display(Latex("\n".join(blocks)))
+
+
+def search_apply(target, expr, rules=None, timeout=5.0):
+    """Find and apply ``target``, preceded by any necessary preparation rewrites.
+
+    Performs a breadth-first search over sub-expression rewrite steps drawn
+    from ``rules``.  Returns a complete list of :class:`DerivationStep` objects
+    that, when applied to ``expr`` in order, produce the final result with
+    ``target`` applied.  The last step is always the application of ``target``.
+
+    Parameters
+    ----------
+    target : Identity
+        The identity to apply.
+    expr : Expr
+        Starting expression.
+    rules : list[Identity] or None
+        Rule library for the BFS.  ``None`` (default) uses all identities in
+        ``tender.lib``.
+    timeout : float
+        Wall-clock time limit in seconds (fractions allowed, e.g. ``0.5``).
+
+    Returns
+    -------
+    list[DerivationStep]
+        Complete steps including the final application of ``target``.
+        ``Derivation(steps).apply(State(expr))[-1].expr`` is the result.
+
+    Raises
+    ------
+    TimeoutError
+        No sequence found within ``timeout`` seconds.
+    RuntimeError
+        Search space exhausted (all reachable expressions visited).
+    """
+    import time
+    from collections import deque
+
+    if rules is None:
+        from tender.lib import ALL
+        rules = ALL
+
+    def _try_target(e):
+        """Return capture step applying target anywhere in e, or None."""
+        matches = list(_find_and_rewrite_all(target, e))
+        if matches:
+            new_e, name = matches[0]
+            return _capture_step(name, new_e)
+        return None
+
+    direct = _try_target(expr)
+    if direct is not None:
+        return [direct]
+
+    deadline = time.monotonic() + timeout
+    visited = {expr.latex()}
+    queue = deque([(expr, [])])
+
+    while queue:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f"search_apply: no preparation sequence for '{target.name}' "
+                f"found within {timeout:g}s")
+
+        current, steps = queue.popleft()
+
+        for rule in rules:
+            for item in _find_and_rewrite_all(rule, current):
+                new_expr, step_name = item
+                key = new_expr.latex()
+                if key in visited:
+                    continue
+                visited.add(key)
+                step = _capture_step(step_name, new_expr)
+                new_steps = steps + [step]
+
+                final = _try_target(new_expr)
+                if final is not None:
+                    return new_steps + [final]
+
+                queue.append((new_expr, new_steps))
+
+    raise RuntimeError(
+        f"search_apply: search space exhausted for '{target.name}' — "
+        f"no sequence found within the visited rule applications")
 
 
 def _label_to_math(label):
@@ -262,6 +350,7 @@ __all__ = [
     "substitute_step", "diff_step",
     "apply_integration_by_parts_step", "apply_divergence_theorem_step",
     "localize_step", "collect_step",
-    "apply_identity", "find_matches", "apply_identity_auto",
+    "apply_identity", "find_matches", "apply_identity_auto", "matches_at_root",
+    "search_apply",
     "declare_symmetric", "declare_skew_symmetric",
 ]

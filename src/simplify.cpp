@@ -204,6 +204,20 @@ auto substitute_step(Expr* what, Expr* with_what) -> DerivationStep
         }};
 }
 
+auto replace_in_tree(ResourceList& rl, Expr* root, Expr* what, Expr* with_what)
+    -> Expr*
+{
+    return substitute_impl(rl, root, what, with_what);
+}
+
+auto capture_step(std::string name, Expr* result) -> DerivationStep
+{
+    return DerivationStep{
+        std::move(name), [result](ResourceList&, Expr*) -> Expr* {
+            return result;
+        }};
+}
+
 // ===========================================================================
 // expand — distribute binary operations over Sum (bottom-up)
 // ===========================================================================

@@ -22,7 +22,7 @@ OUTDIR   := out
 
 PYTHONPATH_VAR := PYTHONPATH=$(BUILD)/python
 
-EXAMPLES := pvw_continuum bac_cab
+EXAMPLES := pvw_continuum bac_cab bac_cab_search
 
 .PHONY: all $(EXAMPLES) clean
 
@@ -40,6 +40,11 @@ bac_cab: | $(OUTDIR)
 	$(PYTHONPATH_VAR) $(PYTHON) bac_cab.py
 	$(PDFLATEX) -interaction=nonstopmode -output-directory=$(OUTDIR) $(OUTDIR)/bac_cab.tex
 	@$(VIEWER) $(OUTDIR)/bac_cab.pdf 2>/dev/null &
+
+bac_cab_search: | $(OUTDIR)
+	$(PYTHONPATH_VAR) $(PYTHON) bac_cab_search.py
+	$(PDFLATEX) -interaction=nonstopmode -output-directory=$(OUTDIR) $(OUTDIR)/bac_cab_search.tex
+	@$(VIEWER) $(OUTDIR)/bac_cab_search.pdf 2>/dev/null &
 
 clean:
 	rm -rf $(OUTDIR)

@@ -333,19 +333,88 @@ auto find_matches(Identity const& id, Expr* expr, int max_nodes)
 }
 
 // ===========================================================================
+// find_and_rewrite_all — sub-expression rewriting for BFS search
+// ===========================================================================
+
+static auto find_and_rewrite_impl(
+    Identity const& id,
+    ResourceList& rl,
+    Expr* root,
+    Expr* node,
+    std::vector<std::pair<Expr*, std::string>>& results) -> void
+{
+    auto matches = match_impl(id.lhs(), node, {});
+    for (auto const& binding: matches)
+    {
+        PatternMapping mapping{binding.begin(), binding.end()};
+        Expr* rhs_expr = apply_rhs(rl, id, mapping);
+        Expr* new_root = replace_in_tree(rl, root, node, rhs_expr);
+        results.emplace_back(new_root, "apply(" + id.name() + ")");
+    }
+
+    if (auto* s = dynamic_cast<Sum*>(node))
+        for (auto* t: s->terms())
+            find_and_rewrite_impl(id, rl, root, t, results);
+    else if (auto* sc = dynamic_cast<Scale*>(node))
+        find_and_rewrite_impl(id, rl, root, sc->expr(), results);
+    else if (auto* tp = dynamic_cast<TensorProduct*>(node))
+    {
+        find_and_rewrite_impl(id, rl, root, tp->lhs(), results);
+        find_and_rewrite_impl(id, rl, root, tp->rhs(), results);
+    }
+    else if (auto* c = dynamic_cast<Contract*>(node))
+    {
+        find_and_rewrite_impl(id, rl, root, c->lhs(), results);
+        find_and_rewrite_impl(id, rl, root, c->rhs(), results);
+    }
+    else if (auto* dc = dynamic_cast<DoubleContract*>(node))
+    {
+        find_and_rewrite_impl(id, rl, root, dc->lhs(), results);
+        find_and_rewrite_impl(id, rl, root, dc->rhs(), results);
+    }
+    else if (auto* dcr = dynamic_cast<DoubleContractReversed*>(node))
+    {
+        find_and_rewrite_impl(id, rl, root, dcr->lhs(), results);
+        find_and_rewrite_impl(id, rl, root, dcr->rhs(), results);
+    }
+    else if (auto* cp = dynamic_cast<CrossProduct*>(node))
+    {
+        find_and_rewrite_impl(id, rl, root, cp->lhs(), results);
+        find_and_rewrite_impl(id, rl, root, cp->rhs(), results);
+    }
+    else if (auto* tr = dynamic_cast<Trace*>(node))
+        find_and_rewrite_impl(id, rl, root, tr->arg(), results);
+    else if (auto* fa = dynamic_cast<FunctionApply*>(node))
+        find_and_rewrite_impl(id, rl, root, fa->arg(), results);
+    else if (auto* pw = dynamic_cast<Pow*>(node))
+        find_and_rewrite_impl(id, rl, root, pw->base(), results);
+    else if (auto* integ = dynamic_cast<Integral*>(node))
+        find_and_rewrite_impl(id, rl, root, integ->integrand(), results);
+}
+
+auto find_and_rewrite_all(Identity const& id, ResourceList& rl, Expr* root)
+    -> std::vector<std::pair<Expr*, std::string>>
+{
+    std::vector<std::pair<Expr*, std::string>> results;
+    find_and_rewrite_impl(id, rl, root, root, results);
+    return results;
+}
+
+// ===========================================================================
 // apply_identity_auto
 // ===========================================================================
 
-auto apply_identity_auto(Identity const& id, Expr* expr, int max_nodes)
-    -> DerivationStep
+auto apply_identity_auto(Identity const& id, Expr* expr) -> DerivationStep
 {
-    auto matches = find_matches(id, expr, max_nodes);
-    if (matches.empty())
+    // Match only at the root: apply_identity replaces the whole expression,
+    // so a binding from a deep sub-tree would reconstruct the wrong result.
+    auto root_matches = match_pattern(id.lhs(), expr, {});
+    if (root_matches.empty())
         throw std::invalid_argument(
-            "apply_identity_auto: no match for identity '" + id.name()
-            + "' in expression");
+            "apply_identity_auto: identity '" + id.name()
+            + "' does not match the current expression");
     return apply_identity(
-        id, PatternMapping{matches[0].begin(), matches[0].end()});
+        id, PatternMapping{root_matches[0].begin(), root_matches[0].end()});
 }
 
 } // namespace tender

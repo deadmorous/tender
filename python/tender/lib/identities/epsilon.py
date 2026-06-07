@@ -14,11 +14,14 @@ bac_cab = Identity(
     rhs=tp(_b, dot(_a, _c)) - tp(_c, dot(_a, _b)),
 )
 
-# Companion (CAB-BAC):  (a×b)×c = b(a·c) − a(b·c)
-double_cross = Identity(
-    "double-cross",
-    lhs=cross(cross(_a, _b), _c),
-    rhs=tp(_b, dot(_a, _c)) - tp(_a, dot(_b, _c)),
+# Anti-commutativity:  a×b = -(b×a)
+anti_commutativity = Identity(
+    "cross-anticomm",
+    lhs=cross(_a, _b),
+    rhs=-cross(_b, _a),
 )
 
-ALL = [bac_cab, double_cross]
+# Note: the "double-cross" identity (a×b)×c = b(a·c) − a(b·c) is derivable
+# from bac_cab + anti_commutativity via search_apply and is not listed here.
+
+ALL = [bac_cab, anti_commutativity]

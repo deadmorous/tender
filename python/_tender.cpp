@@ -531,9 +531,29 @@ NB_MODULE(_tender, m)
         }, "identity"_a, "expr"_a, "max_nodes"_a = 10000);
 
     m.def("apply_identity_auto",
-        [](Identity const& id, Expr* expr, int max_nodes) {
-            return apply_identity_auto(id, expr, max_nodes);
-        }, "identity"_a, "expr"_a, "max_nodes"_a = 10000);
+        [](Identity const& id, Expr* expr) {
+            return apply_identity_auto(id, expr);
+        }, "identity"_a, "expr"_a);
+
+    m.def("matches_at_root",
+        [](Identity const& id, Expr* expr) -> bool {
+            return !match_pattern(id.lhs(), expr, {}).empty();
+        }, "id"_a, "expr"_a);
+
+    m.def("_find_and_rewrite_all",
+        [](Identity const& id, Expr* root) -> nb::list {
+            auto results = find_and_rewrite_all(id, g_rl, root);
+            nb::list lst;
+            for (auto const& [expr, name]: results)
+                lst.append(nb::make_tuple(
+                    nb::cast(expr, nb::rv_policy::reference), name));
+            return lst;
+        }, "id"_a, "root"_a);
+
+    m.def("_capture_step",
+        [](std::string name, Expr* result) {
+            return capture_step(std::move(name), result);
+        }, "name"_a, "result"_a);
 
     // declare_symmetric / declare_skew_symmetric on NamedTensor
     // (accessed via the Expr binding since NamedTensor is a subclass)

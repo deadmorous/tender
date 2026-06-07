@@ -118,6 +118,15 @@ auto simplify_identity_step() -> DerivationStep;
 // Replace every occurrence of `what` (by pointer identity) with `with_what`.
 auto substitute_step(Expr* what, Expr* with_what) -> DerivationStep;
 
+// Replace every occurrence of `what` (by pointer identity) in `root` with
+// `with_what`; returns the new root (or `root` unchanged if nothing matched).
+auto replace_in_tree(ResourceList& rl, Expr* root, Expr* what, Expr* with_what)
+    -> Expr*;
+
+// A step that ignores its input expression and returns `result` unchanged.
+// Used by search_apply to encode a sub-expression rewrite as a DerivationStep.
+auto capture_step(std::string name, Expr* result) -> DerivationStep;
+
 // Distribute binary operations over Sum, expanding products into sums of
 // products:
 //   Scale(c, Sum(…))              → Sum(Scale(c, t), …)

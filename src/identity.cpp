@@ -170,6 +170,12 @@ auto apply_identity(Identity const& id, PatternMapping const& mapping)
         }};
 }
 
+auto apply_rhs(ResourceList& rl, Identity const& id, PatternMapping const& mapping)
+    -> Expr*
+{
+    return substitute_pattern(rl, id.rhs(), mapping);
+}
+
 // ===========================================================================
 // Factory
 // ===========================================================================

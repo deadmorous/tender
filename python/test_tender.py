@@ -14,7 +14,7 @@ from tender import (
     State, Derivation,
     simplify_identity_step, expand_step, substitute_step,
     apply_integration_by_parts_step, localize_step, collect_step,
-    apply_identity, find_matches, apply_identity_auto,
+    apply_identity, find_matches, apply_identity_auto, search_apply,
     declare_symmetric, declare_skew_symmetric,
     Identity, make_pattern_var,
     show, doc,
@@ -570,9 +570,9 @@ def test_doc_latex():
 
 
 def test_standard_library_epsilon():
-    from tender.lib.identities.epsilon import bac_cab, double_cross, ALL
+    from tender.lib.identities.epsilon import bac_cab, anti_commutativity, ALL
     assert bac_cab.name == "BAC-CAB"
-    assert double_cross.name == "double-cross"
+    assert anti_commutativity.name == "cross-anticomm"
     assert len(ALL) == 2
 
 
@@ -707,3 +707,38 @@ def test_apply_identity_wrong_expression_raises():
     # Swapped expression: must raise
     with pytest.raises(Exception):
         Derivation([step]).apply(State(wrong))
+
+
+def test_search_apply_direct():
+    # When target already applies, search_apply returns one step (the application).
+    from tender.lib.identities.epsilon import bac_cab
+    u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
+    expr = cross(u, cross(v, w))
+    steps = search_apply(bac_cab, expr, timeout=2.0)
+    assert len(steps) == 1
+    history = Derivation(steps).apply(State(expr))
+    result = history[-1].expr.latex()
+    # BAC-CAB: a×(b×c) = b(a·c) - c(a·b) → v(u·w) - w(u·v)
+    assert r"\cdot" in result
+
+
+def test_search_apply_needs_anticomm():
+    # cross(cross(v,w), u) needs anti-commutativity before BAC-CAB applies.
+    from tender.lib.identities.epsilon import bac_cab
+    u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
+    expr = cross(cross(v, w), u)
+    steps = search_apply(bac_cab, expr, timeout=5.0)
+    assert len(steps) >= 2
+    history = Derivation(steps).apply(State(expr))
+    result = history[-1].expr.latex()
+    assert r"\cdot" in result
+
+
+def test_search_apply_exhausted():
+    # An unreachable target raises RuntimeError.
+    from tender.lib.identities.epsilon import bac_cab
+    u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
+    # A plain tensor product: no cross products, so BAC-CAB can never apply.
+    expr = dot(u, v)
+    with pytest.raises(RuntimeError):
+        search_apply(bac_cab, expr, rules=[], timeout=1.0)
