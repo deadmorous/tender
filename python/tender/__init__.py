@@ -185,8 +185,17 @@ def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False, letter
     contractions falls back to the concrete expansion path.
 
     covariant: bool (applied to all indices) or list[bool] (one per index).
-    letter: first index letter for abstract mode (default "i").
+    letter: index letter(s) for abstract mode.
+            str  → used as the single letter (rank 1) or first letter (rank > 1),
+                   remaining letters filled from "i","j","k","l",...
+            list → used directly as the full letter list (length must equal rank).
+            None → defaults to "i" for covariant, "j" for contravariant (rank 1),
+                   or "i","j","k",... for rank > 1.
             Ignored in concrete mode.
+
+    When expanding multiple tensors in the same expression use distinct letter
+    sets to avoid clashing dummy indices, e.g. letter=["i","j"] for one tensor
+    and letter=["k","l"] for another.
     """
     sym = tensor_expr.symbol
     r = tensor_expr.rank
@@ -203,14 +212,20 @@ def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False, letter
                 f"expand_in_basis_step: covariant list length {len(cov_list)} "
                 f"does not match tensor rank {r}"
             )
-        # Default first letter: "i" for covariant (or rank > 1), "j" for rank-1 contravariant
-        if letter and isinstance(letter, str):
-            first_ltr = letter
+        # Resolve index letters from the letter argument
+        if isinstance(letter, list):
+            letters = letter
+            if len(letters) != r:
+                raise ValueError(
+                    f"expand_in_basis_step: letter list length {len(letters)} "
+                    f"does not match tensor rank {r}"
+                )
+        elif isinstance(letter, str):
+            letters = _abstract_index_letters(r, letter)
         elif r == 1 and not cov_list[0]:
-            first_ltr = "j"
+            letters = ["j"]  # rank-1 contravariant default
         else:
-            first_ltr = "i"
-        letters = _abstract_index_letters(r, first_ltr)
+            letters = _abstract_index_letters(r, "i")
         comp_sym = _abstract_comp_sym(sym, cov_list, letters)
         expr = tensor(comp_sym)
         for cov, ltr in zip(cov_list, letters):

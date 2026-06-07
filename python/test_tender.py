@@ -1058,6 +1058,27 @@ def test_abstract_basis_expansion_rank2_covariant_list_mismatch():
         expand_in_basis_step(A, wcs, covariant=[True], abstract=True)
 
 
+def test_abstract_basis_expansion_letter_list():
+    """letter=list overrides auto-picked letters for all indices."""
+    from tender import expand_in_basis_step, SymBasisVec, TensorProduct, NamedTensor
+    A = tensor("A", 2)
+    step = expand_in_basis_step(A, wcs, covariant=True, abstract=True, letter=["k", "l"])
+    result = Derivation([step]).apply(State(A))[-1].expr
+    # Expect TP(TP(tensor("A^kl", 0), SBV("k")), SBV("l"))
+    assert result.rhs.letter == "l"
+    assert result.lhs.rhs.letter == "k"
+    assert result.lhs.lhs.symbol == "A^kl"
+
+
+def test_abstract_basis_expansion_letter_list_length_mismatch():
+    """letter list length != rank raises ValueError."""
+    from tender import expand_in_basis_step
+    import pytest
+    A = tensor("A", 2)
+    with pytest.raises(ValueError, match="letter list length"):
+        expand_in_basis_step(A, wcs, abstract=True, letter=["i"])
+
+
 def test_abstract_comp_sym_latex():
     """sym_to_latex renders multi-index component symbols correctly."""
     from tender import tensor
