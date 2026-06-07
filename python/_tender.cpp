@@ -381,10 +381,18 @@ NB_MODULE(_tender, m)
         .def_prop_ro("rhs", &Identity::rhs, nb::rv_policy::reference)
         .def_static(
             "from_derivation",
-            [](std::string name, std::vector<State> const& history)
-            { return Identity::from_derivation(std::move(name), history); },
+            [](std::string name,
+               std::vector<State> const& history,
+               std::vector<Expr*> pvars)
+            {
+                if (pvars.empty())
+                    return Identity::from_derivation(std::move(name), history);
+                return Identity::from_derivation(
+                    std::move(name), history, pvars, g_rl);
+            },
             "name"_a,
-            "history"_a);
+            "history"_a,
+            "pattern_vars"_a = std::vector<Expr*>{});
 
     // =======================================================================
     // Nabla object  (∇)

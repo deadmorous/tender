@@ -23,6 +23,7 @@ foreach(_py
     tender/lib/identities/epsilon.py
     tender/lib/identities/identity_tensor.py
     tender/lib/identities/functions.py
+    tender/lib/identities/vectors.py
     test_tender.py)
     add_custom_command(
         OUTPUT  ${CMAKE_CURRENT_BINARY_DIR}/${_py}

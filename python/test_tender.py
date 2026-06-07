@@ -867,3 +867,73 @@ def test_definitions_library():
     assert "tp-contract-right" in names
     assert "scalar-comm" in names
     assert "cross-def" in names
+
+
+def test_from_derivation_pattern_vars():
+    """Identity.from_derivation with pattern_vars lifts concrete tensors to PatternVars."""
+    from tender import tensor, dot, Identity, PatternVar, State
+    a = tensor("a", 1)
+    b = tensor("b", 1)
+    lhs_expr = dot(a, b)
+    rhs_expr = dot(b, a)
+    history = [State(lhs_expr), State(rhs_expr)]
+    id_ = Identity.from_derivation("dot-comm-test", history, pattern_vars=[a, b])
+    assert id_.name == "dot-comm-test"
+    # Sub-nodes of lhs Contract should be PatternVar instances.
+    lhs_co = id_.lhs
+    assert isinstance(lhs_co.lhs, PatternVar), "lhs of dot should be PatternVar"
+    assert isinstance(lhs_co.rhs, PatternVar), "rhs of dot should be PatternVar"
+    assert lhs_co.lhs.rank == 1
+    assert lhs_co.lhs.symbol == "a"
+
+
+def test_from_derivation_no_pattern_vars_is_unchanged():
+    """from_derivation without pattern_vars preserves concrete tensors."""
+    from tender import tensor, dot, Identity, PatternVar, State
+    a = tensor("a", 1)
+    b = tensor("b", 1)
+    lhs_expr = dot(a, b)
+    rhs_expr = dot(b, a)
+    history = [State(lhs_expr), State(rhs_expr)]
+    id_ = Identity.from_derivation("raw", history)
+    # No substitution: lhs is the original Contract, sub-nodes are NamedTensors.
+    assert id_.lhs is lhs_expr
+    assert id_.rhs is rhs_expr
+
+
+def test_vectors_library():
+    """Phase 13.5 vectors module loads with correct identities."""
+    from tender.lib.identities.vectors import (
+        dot_comm, cross_self_zero, cross_anticomm,
+        double_cross, jacobi, ALL,
+    )
+    assert len(ALL) == 4  # cross_anticomm excluded (already in epsilon)
+    names = {id_.name for id_ in ALL}
+    assert "dot-comm" in names
+    assert "cross-self-zero" in names
+    assert "double-cross" in names
+    assert "jacobi" in names
+    # cross_anticomm is re-exported but not in ALL
+    assert cross_anticomm.name == "cross-anticomm"
+
+
+def test_vectors_latex_forms():
+    """Check LaTeX rendering of key vector identities."""
+    from tender.lib.identities.vectors import dot_comm, cross_self_zero, double_cross
+    assert "cdot" in dot_comm.lhs.latex()
+    assert dot_comm.rhs.latex() == dot_comm.lhs.latex()[::-1] or \
+        "cdot" in dot_comm.rhs.latex()
+    # cross_self_zero rhs should be 0
+    assert cross_self_zero.rhs.latex() == "0"
+    # double_cross lhs should contain times
+    assert "times" in double_cross.lhs.latex()
+
+
+def test_full_identity_library_count():
+    """Library has at least 16 identities after Phase 13.5."""
+    from tender.lib.identities import ALL
+    assert len(ALL) >= 16
+    names = {id_.name for id_ in ALL}
+    assert "dot-comm" in names
+    assert "double-cross" in names
+    assert "jacobi" in names

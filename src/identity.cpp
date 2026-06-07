@@ -63,6 +63,39 @@ auto Identity::from_derivation(
         std::move(name), history.front().expr(), history.back().expr()};
 }
 
+auto Identity::from_derivation(
+    std::string name,
+    std::vector<State> const& history,
+    std::vector<Expr*> const& pattern_vars,
+    ResourceList& rl) -> Identity
+{
+    if (history.size() < 2)
+        throw std::invalid_argument(
+            "Identity::from_derivation: history must have at least 2 states");
+
+    auto* lhs = history.front().expr();
+    auto* rhs = history.back().expr();
+
+    for (auto* concrete: pattern_vars)
+    {
+        auto* nt = dynamic_cast<NamedTensor*>(concrete);
+        if (!nt)
+            throw std::invalid_argument(
+                "Identity::from_derivation: pattern_vars entries must be "
+                "NamedTensor");
+        auto* pv = make_pattern_var(rl, nt->symbol());
+        pv->constrain_rank(nt->rank());
+        if (nt->is_symmetric())
+            pv->constrain_symmetric();
+        if (nt->is_skew_symmetric())
+            pv->constrain_skew_symmetric();
+        lhs = replace_in_tree(rl, lhs, concrete, pv);
+        rhs = replace_in_tree(rl, rhs, concrete, pv);
+    }
+
+    return Identity{std::move(name), lhs, rhs};
+}
+
 // ===========================================================================
 // Pattern substitution
 // ===========================================================================

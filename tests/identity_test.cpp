@@ -435,3 +435,81 @@ TEST(SubstitutePattern, ProductInRhs)
     EXPECT_EQ(pr->lhs(), s);
     EXPECT_EQ(pr->rhs(), t);
 }
+
+// ===========================================================================
+// Identity::from_derivation with pattern_vars
+// ===========================================================================
+
+TEST(FromDerivationPatternVars, SubstitutesConcreteWithPatternVar)
+{
+    // Build a two-state history for dot(a, b) → dot(b, a) (asserted
+    // symbolically).
+    auto rl = make_rl();
+    auto* a = make_named_tensor(rl, "a", 1, {});
+    auto* b = make_named_tensor(rl, "b", 1, {});
+
+    auto* lhs_expr = make_contract(rl, a, b);
+    auto* rhs_expr = make_contract(rl, b, a);
+
+    auto id = Identity::from_derivation(
+        "dot-comm", {State{lhs_expr}, State{rhs_expr}}, {a, b}, rl);
+
+    // Both sides should contain PatternVars, not the original NamedTensors.
+    auto* lhs_co = dynamic_cast<Contract*>(id.lhs());
+    ASSERT_NE(lhs_co, nullptr);
+    EXPECT_NE(dynamic_cast<PatternVar*>(lhs_co->lhs()), nullptr);
+    EXPECT_NE(dynamic_cast<PatternVar*>(lhs_co->rhs()), nullptr);
+
+    auto* rhs_co = dynamic_cast<Contract*>(id.rhs());
+    ASSERT_NE(rhs_co, nullptr);
+    EXPECT_NE(dynamic_cast<PatternVar*>(rhs_co->lhs()), nullptr);
+    EXPECT_NE(dynamic_cast<PatternVar*>(rhs_co->rhs()), nullptr);
+}
+
+TEST(FromDerivationPatternVars, PatternVarsHaveCorrectRank)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* T = make_named_tensor(rl, "T", 2, {});
+
+    auto* lhs_expr = make_contract(rl, T, u);
+    auto* rhs_expr = make_contract(rl, u, T);
+
+    auto id = Identity::from_derivation(
+        "test", {State{lhs_expr}, State{rhs_expr}}, {u, T}, rl);
+
+    auto* co = dynamic_cast<Contract*>(id.lhs());
+    ASSERT_NE(co, nullptr);
+    auto* pv_T = dynamic_cast<PatternVar*>(co->lhs());
+    auto* pv_u = dynamic_cast<PatternVar*>(co->rhs());
+    ASSERT_NE(pv_T, nullptr);
+    ASSERT_NE(pv_u, nullptr);
+    EXPECT_EQ(pv_T->rank(), 2);
+    EXPECT_EQ(pv_u->rank(), 1);
+}
+
+TEST(FromDerivationPatternVars, NonNamedTensorThrows)
+{
+    auto rl = make_rl();
+    auto* pv = make_pattern_var(rl, "x")->constrain_rank(1);
+    auto* expr = make_contract(rl, pv, pv);
+
+    EXPECT_THROW(
+        Identity::from_derivation("bad", {State{expr}, State{expr}}, {pv}, rl),
+        std::invalid_argument);
+}
+
+TEST(FromDerivationPatternVars, EmptyPatternVarsFallsThrough)
+{
+    auto rl = make_rl();
+    auto* a = make_named_tensor(rl, "a", 1, {});
+    auto* b = make_named_tensor(rl, "b", 1, {});
+    auto* expr = make_contract(rl, a, b);
+
+    // With no pattern_vars the concrete tensors survive into lhs/rhs.
+    auto id =
+        Identity::from_derivation("raw", {State{expr}, State{expr}}, {}, rl);
+
+    EXPECT_EQ(id.lhs(), expr);
+    EXPECT_EQ(id.rhs(), expr);
+}

@@ -85,6 +85,15 @@ public:
     static auto from_derivation(
         std::string name, std::vector<State> const& history) -> Identity;
 
+    // Same as above, but substitute each concrete NamedTensor in pattern_vars
+    // with a fresh PatternVar of the same name and rank before recording
+    // lhs/rhs.  No variables leak into the caller's namespace.
+    static auto from_derivation(
+        std::string name,
+        std::vector<State> const& history,
+        std::vector<Expr*> const& pattern_vars,
+        ResourceList& rl) -> Identity;
+
 private:
     std::string name_;
     Expr* lhs_;
