@@ -1,4 +1,5 @@
 #include <tender/derivation.hpp>
+#include <tender/integral.hpp>
 
 #include <vector>
 
@@ -191,6 +192,14 @@ static auto substitute_impl(
     {
         auto* arg = substitute_impl(rl, fa->arg(), what, with_what);
         return arg == fa->arg() ? e : make_function(rl, fa->kind(), arg);
+    }
+
+    if (auto* integ = dynamic_cast<Integral*>(e))
+    {
+        auto* body = substitute_impl(rl, integ->integrand(), what, with_what);
+        return body == integ->integrand() ?
+                   e :
+                   make_integral(rl, integ->domain(), body);
     }
 
     return e;

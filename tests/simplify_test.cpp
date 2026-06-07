@@ -694,3 +694,140 @@ TEST(Combined, ExpandThenSimplifyIdentity)
     EXPECT_EQ(s->terms()[0], u);
     EXPECT_EQ(s->terms()[1], v);
 }
+
+// ===========================================================================
+// replace_in_tree
+// ===========================================================================
+
+TEST(ReplaceInTree, ReplacesLeafAtRoot)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    EXPECT_EQ(replace_in_tree(rl, u, u, v), v);
+}
+
+TEST(ReplaceInTree, ReplacesInsideScale)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* expr = make_scale(rl, Rational{2}, u);
+    auto* result = replace_in_tree(rl, expr, u, v);
+    auto* sc = dynamic_cast<Scale*>(result);
+    ASSERT_NE(sc, nullptr);
+    EXPECT_EQ(sc->expr(), v);
+}
+
+TEST(ReplaceInTree, NoMatchReturnsOriginal)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    EXPECT_EQ(replace_in_tree(rl, u, v, w), u);
+}
+
+TEST(ReplaceInTree, ReplacesInsideCrossProduct)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    auto* expr = rl.make<CrossProduct>(u, v);
+    auto* result = replace_in_tree(rl, expr, v, w);
+    auto* cp = dynamic_cast<CrossProduct*>(result);
+    ASSERT_NE(cp, nullptr);
+    EXPECT_EQ(cp->lhs(), u);
+    EXPECT_EQ(cp->rhs(), w);
+}
+
+// ===========================================================================
+// capture_step
+// ===========================================================================
+
+TEST(CaptureStep, IgnoresInputReturnsPrecomputed)
+{
+    auto rl = make_rl();
+    auto* u = make_named_tensor(rl, "u", 1, {});
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto step = capture_step("my_step", v);
+    EXPECT_EQ(step.name(), "my_step");
+    EXPECT_EQ(step.apply(rl, State{u}).expr(), v);
+}
+
+TEST(CaptureStep, NameIsPreserved)
+{
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto step = capture_step("apply(bac_cab)", v);
+    EXPECT_EQ(step.name(), "apply(bac_cab)");
+}
+
+// ===========================================================================
+// Expand — DoubleContract and DoubleContractReversed over Sum
+// ===========================================================================
+
+TEST(Expand, DoubleContractOverSumOnLeft)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* C = make_named_tensor(rl, "C", 2, {});
+    auto* sum_AB = make_sum(rl, {A, B});
+    auto* expr = make_double_contract(rl, sum_AB, C);
+
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(s->terms().size(), 2u);
+    EXPECT_NE(dynamic_cast<DoubleContract*>(s->terms()[0]), nullptr);
+    EXPECT_NE(dynamic_cast<DoubleContract*>(s->terms()[1]), nullptr);
+}
+
+TEST(Expand, DoubleContractOverSumOnRight)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* C = make_named_tensor(rl, "C", 2, {});
+    auto* sum_AB = make_sum(rl, {A, B});
+    auto* expr = make_double_contract(rl, C, sum_AB);
+
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(s->terms().size(), 2u);
+}
+
+TEST(Expand, DoubleContractReversedOverSumOnLeft)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* C = make_named_tensor(rl, "C", 2, {});
+    auto* sum_AB = make_sum(rl, {A, B});
+    auto* expr = make_double_contract_reversed(rl, sum_AB, C);
+
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(s->terms().size(), 2u);
+    EXPECT_NE(dynamic_cast<DoubleContractReversed*>(s->terms()[0]), nullptr);
+    EXPECT_NE(dynamic_cast<DoubleContractReversed*>(s->terms()[1]), nullptr);
+}
+
+TEST(Expand, DoubleContractReversedOverSumOnRight)
+{
+    auto rl = make_rl();
+    auto* A = make_named_tensor(rl, "A", 2, {});
+    auto* B = make_named_tensor(rl, "B", 2, {});
+    auto* C = make_named_tensor(rl, "C", 2, {});
+    auto* sum_AB = make_sum(rl, {A, B});
+    auto* expr = make_double_contract_reversed(rl, C, sum_AB);
+
+    auto history = Derivation{{expand_step()}}.apply(rl, State{expr});
+    auto* s = dynamic_cast<Sum*>(history[1].expr());
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(s->terms().size(), 2u);
+}
