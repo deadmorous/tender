@@ -1044,7 +1044,12 @@ Product::Product(Expr* lhs, Expr* rhs) : lhs_(lhs), rhs_(rhs)
 
 auto Product::latex() const -> std::string
 {
-    return lhs_->latex() + " \\cdot " + rhs_->latex();
+    // Scalar × scalar: juxtapose with a space; wrap Sum operands in parens.
+    auto wrap = [](Expr const* e) -> std::string {
+        return dynamic_cast<Sum const*>(e) ? "(" + e->latex() + ")" :
+                                             e->latex();
+    };
+    return wrap(lhs_) + " " + wrap(rhs_);
 }
 
 auto Product::python() const -> std::string

@@ -89,7 +89,7 @@ TEST(Product, Latex)
     auto* x = make_parameter(rl, "x");
     auto* y = make_parameter(rl, "y");
     auto* pr = make_product(rl, x, y);
-    EXPECT_EQ(pr->latex(), "x \\cdot y");
+    EXPECT_EQ(pr->latex(), "x y");
 }
 
 TEST(Product, Python)
