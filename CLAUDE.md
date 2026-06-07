@@ -12,6 +12,19 @@ Tensor algebra library for computational mechanics, using direct (coordinate-fre
 6. **Keep code DRY.** Don't repeat yourself — shared logic lives in one place.
 7. **Minimise dependencies.** Reinventing a small wheel is fine; it keeps the codebase stable and predictable. Large dependencies are taken on only when the alternative is unreasonable.
 
+## Before committing
+
+- **Run clang-format** on all changed C++ files before every commit.
+  A `.clang-format` file is at the repo root.  Format everything under `src/`,
+  `tests/`, `benchmarks/`, and `python/`:
+  ```bash
+  find src tests benchmarks python -name "*.cpp" -o -name "*.hpp" \
+    | xargs clang-format -i
+  ```
+- **Strip Jupyter notebooks** — no outputs or execution counts in the repo.
+  Use `examples/strip_notebooks.sh` (or `nbstripout <file>`) before staging
+  any `.ipynb`.  The CI `notebooks-clean` job enforces this.
+
 ## Conversation log
 
 All notable design discussions and decisions are recorded in `vibes/` as Markdown files.

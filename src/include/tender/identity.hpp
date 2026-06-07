@@ -105,8 +105,10 @@ auto apply_identity(Identity const& id, PatternMapping const& mapping)
 
 // Returns the RHS expression with pattern variables substituted by mapping.
 // No rank/constraint validation — caller is responsible.
-auto apply_rhs(ResourceList& rl, Identity const& id, PatternMapping const& mapping)
-    -> Expr*;
+auto apply_rhs(
+    ResourceList& rl,
+    Identity const& id,
+    PatternMapping const& mapping) -> Expr*;
 
 // ===========================================================================
 // Factory
