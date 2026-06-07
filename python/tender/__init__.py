@@ -102,6 +102,9 @@ from ._tender import (
     _capture_step,
     declare_symmetric,
     declare_skew_symmetric,
+    simplify_basis_dot_step,
+    collect_zero_terms_step,
+    reassemble_from_components_step,
     # Singleton getters (private)
     _identity_singleton,
     _levi_civita_singleton,
@@ -119,6 +122,54 @@ wcs = _wcs_singleton()
 cylindrical_cs = _cylindrical_cs_singleton()
 spherical_cs = _spherical_cs_singleton()
 nabla = Nabla()
+
+def expand_in_basis_step(tensor_expr, cs, covariant=True):
+    """Create a DerivationStep that replaces tensor_expr with its basis expansion.
+
+    For rank-1 covariant (default):   a  →  a^1 e_1 + a^2 e_2 + a^3 e_3
+    For rank-1 contravariant:         a  →  a_1 e^1 + a_2 e^2 + a_3 e^3
+    For rank-2 covariant:             A  →  Σ_{i,j} A^{ij} e_i ⊗ e_j
+
+    Component scalars are fresh NamedTensors named  <sym>^<i>  (upper) or
+    <sym>_<i>  (lower), using 1-based index labels.
+
+    tensor_expr must be a NamedTensor.
+    """
+    sym = tensor_expr.symbol
+    r = tensor_expr.rank
+    dim = cs.dim
+
+    if r == 1:
+        if covariant:
+            comps = [tensor(f"{sym}^{i + 1}") for i in range(dim)]
+            vecs = [cs.basis(i) for i in range(dim)]
+        else:
+            comps = [tensor(f"{sym}_{i + 1}") for i in range(dim)]
+            vecs = [cs.cobasis(i) for i in range(dim)]
+        terms = [c * v for c, v in zip(comps, vecs)]
+    elif r == 2:
+        if covariant:
+            def _fmt(i, j):
+                return f"{sym}^{{{i + 1}{j + 1}}}"
+        else:
+            def _fmt(i, j):
+                return f"{sym}_{{{i + 1}{j + 1}}}"
+        terms = [
+            tensor(_fmt(i, j)) * (cs.basis(i) * cs.basis(j))
+            for i in range(dim)
+            for j in range(dim)
+        ]
+    else:
+        raise ValueError(
+            f"expand_in_basis_step: unsupported rank {r} "
+            f"(only rank 1 and 2 are supported)"
+        )
+
+    expansion = terms[0]
+    for t in terms[1:]:
+        expansion = expansion + t
+    return substitute_step(tensor_expr, expansion)
+
 
 def doc(entry, format="latex"):
     """Render an Identity (or future Theorem) as LaTeX, plain text, or Jupyter math.
@@ -350,6 +401,8 @@ __all__ = [
     "substitute_step", "diff_step",
     "apply_integration_by_parts_step", "apply_divergence_theorem_step",
     "localize_step", "collect_step",
+    "expand_in_basis_step", "simplify_basis_dot_step",
+    "collect_zero_terms_step", "reassemble_from_components_step",
     "apply_identity", "find_matches", "apply_identity_auto", "matches_at_root",
     "search_apply",
     "declare_symmetric", "declare_skew_symmetric",

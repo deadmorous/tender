@@ -1,5 +1,5 @@
 """tender.lib.identities — standard algebraic identities."""
 
-from . import epsilon, identity_tensor, functions
+from . import definitions, epsilon, functions, identity_tensor
 
-ALL = epsilon.ALL + identity_tensor.ALL + functions.ALL
+ALL = definitions.ALL + epsilon.ALL + identity_tensor.ALL + functions.ALL

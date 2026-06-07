@@ -19,6 +19,7 @@ foreach(_py
     tender/__init__.py
     tender/lib/__init__.py
     tender/lib/identities/__init__.py
+    tender/lib/identities/definitions.py
     tender/lib/identities/epsilon.py
     tender/lib/identities/identity_tensor.py
     tender/lib/identities/functions.py

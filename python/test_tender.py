@@ -742,3 +742,128 @@ def test_search_apply_exhausted():
     expr = dot(u, v)
     with pytest.raises(RuntimeError):
         search_apply(bac_cab, expr, rules=[], timeout=1.0)
+
+
+# ===========================================================================
+# Phase 13.2 — basis expansion steps
+# ===========================================================================
+
+def test_expand_in_basis_step_rank1_covariant():
+    from tender import expand_in_basis_step, Sum, TensorProduct
+    a = tensor("a", 1)
+    step = expand_in_basis_step(a, wcs, covariant=True)
+    result = step.apply(State(a)).expr
+    assert isinstance(result, Sum)
+    assert len(result.terms) == 3
+    for term in result.terms:
+        assert isinstance(term, TensorProduct)
+        assert term.lhs.rank == 0   # scalar component
+        assert term.rhs.rank == 1   # basis vector
+
+
+def test_expand_in_basis_step_rank1_contravariant():
+    from tender import expand_in_basis_step, Sum, TensorProduct
+    a = tensor("a", 1)
+    step = expand_in_basis_step(a, wcs, covariant=False)
+    result = step.apply(State(a)).expr
+    assert isinstance(result, Sum)
+    assert len(result.terms) == 3
+
+
+def test_expand_in_basis_step_rank2():
+    from tender import expand_in_basis_step, Sum
+    A = tensor("A", 2)
+    step = expand_in_basis_step(A, wcs, covariant=True)
+    result = step.apply(State(A)).expr
+    assert isinstance(result, Sum)
+    assert len(result.terms) == 9   # 3x3 components
+
+
+def test_expand_in_basis_step_bad_rank_raises():
+    from tender import expand_in_basis_step
+    T = tensor("T", 3)
+    with pytest.raises(ValueError):
+        expand_in_basis_step(T, wcs)
+
+
+def test_simplify_basis_dot_step_diagonal():
+    from tender import simplify_basis_dot_step, RationalConst
+    e0 = wcs.basis(0)
+    expr = dot(e0, e0)
+    step = simplify_basis_dot_step(wcs)
+    result = step.apply(State(expr)).expr
+    assert isinstance(result, RationalConst)
+    assert result.value == Rational(1)
+
+
+def test_simplify_basis_dot_step_off_diagonal():
+    from tender import simplify_basis_dot_step, RationalConst
+    e0 = wcs.basis(0)
+    e1 = wcs.basis(1)
+    expr = dot(e0, e1)
+    step = simplify_basis_dot_step(wcs)
+    result = step.apply(State(expr)).expr
+    assert isinstance(result, RationalConst)
+    assert result.value == Rational(0)
+
+
+def test_collect_zero_terms_step():
+    from tender import collect_zero_terms_step, rational, Sum
+    a = tensor("a", 1)
+    b = tensor("b", 1)
+    zero = rational(0)
+    # Build sum manually: a + 0 + b + 0
+    expr = a + zero + b + zero
+    step = collect_zero_terms_step()
+    result = step.apply(State(expr)).expr
+    assert isinstance(result, Sum)
+    assert len(result.terms) == 2
+
+
+def test_reassemble_from_components_step_identity():
+    from tender import reassemble_from_components_step, IdentityTensor, tp
+    e0, e1, e2 = wcs.basis(0), wcs.basis(1), wcs.basis(2)
+    identity_sum = tp(e0, e0) + tp(e1, e1) + tp(e2, e2)
+    step = reassemble_from_components_step(wcs)
+    result = step.apply(State(identity_sum)).expr
+    assert isinstance(result, IdentityTensor)
+
+
+def test_dot_commutativity_pipeline():
+    """Full a·b = b·a derivation via component expansion in WCS."""
+    from tender import expand_in_basis_step, simplify_basis_dot_step
+    from tender import collect_zero_terms_step, expand_step, Sum, Product
+
+    a = tensor("a", 1)
+    b = tensor("b", 1)
+    expr = dot(a, b)
+
+    steps = [
+        expand_in_basis_step(a, wcs, covariant=True),
+        expand_in_basis_step(b, wcs, covariant=False),
+        expand_step(),
+        simplify_basis_dot_step(wcs),
+        collect_zero_terms_step(),
+    ]
+    history = Derivation(steps).apply(State(expr))
+    result = history[-1].expr
+
+    # Result should be a sum of 3 scalar products a^i * b_i
+    assert isinstance(result, Sum)
+    assert len(result.terms) == 3
+    for term in result.terms:
+        assert isinstance(term, Product)
+        assert term.lhs.rank == 0
+        assert term.rhs.rank == 0
+
+
+def test_definitions_library():
+    from tender.lib.identities.definitions import (
+        tp_contract_right, tp_contract_left, trace_dyad,
+        identity_vec, cross_def, scalar_comm, ALL,
+    )
+    assert len(ALL) == 6
+    names = {id_.name for id_ in ALL}
+    assert "tp-contract-right" in names
+    assert "scalar-comm" in names
+    assert "cross-def" in names

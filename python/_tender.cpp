@@ -719,6 +719,19 @@ NB_MODULE(_tender, m)
     m.def("collect_step", [](Expr* v) { return collect_step(v); }, "v"_a);
 
     m.def(
+        "simplify_basis_dot_step",
+        [](CoordSystem const* cs) { return simplify_basis_dot_step(*cs); },
+        "cs"_a);
+
+    m.def("collect_zero_terms_step", &collect_zero_terms_step);
+
+    m.def(
+        "reassemble_from_components_step",
+        [](CoordSystem const* cs)
+        { return reassemble_from_components_step(*cs); },
+        "cs"_a);
+
+    m.def(
         "apply_identity",
         [](Identity const& id, nb::dict mapping)
         {
