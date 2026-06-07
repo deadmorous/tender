@@ -832,6 +832,61 @@ NB_MODULE(_tender, m)
         "expr"_a);
 
     // =======================================================================
+    // IndexedSum node
+    // =======================================================================
+    nb::class_<IndexedSum, Expr>(m, "IndexedSum")
+        .def_prop_ro("lhs_sym", [](IndexedSum const* n) { return n->lhs_sym(); })
+        .def_prop_ro("lhs_sep", [](IndexedSum const* n) { return n->lhs_sep(); })
+        .def_prop_ro("rhs_sym", [](IndexedSum const* n) { return n->rhs_sym(); })
+        .def_prop_ro("rhs_sep", [](IndexedSum const* n) { return n->rhs_sep(); })
+        .def_prop_ro(
+            "index_letter",
+            [](IndexedSum const* n) { return n->index_letter(); });
+
+    m.def(
+        "make_indexed_sum",
+        [](std::string lhs_sym,
+           std::string lhs_sep,
+           std::string rhs_sym,
+           std::string rhs_sep,
+           std::string index_letter,
+           int rank) -> Expr*
+        {
+            return make_indexed_sum(
+                g_rl,
+                std::move(lhs_sym),
+                std::move(lhs_sep),
+                std::move(rhs_sym),
+                std::move(rhs_sep),
+                std::move(index_letter),
+                rank);
+        },
+        nb::rv_policy::reference,
+        "lhs_sym"_a,
+        "lhs_sep"_a,
+        "rhs_sym"_a,
+        "rhs_sep"_a,
+        "index_letter"_a,
+        "rank"_a = 0);
+
+    m.def(
+        "collect_repeated_sum_step",
+        [](CoordSystem const* cs, std::string index_letter)
+        { return collect_repeated_sum_step(*cs, std::move(index_letter)); },
+        "cs"_a,
+        "index_letter"_a = std::string{});
+
+    m.def(
+        "reassemble_vector_step",
+        [](CoordSystem const* cs) { return reassemble_vector_step(*cs); },
+        "cs"_a);
+
+    m.def(
+        "reassemble_dot_step",
+        [](CoordSystem const* cs) { return reassemble_dot_step(*cs); },
+        "cs"_a);
+
+    // =======================================================================
     // Singleton getters — called once from __init__.py to create module attrs
     // =======================================================================
     m.def(

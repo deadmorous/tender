@@ -3,6 +3,11 @@
 #include <tender/expr.hpp>
 #include <tender/integral.hpp>
 
+#include <algorithm>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace tender
@@ -371,6 +376,396 @@ auto reassemble_from_components_step(CoordSystem const& cs) -> DerivationStep
         "reassemble_from_components",
         [&cs](ResourceList& rl, Expr* e) -> Expr*
         { return reassemble_impl(rl, e, cs); }};
+}
+
+// ===========================================================================
+// collect_repeated_sum_step
+// ===========================================================================
+
+struct ComponentInfo
+{
+    std::string base;
+    std::string sep; // "^" or "_"
+    int idx;         // 1-based integer suffix
+};
+
+static auto parse_component(std::string const& sym)
+    -> std::optional<ComponentInfo>
+{
+    auto try_split = [&](char delim) -> std::optional<ComponentInfo>
+    {
+        auto pos = sym.find(delim);
+        if (pos == std::string::npos)
+            return std::nullopt;
+        std::string base = sym.substr(0, pos);
+        std::string suffix = sym.substr(pos + 1);
+        if (base.empty() || suffix.empty())
+            return std::nullopt;
+        if (!std::all_of(suffix.begin(), suffix.end(), ::isdigit))
+            return std::nullopt;
+        try
+        {
+            int idx = std::stoi(suffix);
+            return ComponentInfo{base, std::string(1, delim), idx};
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    };
+
+    if (auto r = try_split('^'))
+        return r;
+    return try_split('_');
+}
+
+static auto collect_used_index_letters(Expr* e) -> std::set<std::string>
+{
+    std::set<std::string> result;
+    if (!e)
+        return result;
+
+    if (auto* es = dynamic_cast<ExplicitSum*>(e))
+    {
+        result.insert(es->index()->letter());
+        auto sub = collect_used_index_letters(es->body());
+        result.insert(sub.begin(), sub.end());
+    }
+    else if (auto* is = dynamic_cast<IndexedSum*>(e))
+    {
+        result.insert(is->index_letter());
+    }
+    else if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        for (auto* t: s->terms())
+        {
+            auto sub = collect_used_index_letters(t);
+            result.insert(sub.begin(), sub.end());
+        }
+    }
+    else if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        auto l = collect_used_index_letters(tp->lhs());
+        auto r = collect_used_index_letters(tp->rhs());
+        result.insert(l.begin(), l.end());
+        result.insert(r.begin(), r.end());
+    }
+    else if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        auto l = collect_used_index_letters(co->lhs());
+        auto r = collect_used_index_letters(co->rhs());
+        result.insert(l.begin(), l.end());
+        result.insert(r.begin(), r.end());
+    }
+    else if (auto* pr = dynamic_cast<Product*>(e))
+    {
+        auto l = collect_used_index_letters(pr->lhs());
+        auto r = collect_used_index_letters(pr->rhs());
+        result.insert(l.begin(), l.end());
+        result.insert(r.begin(), r.end());
+    }
+    else if (auto* sc = dynamic_cast<Scale*>(e))
+    {
+        auto sub = collect_used_index_letters(sc->expr());
+        result.insert(sub.begin(), sub.end());
+    }
+    return result;
+}
+
+static auto pick_index_letter(Expr* e, std::string const& requested)
+    -> std::string
+{
+    static char const candidates[] = "ijklmnpqrs";
+    auto used = collect_used_index_letters(e);
+
+    if (!requested.empty())
+    {
+        if (used.count(requested))
+            throw std::invalid_argument(
+                "collect_repeated_sum_step: index letter '" + requested
+                + "' is already in use");
+        return requested;
+    }
+
+    for (char c: candidates)
+    {
+        std::string letter(1, c);
+        if (!used.count(letter))
+            return letter;
+    }
+    throw std::runtime_error(
+        "collect_repeated_sum_step: all candidate index letters exhausted");
+}
+
+static auto collect_repeated_sum_impl(
+    ResourceList& rl,
+    Expr* e,
+    CoordSystem const& cs,
+    std::string const& letter) -> Expr*
+{
+    auto* s = dynamic_cast<Sum*>(e);
+    if (!s || static_cast<int>(s->terms().size()) != cs.dim())
+        return e;
+
+    // Parse each term as Product(NamedTensor(rank=0), NamedTensor(rank=0))
+    struct TermData
+    {
+        ComponentInfo lhs;
+        ComponentInfo rhs;
+    };
+    std::vector<TermData> data;
+    data.reserve(cs.dim());
+
+    for (auto* term: s->terms())
+    {
+        auto* pr = dynamic_cast<Product*>(term);
+        if (!pr)
+            return e;
+        auto* lhs_nt = dynamic_cast<NamedTensor*>(pr->lhs());
+        auto* rhs_nt = dynamic_cast<NamedTensor*>(pr->rhs());
+        if (!lhs_nt || lhs_nt->rank() != 0 || !rhs_nt || rhs_nt->rank() != 0)
+            return e;
+        auto lc = parse_component(lhs_nt->symbol());
+        auto rc = parse_component(rhs_nt->symbol());
+        if (!lc || !rc)
+            return e;
+        data.push_back({*lc, *rc});
+    }
+
+    // Consistency: same base/sep across all terms; paired indices must match
+    std::string const& lb = data[0].lhs.base;
+    std::string const& ls = data[0].lhs.sep;
+    std::string const& rb = data[0].rhs.base;
+    std::string const& rs = data[0].rhs.sep;
+
+    for (auto const& d: data)
+    {
+        if (d.lhs.base != lb || d.lhs.sep != ls)
+            return e;
+        if (d.rhs.base != rb || d.rhs.sep != rs)
+            return e;
+        if (d.lhs.idx != d.rhs.idx)
+            return e;
+    }
+
+    // Indices must cover {1..dim} exactly (any order)
+    std::vector<bool> seen(cs.dim() + 1, false);
+    for (auto const& d: data)
+    {
+        if (d.lhs.idx < 1 || d.lhs.idx > cs.dim())
+            return e;
+        if (seen[d.lhs.idx])
+            return e;
+        seen[d.lhs.idx] = true;
+    }
+
+    return make_indexed_sum(rl, lb, ls, rb, rs, letter, 0);
+}
+
+auto collect_repeated_sum_step(CoordSystem const& cs, std::string index_letter)
+    -> DerivationStep
+{
+    return DerivationStep{
+        "collect_repeated_sum",
+        [&cs, req = std::move(index_letter)](ResourceList& rl, Expr* e) -> Expr*
+        {
+            std::string letter = pick_index_letter(e, req);
+            return collect_repeated_sum_impl(rl, e, cs, letter);
+        }};
+}
+
+// ===========================================================================
+// reassemble_vector_step
+// ===========================================================================
+
+// Try to match e as Sum of dim TensorProduct(component_scalar, basis_vector)
+// terms.  Returns a fresh NamedTensor(base, rank=1) on match, nullptr on miss.
+// The separator ("^" or "_") in the component symbol determines covariance:
+//   "^" (upper) → matched against cs.basis(k)
+//   "_" (lower) → matched against cs.cobasis(k)
+static auto try_match_vector_sum(
+    ResourceList& rl, Expr* e, CoordSystem const& cs) -> Expr*
+{
+    auto* s = dynamic_cast<Sum*>(e);
+    if (!s || static_cast<int>(s->terms().size()) != cs.dim())
+        return nullptr;
+
+    struct TermData
+    {
+        ComponentInfo comp;
+        int basis_idx; // 0-based
+    };
+    std::vector<TermData> data;
+    data.reserve(cs.dim());
+
+    for (auto* term: s->terms())
+    {
+        auto* tp = dynamic_cast<TensorProduct*>(term);
+        if (!tp)
+            return nullptr;
+        auto* comp_nt = dynamic_cast<NamedTensor*>(tp->lhs());
+        if (!comp_nt || comp_nt->rank() != 0)
+            return nullptr;
+        auto comp = parse_component(comp_nt->symbol());
+        if (!comp)
+            return nullptr;
+
+        // Use the separator to choose basis vs cobasis
+        int bidx = -1;
+        for (int i = 0; i < cs.dim(); ++i)
+        {
+            Expr* expected = (comp->sep == "^") ? cs.basis(i) : cs.cobasis(i);
+            if (tp->rhs() == expected)
+            {
+                bidx = i;
+                break;
+            }
+        }
+        if (bidx < 0)
+            return nullptr;
+
+        data.push_back({*comp, bidx});
+    }
+
+    // Consistency: same base and sep across all terms
+    std::string const& base = data[0].comp.base;
+    std::string const& sep = data[0].comp.sep;
+
+    for (auto const& d: data)
+    {
+        if (d.comp.base != base || d.comp.sep != sep)
+            return nullptr;
+        // Component index (1-based) must equal basis index (0-based) + 1
+        if (d.comp.idx != d.basis_idx + 1)
+            return nullptr;
+    }
+
+    // Indices must cover {0..dim-1} exactly
+    std::vector<bool> seen(cs.dim(), false);
+    for (auto const& d: data)
+    {
+        if (seen[d.basis_idx])
+            return nullptr;
+        seen[d.basis_idx] = true;
+    }
+
+    return make_named_tensor(rl, base, 1, {});
+}
+
+static auto reassemble_vector_impl(
+    ResourceList& rl, Expr* e, CoordSystem const& cs) -> Expr*
+{
+    // Try to match the current node first.
+    if (auto* v = try_match_vector_sum(rl, e, cs))
+        return v;
+
+    // Otherwise recurse into known compound nodes.
+    if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        std::vector<Expr*> terms;
+        terms.reserve(s->terms().size());
+        bool changed = false;
+        for (auto* t: s->terms())
+        {
+            auto* r = reassemble_vector_impl(rl, t, cs);
+            if (r != t)
+                changed = true;
+            terms.push_back(r);
+        }
+        return changed ? make_sum(rl, std::move(terms)) : e;
+    }
+    if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        auto* l = reassemble_vector_impl(rl, tp->lhs(), cs);
+        auto* r = reassemble_vector_impl(rl, tp->rhs(), cs);
+        return (l == tp->lhs() && r == tp->rhs()) ?
+                   e :
+                   make_tensor_product(rl, l, r);
+    }
+    if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        auto* l = reassemble_vector_impl(rl, co->lhs(), cs);
+        auto* r = reassemble_vector_impl(rl, co->rhs(), cs);
+        return (l == co->lhs() && r == co->rhs()) ? e : make_contract(rl, l, r);
+    }
+    if (auto* sc = dynamic_cast<Scale*>(e))
+    {
+        auto* inner = reassemble_vector_impl(rl, sc->expr(), cs);
+        return inner == sc->expr() ? e : make_scale(rl, sc->coeff(), inner);
+    }
+    return e;
+}
+
+auto reassemble_vector_step(CoordSystem const& cs) -> DerivationStep
+{
+    return DerivationStep{
+        "reassemble_vector", [&cs](ResourceList& rl, Expr* e) -> Expr* {
+            return reassemble_vector_impl(rl, e, cs);
+        }};
+}
+
+// ===========================================================================
+// reassemble_dot_step
+// ===========================================================================
+
+static auto reassemble_dot_impl(
+    ResourceList& rl, Expr* e, CoordSystem const& cs) -> Expr*
+{
+    if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        auto* l = try_match_vector_sum(rl, co->lhs(), cs);
+        auto* r = try_match_vector_sum(rl, co->rhs(), cs);
+        if (l || r)
+        {
+            auto* new_lhs = l ? l : reassemble_dot_impl(rl, co->lhs(), cs);
+            auto* new_rhs = r ? r : reassemble_dot_impl(rl, co->rhs(), cs);
+            return make_contract(rl, new_lhs, new_rhs);
+        }
+        auto* rl2 = reassemble_dot_impl(rl, co->lhs(), cs);
+        auto* rr2 = reassemble_dot_impl(rl, co->rhs(), cs);
+        return (rl2 == co->lhs() && rr2 == co->rhs()) ?
+                   e :
+                   make_contract(rl, rl2, rr2);
+    }
+    if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        // Try vector match first, then recurse.
+        if (auto* v = try_match_vector_sum(rl, e, cs))
+            return v;
+        std::vector<Expr*> terms;
+        terms.reserve(s->terms().size());
+        bool changed = false;
+        for (auto* t: s->terms())
+        {
+            auto* r = reassemble_dot_impl(rl, t, cs);
+            if (r != t)
+                changed = true;
+            terms.push_back(r);
+        }
+        return changed ? make_sum(rl, std::move(terms)) : e;
+    }
+    if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        auto* l = reassemble_dot_impl(rl, tp->lhs(), cs);
+        auto* r = reassemble_dot_impl(rl, tp->rhs(), cs);
+        return (l == tp->lhs() && r == tp->rhs()) ?
+                   e :
+                   make_tensor_product(rl, l, r);
+    }
+    if (auto* sc = dynamic_cast<Scale*>(e))
+    {
+        auto* inner = reassemble_dot_impl(rl, sc->expr(), cs);
+        return inner == sc->expr() ? e : make_scale(rl, sc->coeff(), inner);
+    }
+    return e;
+}
+
+auto reassemble_dot_step(CoordSystem const& cs) -> DerivationStep
+{
+    return DerivationStep{
+        "reassemble_dot", [&cs](ResourceList& rl, Expr* e) -> Expr* {
+            return reassemble_dot_impl(rl, e, cs);
+        }};
 }
 
 } // namespace tender

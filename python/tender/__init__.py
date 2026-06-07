@@ -105,6 +105,12 @@ from ._tender import (
     simplify_basis_dot_step,
     collect_zero_terms_step,
     reassemble_from_components_step,
+    collect_repeated_sum_step,
+    reassemble_vector_step,
+    reassemble_dot_step,
+    # IndexedSum node
+    IndexedSum,
+    make_indexed_sum,
     # Singleton getters (private)
     _identity_singleton,
     _levi_civita_singleton,
@@ -310,6 +316,62 @@ def search_apply(target, expr, rules=None, timeout=5.0):
         f"no sequence found within the visited rule applications")
 
 
+def prove_equal_by_components(lhs_expr, rhs_expr, lhs_steps, rhs_steps):
+    """Prove lhs_expr == rhs_expr by expanding both to component form.
+
+    Applies ``lhs_steps`` to ``lhs_expr`` and ``rhs_steps`` to ``rhs_expr``,
+    then compares the terminal expressions.  Comparison is order-insensitive for
+    sums and commutative for scalar products (Product nodes).
+
+    Parameters
+    ----------
+    lhs_expr, rhs_expr : Expr
+        The two invariant expressions to compare.
+    lhs_steps, rhs_steps : list[DerivationStep]
+        Derivation steps that reduce each side to component form.
+
+    Returns
+    -------
+    tuple[list[State], list[State]]
+        ``(lhs_history, rhs_history)`` on success.
+
+    Raises
+    ------
+    ValueError
+        If the terminal component forms are not equal.
+    """
+    lhs_history = Derivation(lhs_steps).apply(State(lhs_expr))
+    rhs_history = Derivation(rhs_steps).apply(State(rhs_expr))
+    lhs_normal = _normalize_component_form(lhs_history[-1].expr)
+    rhs_normal = _normalize_component_form(rhs_history[-1].expr)
+    if lhs_normal != rhs_normal:
+        raise ValueError(
+            "Expressions do not reduce to the same component form:\n"
+            f"  lhs: {lhs_history[-1].expr.python()}\n"
+            f"  rhs: {rhs_history[-1].expr.python()}"
+        )
+    return lhs_history, rhs_history
+
+
+def _normalize_component_form(expr):
+    """Return a canonical string for component-form equality checks.
+
+    Sorts the terms of any Sum (order-insensitive) and treats Product as
+    commutative (sorted factors), so that ``a^k b_k`` and ``b_k a^k``
+    compare equal.
+    """
+    if isinstance(expr, Sum):
+        terms = sorted(_normalize_component_form(t) for t in expr.terms)
+        return "Sum[" + ",".join(terms) + "]"
+    if isinstance(expr, Product):
+        factors = sorted([
+            _normalize_component_form(expr.lhs),
+            _normalize_component_form(expr.rhs),
+        ])
+        return "Prod[" + "*".join(factors) + "]"
+    return expr.python()
+
+
 def _label_to_math(label):
     """Render a step label as a LaTeX math-mode fragment.
 
@@ -406,6 +468,9 @@ __all__ = [
     "localize_step", "collect_step",
     "expand_in_basis_step", "simplify_basis_dot_step",
     "collect_zero_terms_step", "reassemble_from_components_step",
+    "collect_repeated_sum_step", "reassemble_vector_step", "reassemble_dot_step",
+    "IndexedSum", "make_indexed_sum",
+    "prove_equal_by_components",
     "apply_identity", "find_matches", "apply_identity_auto", "matches_at_root",
     "search_apply",
     "declare_symmetric", "declare_skew_symmetric",

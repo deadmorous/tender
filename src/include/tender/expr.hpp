@@ -328,6 +328,57 @@ private:
     int rank_;
 };
 
+// Display-only terminal node for Einstein indexed-sum notation.
+// Renders e.g. "a^{i} b_{i}" from base symbols and separator characters.
+// Not rewritten by any rule; produced by collect_repeated_sum_step.
+class IndexedSum : public Expr
+{
+public:
+    IndexedSum(
+        std::string lhs_sym,
+        std::string lhs_sep,
+        std::string rhs_sym,
+        std::string rhs_sep,
+        std::string index_letter,
+        int rank);
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return rank_;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+
+    [[nodiscard]] auto lhs_sym() const noexcept -> std::string const&
+    {
+        return lhs_sym_;
+    }
+    [[nodiscard]] auto lhs_sep() const noexcept -> std::string const&
+    {
+        return lhs_sep_;
+    }
+    [[nodiscard]] auto rhs_sym() const noexcept -> std::string const&
+    {
+        return rhs_sym_;
+    }
+    [[nodiscard]] auto rhs_sep() const noexcept -> std::string const&
+    {
+        return rhs_sep_;
+    }
+    [[nodiscard]] auto index_letter() const noexcept -> std::string const&
+    {
+        return index_letter_;
+    }
+
+private:
+    std::string lhs_sym_;
+    std::string lhs_sep_;
+    std::string rhs_sym_;
+    std::string rhs_sep_;
+    std::string index_letter_;
+    int rank_;
+};
+
 // Result of convolve(): pairs one slot from lhs with one slot from rhs.
 // Rank = lhs.rank() + rhs.rank() − 2.
 class Contraction : public Expr
@@ -770,6 +821,14 @@ auto make_named_tensor(
     ResourceList& rl, std::string sym, int rank, SlotList slots) -> Expr*;
 auto make_explicit_sum(ResourceList& rl, Expr* body, Index* index) -> Expr*;
 auto make_no_sum(ResourceList& rl, Expr* body, Index* index) -> Expr*;
+auto make_indexed_sum(
+    ResourceList& rl,
+    std::string lhs_sym,
+    std::string lhs_sep,
+    std::string rhs_sym,
+    std::string rhs_sep,
+    std::string index_letter,
+    int rank) -> Expr*;
 
 // Pair slot_a from a with slot_b from b. Exactly one slot must be Upper and
 // the other Lower; throws std::invalid_argument on level mismatch or

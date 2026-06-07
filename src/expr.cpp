@@ -525,6 +525,62 @@ auto NoSum::python() const -> std::string
 }
 
 // ===========================================================================
+// IndexedSum
+// ===========================================================================
+
+IndexedSum::IndexedSum(
+    std::string lhs_sym,
+    std::string lhs_sep,
+    std::string rhs_sym,
+    std::string rhs_sep,
+    std::string index_letter,
+    int rank) :
+  lhs_sym_(std::move(lhs_sym)),
+  lhs_sep_(std::move(lhs_sep)),
+  rhs_sym_(std::move(rhs_sym)),
+  rhs_sep_(std::move(rhs_sep)),
+  index_letter_(std::move(index_letter)),
+  rank_(rank)
+{
+}
+
+auto IndexedSum::latex() const -> std::string
+{
+    auto part = [&](std::string const& sym,
+                    std::string const& sep) -> std::string
+    {
+        std::string base = sym_to_latex(sym);
+        return sep == "^" ? base + "^{" + index_letter_ + "}" :
+                            base + "_{" + index_letter_ + "}";
+    };
+    return part(lhs_sym_, lhs_sep_) + " " + part(rhs_sym_, rhs_sep_);
+}
+
+auto IndexedSum::python() const -> std::string
+{
+    return "indexed_sum('" + lhs_sym_ + "', '" + lhs_sep_ + "', '" + rhs_sym_
+           + "', '" + rhs_sep_ + "', '" + index_letter_ + "')";
+}
+
+auto make_indexed_sum(
+    ResourceList& rl,
+    std::string lhs_sym,
+    std::string lhs_sep,
+    std::string rhs_sym,
+    std::string rhs_sep,
+    std::string index_letter,
+    int rank) -> Expr*
+{
+    return rl.make<IndexedSum>(
+        std::move(lhs_sym),
+        std::move(lhs_sep),
+        std::move(rhs_sym),
+        std::move(rhs_sep),
+        std::move(index_letter),
+        rank);
+}
+
+// ===========================================================================
 // Contraction
 // ===========================================================================
 
