@@ -321,7 +321,9 @@ def _label_to_math(label):
 
     if "\\" not in label:
         # No LaTeX commands — use text mode directly.
-        return r"\text{[" + label + r":] }"
+        # Escape ^ and _ so they render literally inside \text{} in display math.
+        safe = label.replace("_", r"\_").replace("^", r"\^{}")
+        return r"\text{[" + safe + r":] }"
 
     # Match \command sequences first (pass through), then bare alpha runs
     # (wrap in \mathrm{}).  The alternation consumes \partial as one token,
@@ -349,6 +351,7 @@ def to_latex_document(history, title=None):
     """
     lines = [
         r"\documentclass{article}",
+        r"\usepackage[utf8]{inputenc}",
         r"\usepackage{amsmath,amssymb}",
         r"\begin{document}",
     ]

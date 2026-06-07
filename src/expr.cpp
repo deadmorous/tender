@@ -19,6 +19,17 @@ static auto sym_to_latex(std::string const& sym) -> std::string
     // so that e.g. \boldsymbol{\sigma} is not wrapped in \text{}.
     if (sym.find('\\') != std::string::npos)
         return sym;
+    // Component notation: "a^1" → "a^{1}", "b_1" → "b_{1}".
+    // Splitting at ^ / _ keeps them in math mode, avoiding pdflatex's
+    // rejection of ^ inside \text{} in display math.
+    auto hat = sym.find('^');
+    if (hat != std::string::npos)
+        return sym_to_latex(sym.substr(0, hat)) + "^{" + sym.substr(hat + 1)
+               + "}";
+    auto us = sym.find('_');
+    if (us != std::string::npos)
+        return sym_to_latex(sym.substr(0, us)) + "_{" + sym.substr(us + 1)
+               + "}";
     return "\\text{" + sym + "}";
 }
 

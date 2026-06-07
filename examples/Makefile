@@ -22,29 +22,19 @@ OUTDIR   := out
 
 PYTHONPATH_VAR := PYTHONPATH=$(BUILD)/python
 
-EXAMPLES := pvw_continuum bac_cab bac_cab_search
+EXAMPLES := pvw_continuum bac_cab bac_cab_search dot_commutativity
 
-.PHONY: all $(EXAMPLES) clean
+.PHONY: all clean
 
 all: $(EXAMPLES)
 
 $(OUTDIR):
 	mkdir -p $(OUTDIR)
 
-pvw_continuum: | $(OUTDIR)
-	$(PYTHONPATH_VAR) $(PYTHON) pvw_continuum.py
-	$(PDFLATEX) -interaction=nonstopmode -output-directory=$(OUTDIR) $(OUTDIR)/pvw_continuum.tex
-	@$(VIEWER) $(OUTDIR)/pvw_continuum.pdf 2>/dev/null &
-
-bac_cab: | $(OUTDIR)
-	$(PYTHONPATH_VAR) $(PYTHON) bac_cab.py
-	$(PDFLATEX) -interaction=nonstopmode -output-directory=$(OUTDIR) $(OUTDIR)/bac_cab.tex
-	@$(VIEWER) $(OUTDIR)/bac_cab.pdf 2>/dev/null &
-
-bac_cab_search: | $(OUTDIR)
-	$(PYTHONPATH_VAR) $(PYTHON) bac_cab_search.py
-	$(PDFLATEX) -interaction=nonstopmode -output-directory=$(OUTDIR) $(OUTDIR)/bac_cab_search.tex
-	@$(VIEWER) $(OUTDIR)/bac_cab_search.pdf 2>/dev/null &
+%: %.py | $(OUTDIR)
+	$(PYTHONPATH_VAR) $(PYTHON) $<
+	$(PDFLATEX) -interaction=nonstopmode -output-directory=$(OUTDIR) $(OUTDIR)/$@.tex
+	@$(VIEWER) $(OUTDIR)/$@.pdf 2>/dev/null &
 
 clean:
 	rm -rf $(OUTDIR)

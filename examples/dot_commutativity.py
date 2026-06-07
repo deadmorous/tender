@@ -9,6 +9,7 @@ No commutativity is assumed; the result follows from the fact that the final
 component sum a^1 b_1 + a^2 b_2 + a^3 b_3 is symmetric in a and b.
 """
 
+import pathlib
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'build', 'python'))
 
@@ -19,7 +20,7 @@ from tender import (
     expand_step, expand_in_basis_step,
     simplify_basis_dot_step,
     collect_zero_terms_step,
-    show,
+    show, to_latex_document,
 )
 
 # Vectors
@@ -52,3 +53,14 @@ print("\nFinal result:")
 print(" ", result.latex())
 print("\nThe expression a^1 b_1 + a^2 b_2 + a^3 b_3 is manifestly symmetric")
 print("in the components of a and b, proving a·b = b·a. ∎")
+
+tex = to_latex_document(
+    history,
+    title="Dot-product commutativity — proof from first principles",
+)
+out_dir = pathlib.Path(__file__).parent / "out"
+out_dir.mkdir(exist_ok=True)
+out = out_dir / "dot_commutativity.tex"
+out.write_text(tex)
+print(f"\nLaTeX document written to {out}")
+print("Compile with: pdflatex -output-directory out out/dot_commutativity.tex")
