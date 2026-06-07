@@ -111,6 +111,9 @@ from ._tender import (
     # IndexedSum node
     IndexedSum,
     make_indexed_sum,
+    # SymBasisVec node
+    SymBasisVec,
+    make_sym_basis_vec,
     # Singleton getters (private)
     _identity_singleton,
     _levi_civita_singleton,
@@ -129,21 +132,41 @@ cylindrical_cs = _cylindrical_cs_singleton()
 spherical_cs = _spherical_cs_singleton()
 nabla = Nabla()
 
-def expand_in_basis_step(tensor_expr, cs, covariant=True):
+def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False, letter=None):
     """Create a DerivationStep that replaces tensor_expr with its basis expansion.
 
-    For rank-1 covariant (default):   a  →  a^1 e_1 + a^2 e_2 + a^3 e_3
-    For rank-1 contravariant:         a  →  a_1 e^1 + a_2 e^2 + a_3 e^3
-    For rank-2 covariant:             A  →  Σ_{i,j} A^{ij} e_i ⊗ e_j
+    Concrete mode (default, abstract=False):
+      rank-1 covariant:    a  →  a^1 e_1 + a^2 e_2 + a^3 e_3
+      rank-1 contravariant: a →  a_1 e^1 + a_2 e^2 + a_3 e^3
+      rank-2 covariant:    A  →  Σ_{i,j} A^{ij} e_i ⊗ e_j
 
-    Component scalars are fresh NamedTensors named  <sym>^<i>  (upper) or
-    <sym>_<i>  (lower), using 1-based index labels.
+    Abstract mode (abstract=True, rank-1 only):
+      covariant:    a  →  a^i e_i    (single TensorProduct with SymBasisVec)
+      contravariant: a →  a_j e^j
 
-    tensor_expr must be a NamedTensor.
+    In abstract mode, simplify_basis_dot_step collapses the dot product
+    directly to an IndexedSum (e.g. a^i b_i) without 9-term expansion.
+
+    letter: index letter for abstract mode (default: "i" for covariant,
+            "j" for contravariant).  Ignored in concrete mode.
     """
     sym = tensor_expr.symbol
     r = tensor_expr.rank
     dim = cs.dim
+
+    if abstract:
+        if r != 1:
+            raise ValueError(
+                f"expand_in_basis_step: abstract mode only supports rank 1, got {r}"
+            )
+        ltr = letter or ("i" if covariant else "j")
+        if covariant:
+            comp = tensor(f"{sym}^{ltr}")
+            vec = make_sym_basis_vec(cs, ltr, False)
+        else:
+            comp = tensor(f"{sym}_{ltr}")
+            vec = make_sym_basis_vec(cs, ltr, True)
+        return substitute_step(tensor_expr, comp * vec)
 
     if r == 1:
         if covariant:
@@ -359,7 +382,14 @@ def _normalize_component_form(expr):
     Sorts the terms of any Sum (order-insensitive) and treats Product as
     commutative (sorted factors), so that ``a^k b_k`` and ``b_k a^k``
     compare equal.
+
+    IndexedSum nodes are normalised letter-invariantly: ``a^i b_i`` and
+    ``a^j b_j`` are considered equal, and factor order is ignored so that
+    ``a^i b_i`` and ``b_i a^i`` compare equal.
     """
+    if isinstance(expr, IndexedSum):
+        parts = sorted([(expr.lhs_sym, expr.lhs_sep), (expr.rhs_sym, expr.rhs_sep)])
+        return "IndexedSum[" + ",".join(f"{s}{p}" for s, p in parts) + "]"
     if isinstance(expr, Sum):
         terms = sorted(_normalize_component_form(t) for t in expr.terms)
         return "Sum[" + ",".join(terms) + "]"
@@ -470,6 +500,7 @@ __all__ = [
     "collect_zero_terms_step", "reassemble_from_components_step",
     "collect_repeated_sum_step", "reassemble_vector_step", "reassemble_dot_step",
     "IndexedSum", "make_indexed_sum",
+    "SymBasisVec", "make_sym_basis_vec",
     "prove_equal_by_components",
     "apply_identity", "find_matches", "apply_identity_auto", "matches_at_root",
     "search_apply",

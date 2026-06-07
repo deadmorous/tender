@@ -1,5 +1,7 @@
 #include <tender/expr.hpp>
 
+#include <tender/coord_system.hpp>
+
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -578,6 +580,38 @@ auto make_indexed_sum(
         std::move(rhs_sep),
         std::move(index_letter),
         rank);
+}
+
+// ===========================================================================
+// SymBasisVec
+// ===========================================================================
+
+SymBasisVec::SymBasisVec(
+    CoordSystem const& cs, std::string letter, bool cobasis) :
+  cs_(&cs), letter_(std::move(letter)), cobasis_(cobasis)
+{
+}
+
+auto SymBasisVec::latex() const -> std::string
+{
+    if (cobasis_)
+        return "\\mathbf{e}^{" + letter_ + "}";
+    return "\\mathbf{e}_{" + letter_ + "}";
+}
+
+auto SymBasisVec::python() const -> std::string
+{
+    return std::string("make_sym_basis_vec(cs, '") + letter_ + "', "
+           + (cobasis_ ? "True" : "False") + ")";
+}
+
+auto make_sym_basis_vec(
+    ResourceList& rl,
+    CoordSystem const& cs,
+    std::string letter,
+    bool cobasis) -> Expr*
+{
+    return rl.make<SymBasisVec>(cs, std::move(letter), cobasis);
 }
 
 // ===========================================================================

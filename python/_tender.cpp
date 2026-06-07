@@ -869,6 +869,27 @@ NB_MODULE(_tender, m)
         "index_letter"_a,
         "rank"_a = 0);
 
+    // =======================================================================
+    // SymBasisVec node
+    // =======================================================================
+    nb::class_<SymBasisVec, Expr>(m, "SymBasisVec")
+        .def_prop_ro("letter", [](SymBasisVec const* n) { return n->letter(); })
+        .def_prop_ro(
+            "is_cobasis", [](SymBasisVec const* n) { return n->is_cobasis(); })
+        .def_prop_ro(
+            "cs",
+            [](SymBasisVec const* n) -> CoordSystem const* { return &n->cs(); },
+            nb::rv_policy::reference);
+
+    m.def(
+        "make_sym_basis_vec",
+        [](CoordSystem const* cs, std::string letter, bool cobasis) -> Expr*
+        { return make_sym_basis_vec(g_rl, *cs, std::move(letter), cobasis); },
+        nb::rv_policy::reference,
+        "cs"_a,
+        "letter"_a,
+        "cobasis"_a);
+
     m.def(
         "collect_repeated_sum_step",
         [](CoordSystem const* cs, std::string index_letter)

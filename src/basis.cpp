@@ -1,5 +1,6 @@
 #include <tender/basis.hpp>
 
+#include <tender/coord_system.hpp>
 #include <tender/expr.hpp>
 #include <tender/integral.hpp>
 
@@ -29,14 +30,75 @@ static auto find_basis_index(Expr* e, CoordSystem const& cs) -> int
     return -1;
 }
 
+// Parse an abstract component symbol like "a^i" or "b_j" (letter index, not
+// digit).
+struct AbstractCompInfo
+{
+    std::string base;
+    std::string sep; // "^" or "_"
+    std::string letter;
+};
+
+static auto parse_abstract_comp(std::string const& sym)
+    -> std::optional<AbstractCompInfo>
+{
+    auto hat = sym.find('^');
+    if (hat != std::string::npos && hat + 1 < sym.size())
+        return AbstractCompInfo{sym.substr(0, hat), "^", sym.substr(hat + 1)};
+    auto us = sym.find('_');
+    if (us != std::string::npos && us + 1 < sym.size())
+        return AbstractCompInfo{sym.substr(0, us), "_", sym.substr(us + 1)};
+    return std::nullopt;
+}
+
 // Evaluate Contract(l, r) assuming both are already simplified.
 // Handles:
-//   Contract(TensorProduct(s, v), r)  →  make_product(s, Contract(v, r))
-//   Contract(l, TensorProduct(s, w))  →  make_product(s, Contract(l, w))
-//   Contract(e_i, e^j)                →  RationalConst(i==j ? 1 : 0)
+//   Contract(TP(a^i, e_i), TP(b_j, e^j))  →  IndexedSum(a, ^, b, _, i, 0)
+//   Contract(TensorProduct(s, v), r)        →  make_product(s, Contract(v, r))
+//   Contract(l, TensorProduct(s, w))        →  make_product(s, Contract(l, w))
+//   Contract(e_i, e^j)                      →  RationalConst(i==j ? 1 : 0)
 static auto simplify_contract(
     ResourceList& rl, Expr* l, Expr* r, CoordSystem const& cs) -> Expr*
 {
+    // Abstract-basis dot: Contract(TP(comp_a, SBV_basis), TP(comp_b,
+    // SBV_cobasis)) → IndexedSum using lhs index letter as the dummy Einstein
+    // index.
+    if (auto* tpl = dynamic_cast<TensorProduct*>(l))
+    {
+        if (auto* sbvl = dynamic_cast<SymBasisVec*>(tpl->rhs()))
+        {
+            if (auto* tpr = dynamic_cast<TensorProduct*>(r))
+            {
+                if (auto* sbvr = dynamic_cast<SymBasisVec*>(tpr->rhs()))
+                {
+                    if (&sbvl->cs() == &sbvr->cs()
+                        && sbvl->is_cobasis() != sbvr->is_cobasis())
+                    {
+                        auto* nt_a = dynamic_cast<NamedTensor*>(tpl->lhs());
+                        auto* nt_b = dynamic_cast<NamedTensor*>(tpr->lhs());
+                        if (nt_a && nt_b && nt_a->rank() == 0
+                            && nt_b->rank() == 0)
+                        {
+                            auto ca = parse_abstract_comp(nt_a->symbol());
+                            auto cb = parse_abstract_comp(nt_b->symbol());
+                            if (ca && cb)
+                            {
+                                return make_indexed_sum(
+                                    rl,
+                                    ca->base,
+                                    ca->sep,
+                                    cb->base,
+                                    cb->sep,
+                                    sbvl->letter(),
+                                    0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Pull rank-0 scalar out of lhs TensorProduct.
     if (auto* tpl = dynamic_cast<TensorProduct*>(l))
     {

@@ -507,3 +507,384 @@ TEST(ReassembleDot, DotProduct)
     EXPECT_EQ(a->symbol(), "a");
     EXPECT_EQ(b->symbol(), "b");
 }
+
+// ===========================================================================
+// SymBasisVec — abstract symbolic basis vectors for Einstein-notation proofs
+// ===========================================================================
+
+TEST(SymBasisVec, LatexBasis)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv = make_sym_basis_vec(rl, cs, "i", false);
+    EXPECT_EQ(sbv->latex(), "\\mathbf{e}_{i}");
+}
+
+TEST(SymBasisVec, LatexCobasis)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv = make_sym_basis_vec(rl, cs, "j", true);
+    EXPECT_EQ(sbv->latex(), "\\mathbf{e}^{j}");
+}
+
+TEST(SymBasisVec, Rank)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv = make_sym_basis_vec(rl, cs, "k", false);
+    EXPECT_EQ(sbv->rank(), 1);
+}
+
+TEST(SymBasisVec, Properties)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv =
+        dynamic_cast<SymBasisVec*>(make_sym_basis_vec(rl, cs, "i", true));
+    ASSERT_NE(sbv, nullptr);
+    EXPECT_EQ(sbv->letter(), "i");
+    EXPECT_TRUE(sbv->is_cobasis());
+    EXPECT_EQ(&sbv->cs(), &cs);
+}
+
+// ===========================================================================
+// Abstract basis dot: simplify_basis_dot_step on TP(comp, SBV) expressions
+// ===========================================================================
+
+// Contract(TP(a^i, e_i), TP(b_j, e^j))  →  IndexedSum a^i b_i
+TEST(AbstractBasisDot, CovariantTimesContravariant)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* comp_a = make_named_tensor(rl, "a^i", 0, {});
+    auto* comp_b = make_named_tensor(rl, "b_j", 0, {});
+    auto* sbv_a = make_sym_basis_vec(rl, cs, "i", false); // e_i (basis)
+    auto* sbv_b = make_sym_basis_vec(rl, cs, "j", true);  // e^j (cobasis)
+    auto* expr = make_contract(
+        rl,
+        make_tensor_product(rl, comp_a, sbv_a),
+        make_tensor_product(rl, comp_b, sbv_b));
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* is = dynamic_cast<IndexedSum*>(result);
+    ASSERT_NE(is, nullptr) << "Expected IndexedSum, got: " << result->latex();
+    EXPECT_EQ(is->lhs_sym(), "a");
+    EXPECT_EQ(is->lhs_sep(), "^");
+    EXPECT_EQ(is->rhs_sym(), "b");
+    EXPECT_EQ(is->rhs_sep(), "_");
+    EXPECT_EQ(is->index_letter(), "i");
+    EXPECT_EQ(is->latex(), "a^{i} b_{i}");
+}
+
+// Same letter for both SBV nodes — still works (e_i · e^i = 1)
+TEST(AbstractBasisDot, SameLetter)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* comp_a = make_named_tensor(rl, "a^i", 0, {});
+    auto* comp_b = make_named_tensor(rl, "b_i", 0, {});
+    auto* sbv_a = make_sym_basis_vec(rl, cs, "i", false);
+    auto* sbv_b = make_sym_basis_vec(rl, cs, "i", true);
+    auto* expr = make_contract(
+        rl,
+        make_tensor_product(rl, comp_a, sbv_a),
+        make_tensor_product(rl, comp_b, sbv_b));
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* is = dynamic_cast<IndexedSum*>(result);
+    ASSERT_NE(is, nullptr) << "Expected IndexedSum, got: " << result->latex();
+    EXPECT_EQ(is->index_letter(), "i");
+    EXPECT_EQ(is->latex(), "a^{i} b_{i}");
+}
+
+// Two SBV from same CS but both cobasis — no match (cobasis · cobasis)
+TEST(AbstractBasisDot, BothCobasisPassThrough)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* comp_a = make_named_tensor(rl, "a^i", 0, {});
+    auto* comp_b = make_named_tensor(rl, "b_j", 0, {});
+    auto* sbv_a = make_sym_basis_vec(rl, cs, "i", true);
+    auto* sbv_b = make_sym_basis_vec(rl, cs, "j", true);
+    auto* expr = make_contract(
+        rl,
+        make_tensor_product(rl, comp_a, sbv_a),
+        make_tensor_product(rl, comp_b, sbv_b));
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+    // Not an IndexedSum — passes through as Contract
+    EXPECT_EQ(dynamic_cast<IndexedSum*>(result), nullptr);
+}
+
+// ===========================================================================
+// Coverage: recursive paths in simplify_basis_dot_impl
+// ===========================================================================
+
+// Scale(2, Contract(e_0, e^0)) → Scale(2, 1) → Product
+TEST(SimplifyBasisDot, NestedInScale)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* inner = make_contract(rl, cs.basis(0), cs.cobasis(0));
+    auto* expr = make_scale(rl, Rational{2}, inner);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    // 2 * 1 = 2
+    auto* rc = dynamic_cast<RationalConst*>(result);
+    ASSERT_NE(rc, nullptr) << result->latex();
+    EXPECT_EQ(rc->value(), Rational{2});
+}
+
+// Product(s, Contract(e_0, e^0)) → Product(s, 1) = s
+TEST(SimplifyBasisDot, NestedInProduct)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* s = make_named_tensor(rl, "s", 0, {});
+    auto* inner = make_contract(rl, cs.basis(0), cs.cobasis(0));
+    auto* expr = make_product(rl, s, inner);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    // Product(s, 1) simplifies to s
+    EXPECT_EQ(result, s);
+}
+
+// ===========================================================================
+// Coverage: recursive paths in collect_zeros_impl
+// ===========================================================================
+
+// Scale(2, Sum(a, zero)) → Scale(2, a)
+// Scale wrapping a Contract whose lhs has a zero sum — make_scale does not
+// distribute into Contract, so Scale actually exists in the tree.
+TEST(CollectZeroTerms, NestedInScale)
+{
+    auto rl = make_rl();
+    auto* a = make_named_tensor(rl, "a", 1, {});
+    auto* b = make_named_tensor(rl, "b", 1, {});
+    auto* c = make_named_tensor(rl, "c", 1, {});
+    auto* zero = make_rational(rl, Rational{0});
+
+    auto* sum_with_zero = make_sum(rl, {a, b, zero});
+    auto* co = make_contract(rl, sum_with_zero, c);
+    auto* expr = make_scale(rl, Rational{2}, co);
+
+    auto step = collect_zero_terms_step();
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    // Scale(2, Contract(Sum(a, b), c)) — zero removed from inner sum
+    auto* sc = dynamic_cast<Scale*>(result);
+    ASSERT_NE(sc, nullptr) << result->latex();
+    auto* inner_co = dynamic_cast<Contract*>(sc->expr());
+    ASSERT_NE(inner_co, nullptr);
+    auto* inner_s = dynamic_cast<Sum*>(inner_co->lhs());
+    ASSERT_NE(inner_s, nullptr);
+    EXPECT_EQ(static_cast<int>(inner_s->terms().size()), 2);
+}
+
+// TensorProduct(a, Sum(b, zero)) → TensorProduct(a, b)
+TEST(CollectZeroTerms, NestedInTensorProduct)
+{
+    auto rl = make_rl();
+    auto* a = make_named_tensor(rl, "a", 0, {});
+    auto* b = make_named_tensor(rl, "b", 1, {});
+    auto* zero = make_rational(rl, Rational{0});
+
+    auto* inner = make_sum(rl, {b, make_scale(rl, Rational{0}, b)});
+    // inner = Sum(b, 0*b); after collect_zeros becomes b
+    // We want TP(a, inner) where inner still has a zero
+    // Use: inner_sum = make_sum({b, b, zero}) → Sum of 2 b + zero
+    // Actually simplest: use Contract containing a zero sum
+    auto* c = make_named_tensor(rl, "c", 1, {});
+    auto* sum_with_zero = make_sum(rl, {b, c, make_rational(rl, Rational{0})});
+    auto* expr = make_tensor_product(rl, a, sum_with_zero);
+
+    auto step = collect_zero_terms_step();
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* tp = dynamic_cast<TensorProduct*>(result);
+    ASSERT_NE(tp, nullptr) << result->latex();
+    auto* s = dynamic_cast<Sum*>(tp->rhs());
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(static_cast<int>(s->terms().size()), 2);
+}
+
+// Contract(Sum(a, zero), b) → Contract(a, b)
+TEST(CollectZeroTerms, NestedInContract)
+{
+    auto rl = make_rl();
+    auto* a = make_named_tensor(rl, "a", 1, {});
+    auto* b = make_named_tensor(rl, "b", 1, {});
+    auto* zero = make_rational(rl, Rational{0});
+
+    auto* sum_with_zero = make_sum(rl, {a, zero});
+    auto* expr = make_contract(rl, sum_with_zero, b);
+
+    auto step = collect_zero_terms_step();
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* co = dynamic_cast<Contract*>(result);
+    ASSERT_NE(co, nullptr) << result->latex();
+    EXPECT_EQ(co->lhs(), a);
+}
+
+// ===========================================================================
+// Coverage: nested reassemble_vector_impl paths
+// ===========================================================================
+
+// TensorProduct(scalar, vector_expansion) → TensorProduct(scalar, tensor)
+TEST(ReassembleVector, NestedInTensorProduct)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* s = make_named_tensor(rl, "s", 0, {});
+
+    std::vector<Expr*> terms;
+    for (int k = 0; k < cs.dim(); ++k)
+        terms.push_back(make_tensor_product(
+            rl,
+            make_named_tensor(rl, "a^" + std::to_string(k + 1), 0, {}),
+            cs.basis(k)));
+    auto* vec_sum = make_sum(rl, std::move(terms));
+    auto* expr = make_tensor_product(rl, s, vec_sum);
+
+    auto step = reassemble_vector_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* tp = dynamic_cast<TensorProduct*>(result);
+    ASSERT_NE(tp, nullptr) << result->latex();
+    EXPECT_EQ(tp->lhs(), s);
+    auto* a = dynamic_cast<NamedTensor*>(tp->rhs());
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->symbol(), "a");
+}
+
+// Contract(vector_expansion, b) → Contract(tensor, b)
+TEST(ReassembleVector, NestedInContract)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* b = make_named_tensor(rl, "b", 1, {});
+
+    std::vector<Expr*> terms;
+    for (int k = 0; k < cs.dim(); ++k)
+        terms.push_back(make_tensor_product(
+            rl,
+            make_named_tensor(rl, "a^" + std::to_string(k + 1), 0, {}),
+            cs.basis(k)));
+    auto* vec_sum = make_sum(rl, std::move(terms));
+    auto* expr = make_contract(rl, vec_sum, b);
+
+    auto step = reassemble_vector_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* co = dynamic_cast<Contract*>(result);
+    ASSERT_NE(co, nullptr) << result->latex();
+    auto* a = dynamic_cast<NamedTensor*>(co->lhs());
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->symbol(), "a");
+}
+
+// Scale(2, Contract(vector_expansion, b)) → Scale(2, Contract(tensor, b))
+// make_scale does not distribute into Contract, so Scale exists in the tree.
+TEST(ReassembleVector, NestedInScale)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* b = make_named_tensor(rl, "b", 1, {});
+
+    std::vector<Expr*> terms;
+    for (int k = 0; k < cs.dim(); ++k)
+        terms.push_back(make_tensor_product(
+            rl,
+            make_named_tensor(rl, "a^" + std::to_string(k + 1), 0, {}),
+            cs.basis(k)));
+    auto* vec_sum = make_sum(rl, std::move(terms));
+    auto* co = make_contract(rl, vec_sum, b);
+    auto* expr = make_scale(rl, Rational{2}, co);
+
+    auto step = reassemble_vector_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* sc = dynamic_cast<Scale*>(result);
+    ASSERT_NE(sc, nullptr) << result->latex();
+    auto* inner_co = dynamic_cast<Contract*>(sc->expr());
+    ASSERT_NE(inner_co, nullptr);
+    auto* a = dynamic_cast<NamedTensor*>(inner_co->lhs());
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->symbol(), "a");
+}
+
+// ===========================================================================
+// Coverage: nested reassemble_dot_impl paths
+// ===========================================================================
+
+// Contract where only lhs is a vector sum → Contract(tensor, original_rhs)
+TEST(ReassembleDot, OnlyLhsIsVectorSum)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* b = make_named_tensor(rl, "b", 1, {});
+
+    std::vector<Expr*> terms;
+    for (int k = 0; k < cs.dim(); ++k)
+        terms.push_back(make_tensor_product(
+            rl,
+            make_named_tensor(rl, "a^" + std::to_string(k + 1), 0, {}),
+            cs.basis(k)));
+    auto* vec_sum = make_sum(rl, std::move(terms));
+    auto* expr = make_contract(rl, vec_sum, b);
+
+    auto step = reassemble_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* co = dynamic_cast<Contract*>(result);
+    ASSERT_NE(co, nullptr) << result->latex();
+    auto* a = dynamic_cast<NamedTensor*>(co->lhs());
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->symbol(), "a");
+    EXPECT_EQ(co->rhs(), b);
+}
+
+// Sum containing a Contract with vector sums
+TEST(ReassembleDot, NestedInSum)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+
+    auto make_vec_sum = [&](std::string const& base)
+    {
+        std::vector<Expr*> terms;
+        for (int k = 0; k < cs.dim(); ++k)
+            terms.push_back(make_tensor_product(
+                rl,
+                make_named_tensor(rl, base + "^" + std::to_string(k + 1), 0, {}),
+                cs.basis(k)));
+        return make_sum(rl, std::move(terms));
+    };
+
+    // scalar + Contract(a_vec_sum, b_vec_sum)
+    auto* scalar = make_named_tensor(rl, "c", 0, {});
+    auto* dot_term = make_contract(rl, make_vec_sum("a"), make_vec_sum("b"));
+    auto* expr = make_sum(rl, {scalar, dot_term});
+
+    auto step = reassemble_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* s = dynamic_cast<Sum*>(result);
+    ASSERT_NE(s, nullptr) << result->latex();
+    bool found_contract = false;
+    for (auto* t: s->terms())
+        if (dynamic_cast<Contract*>(t))
+            found_contract = true;
+    EXPECT_TRUE(found_contract);
+}

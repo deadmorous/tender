@@ -12,6 +12,8 @@
 namespace tender
 {
 
+class CoordSystem; // forward declaration — defined in coord_system.hpp
+
 // ===========================================================================
 // Abstract base
 // ===========================================================================
@@ -378,6 +380,48 @@ private:
     std::string index_letter_;
     int rank_;
 };
+
+// Abstract symbolic basis vector e_i or cobasis e^i.
+// Used for index-notation derivations without concrete component expansion:
+//   expand_in_basis_step(v, cs, abstract=True)  →  TensorProduct(v^i,
+//   SymBasisVec(cs,"i",false))
+// simplify_basis_dot_step recognises Contract(TP(a, SBV), TP(b, SBV)) and
+// produces IndexedSum.
+class SymBasisVec : public Expr
+{
+public:
+    SymBasisVec(CoordSystem const& cs, std::string letter, bool cobasis);
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 1;
+    }
+    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto cs() const noexcept -> CoordSystem const&
+    {
+        return *cs_;
+    }
+    [[nodiscard]] auto letter() const noexcept -> std::string const&
+    {
+        return letter_;
+    }
+    [[nodiscard]] auto is_cobasis() const noexcept -> bool
+    {
+        return cobasis_;
+    }
+
+private:
+    CoordSystem const* cs_;
+    std::string letter_;
+    bool cobasis_;
+};
+
+auto make_sym_basis_vec(
+    ResourceList& rl,
+    CoordSystem const& cs,
+    std::string letter,
+    bool cobasis) -> Expr*;
 
 // Result of convolve(): pairs one slot from lhs with one slot from rhs.
 // Rank = lhs.rank() + rhs.rank() − 2.
