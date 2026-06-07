@@ -45,6 +45,7 @@ Each phase below cites the vibes where its design decisions live.
 | 000016 | Rewrite search — BFS over sub-expression rewrites |
 | 000017 | Phase 13.5 — identity derivation and library growth |
 | 000018 | Phase 13.2 — index/basis bridge, expand-in-basis tooling |
+| 000019 | Phase 13.6 — indexed-sum notation (collect repeated component sums) |
 
 ---
 
@@ -571,6 +572,37 @@ exported from `tender.lib` covers both.
 user-defined extensions.
 
 **Sources**: vibe 000017
+
+---
+
+## Phase 13.6 — Indexed-sum notation
+
+**Goal**: add a `collect_repeated_sum_step(cs)` that collapses an explicit
+component sum such as `a^1 b_1 + a^2 b_2 + a^3 b_3` into the compact indexed
+form `a^i b_i`, completing the WCS component-expansion pipeline with readable
+output.
+
+### Deliverables
+
+1. **`IndexedSum` AST node** — display-only rank-0 node; stores pre-rendered
+   body LaTeX with the running suffix replaced by an index letter.
+2. **`collect_repeated_sum_step(cs)`** — recognises a `Sum` of `dim` terms each
+   of the form `Product(NamedTensor, NamedTensor)` where symbols differ only by
+   a 1-based integer suffix; emits an `IndexedSum` node.
+3. **Python binding and `__init__.py`** — expose `IndexedSum` type and
+   `collect_repeated_sum_step`.
+4. **Tests** — C++ unit tests; Python tests in `test_tender.py`.
+5. **Updated `dot_commutativity.py`** — final step shows `a^{i} b_{i}`.
+
+### Exit criterion
+
+`show(history)` for the `dot_commutativity` derivation ends with
+
+    [collect_repeated_sum]  a^{i} b_{i}
+
+and the compiled PDF renders it correctly.
+
+**Sources**: vibe 000019
 
 ---
 
