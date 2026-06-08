@@ -36,7 +36,9 @@ public:
         return constraints_.required_rank;
     }
 
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
 
     [[nodiscard]] auto symbol() const noexcept -> std::string const&

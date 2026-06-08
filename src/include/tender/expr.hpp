@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <tender/index.hpp>
@@ -14,6 +15,10 @@ namespace tender
 
 class CoordSystem; // forward declaration — defined in coord_system.hpp
 
+using IndexNameMap = std::unordered_map<int, std::string>;
+
+struct EnrichedExpr;
+
 // ===========================================================================
 // Abstract base
 // ===========================================================================
@@ -24,8 +29,12 @@ public:
     virtual ~Expr() = default;
 
     [[nodiscard]] virtual auto rank() const noexcept -> int = 0;
-    [[nodiscard]] virtual auto latex() const -> std::string = 0;
+    [[nodiscard]] virtual auto latex(IndexNameMap const& map) const
+        -> std::string = 0;
     [[nodiscard]] virtual auto python() const -> std::string = 0;
+
+    // Non-virtual convenience: calls enrich(this).latex()
+    [[nodiscard]] auto latex() const -> std::string;
 
     [[nodiscard]] auto name() const noexcept -> std::string const&
     {
@@ -73,7 +82,9 @@ public:
     {
         return 0;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto value() const noexcept -> Rational const&
     {
@@ -96,7 +107,9 @@ public:
     {
         return 0;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto symbol() const noexcept -> std::string const&
     {
@@ -119,7 +132,9 @@ public:
     {
         return 0;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto symbol() const noexcept -> std::string const&
     {
@@ -158,7 +173,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto terms() const noexcept -> std::vector<Expr*> const&
     {
@@ -183,7 +200,9 @@ public:
     {
         return expr_->rank();
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto coeff() const noexcept -> Rational const&
     {
@@ -211,7 +230,9 @@ public:
     {
         return lhs_->rank() + rhs_->rank();
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto lhs() const noexcept -> Expr*
     {
@@ -241,7 +262,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto symbol() const noexcept -> std::string const&
     {
@@ -285,7 +308,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto body() const noexcept -> Expr*
     {
@@ -313,7 +338,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto body() const noexcept -> Expr*
     {
@@ -348,7 +375,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
 
     [[nodiscard]] auto lhs_sym() const noexcept -> std::string const&
@@ -383,28 +412,30 @@ private:
 
 // Abstract symbolic basis vector e_i or cobasis e^i.
 // Used for index-notation derivations without concrete component expansion:
-//   expand_in_basis_step(v, cs, abstract=True)  →  TensorProduct(v^i,
-//   SymBasisVec(cs,"i",false))
-// simplify_basis_dot_step recognises Contract(TP(a, SBV), TP(b, SBV)) and
-// produces IndexedSum.
+//   expand_in_basis_step(v, cs, abstract=True)  →  TensorProduct(AbstractComp,
+//   SymBasisVec(cs, index_id, false))
+// simplify_basis_dot_step recognises Contract(TP(AbstractComp, SBV),
+// TP(AbstractComp, SBV)) and produces AbstractIndexedSum.
 class SymBasisVec : public Expr
 {
 public:
-    SymBasisVec(CoordSystem const& cs, std::string letter, bool cobasis);
+    SymBasisVec(CoordSystem const& cs, int index_id, bool cobasis);
 
     [[nodiscard]] auto rank() const noexcept -> int override
     {
         return 1;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto cs() const noexcept -> CoordSystem const&
     {
         return *cs_;
     }
-    [[nodiscard]] auto letter() const noexcept -> std::string const&
+    [[nodiscard]] auto index_id() const noexcept -> int
     {
-        return letter_;
+        return index_id_;
     }
     [[nodiscard]] auto is_cobasis() const noexcept -> bool
     {
@@ -413,15 +444,99 @@ public:
 
 private:
     CoordSystem const* cs_;
-    std::string letter_;
+    int index_id_;
     bool cobasis_;
 };
 
 auto make_sym_basis_vec(
     ResourceList& rl,
     CoordSystem const& cs,
-    std::string letter,
+    int index_id,
     bool cobasis) -> Expr*;
+
+// Abstract component: rank-0 node holding a base symbol and a list of
+// (index_id, is_upper) pairs. Replaces the NamedTensor("a^i", 0) hack for
+// the abstract-basis derivation path.
+class AbstractComp : public Expr
+{
+public:
+    using IndexSpec = std::vector<std::pair<int, bool>>;
+
+    AbstractComp(std::string base_sym, IndexSpec indices);
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 0;
+    }
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto base_sym() const noexcept -> std::string const&
+    {
+        return base_sym_;
+    }
+    [[nodiscard]] auto indices() const noexcept -> IndexSpec const&
+    {
+        return indices_;
+    }
+
+private:
+    std::string base_sym_;
+    IndexSpec indices_;
+};
+
+auto make_abstract_comp(
+    ResourceList& rl,
+    std::string base_sym,
+    std::vector<std::pair<int, bool>> indices) -> AbstractComp*;
+
+// Display-only node for abstract Einstein-notation indexed sum.
+// Produced by simplify_basis_dot_step when contracting two
+// AbstractComp-SBV tensor products.
+class AbstractIndexedSum : public Expr
+{
+public:
+    AbstractIndexedSum(
+        AbstractComp const* lhs,
+        AbstractComp const* rhs,
+        int index_id,
+        int rank);
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return rank_;
+    }
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto lhs() const noexcept -> AbstractComp const*
+    {
+        return lhs_;
+    }
+    [[nodiscard]] auto rhs() const noexcept -> AbstractComp const*
+    {
+        return rhs_;
+    }
+    [[nodiscard]] auto index_id() const noexcept -> int
+    {
+        return index_id_;
+    }
+
+private:
+    AbstractComp const* lhs_;
+    AbstractComp const* rhs_;
+    int index_id_;
+    int rank_;
+};
+
+auto make_abstract_indexed_sum(
+    ResourceList& rl,
+    AbstractComp const* lhs,
+    AbstractComp const* rhs,
+    int index_id,
+    int rank) -> AbstractIndexedSum*;
 
 // Result of convolve(): pairs one slot from lhs with one slot from rhs.
 // Rank = lhs.rank() + rhs.rank() − 2.
@@ -440,7 +555,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto lhs() const noexcept -> Expr*
     {
@@ -481,7 +598,9 @@ public:
     {
         return 0;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto lhs() const noexcept -> Expr*
     {
@@ -528,7 +647,9 @@ public:
     {
         return 0;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto kind() const noexcept -> FunctionKind
     {
@@ -555,7 +676,9 @@ public:
     {
         return 0;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto base() const noexcept -> Expr*
     {
@@ -581,7 +704,9 @@ public:
     {
         return 0;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto y() const noexcept -> Expr*
     {
@@ -610,7 +735,9 @@ public:
     {
         return 2;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
 };
 
@@ -623,7 +750,9 @@ public:
     {
         return 3;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
 };
 
@@ -637,7 +766,9 @@ public:
     {
         return 0;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto arg() const noexcept -> Expr*
     {
@@ -662,7 +793,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto lhs() const noexcept -> Expr*
     {
@@ -694,7 +827,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto lhs() const noexcept -> Expr*
     {
@@ -724,7 +859,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto lhs() const noexcept -> Expr*
     {
@@ -753,7 +890,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto lhs() const noexcept -> Expr*
     {
@@ -785,7 +924,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
     [[nodiscard]] auto velocity() const noexcept -> Expr*
     {
@@ -822,7 +963,9 @@ public:
     {
         return rank_;
     }
-    [[nodiscard]] auto latex() const -> std::string override;
+    [[nodiscard]] auto latex(IndexNameMap const& map) const
+        -> std::string override;
+    using Expr::latex;
     [[nodiscard]] auto python() const -> std::string override;
 
     [[nodiscard]] auto poly() const noexcept -> Polynomial const&
@@ -983,5 +1126,22 @@ auto make_material_deriv(ResourceList& rl, Expr* velocity, Expr* field) -> Expr*
 // Polynomial node. var->rank() must be 0 or 2.
 auto make_polynomial_expr(ResourceList& rl, Polynomial poly, Expr* var)
     -> PolynomialExpr*;
+
+// ===========================================================================
+// EnrichedExpr — pre-rendering stage for abstract-index nodes
+// ===========================================================================
+
+struct EnrichedExpr
+{
+    Expr const* expr;
+    IndexNameMap index_names;
+    [[nodiscard]] auto latex() const -> std::string; // calls
+                                                     // expr->latex(index_names)
+};
+
+// DFS-walk expr to collect all abstract index IDs (from AbstractComp,
+// SymBasisVec, AbstractIndexedSum nodes) in first-appearance order, then
+// assign letters "i","j","k","l","m","n" and "a","b","c","d","e".
+auto enrich(Expr const* e) -> EnrichedExpr;
 
 } // namespace tender

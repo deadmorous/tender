@@ -111,7 +111,7 @@ public:
     {
         return arg_->rank() + 1;
     }
-    auto latex() const -> std::string override;
+    auto latex(IndexNameMap const& map) const -> std::string override;
     auto python() const -> std::string override;
     auto arg() const noexcept -> Expr*
     {
@@ -136,7 +136,7 @@ public:
     {
         return arg_->rank() - 1;
     }
-    auto latex() const -> std::string override;
+    auto latex(IndexNameMap const& map) const -> std::string override;
     auto python() const -> std::string override;
     auto arg() const noexcept -> Expr*
     {
@@ -162,7 +162,7 @@ public:
     {
         return arg_->rank();
     }
-    auto latex() const -> std::string override;
+    auto latex(IndexNameMap const& map) const -> std::string override;
     auto python() const -> std::string override;
     auto arg() const noexcept -> Expr*
     {
@@ -188,7 +188,7 @@ public:
     {
         return integrand_->rank();
     }
-    auto latex() const -> std::string override;
+    auto latex(IndexNameMap const& map) const -> std::string override;
     auto python() const -> std::string override;
     auto domain() const noexcept -> Domain*
     {

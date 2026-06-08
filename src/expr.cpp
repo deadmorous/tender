@@ -4,10 +4,167 @@
 
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace tender
 {
+
+// ===========================================================================
+// enrich() — DFS index-ID collection
+// ===========================================================================
+
+static auto collect_index_ids_impl(
+    Expr const* e,
+    std::vector<int>& order,
+    std::unordered_set<int>& seen) -> void;
+
+static auto add_id(
+    int id, std::vector<int>& order, std::unordered_set<int>& seen) -> void
+{
+    if (seen.insert(id).second)
+        order.push_back(id);
+}
+
+static auto collect_index_ids_impl(
+    Expr const* e,
+    std::vector<int>& order,
+    std::unordered_set<int>& seen) -> void
+{
+    if (!e)
+        return;
+    if (auto const* ac = dynamic_cast<AbstractComp const*>(e))
+    {
+        for (auto const& [id, is_upper]: ac->indices())
+            add_id(id, order, seen);
+        return;
+    }
+    if (auto const* sbv = dynamic_cast<SymBasisVec const*>(e))
+    {
+        add_id(sbv->index_id(), order, seen);
+        return;
+    }
+    if (auto const* ais = dynamic_cast<AbstractIndexedSum const*>(e))
+    {
+        collect_index_ids_impl(ais->lhs(), order, seen);
+        collect_index_ids_impl(ais->rhs(), order, seen);
+        return;
+    }
+    if (auto const* tp = dynamic_cast<TensorProduct const*>(e))
+    {
+        collect_index_ids_impl(tp->lhs(), order, seen);
+        collect_index_ids_impl(tp->rhs(), order, seen);
+        return;
+    }
+    if (auto const* co = dynamic_cast<Contract const*>(e))
+    {
+        collect_index_ids_impl(co->lhs(), order, seen);
+        collect_index_ids_impl(co->rhs(), order, seen);
+        return;
+    }
+    if (auto const* dc = dynamic_cast<DoubleContract const*>(e))
+    {
+        collect_index_ids_impl(dc->lhs(), order, seen);
+        collect_index_ids_impl(dc->rhs(), order, seen);
+        return;
+    }
+    if (auto const* dr = dynamic_cast<DoubleContractReversed const*>(e))
+    {
+        collect_index_ids_impl(dr->lhs(), order, seen);
+        collect_index_ids_impl(dr->rhs(), order, seen);
+        return;
+    }
+    if (auto const* cp = dynamic_cast<CrossProduct const*>(e))
+    {
+        collect_index_ids_impl(cp->lhs(), order, seen);
+        collect_index_ids_impl(cp->rhs(), order, seen);
+        return;
+    }
+    if (auto const* pr = dynamic_cast<Product const*>(e))
+    {
+        collect_index_ids_impl(pr->lhs(), order, seen);
+        collect_index_ids_impl(pr->rhs(), order, seen);
+        return;
+    }
+    if (auto const* s = dynamic_cast<Sum const*>(e))
+    {
+        for (auto const* t: s->terms())
+            collect_index_ids_impl(t, order, seen);
+        return;
+    }
+    if (auto const* sc = dynamic_cast<Scale const*>(e))
+    {
+        collect_index_ids_impl(sc->expr(), order, seen);
+        return;
+    }
+    if (auto const* tr = dynamic_cast<Trace const*>(e))
+    {
+        collect_index_ids_impl(tr->arg(), order, seen);
+        return;
+    }
+    if (auto const* fa = dynamic_cast<FunctionApply const*>(e))
+    {
+        collect_index_ids_impl(fa->arg(), order, seen);
+        return;
+    }
+    if (auto const* pw = dynamic_cast<Pow const*>(e))
+    {
+        collect_index_ids_impl(pw->base(), order, seen);
+        return;
+    }
+    if (auto const* a2 = dynamic_cast<ATan2 const*>(e))
+    {
+        collect_index_ids_impl(a2->y(), order, seen);
+        collect_index_ids_impl(a2->x(), order, seen);
+        return;
+    }
+    if (auto const* md = dynamic_cast<MaterialDeriv const*>(e))
+    {
+        collect_index_ids_impl(md->velocity(), order, seen);
+        collect_index_ids_impl(md->field(), order, seen);
+        return;
+    }
+    if (auto const* pe = dynamic_cast<PolynomialExpr const*>(e))
+    {
+        collect_index_ids_impl(pe->var(), order, seen);
+        return;
+    }
+    // All other nodes (leaf nodes): no-op
+}
+
+auto enrich(Expr const* e) -> EnrichedExpr
+{
+    std::vector<int> order;
+    std::unordered_set<int> seen;
+    collect_index_ids_impl(e, order, seen);
+
+    static char const letters[] = "ijklmn";
+    static char const extra[] = "abcde";
+    IndexNameMap map;
+    std::size_t li = 0;
+    for (int id: order)
+    {
+        if (li < 6)
+            map[id] = std::string(1, letters[li++]);
+        else
+            map[id] = std::string(1, extra[li++ - 6]);
+    }
+    return EnrichedExpr{e, std::move(map)};
+}
+
+auto EnrichedExpr::latex() const -> std::string
+{
+    return expr->latex(index_names);
+}
+
+// ===========================================================================
+// Expr::latex() — non-virtual convenience
+// ===========================================================================
+
+auto Expr::latex() const -> std::string
+{
+    return enrich(this).latex();
+}
 
 // ===========================================================================
 // LaTeX helpers
@@ -105,7 +262,7 @@ auto Expr::set_name(std::string n) -> void
 // RationalConst
 // ===========================================================================
 
-auto RationalConst::latex() const -> std::string
+auto RationalConst::latex(IndexNameMap const& map) const -> std::string
 {
     if (has_name())
         return sym_to_latex(name());
@@ -123,7 +280,7 @@ auto RationalConst::python() const -> std::string
 // NamedConst
 // ===========================================================================
 
-auto NamedConst::latex() const -> std::string
+auto NamedConst::latex(IndexNameMap const& map) const -> std::string
 {
     return sym_to_latex(has_name() ? name() : symbol_);
 }
@@ -137,7 +294,7 @@ auto NamedConst::python() const -> std::string
 // SymbolicVar
 // ===========================================================================
 
-auto SymbolicVar::latex() const -> std::string
+auto SymbolicVar::latex(IndexNameMap const& map) const -> std::string
 {
     return sym_to_latex(has_name() ? name() : symbol_);
 }
@@ -151,11 +308,11 @@ auto SymbolicVar::python() const -> std::string
 // Scale
 // ===========================================================================
 
-auto Scale::latex() const -> std::string
+auto Scale::latex(IndexNameMap const& map) const -> std::string
 {
     if (coeff_ == Rational{-1})
-        return "-" + expr_->latex();
-    return rational_to_latex(coeff_) + " " + expr_->latex();
+        return "-" + expr_->latex(map);
+    return rational_to_latex(coeff_) + " " + expr_->latex(map);
 }
 
 auto Scale::python() const -> std::string
@@ -178,7 +335,7 @@ static auto has_negative_lead(Expr const* e) -> bool
 }
 
 // LaTeX for e with its leading sign stripped (for use after an explicit " - ").
-static auto latex_unsigned(Expr const* e) -> std::string
+static auto latex_unsigned(Expr const* e, IndexNameMap const& map) -> std::string
 {
     if (auto const* rc = dynamic_cast<RationalConst const*>(e))
         return rational_to_latex_abs(rc->value()); // GCOV_EXCL_LINE
@@ -188,28 +345,28 @@ static auto latex_unsigned(Expr const* e) -> std::string
             sc->coeff().num() < 0 ? -sc->coeff().num() : sc->coeff().num(),
             sc->coeff().den());
         if (abs_coeff == Rational{1})
-            return sc->expr()->latex();
-        return rational_to_latex(abs_coeff) + " " + sc->expr()->latex();
+            return sc->expr()->latex(map);
+        return rational_to_latex(abs_coeff) + " " + sc->expr()->latex(map);
     }
-    return e->latex(); // GCOV_EXCL_LINE
+    return e->latex(map); // GCOV_EXCL_LINE
 }
 
-auto Sum::latex() const -> std::string
+auto Sum::latex(IndexNameMap const& map) const -> std::string
 {
     std::string result;
     for (auto const* term: terms_)
     {
         if (result.empty())
         {
-            result = term->latex();
+            result = term->latex(map);
         }
         else if (has_negative_lead(term))
         {
-            result += " - " + latex_unsigned(term);
+            result += " - " + latex_unsigned(term, map);
         }
         else
         {
-            result += " + " + term->latex();
+            result += " + " + term->latex(map);
         }
     }
     return result.empty() ? "0" : result;
@@ -231,15 +388,15 @@ auto Sum::python() const -> std::string
 // TensorProduct
 // ===========================================================================
 
-auto TensorProduct::latex() const -> std::string
+auto TensorProduct::latex(IndexNameMap const& map) const -> std::string
 {
     if (lhs_->rank() == 0 && rhs_->rank() >= 1)
     {
         // Scalar × tensor: render without \otimes for readability.
         bool rhs_needs_parens = dynamic_cast<Sum const*>(rhs_) != nullptr;
         std::string rhs_tex =
-            rhs_needs_parens ? "(" + rhs_->latex() + ")" : rhs_->latex();
-        return "(" + lhs_->latex() + ") " + rhs_tex;
+            rhs_needs_parens ? "(" + rhs_->latex(map) + ")" : rhs_->latex(map);
+        return "(" + lhs_->latex(map) + ") " + rhs_tex;
     }
     if (lhs_->rank() >= 1 && rhs_->rank() == 0)
     {
@@ -253,10 +410,10 @@ auto TensorProduct::latex() const -> std::string
                           || dynamic_cast<FunctionApply const*>(rhs_)
                           || dynamic_cast<Pow const*>(rhs_);
         std::string rhs_tex =
-            rhs_atomic ? rhs_->latex() : "(" + rhs_->latex() + ")";
-        return lhs_->latex() + " " + rhs_tex;
+            rhs_atomic ? rhs_->latex(map) : "(" + rhs_->latex(map) + ")";
+        return lhs_->latex(map) + " " + rhs_tex;
     }
-    return lhs_->latex() + " \\otimes " + rhs_->latex();
+    return lhs_->latex(map) + " \\otimes " + rhs_->latex(map);
 }
 
 auto TensorProduct::python() const -> std::string
@@ -465,7 +622,7 @@ static auto slot_decorations(SlotList const& sl) -> std::string
     return result;
 }
 
-auto NamedTensor::latex() const -> std::string
+auto NamedTensor::latex(IndexNameMap const& map) const -> std::string
 {
     std::string const& sym = has_name() ? name() : symbol_;
     std::string base =
@@ -509,9 +666,9 @@ ExplicitSum::ExplicitSum(Expr* body, Index* index) : body_(body), index_(index)
     set_slots(std::move(remaining));
 }
 
-auto ExplicitSum::latex() const -> std::string
+auto ExplicitSum::latex(IndexNameMap const& map) const -> std::string
 {
-    return "\\sum_{" + index_->letter() + "} " + body_->latex();
+    return "\\sum_{" + index_->letter() + "} " + body_->latex(map);
 }
 
 auto ExplicitSum::python() const -> std::string
@@ -530,9 +687,9 @@ NoSum::NoSum(Expr* body, Index* index) : body_(body), index_(index)
     set_slots(body->slots());
 }
 
-auto NoSum::latex() const -> std::string
+auto NoSum::latex(IndexNameMap const& map) const -> std::string
 {
-    return body_->latex();
+    return body_->latex(map);
 }
 
 auto NoSum::python() const -> std::string
@@ -560,7 +717,7 @@ IndexedSum::IndexedSum(
 {
 }
 
-auto IndexedSum::latex() const -> std::string
+auto IndexedSum::latex(IndexNameMap const& map) const -> std::string
 {
     auto part = [&](std::string const& sym,
                     std::string const& sep) -> std::string
@@ -600,32 +757,123 @@ auto make_indexed_sum(
 // SymBasisVec
 // ===========================================================================
 
-SymBasisVec::SymBasisVec(
-    CoordSystem const& cs, std::string letter, bool cobasis) :
-  cs_(&cs), letter_(std::move(letter)), cobasis_(cobasis)
+SymBasisVec::SymBasisVec(CoordSystem const& cs, int index_id, bool cobasis) :
+  cs_(&cs), index_id_(index_id), cobasis_(cobasis)
 {
 }
 
-auto SymBasisVec::latex() const -> std::string
+auto SymBasisVec::latex(IndexNameMap const& map) const -> std::string
 {
+    std::string ltr = map.count(index_id_) ? map.at(index_id_) :
+                                             ("?" + std::to_string(index_id_));
     if (cobasis_)
-        return "\\mathbf{e}^{" + letter_ + "}";
-    return "\\mathbf{e}_{" + letter_ + "}";
+        return "\\mathbf{e}^{" + ltr + "}";
+    return "\\mathbf{e}_{" + ltr + "}";
 }
 
 auto SymBasisVec::python() const -> std::string
 {
-    return std::string("make_sym_basis_vec(cs, '") + letter_ + "', "
+    return "make_sym_basis_vec(cs, " + std::to_string(index_id_) + ", "
            + (cobasis_ ? "True" : "False") + ")";
 }
 
 auto make_sym_basis_vec(
-    ResourceList& rl,
-    CoordSystem const& cs,
-    std::string letter,
-    bool cobasis) -> Expr*
+    ResourceList& rl, CoordSystem const& cs, int index_id, bool cobasis) -> Expr*
 {
-    return rl.make<SymBasisVec>(cs, std::move(letter), cobasis);
+    return rl.make<SymBasisVec>(cs, index_id, cobasis);
+}
+
+// ===========================================================================
+// AbstractComp
+// ===========================================================================
+
+AbstractComp::AbstractComp(std::string base_sym, IndexSpec indices) :
+  base_sym_(std::move(base_sym)), indices_(std::move(indices))
+{
+}
+
+auto AbstractComp::latex(IndexNameMap const& map) const -> std::string
+{
+    std::string result = sym_to_latex(base_sym_);
+    // Group consecutive same-direction indices: "^{ij}" or "_{k}"
+    char current_sep = '\0';
+    std::string current_group;
+    auto flush = [&]()
+    {
+        if (!current_group.empty())
+            result += (current_sep == '^') ? "^{" + current_group + "}" :
+                                             "_{" + current_group + "}";
+    };
+    for (auto const& [id, is_upper]: indices_)
+    {
+        char sep = is_upper ? '^' : '_';
+        std::string ltr =
+            map.count(id) ? map.at(id) : ("?" + std::to_string(id));
+        if (sep == current_sep)
+        {
+            current_group += ltr;
+        }
+        else
+        {
+            flush();
+            current_sep = sep;
+            current_group = ltr;
+        }
+    }
+    flush();
+    return result;
+}
+
+auto AbstractComp::python() const -> std::string
+{
+    std::string s = "abstract_comp('" + base_sym_ + "', [";
+    for (std::size_t k = 0; k < indices_.size(); ++k)
+    {
+        if (k)
+            s += ", ";
+        s += "(" + std::to_string(indices_[k].first) + ", "
+             + (indices_[k].second ? "True" : "False") + ")";
+    }
+    return s + "])";
+}
+
+auto make_abstract_comp(
+    ResourceList& rl,
+    std::string base_sym,
+    std::vector<std::pair<int, bool>> indices) -> AbstractComp*
+{
+    return rl.make<AbstractComp>(std::move(base_sym), std::move(indices));
+}
+
+// ===========================================================================
+// AbstractIndexedSum
+// ===========================================================================
+
+AbstractIndexedSum::AbstractIndexedSum(
+    AbstractComp const* lhs, AbstractComp const* rhs, int index_id, int rank) :
+  lhs_(lhs), rhs_(rhs), index_id_(index_id), rank_(rank)
+{
+}
+
+auto AbstractIndexedSum::latex(IndexNameMap const& map) const -> std::string
+{
+    return lhs_->latex(map) + " " + rhs_->latex(map);
+}
+
+auto AbstractIndexedSum::python() const -> std::string
+{
+    return "abstract_indexed_sum(" + lhs_->python() + ", " + rhs_->python()
+           + ", " + std::to_string(index_id_) + ")";
+}
+
+auto make_abstract_indexed_sum(
+    ResourceList& rl,
+    AbstractComp const* lhs,
+    AbstractComp const* rhs,
+    int index_id,
+    int rank) -> AbstractIndexedSum*
+{
+    return rl.make<AbstractIndexedSum>(lhs, rhs, index_id, rank);
 }
 
 // ===========================================================================
@@ -644,9 +892,9 @@ Contraction::Contraction(
     set_slots(std::move(slots));
 }
 
-auto Contraction::latex() const -> std::string
+auto Contraction::latex(IndexNameMap const& map) const -> std::string
 {
-    return lhs_->latex() + " " + rhs_->latex();
+    return lhs_->latex(map) + " " + rhs_->latex(map);
 }
 
 auto Contraction::python() const -> std::string
@@ -759,12 +1007,12 @@ FunctionApply::FunctionApply(FunctionKind kind, Expr* arg) :
             + std::to_string(arg->rank()));
 }
 
-auto FunctionApply::latex() const -> std::string
+auto FunctionApply::latex(IndexNameMap const& map) const -> std::string
 {
     std::string name = function_latex_name(kind_);
     if (kind_ == FunctionKind::Sqrt)
-        return name + "{" + arg_->latex() + "}";
-    return name + "(" + arg_->latex() + ")";
+        return name + "{" + arg_->latex(map) + "}";
+    return name + "(" + arg_->latex(map) + ")";
 }
 
 auto FunctionApply::python() const -> std::string
@@ -781,9 +1029,9 @@ Pow::Pow(Expr* base, Rational exp) : base_(base), exp_(std::move(exp))
             + std::to_string(base->rank()));
 }
 
-auto Pow::latex() const -> std::string
+auto Pow::latex(IndexNameMap const& map) const -> std::string
 {
-    return base_->latex() + "^{" + rational_to_latex(exp_) + "}";
+    return base_->latex(map) + "^{" + rational_to_latex(exp_) + "}";
 }
 
 auto Pow::python() const -> std::string
@@ -798,9 +1046,10 @@ ATan2::ATan2(Expr* y, Expr* x) : y_(y), x_(x)
             "ATan2: both arguments must be scalar (rank 0)");
 }
 
-auto ATan2::latex() const -> std::string
+auto ATan2::latex(IndexNameMap const& map) const -> std::string
 {
-    return "\\operatorname{atan2}(" + y_->latex() + ", " + x_->latex() + ")";
+    return "\\operatorname{atan2}(" + y_->latex(map) + ", " + x_->latex(map)
+           + ")";
 }
 
 auto ATan2::python() const -> std::string
@@ -954,11 +1203,11 @@ auto derivative_of_pow(ResourceList& rl, Expr* base, Rational exp) -> Expr*
 // ===========================================================================
 
 // Wrap a Sum sub-expression in parentheses so binary operators render cleanly.
-static auto latex_operand(Expr const* e) -> std::string
+static auto latex_operand(Expr const* e, IndexNameMap const& map) -> std::string
 {
     if (dynamic_cast<Sum const*>(e) || dynamic_cast<CrossProduct const*>(e))
-        return "(" + e->latex() + ")";
-    return e->latex();
+        return "(" + e->latex(map) + ")";
+    return e->latex(map);
 }
 
 // True for expressions that render as a single atomic token (no space-separated
@@ -978,7 +1227,7 @@ static auto is_atomic_scalar(Expr const* e) -> bool
 // IdentityTensor
 // ===========================================================================
 
-auto IdentityTensor::latex() const -> std::string
+auto IdentityTensor::latex(IndexNameMap const& map) const -> std::string
 {
     return "\\mathbf{I}";
 }
@@ -992,7 +1241,7 @@ auto IdentityTensor::python() const -> std::string
 // LeviCivitaTensor
 // ===========================================================================
 
-auto LeviCivitaTensor::latex() const -> std::string
+auto LeviCivitaTensor::latex(IndexNameMap const& map) const -> std::string
 {
     return "\\boldsymbol{\\varepsilon}";
 }
@@ -1014,9 +1263,9 @@ Trace::Trace(Expr* arg) : arg_(arg)
             + std::to_string(arg->rank()));
 }
 
-auto Trace::latex() const -> std::string
+auto Trace::latex(IndexNameMap const& map) const -> std::string
 {
-    return "\\mathrm{tr}(" + arg_->latex() + ")";
+    return "\\mathrm{tr}(" + arg_->latex(map) + ")";
 }
 
 auto Trace::python() const -> std::string
@@ -1028,9 +1277,9 @@ auto Trace::python() const -> std::string
 // Contract
 // ===========================================================================
 
-auto Contract::latex() const -> std::string
+auto Contract::latex(IndexNameMap const& map) const -> std::string
 {
-    return latex_operand(lhs_) + " \\cdot " + latex_operand(rhs_);
+    return latex_operand(lhs_, map) + " \\cdot " + latex_operand(rhs_, map);
 }
 
 auto Contract::python() const -> std::string
@@ -1042,9 +1291,9 @@ auto Contract::python() const -> std::string
 // DoubleContract
 // ===========================================================================
 
-auto DoubleContract::latex() const -> std::string
+auto DoubleContract::latex(IndexNameMap const& map) const -> std::string
 {
-    return latex_operand(lhs_) + " : " + latex_operand(rhs_);
+    return latex_operand(lhs_, map) + " : " + latex_operand(rhs_, map);
 }
 
 auto DoubleContract::python() const -> std::string
@@ -1056,9 +1305,10 @@ auto DoubleContract::python() const -> std::string
 // DoubleContractReversed
 // ===========================================================================
 
-auto DoubleContractReversed::latex() const -> std::string
+auto DoubleContractReversed::latex(IndexNameMap const& map) const -> std::string
 {
-    return latex_operand(lhs_) + " \\cdot\\!\\cdot " + latex_operand(rhs_);
+    return latex_operand(lhs_, map) + " \\cdot\\!\\cdot "
+           + latex_operand(rhs_, map);
 }
 
 auto DoubleContractReversed::python() const -> std::string
@@ -1075,9 +1325,9 @@ CrossProduct::CrossProduct(Expr* lhs, Expr* rhs) :
 {
 }
 
-auto CrossProduct::latex() const -> std::string
+auto CrossProduct::latex(IndexNameMap const& map) const -> std::string
 {
-    return latex_operand(lhs_) + " \\times " + latex_operand(rhs_);
+    return latex_operand(lhs_, map) + " \\times " + latex_operand(rhs_, map);
 }
 
 auto CrossProduct::python() const -> std::string
@@ -1167,12 +1417,13 @@ Product::Product(Expr* lhs, Expr* rhs) : lhs_(lhs), rhs_(rhs)
             "Product: both operands must be scalar (rank 0)");
 }
 
-auto Product::latex() const -> std::string
+auto Product::latex(IndexNameMap const& map) const -> std::string
 {
     // Scalar × scalar: juxtapose with a space; wrap Sum operands in parens.
-    auto wrap = [](Expr const* e) -> std::string {
-        return dynamic_cast<Sum const*>(e) ? "(" + e->latex() + ")" :
-                                             e->latex();
+    auto wrap = [&map](Expr const* e) -> std::string
+    {
+        return dynamic_cast<Sum const*>(e) ? "(" + e->latex(map) + ")" :
+                                             e->latex(map);
     };
     return wrap(lhs_) + " " + wrap(rhs_);
 }
@@ -1195,9 +1446,9 @@ MaterialDeriv::MaterialDeriv(Expr* velocity, Expr* field) :
             + std::to_string(velocity->rank()));
 }
 
-auto MaterialDeriv::latex() const -> std::string
+auto MaterialDeriv::latex(IndexNameMap const& map) const -> std::string
 {
-    return "\\frac{\\mathrm{D}}{\\mathrm{D}t}\\left(" + field_->latex()
+    return "\\frac{\\mathrm{D}}{\\mathrm{D}t}\\left(" + field_->latex(map)
            + "\\right)";
 }
 

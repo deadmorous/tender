@@ -945,59 +945,60 @@ def test_full_identity_library_count():
 
 def test_sym_basis_vec_latex():
     from tender import make_sym_basis_vec, SymBasisVec
-    sbv_basis = make_sym_basis_vec(wcs, "i", False)
-    sbv_cobasis = make_sym_basis_vec(wcs, "j", True)
+    # index_id 0 → letter "i", index_id 1 → letter "j" (both alone → "i")
+    sbv_basis = make_sym_basis_vec(wcs, 0, False)
+    sbv_cobasis = make_sym_basis_vec(wcs, 0, True)
     assert isinstance(sbv_basis, SymBasisVec)
     assert sbv_basis.latex() == r"\mathbf{e}_{i}"
-    assert sbv_cobasis.latex() == r"\mathbf{e}^{j}"
+    assert sbv_cobasis.latex() == r"\mathbf{e}^{i}"
 
 
 def test_sym_basis_vec_properties():
     from tender import make_sym_basis_vec, SymBasisVec
-    sbv = make_sym_basis_vec(wcs, "k", True)
-    assert sbv.letter == "k"
+    sbv = make_sym_basis_vec(wcs, 0, True)
+    assert sbv.index_id == 0
     assert sbv.is_cobasis is True
     assert sbv.rank == 1
 
 
 def test_abstract_basis_expansion_covariant():
-    """expand_in_basis_step with abstract=True produces a single TP, not a sum."""
-    from tender import expand_in_basis_step, TensorProduct, NamedTensor, SymBasisVec
+    """expand_in_basis_step with abstract=True produces a single TP(AbstractComp, SBV)."""
+    from tender import (
+        expand_in_basis_step, TensorProduct, AbstractComp, SymBasisVec
+    )
 
     a = tensor("a", 1)
     step = expand_in_basis_step(a, wcs, covariant=True, abstract=True)
     result = Derivation([step]).apply(State(a))[-1].expr
 
     assert isinstance(result, TensorProduct)
-    assert isinstance(result.lhs, NamedTensor)
-    assert result.lhs.symbol == "a^i"
+    assert isinstance(result.lhs, AbstractComp)
+    assert result.lhs.base_sym == "a"
+    # indices: [(id, True)] meaning upper (covariant) index
+    assert len(result.lhs.indices) == 1
+    assert result.lhs.indices[0][1] is True
     assert isinstance(result.rhs, SymBasisVec)
-    assert result.rhs.letter == "i"
     assert result.rhs.is_cobasis is False
+    # latex should render as "a^{i} \mathbf{e}_{i}" style
+    assert r"\mathbf{e}_{" in result.rhs.latex()
 
 
 def test_abstract_basis_expansion_contravariant():
-    from tender import expand_in_basis_step, TensorProduct, NamedTensor, SymBasisVec
+    from tender import (
+        expand_in_basis_step, TensorProduct, AbstractComp, SymBasisVec
+    )
 
     b = tensor("b", 1)
     step = expand_in_basis_step(b, wcs, covariant=False, abstract=True)
     result = Derivation([step]).apply(State(b))[-1].expr
 
     assert isinstance(result, TensorProduct)
-    assert result.lhs.symbol == "b_j"
+    assert isinstance(result.lhs, AbstractComp)
+    assert result.lhs.base_sym == "b"
+    # indices: [(id, False)] meaning lower (contravariant) index
+    assert result.lhs.indices[0][1] is False
     assert isinstance(result.rhs, SymBasisVec)
-    assert result.rhs.letter == "j"
     assert result.rhs.is_cobasis is True
-
-
-def test_abstract_basis_custom_letter():
-    from tender import expand_in_basis_step, TensorProduct, SymBasisVec
-
-    a = tensor("a", 1)
-    step = expand_in_basis_step(a, wcs, covariant=True, abstract=True, letter="k")
-    result = Derivation([step]).apply(State(a))[-1].expr
-    assert result.lhs.symbol == "a^k"
-    assert result.rhs.letter == "k"
 
 
 def test_abstract_basis_expansion_rank_error():
@@ -1010,8 +1011,8 @@ def test_abstract_basis_expansion_rank_error():
 
 
 def test_abstract_basis_expansion_rank2_covariant():
-    """Abstract rank-2 all-up: A → A^{ij} e_i ⊗ e_j."""
-    from tender import expand_in_basis_step, SymBasisVec, TensorProduct, NamedTensor
+    """Abstract rank-2 all-up: A → TP(TP(AbstractComp, SBV_i), SBV_j)."""
+    from tender import expand_in_basis_step, SymBasisVec, TensorProduct, AbstractComp
     A = tensor("A", 2)
     step = expand_in_basis_step(A, wcs, covariant=True, abstract=True)
     # TP structure: TP(TP(comp, SBV_i), SBV_j)
@@ -1019,34 +1020,36 @@ def test_abstract_basis_expansion_rank2_covariant():
     assert isinstance(result, TensorProduct)
     sbv_j = result.rhs
     assert isinstance(sbv_j, SymBasisVec)
-    assert sbv_j.letter == "j"
     assert not sbv_j.is_cobasis
     inner = result.lhs
     assert isinstance(inner, TensorProduct)
     sbv_i = inner.rhs
     assert isinstance(sbv_i, SymBasisVec)
-    assert sbv_i.letter == "i"
     assert not sbv_i.is_cobasis
     comp = inner.lhs
-    assert isinstance(comp, NamedTensor)
-    assert comp.symbol == "A^ij"
-    assert comp.rank == 0
+    assert isinstance(comp, AbstractComp)
+    assert comp.base_sym == "A"
+    # Two upper indices
+    assert len(comp.indices) == 2
+    assert comp.indices[0][1] is True
+    assert comp.indices[1][1] is True
 
 
 def test_abstract_basis_expansion_rank2_mixed():
-    """Abstract rank-2 mixed: A → A^{i}_{j} e_i ⊗ e^j."""
-    from tender import expand_in_basis_step, SymBasisVec, TensorProduct, NamedTensor
+    """Abstract rank-2 mixed: A → TP(TP(AbstractComp, SBV_i), SBV^j)."""
+    from tender import expand_in_basis_step, SymBasisVec, TensorProduct, AbstractComp
     A = tensor("A", 2)
     step = expand_in_basis_step(A, wcs, covariant=[True, False], abstract=True)
     result = Derivation([step]).apply(State(A))[-1].expr
     assert isinstance(result, TensorProduct)
     sbv_j = result.rhs
     assert isinstance(sbv_j, SymBasisVec)
-    assert sbv_j.letter == "j"
     assert sbv_j.is_cobasis  # covariant=False → cobasis
     comp = result.lhs.lhs
-    assert isinstance(comp, NamedTensor)
-    assert comp.symbol == "A^i_j"
+    assert isinstance(comp, AbstractComp)
+    assert comp.base_sym == "A"
+    assert comp.indices[0][1] is True   # first: upper
+    assert comp.indices[1][1] is False  # second: lower
 
 
 def test_abstract_basis_expansion_rank2_covariant_list_mismatch():
@@ -1056,27 +1059,6 @@ def test_abstract_basis_expansion_rank2_covariant_list_mismatch():
     A = tensor("A", 2)
     with pytest.raises(ValueError, match="covariant list length"):
         expand_in_basis_step(A, wcs, covariant=[True], abstract=True)
-
-
-def test_abstract_basis_expansion_letter_list():
-    """letter=list overrides auto-picked letters for all indices."""
-    from tender import expand_in_basis_step, SymBasisVec, TensorProduct, NamedTensor
-    A = tensor("A", 2)
-    step = expand_in_basis_step(A, wcs, covariant=True, abstract=True, letter=["k", "l"])
-    result = Derivation([step]).apply(State(A))[-1].expr
-    # Expect TP(TP(tensor("A^kl", 0), SBV("k")), SBV("l"))
-    assert result.rhs.letter == "l"
-    assert result.lhs.rhs.letter == "k"
-    assert result.lhs.lhs.symbol == "A^kl"
-
-
-def test_abstract_basis_expansion_letter_list_length_mismatch():
-    """letter list length != rank raises ValueError."""
-    from tender import expand_in_basis_step
-    import pytest
-    A = tensor("A", 2)
-    with pytest.raises(ValueError, match="letter list length"):
-        expand_in_basis_step(A, wcs, abstract=True, letter=["i"])
 
 
 def test_abstract_comp_sym_latex():
@@ -1090,9 +1072,9 @@ def test_abstract_comp_sym_latex():
 
 
 def test_abstract_dot_simplify():
-    """Abstract-index dot product: a^i e_i · b_j e^j → a^i b_i."""
+    """Abstract-index dot product: a^i e_i · b_j e^j → AbstractIndexedSum."""
     from tender import (
-        expand_in_basis_step, simplify_basis_dot_step, IndexedSum
+        expand_in_basis_step, simplify_basis_dot_step, AbstractIndexedSum
     )
     a = tensor("a", 1)
     b = tensor("b", 1)
@@ -1103,12 +1085,10 @@ def test_abstract_dot_simplify():
     ]
     result = Derivation(steps).apply(State(dot(a, b)))[-1].expr
 
-    assert isinstance(result, IndexedSum)
-    assert result.lhs_sym == "a"
-    assert result.lhs_sep == "^"
-    assert result.rhs_sym == "b"
-    assert result.rhs_sep == "_"
-    assert result.index_letter == "i"
+    assert isinstance(result, AbstractIndexedSum)
+    assert result.lhs.base_sym == "a"
+    assert result.rhs.base_sym == "b"
+    # latex renders as "a^{i} b_{i}" (enrich assigns "i" to the shared index_id)
     assert result.latex() == "a^{i} b_{i}"
 
 
@@ -1128,10 +1108,10 @@ def test_abstract_dot_derivation_steps():
 
 
 def test_prove_equal_by_components_abstract():
-    """prove_equal_by_components works with abstract (IndexedSum) endpoints."""
+    """prove_equal_by_components works with abstract (AbstractIndexedSum) endpoints."""
     from tender import (
         expand_in_basis_step, simplify_basis_dot_step,
-        prove_equal_by_components,
+        prove_equal_by_components, AbstractIndexedSum,
     )
     a = tensor("a", 1)
     b = tensor("b", 1)
@@ -1149,5 +1129,9 @@ def test_prove_equal_by_components_abstract():
     lhs_hist, rhs_hist = prove_equal_by_components(
         dot(a, b), dot(b, a), lhs_steps, rhs_steps
     )
+    assert isinstance(lhs_hist[-1].expr, AbstractIndexedSum)
+    assert isinstance(rhs_hist[-1].expr, AbstractIndexedSum)
+    # Both sides reduce to the same base symbols (letter-invariant)
     assert lhs_hist[-1].expr.latex() == "a^{i} b_{i}"
-    assert rhs_hist[-1].expr.latex() == "b_{j} a^{j}"
+    # rhs: b is expanded first (contravariant) then a (covariant) → b_{i} a^{i}
+    assert rhs_hist[-1].expr.latex() == "b_{i} a^{i}"

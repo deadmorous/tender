@@ -43,9 +43,9 @@ Gradient::Gradient(Expr* arg) : arg_(arg)
 {
 }
 
-auto Gradient::latex() const -> std::string
+auto Gradient::latex(IndexNameMap const& map) const -> std::string
 {
-    return "\\nabla " + arg_->latex();
+    return "\\nabla " + arg_->latex(map);
 }
 
 auto Gradient::python() const -> std::string
@@ -69,9 +69,9 @@ Divergence::Divergence(Expr* arg) : arg_(arg)
             "Divergence: argument must have rank >= 1, got rank 0");
 }
 
-auto Divergence::latex() const -> std::string
+auto Divergence::latex(IndexNameMap const& map) const -> std::string
 {
-    return "\\nabla \\cdot " + arg_->latex();
+    return "\\nabla \\cdot " + arg_->latex(map);
 }
 
 auto Divergence::python() const -> std::string
@@ -95,9 +95,9 @@ Rotor::Rotor(Expr* arg) : arg_(arg)
             "Rotor: argument must have rank >= 1, got rank 0");
 }
 
-auto Rotor::latex() const -> std::string
+auto Rotor::latex(IndexNameMap const& map) const -> std::string
 {
-    return "\\nabla \\times " + arg_->latex();
+    return "\\nabla \\times " + arg_->latex(map);
 }
 
 auto Rotor::python() const -> std::string
@@ -119,9 +119,9 @@ Integral::Integral(Domain* domain, Expr* integrand) :
 {
 }
 
-auto Integral::latex() const -> std::string
+auto Integral::latex(IndexNameMap const& map) const -> std::string
 {
-    return "\\int_{" + domain_->name() + "} " + integrand_->latex() + " \\, "
+    return "\\int_{" + domain_->name() + "} " + integrand_->latex(map) + " \\, "
            + domain_->measure_latex();
 }
 

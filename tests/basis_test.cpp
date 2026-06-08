@@ -516,7 +516,7 @@ TEST(SymBasisVec, LatexBasis)
 {
     auto rl = make_rl();
     auto const& cs = wcs();
-    auto* sbv = make_sym_basis_vec(rl, cs, "i", false);
+    auto* sbv = make_sym_basis_vec(rl, cs, 0, false);
     EXPECT_EQ(sbv->latex(), "\\mathbf{e}_{i}");
 }
 
@@ -524,15 +524,16 @@ TEST(SymBasisVec, LatexCobasis)
 {
     auto rl = make_rl();
     auto const& cs = wcs();
-    auto* sbv = make_sym_basis_vec(rl, cs, "j", true);
-    EXPECT_EQ(sbv->latex(), "\\mathbf{e}^{j}");
+    // index_id=1 is the only ID in this expression, so enrich assigns "i"
+    auto* sbv = make_sym_basis_vec(rl, cs, 1, true);
+    EXPECT_EQ(sbv->latex(), "\\mathbf{e}^{i}");
 }
 
 TEST(SymBasisVec, Rank)
 {
     auto rl = make_rl();
     auto const& cs = wcs();
-    auto* sbv = make_sym_basis_vec(rl, cs, "k", false);
+    auto* sbv = make_sym_basis_vec(rl, cs, 0, false);
     EXPECT_EQ(sbv->rank(), 1);
 }
 
@@ -540,27 +541,29 @@ TEST(SymBasisVec, Properties)
 {
     auto rl = make_rl();
     auto const& cs = wcs();
-    auto* sbv =
-        dynamic_cast<SymBasisVec*>(make_sym_basis_vec(rl, cs, "i", true));
+    auto* sbv = dynamic_cast<SymBasisVec*>(make_sym_basis_vec(rl, cs, 0, true));
     ASSERT_NE(sbv, nullptr);
-    EXPECT_EQ(sbv->letter(), "i");
+    EXPECT_EQ(sbv->index_id(), 0);
     EXPECT_TRUE(sbv->is_cobasis());
     EXPECT_EQ(&sbv->cs(), &cs);
 }
 
 // ===========================================================================
-// Abstract basis dot: simplify_basis_dot_step on TP(comp, SBV) expressions
+// Abstract basis dot: simplify_basis_dot_step on TP(AbstractComp, SBV)
 // ===========================================================================
 
-// Contract(TP(a^i, e_i), TP(b_j, e^j))  →  IndexedSum a^i b_i
+// Contract(TP(AbstractComp("a", [(0,up)]), SBV(0,basis)),
+//          TP(AbstractComp("b", [(0,down)]), SBV(0,cobasis)))
+// → AbstractIndexedSum, latex = "a^{i} b_{i}"
 TEST(AbstractBasisDot, CovariantTimesContravariant)
 {
     auto rl = make_rl();
     auto const& cs = wcs();
-    auto* comp_a = make_named_tensor(rl, "a^i", 0, {});
-    auto* comp_b = make_named_tensor(rl, "b_j", 0, {});
-    auto* sbv_a = make_sym_basis_vec(rl, cs, "i", false); // e_i (basis)
-    auto* sbv_b = make_sym_basis_vec(rl, cs, "j", true);  // e^j (cobasis)
+    // Both SBVs share index_id=0
+    auto* comp_a = make_abstract_comp(rl, "a", {{0, true}});  // a^i
+    auto* comp_b = make_abstract_comp(rl, "b", {{0, false}}); // b_i
+    auto* sbv_a = make_sym_basis_vec(rl, cs, 0, false);       // e_i (basis)
+    auto* sbv_b = make_sym_basis_vec(rl, cs, 0, true);        // e^i (cobasis)
     auto* expr = make_contract(
         rl,
         make_tensor_product(rl, comp_a, sbv_a),
@@ -569,37 +572,13 @@ TEST(AbstractBasisDot, CovariantTimesContravariant)
     auto step = simplify_basis_dot_step(cs);
     auto* result = step.apply(rl, State{expr}).expr();
 
-    auto* is = dynamic_cast<IndexedSum*>(result);
-    ASSERT_NE(is, nullptr) << "Expected IndexedSum, got: " << result->latex();
-    EXPECT_EQ(is->lhs_sym(), "a");
-    EXPECT_EQ(is->lhs_sep(), "^");
-    EXPECT_EQ(is->rhs_sym(), "b");
-    EXPECT_EQ(is->rhs_sep(), "_");
-    EXPECT_EQ(is->index_letter(), "i");
-    EXPECT_EQ(is->latex(), "a^{i} b_{i}");
-}
-
-// Same letter for both SBV nodes — still works (e_i · e^i = 1)
-TEST(AbstractBasisDot, SameLetter)
-{
-    auto rl = make_rl();
-    auto const& cs = wcs();
-    auto* comp_a = make_named_tensor(rl, "a^i", 0, {});
-    auto* comp_b = make_named_tensor(rl, "b_i", 0, {});
-    auto* sbv_a = make_sym_basis_vec(rl, cs, "i", false);
-    auto* sbv_b = make_sym_basis_vec(rl, cs, "i", true);
-    auto* expr = make_contract(
-        rl,
-        make_tensor_product(rl, comp_a, sbv_a),
-        make_tensor_product(rl, comp_b, sbv_b));
-
-    auto step = simplify_basis_dot_step(cs);
-    auto* result = step.apply(rl, State{expr}).expr();
-
-    auto* is = dynamic_cast<IndexedSum*>(result);
-    ASSERT_NE(is, nullptr) << "Expected IndexedSum, got: " << result->latex();
-    EXPECT_EQ(is->index_letter(), "i");
-    EXPECT_EQ(is->latex(), "a^{i} b_{i}");
+    auto* ais = dynamic_cast<AbstractIndexedSum*>(result);
+    ASSERT_NE(ais, nullptr)
+        << "Expected AbstractIndexedSum, got: " << result->latex();
+    EXPECT_EQ(ais->lhs()->base_sym(), "a");
+    EXPECT_EQ(ais->rhs()->base_sym(), "b");
+    EXPECT_EQ(ais->index_id(), 0);
+    EXPECT_EQ(result->latex(), "a^{i} b_{i}");
 }
 
 // Two SBV from same CS but both cobasis — no match (cobasis · cobasis)
@@ -607,10 +586,10 @@ TEST(AbstractBasisDot, BothCobasisPassThrough)
 {
     auto rl = make_rl();
     auto const& cs = wcs();
-    auto* comp_a = make_named_tensor(rl, "a^i", 0, {});
-    auto* comp_b = make_named_tensor(rl, "b_j", 0, {});
-    auto* sbv_a = make_sym_basis_vec(rl, cs, "i", true);
-    auto* sbv_b = make_sym_basis_vec(rl, cs, "j", true);
+    auto* comp_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* comp_b = make_abstract_comp(rl, "b", {{0, false}});
+    auto* sbv_a = make_sym_basis_vec(rl, cs, 0, true);
+    auto* sbv_b = make_sym_basis_vec(rl, cs, 0, true);
     auto* expr = make_contract(
         rl,
         make_tensor_product(rl, comp_a, sbv_a),
@@ -618,8 +597,8 @@ TEST(AbstractBasisDot, BothCobasisPassThrough)
 
     auto step = simplify_basis_dot_step(cs);
     auto* result = step.apply(rl, State{expr}).expr();
-    // Not an IndexedSum — passes through as Contract
-    EXPECT_EQ(dynamic_cast<IndexedSum*>(result), nullptr);
+    // Not an AbstractIndexedSum — passes through as Contract
+    EXPECT_EQ(dynamic_cast<AbstractIndexedSum*>(result), nullptr);
 }
 
 // ===========================================================================
@@ -887,4 +866,34 @@ TEST(ReassembleDot, NestedInSum)
         if (dynamic_cast<Contract*>(t))
             found_contract = true;
     EXPECT_TRUE(found_contract);
+}
+
+// ===========================================================================
+// python() output for abstract-index nodes
+// ===========================================================================
+
+TEST(SymBasisVec, Python)
+{
+    auto rl = make_rl();
+    auto* sbv = make_sym_basis_vec(rl, wcs(), 3, false);
+    EXPECT_EQ(sbv->python(), "make_sym_basis_vec(cs, 3, False)");
+}
+
+TEST(AbstractComp, Python)
+{
+    auto rl = make_rl();
+    auto* ac = make_abstract_comp(rl, "A", {{0, true}, {1, false}});
+    EXPECT_EQ(ac->python(), "abstract_comp('A', [(0, True), (1, False)])");
+}
+
+TEST(AbstractIndexedSum, Python)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* comp_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* comp_b = make_abstract_comp(rl, "b", {{0, false}});
+    auto* ais = make_abstract_indexed_sum(rl, comp_a, comp_b, 0, 0);
+    auto py = ais->python();
+    EXPECT_NE(py.find("abstract_indexed_sum"), std::string::npos);
+    EXPECT_NE(py.find("abstract_comp('a'"), std::string::npos);
 }

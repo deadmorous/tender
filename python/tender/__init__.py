@@ -114,6 +114,12 @@ from ._tender import (
     # SymBasisVec node
     SymBasisVec,
     make_sym_basis_vec,
+    # AbstractComp and AbstractIndexedSum nodes
+    AbstractComp,
+    AbstractIndexedSum,
+    make_abstract_comp,
+    make_abstract_indexed_sum,
+    alloc_index_id,
     # Singleton getters (private)
     _identity_singleton,
     _levi_civita_singleton,
@@ -165,7 +171,7 @@ def _abstract_comp_sym(base_sym, cov_list, letters):
     return result
 
 
-def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False, letter=None):
+def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False):
     """Create a DerivationStep that replaces tensor_expr with its basis expansion.
 
     Concrete mode (default, abstract=False):
@@ -174,28 +180,17 @@ def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False, letter
       rank-2 covariant:    A  →  Σ_{i,j} A^{ij} e_i ⊗ e_j
 
     Abstract mode (abstract=True):
-      rank-1 covariant:   a → a^i e_i  (TensorProduct with SymBasisVec)
-      rank-1 contravariant: a → a_j e^j
-      rank-2 all-up:    A → A^{ij} e_i ⊗ e_j   (covariant=[True, True])
-      rank-2 mixed:     A → A^{i}_{j} e_i ⊗ e^j (covariant=[True, False])
+      rank-1 covariant:   a → AbstractComp("a", [(id, True)]) ⊗ SBV(id, basis)
+      rank-1 contravariant: a → AbstractComp("a", [(id, False)]) ⊗ SBV(id, cobasis)
+      rank-2 all-up:    A → AbstractComp("A", [(i, True), (j, True)]) ⊗ SBV_i ⊗ SBV_j
+      rank-2 mixed:     A → AbstractComp("A", [(i, True), (j, False)]) ⊗ SBV_i ⊗ SBV^j
 
     In abstract mode, simplify_basis_dot_step collapses rank-1 dot products
-    directly to an IndexedSum (e.g. a^i b_i) without 9-term expansion.
-    For rank ≥ 2, abstract expansion is for display; simplification of
-    contractions falls back to the concrete expansion path.
+    directly to an AbstractIndexedSum without 9-term expansion.  Index IDs are
+    allocated automatically from the global context; latex rendering assigns
+    letter names (i, j, k, …) in first-appearance order via enrich().
 
     covariant: bool (applied to all indices) or list[bool] (one per index).
-    letter: index letter(s) for abstract mode.
-            str  → used as the single letter (rank 1) or first letter (rank > 1),
-                   remaining letters filled from "i","j","k","l",...
-            list → used directly as the full letter list (length must equal rank).
-            None → defaults to "i" for covariant, "j" for contravariant (rank 1),
-                   or "i","j","k",... for rank > 1.
-            Ignored in concrete mode.
-
-    When expanding multiple tensors in the same expression use distinct letter
-    sets to avoid clashing dummy indices, e.g. letter=["i","j"] for one tensor
-    and letter=["k","l"] for another.
     """
     sym = tensor_expr.symbol
     r = tensor_expr.rank
@@ -212,24 +207,14 @@ def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False, letter
                 f"expand_in_basis_step: covariant list length {len(cov_list)} "
                 f"does not match tensor rank {r}"
             )
-        # Resolve index letters from the letter argument
-        if isinstance(letter, list):
-            letters = letter
-            if len(letters) != r:
-                raise ValueError(
-                    f"expand_in_basis_step: letter list length {len(letters)} "
-                    f"does not match tensor rank {r}"
-                )
-        elif isinstance(letter, str):
-            letters = _abstract_index_letters(r, letter)
-        elif r == 1 and not cov_list[0]:
-            letters = ["j"]  # rank-1 contravariant default
-        else:
-            letters = _abstract_index_letters(r, "i")
-        comp_sym = _abstract_comp_sym(sym, cov_list, letters)
-        expr = tensor(comp_sym)
-        for cov, ltr in zip(cov_list, letters):
-            expr = expr * make_sym_basis_vec(cs, ltr, not cov)
+        # Allocate fresh integer index IDs for each index
+        index_ids = [alloc_index_id() for _ in range(r)]
+        # Build AbstractComp: pairs are (index_id, is_upper) where upper = covariant
+        indices = [(idx, cov) for idx, cov in zip(index_ids, cov_list)]
+        comp = make_abstract_comp(sym, indices)
+        expr = comp
+        for idx, cov in zip(index_ids, cov_list):
+            expr = expr * make_sym_basis_vec(cs, idx, not cov)
         return substitute_step(tensor_expr, expr)
 
     if r == 1:
@@ -451,6 +436,10 @@ def _normalize_component_form(expr):
     ``a^j b_j`` are considered equal, and factor order is ignored so that
     ``a^i b_i`` and ``b_i a^i`` compare equal.
     """
+    if isinstance(expr, AbstractIndexedSum):
+        # Normalise letter-invariantly: only the base symbols matter
+        parts = sorted([expr.lhs.base_sym, expr.rhs.base_sym])
+        return "AbstractIndexedSum[" + ",".join(parts) + "]"
     if isinstance(expr, IndexedSum):
         parts = sorted([(expr.lhs_sym, expr.lhs_sep), (expr.rhs_sym, expr.rhs_sep)])
         return "IndexedSum[" + ",".join(f"{s}{p}" for s, p in parts) + "]"
@@ -565,6 +554,8 @@ __all__ = [
     "collect_repeated_sum_step", "reassemble_vector_step", "reassemble_dot_step",
     "IndexedSum", "make_indexed_sum",
     "SymBasisVec", "make_sym_basis_vec",
+    "AbstractComp", "AbstractIndexedSum",
+    "make_abstract_comp", "make_abstract_indexed_sum", "alloc_index_id",
     "prove_equal_by_components",
     "apply_identity", "find_matches", "apply_identity_auto", "matches_at_root",
     "search_apply",

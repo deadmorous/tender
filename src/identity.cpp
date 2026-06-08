@@ -16,7 +16,7 @@ PatternVar::PatternVar(std::string symbol) : symbol_(std::move(symbol))
 {
 }
 
-auto PatternVar::latex() const -> std::string
+auto PatternVar::latex(IndexNameMap const& /*map*/) const -> std::string
 {
     return symbol_;
 }

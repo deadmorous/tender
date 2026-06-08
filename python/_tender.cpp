@@ -1,12 +1,15 @@
 // Python bindings for tender — Phase 12.
 //
-// All C++ objects returned to Python are owned by the module-level g_rl arena.
-// Python holds non-owning references; the arena outlives the interpreter.
+// All C++ objects returned to Python are owned by the module-level g_ctx.rl
+// arena. Python holds non-owning references; the arena outlives the
+// interpreter.
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <tender/context.hpp>
 #include <tender/tender.hpp>
 
 namespace nb = nanobind;
@@ -14,7 +17,7 @@ using namespace nb::literals;
 using namespace tender;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static ResourceList g_rl;
+static Context g_ctx;
 
 // Symbolic differential operator — nabla (∇).
 struct Nabla
@@ -56,7 +59,7 @@ NB_MODULE(_tender, m)
     // =======================================================================
     nb::class_<Expr>(m, "Expr")
         .def_prop_ro("rank", &Expr::rank)
-        .def("latex", &Expr::latex)
+        .def("latex", [](Expr const* e) { return e->latex(); })
         .def("python", &Expr::python)
         .def(
             "_repr_latex_",
@@ -69,48 +72,57 @@ NB_MODULE(_tender, m)
         // Arithmetic operators
         .def(
             "__add__",
-            [](Expr* a, Expr* b) -> Expr* { return make_sum(g_rl, {a, b}); },
+            [](Expr* a, Expr* b) -> Expr*
+            { return make_sum(g_ctx.rl, {a, b}); },
             nb::rv_policy::reference)
         .def(
             "__radd__",
-            [](Expr* b, Expr* a) -> Expr* { return make_sum(g_rl, {a, b}); },
+            [](Expr* b, Expr* a) -> Expr*
+            { return make_sum(g_ctx.rl, {a, b}); },
             nb::rv_policy::reference)
         .def(
             "__sub__",
-            [](Expr* a, Expr* b) -> Expr*
-            { return make_sum(g_rl, {a, make_scale(g_rl, Rational{-1}, b)}); },
+            [](Expr* a, Expr* b) -> Expr* {
+                return make_sum(
+                    g_ctx.rl, {a, make_scale(g_ctx.rl, Rational{-1}, b)});
+            },
             nb::rv_policy::reference)
         .def(
             "__rsub__",
-            [](Expr* b, Expr* a) -> Expr*
-            { return make_sum(g_rl, {a, make_scale(g_rl, Rational{-1}, b)}); },
+            [](Expr* b, Expr* a) -> Expr* {
+                return make_sum(
+                    g_ctx.rl, {a, make_scale(g_ctx.rl, Rational{-1}, b)});
+            },
             nb::rv_policy::reference)
         .def(
             "__neg__",
-            [](Expr* a) -> Expr* { return make_scale(g_rl, Rational{-1}, a); },
+            [](Expr* a) -> Expr*
+            { return make_scale(g_ctx.rl, Rational{-1}, a); },
             nb::rv_policy::reference)
         .def(
             "__mul__",
             [](Expr* a, Expr* b) -> Expr*
-            { return make_tensor_product(g_rl, a, b); },
+            { return make_tensor_product(g_ctx.rl, a, b); },
             nb::rv_policy::reference)
         .def(
             "__mul__",
             [](Expr* a, int n) -> Expr*
-            { return make_scale(g_rl, Rational{n}, a); },
+            { return make_scale(g_ctx.rl, Rational{n}, a); },
             nb::rv_policy::reference)
         .def(
             "__mul__",
-            [](Expr* a, Rational r) -> Expr* { return make_scale(g_rl, r, a); },
+            [](Expr* a, Rational r) -> Expr*
+            { return make_scale(g_ctx.rl, r, a); },
             nb::rv_policy::reference)
         .def(
             "__rmul__",
             [](Expr* b, int n) -> Expr*
-            { return make_scale(g_rl, Rational{n}, b); },
+            { return make_scale(g_ctx.rl, Rational{n}, b); },
             nb::rv_policy::reference)
         .def(
             "__rmul__",
-            [](Expr* b, Rational r) -> Expr* { return make_scale(g_rl, r, b); },
+            [](Expr* b, Rational r) -> Expr*
+            { return make_scale(g_ctx.rl, r, b); },
             nb::rv_policy::reference)
         .def(
             "__truediv__",
@@ -118,30 +130,31 @@ NB_MODULE(_tender, m)
             {
                 if (n == 0)
                     throw std::invalid_argument("division by zero");
-                return make_scale(g_rl, Rational{1, n}, a);
+                return make_scale(g_ctx.rl, Rational{1, n}, a);
             },
             nb::rv_policy::reference)
         // @ — single contraction
         .def(
             "__matmul__",
-            [](Expr* a, Expr* b) -> Expr* { return make_contract(g_rl, a, b); },
+            [](Expr* a, Expr* b) -> Expr*
+            { return make_contract(g_ctx.rl, a, b); },
             nb::rv_policy::reference)
         // // — double contraction (Frobenius)
         .def(
             "__floordiv__",
             [](Expr* a, Expr* b) -> Expr*
-            { return make_double_contract(g_rl, a, b); },
+            { return make_double_contract(g_ctx.rl, a, b); },
             nb::rv_policy::reference)
         // ** — double contraction reversed OR scalar power
         .def(
             "__pow__",
             [](Expr* a, Expr* b) -> Expr*
-            { return make_double_contract_reversed(g_rl, a, b); },
+            { return make_double_contract_reversed(g_ctx.rl, a, b); },
             nb::rv_policy::reference)
         .def(
             "__pow__",
             [](Expr* a, int n) -> Expr*
-            { return make_pow(g_rl, a, Rational{n}); },
+            { return make_pow(g_ctx.rl, a, Rational{n}); },
             nb::rv_policy::reference)
         // % — cross product (chaining raises)
         .def(
@@ -152,7 +165,7 @@ NB_MODULE(_tender, m)
                     throw std::invalid_argument(
                         "% (cross product) is not associative — "
                         "parenthesise explicitly or use cross(a, cross(b, c))");
-                return make_cross_product(g_rl, a, b);
+                return make_cross_product(g_ctx.rl, a, b);
             },
             nb::rv_policy::reference);
 
@@ -355,7 +368,7 @@ NB_MODULE(_tender, m)
         .def(
             "apply",
             [](DerivationStep const& step, State const& s)
-            { return step.apply(g_rl, s); },
+            { return step.apply(g_ctx.rl, s); },
             "state"_a);
 
     nb::class_<Derivation>(m, "Derivation")
@@ -363,7 +376,7 @@ NB_MODULE(_tender, m)
         .def(
             "apply",
             [](Derivation const& d, State const& initial)
-            { return d.apply(g_rl, initial); },
+            { return d.apply(g_ctx.rl, initial); },
             "initial"_a)
         .def(
             "__add__",
@@ -388,7 +401,7 @@ NB_MODULE(_tender, m)
                 if (pvars.empty())
                     return Identity::from_derivation(std::move(name), history);
                 return Identity::from_derivation(
-                    std::move(name), history, pvars, g_rl);
+                    std::move(name), history, pvars, g_ctx.rl);
             },
             "name"_a,
             "history"_a,
@@ -402,18 +415,19 @@ NB_MODULE(_tender, m)
         .def(
             "__matmul__",
             [](Nabla const&, Expr* v) -> Expr*
-            { return make_divergence(g_rl, v); },
+            { return make_divergence(g_ctx.rl, v); },
             nb::rv_policy::reference,
             "v"_a)
         .def(
             "__mul__",
             [](Nabla const&, Expr* v) -> Expr*
-            { return make_gradient(g_rl, v); },
+            { return make_gradient(g_ctx.rl, v); },
             nb::rv_policy::reference,
             "v"_a)
         .def(
             "__mod__",
-            [](Nabla const&, Expr* v) -> Expr* { return make_rotor(g_rl, v); },
+            [](Nabla const&, Expr* v) -> Expr*
+            { return make_rotor(g_ctx.rl, v); },
             nb::rv_policy::reference,
             "v"_a)
         .def("__repr__", [](Nabla const&) { return "nabla"; });
@@ -426,7 +440,7 @@ NB_MODULE(_tender, m)
     m.def(
         "tensor",
         [](std::string name, int rank) -> Expr*
-        { return make_named_tensor(g_rl, std::move(name), rank, {}); },
+        { return make_named_tensor(g_ctx.rl, std::move(name), rank, {}); },
         nb::rv_policy::reference,
         "name"_a,
         "rank"_a = 0);
@@ -434,14 +448,14 @@ NB_MODULE(_tender, m)
     m.def(
         "scalar",
         [](std::string name) -> Expr*
-        { return make_named_tensor(g_rl, std::move(name), 0, {}); },
+        { return make_named_tensor(g_ctx.rl, std::move(name), 0, {}); },
         nb::rv_policy::reference,
         "name"_a);
 
     m.def(
         "parameter",
         [](std::string name) -> Parameter*
-        { return make_parameter(g_rl, std::move(name)); },
+        { return make_parameter(g_ctx.rl, std::move(name)); },
         nb::rv_policy::reference,
         "name"_a);
 
@@ -454,14 +468,14 @@ NB_MODULE(_tender, m)
 
     m.def(
         "rational",
-        [](int64_t n) -> Expr* { return make_rational(g_rl, Rational{n}); },
+        [](int64_t n) -> Expr* { return make_rational(g_ctx.rl, Rational{n}); },
         nb::rv_policy::reference,
         "n"_a);
 
     m.def(
         "rational",
         [](int64_t num, int64_t den) -> Expr*
-        { return make_rational(g_rl, Rational{num, den}); },
+        { return make_rational(g_ctx.rl, Rational{num, den}); },
         nb::rv_policy::reference,
         "num"_a,
         "den"_a);
@@ -469,7 +483,7 @@ NB_MODULE(_tender, m)
     m.def(
         "make_pattern_var",
         [](std::string sym) -> PatternVar*
-        { return make_pattern_var(g_rl, std::move(sym)); },
+        { return make_pattern_var(g_ctx.rl, std::move(sym)); },
         nb::rv_policy::reference,
         "symbol"_a);
 
@@ -477,14 +491,14 @@ NB_MODULE(_tender, m)
     m.def(
         "tp",
         [](Expr* a, Expr* b) -> Expr*
-        { return make_tensor_product(g_rl, a, b); },
+        { return make_tensor_product(g_ctx.rl, a, b); },
         nb::rv_policy::reference,
         "a"_a,
         "b"_a);
 
     m.def(
         "dot",
-        [](Expr* a, Expr* b) -> Expr* { return make_contract(g_rl, a, b); },
+        [](Expr* a, Expr* b) -> Expr* { return make_contract(g_ctx.rl, a, b); },
         nb::rv_policy::reference,
         "a"_a,
         "b"_a);
@@ -492,7 +506,7 @@ NB_MODULE(_tender, m)
     m.def(
         "ddot",
         [](Expr* a, Expr* b) -> Expr*
-        { return make_double_contract(g_rl, a, b); },
+        { return make_double_contract(g_ctx.rl, a, b); },
         nb::rv_policy::reference,
         "a"_a,
         "b"_a);
@@ -500,7 +514,7 @@ NB_MODULE(_tender, m)
     m.def(
         "ddot2",
         [](Expr* a, Expr* b) -> Expr*
-        { return make_double_contract_reversed(g_rl, a, b); },
+        { return make_double_contract_reversed(g_ctx.rl, a, b); },
         nb::rv_policy::reference,
         "a"_a,
         "b"_a);
@@ -511,7 +525,7 @@ NB_MODULE(_tender, m)
         {
             // Free function: nesting is explicit and unambiguous; bypass the
             // guard.
-            return g_rl.make<CrossProduct>(a, b);
+            return g_ctx.rl.make<CrossProduct>(a, b);
         },
         nb::rv_policy::reference,
         "a"_a,
@@ -519,81 +533,81 @@ NB_MODULE(_tender, m)
 
     m.def(
         "trace",
-        [](Expr* a) -> Expr* { return make_trace(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_trace(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
 
     // --- scalar functions ---
     m.def(
         "exp",
-        [](Expr* a) -> Expr* { return make_exp(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_exp(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "log",
-        [](Expr* a) -> Expr* { return make_log(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_log(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "sin",
-        [](Expr* a) -> Expr* { return make_sin(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_sin(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "cos",
-        [](Expr* a) -> Expr* { return make_cos(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_cos(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "tan",
-        [](Expr* a) -> Expr* { return make_tan(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_tan(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "asin",
-        [](Expr* a) -> Expr* { return make_asin(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_asin(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "acos",
-        [](Expr* a) -> Expr* { return make_acos(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_acos(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "atan",
-        [](Expr* a) -> Expr* { return make_atan(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_atan(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "atan2",
-        [](Expr* y, Expr* x) -> Expr* { return make_atan2(g_rl, y, x); },
+        [](Expr* y, Expr* x) -> Expr* { return make_atan2(g_ctx.rl, y, x); },
         nb::rv_policy::reference,
         "y"_a,
         "x"_a);
     m.def(
         "sinh",
-        [](Expr* a) -> Expr* { return make_sinh(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_sinh(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "cosh",
-        [](Expr* a) -> Expr* { return make_cosh(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_cosh(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "tanh",
-        [](Expr* a) -> Expr* { return make_tanh(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_tanh(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "sqrt",
-        [](Expr* a) -> Expr* { return make_sqrt(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_sqrt(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
     m.def(
         "pow",
         [](Expr* base, int n) -> Expr*
-        { return make_pow(g_rl, base, Rational{n}); },
+        { return make_pow(g_ctx.rl, base, Rational{n}); },
         nb::rv_policy::reference,
         "base"_a,
         "n"_a);
@@ -601,20 +615,21 @@ NB_MODULE(_tender, m)
     // --- differentiation ---
     m.def(
         "deriv",
-        [](Parameter const* p, Expr* e) -> Expr* { return deriv(g_rl, p, e); },
+        [](Parameter const* p, Expr* e) -> Expr*
+        { return deriv(g_ctx.rl, p, e); },
         nb::rv_policy::reference,
         "param"_a,
         "expr"_a);
 
     m.def(
         "dt",
-        [](Expr* e) -> Expr* { return dt(g_rl, e); },
+        [](Expr* e) -> Expr* { return dt(g_ctx.rl, e); },
         nb::rv_policy::reference,
         "expr"_a);
 
     m.def(
         "ddt",
-        [](Expr* e) -> Expr* { return ddt(g_rl, e); },
+        [](Expr* e) -> Expr* { return ddt(g_ctx.rl, e); },
         nb::rv_policy::reference,
         "expr"_a);
 
@@ -622,7 +637,7 @@ NB_MODULE(_tender, m)
     m.def(
         "grad",
         [](Expr* f, CoordSystem const& cs) -> Expr*
-        { return grad(g_rl, f, cs); },
+        { return grad(g_ctx.rl, f, cs); },
         nb::rv_policy::reference,
         "f"_a,
         "cs"_a);
@@ -638,19 +653,19 @@ NB_MODULE(_tender, m)
     // --- differential operators (symbolic, not coord-system-aware) ---
     m.def(
         "gradient",
-        [](Expr* a) -> Expr* { return make_gradient(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_gradient(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
 
     m.def(
         "divergence",
-        [](Expr* a) -> Expr* { return make_divergence(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_divergence(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
 
     m.def(
         "rot",
-        [](Expr* a) -> Expr* { return make_rotor(g_rl, a); },
+        [](Expr* a) -> Expr* { return make_rotor(g_ctx.rl, a); },
         nb::rv_policy::reference,
         "a"_a);
 
@@ -658,15 +673,16 @@ NB_MODULE(_tender, m)
     m.def(
         "make_surface_domain",
         [](std::string name, Expr* normal) -> SurfaceDomain*
-        { return make_surface_domain(g_rl, std::move(name), normal); },
+        { return make_surface_domain(g_ctx.rl, std::move(name), normal); },
         nb::rv_policy::reference,
         "name"_a,
         "normal"_a);
 
     m.def(
         "make_volume_domain",
-        [](std::string name, Expr* outward_normal) -> VolumeDomain*
-        { return make_volume_domain(g_rl, std::move(name), outward_normal); },
+        [](std::string name, Expr* outward_normal) -> VolumeDomain* {
+            return make_volume_domain(g_ctx.rl, std::move(name), outward_normal);
+        },
         nb::rv_policy::reference,
         "name"_a,
         "outward_normal"_a);
@@ -674,7 +690,7 @@ NB_MODULE(_tender, m)
     m.def(
         "integral",
         [](Domain* domain, Expr* integrand) -> Expr*
-        { return make_integral(g_rl, domain, integrand); },
+        { return make_integral(g_ctx.rl, domain, integrand); },
         nb::rv_policy::reference,
         "domain"_a,
         "integrand"_a);
@@ -788,7 +804,7 @@ NB_MODULE(_tender, m)
         "_find_and_rewrite_all",
         [](Identity const& id, Expr* root) -> nb::list
         {
-            auto results = find_and_rewrite_all(id, g_rl, root);
+            auto results = find_and_rewrite_all(id, g_ctx.rl, root);
             nb::list lst;
             for (auto const& [expr, name]: results)
                 lst.append(nb::make_tuple(
@@ -853,7 +869,7 @@ NB_MODULE(_tender, m)
            int rank) -> Expr*
         {
             return make_indexed_sum(
-                g_rl,
+                g_ctx.rl,
                 std::move(lhs_sym),
                 std::move(lhs_sep),
                 std::move(rhs_sym),
@@ -873,7 +889,8 @@ NB_MODULE(_tender, m)
     // SymBasisVec node
     // =======================================================================
     nb::class_<SymBasisVec, Expr>(m, "SymBasisVec")
-        .def_prop_ro("letter", [](SymBasisVec const* n) { return n->letter(); })
+        .def_prop_ro(
+            "index_id", [](SymBasisVec const* n) { return n->index_id(); })
         .def_prop_ro(
             "is_cobasis", [](SymBasisVec const* n) { return n->is_cobasis(); })
         .def_prop_ro(
@@ -883,12 +900,75 @@ NB_MODULE(_tender, m)
 
     m.def(
         "make_sym_basis_vec",
-        [](CoordSystem const* cs, std::string letter, bool cobasis) -> Expr*
-        { return make_sym_basis_vec(g_rl, *cs, std::move(letter), cobasis); },
+        [](CoordSystem const* cs, int index_id, bool cobasis) -> Expr*
+        { return make_sym_basis_vec(g_ctx.rl, *cs, index_id, cobasis); },
         nb::rv_policy::reference,
         "cs"_a,
-        "letter"_a,
+        "index_id"_a,
         "cobasis"_a);
+
+    // =======================================================================
+    // AbstractComp node
+    // =======================================================================
+    nb::class_<AbstractComp, Expr>(m, "AbstractComp")
+        .def_prop_ro(
+            "base_sym", [](AbstractComp const* n) { return n->base_sym(); })
+        .def_prop_ro(
+            "indices",
+            [](AbstractComp const* n)
+            {
+                auto const& idx = n->indices();
+                return std::vector<std::pair<int, bool>>(idx.begin(), idx.end());
+            });
+
+    m.def(
+        "make_abstract_comp",
+        [](std::string base_sym,
+           std::vector<std::pair<int, bool>> indices) -> AbstractComp*
+        {
+            return make_abstract_comp(
+                g_ctx.rl, std::move(base_sym), std::move(indices));
+        },
+        nb::rv_policy::reference,
+        "base_sym"_a,
+        "indices"_a);
+
+    // =======================================================================
+    // AbstractIndexedSum node
+    // =======================================================================
+    nb::class_<AbstractIndexedSum, Expr>(m, "AbstractIndexedSum")
+        .def_prop_ro(
+            "lhs",
+            [](AbstractIndexedSum const* n) -> AbstractComp const*
+            { return n->lhs(); },
+            nb::rv_policy::reference)
+        .def_prop_ro(
+            "rhs",
+            [](AbstractIndexedSum const* n) -> AbstractComp const*
+            { return n->rhs(); },
+            nb::rv_policy::reference)
+        .def_prop_ro(
+            "index_id",
+            [](AbstractIndexedSum const* n) { return n->index_id(); });
+
+    m.def(
+        "make_abstract_indexed_sum",
+        [](AbstractComp const* lhs,
+           AbstractComp const* rhs,
+           int index_id,
+           int rank) -> AbstractIndexedSum* {
+            return make_abstract_indexed_sum(g_ctx.rl, lhs, rhs, index_id, rank);
+        },
+        nb::rv_policy::reference,
+        "lhs"_a,
+        "rhs"_a,
+        "index_id"_a,
+        "rank"_a = 0);
+
+    // =======================================================================
+    // alloc_index_id — allocate a fresh integer index ID from g_ctx
+    // =======================================================================
+    m.def("alloc_index_id", []() -> int { return g_ctx.alloc_index_id(); });
 
     m.def(
         "collect_repeated_sum_step",
@@ -914,7 +994,7 @@ NB_MODULE(_tender, m)
         "_identity_singleton",
         []() -> Expr*
         {
-            static Expr* e = make_identity(g_rl);
+            static Expr* e = make_identity(g_ctx.rl);
             return e;
         },
         nb::rv_policy::reference);
@@ -923,7 +1003,7 @@ NB_MODULE(_tender, m)
         "_levi_civita_singleton",
         []() -> Expr*
         {
-            static Expr* e = make_levi_civita(g_rl);
+            static Expr* e = make_levi_civita(g_ctx.rl);
             return e;
         },
         nb::rv_policy::reference);

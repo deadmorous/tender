@@ -67,12 +67,12 @@ PolynomialExpr::PolynomialExpr(Polynomial poly, Expr* var) :
 // PolynomialExpr — latex
 // ===========================================================================
 
-auto PolynomialExpr::latex() const -> std::string
+auto PolynomialExpr::latex(IndexNameMap const& map) const -> std::string
 {
     if (poly_.is_zero())
         return "0";
 
-    std::string var_tex = parenthesise_if_sum(var_, var_->latex());
+    std::string var_tex = parenthesise_if_sum(var_, var_->latex(map));
 
     // rank 0: identical structure to Polynomial::to_latex —
     // constant term is the bare coefficient, no unit symbol.
