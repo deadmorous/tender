@@ -126,9 +126,10 @@ print(doc(bac_cab))
 # ---------------------------------------------------------------------------
 # Standard library
 # ---------------------------------------------------------------------------
-from tender.lib.identities.epsilon import bac_cab as lib_bac_cab
+# BAC-CAB has been promoted from an asserted identity to a proved theorem.
+import tender.lib.theorems as _thm
 print()
-print("Standard library entry (same identity):", lib_bac_cab.name)
+print(f"Library theorem (proved from first principles): {_thm.bac_cab.name}")
 
 # ---------------------------------------------------------------------------
 # Write a compilable LaTeX document

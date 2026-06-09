@@ -1,14 +1,13 @@
 """Phase 13.5 vector identity library.
 
 Identities are either:
-  - Asserted  (stated symbolically; proved externally by component expansion
-               or by established mathematics)
+  - Proved    (validated by a formal derivation in tender.lib.theorems)
   - Derived   (produced by search_apply on the existing identity set)
 
 Tier 1 — fundamental vector relations:
-    dot_comm          a·b = b·a
+    dot_comm          a·b = b·a      [proved in theorems.dot_commutativity]
     cross_self_zero   a×a = 0
-    cross_anticomm    a×b = -(b×a)   [re-exported from epsilon]
+    cross_anticomm    a×b = -(b×a)   [proved in theorems.cross_anticommutativity]
 
 Tier 2 — compound identities:
     double_cross      (a×b)×c = b(a·c) - a(b·c)
@@ -26,7 +25,6 @@ from tender import (
     tp,
     rational,
 )
-from tender.lib.identities.epsilon import anti_commutativity
 
 # ---------------------------------------------------------------------------
 # Pattern variables — all rank-1 vectors
@@ -62,8 +60,12 @@ cross_self_zero = Identity(
     rhs=rational(0),
 )
 
-# a×b = -(b×a)   [re-exported from epsilon; not added to ALL to avoid duplicates]
-cross_anticomm = anti_commutativity
+# a×b = -(b×a)   [proved in tender.lib.theorems.cross_anticommutativity]
+cross_anticomm = Identity(
+    "cross-anticomm",
+    lhs=cross(_a, _b),
+    rhs=-cross(_b, _a),
+)
 
 # ---------------------------------------------------------------------------
 # Tier 2 — derived
@@ -99,4 +101,4 @@ jacobi = Identity(
 # Module exports
 # ---------------------------------------------------------------------------
 
-ALL = [dot_comm, cross_self_zero, double_cross, jacobi]
+ALL = [dot_comm, cross_self_zero, cross_anticomm, double_cross, jacobi]

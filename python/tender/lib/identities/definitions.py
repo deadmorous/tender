@@ -11,6 +11,11 @@ Hierarchy (see vibe 000017 for design rationale):
     cross product      — defined by a × b = ε : (a ⊗ b)
     Levi-Civita ε      — defined by anti-symmetry + normalisation
     scalar commutativity — s t = t s  (rank-0 axiom)
+
+Levi-Civita tensor identities (used in theorem proofs):
+    eps_anticomm    — ε:(a⊗b) = -ε:(b⊗a)   (antisymmetry of ε)
+    cross_def_rev   — ε:(a⊗b) = a×b          (reverse of cross_def; not in ALL)
+    eps_delta       — ε:(a⊗(ε:(b⊗c))) = b(a·c) − c(a·b)  (ε-δ identity for BAC-CAB)
 """
 
 from tender import (
@@ -132,6 +137,49 @@ scalar_comm = Identity(
 )
 
 # ---------------------------------------------------------------------------
+# eps_anticomm
+#   ε : (a ⊗ b) = -ε : (b ⊗ a)
+# The Levi-Civita tensor is antisymmetric in its first two tensor slots.
+# This is an axiomatic property of ε (not derived from cross-product rules).
+# Used in the proof of cross_anticommutativity in tender.lib.theorems.
+# ---------------------------------------------------------------------------
+
+eps_anticomm = Identity(
+    "eps-anticomm",
+    lhs=ddot(eps, tp(_a, _b)),
+    rhs=-ddot(eps, tp(_b, _a)),
+)
+
+# ---------------------------------------------------------------------------
+# cross_def_rev
+#   ε : (a ⊗ b) = a × b
+# Reverse direction of cross_def — used to fold ε:(…) back to a cross product.
+# NOT added to ALL: together with cross_def it forms a reversible pair that
+# would create cycles in search_apply.
+# ---------------------------------------------------------------------------
+
+cross_def_rev = Identity(
+    "cross-def-rev",
+    lhs=ddot(eps, tp(_a, _b)),
+    rhs=cross(_a, _b),
+)
+
+# ---------------------------------------------------------------------------
+# eps_delta
+#   ε : (a ⊗ (ε : (b ⊗ c))) = b(a·c) − c(a·b)
+# The ε-δ identity specialised to the BAC-CAB configuration.
+# Provable from the total antisymmetry of ε and 3-D Kronecker contraction
+# (ε_{ijk} ε_{jlm} = δ_{kl} δ_{im} − δ_{km} δ_{il}).
+# Used in the proof of bac_cab in tender.lib.theorems.
+# ---------------------------------------------------------------------------
+
+eps_delta = Identity(
+    "eps-delta",
+    lhs=ddot(eps, tp(_a, ddot(eps, tp(_b, _c)))),
+    rhs=tp(_b, dot(_a, _c)) - tp(_c, dot(_a, _b)),
+)
+
+# ---------------------------------------------------------------------------
 # Module exports
 # ---------------------------------------------------------------------------
 
@@ -142,4 +190,6 @@ ALL = [
     identity_vec,
     cross_def,
     scalar_comm,
+    eps_anticomm,
+    eps_delta,
 ]

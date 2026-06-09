@@ -19,13 +19,23 @@ import pathlib
 from tender import (
     tensor,
     cross,
+    dot,
+    tp,
+    make_pattern_var,
+    Identity,
     State,
     Derivation,
     show,
     search_apply,
     to_latex_document,
 )
-from tender.lib.identities.epsilon import bac_cab
+
+# Define BAC-CAB as a local Identity for use as a rewrite rule.
+# (The library proves this as a formal theorem in tender.lib.theorems.)
+_a = make_pattern_var("a"); _a.constrain_rank(1)
+_b = make_pattern_var("b"); _b.constrain_rank(1)
+_c = make_pattern_var("c"); _c.constrain_rank(1)
+bac_cab = Identity("BAC-CAB", cross(_a, cross(_b, _c)), tp(_b, dot(_a, _c)) - tp(_c, dot(_a, _b)))
 
 u = tensor("\\mathbf{u}", 1)
 v = tensor("\\mathbf{v}", 1)

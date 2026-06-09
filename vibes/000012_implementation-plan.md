@@ -48,6 +48,7 @@ Each phase below cites the vibes where its design decisions live.
 | 000019 | Phase 13.6 — component-form bridge: indexed notation and invariant reconstruction |
 | 000020 | Phase 13.7 — Context refactoring and structural (anonymous) index IDs |
 | 000021 | Phase 13.8 — Kronecker delta, Levi-Civita symbol, and basis expansions |
+| 000022 | Phase 13.9 — Non-circular proofs for cross-product theorems |
 
 ---
 
@@ -639,6 +640,31 @@ component forms.  Three capabilities:
 11. **Coverage** ≥ 90% maintained (658 C++ tests, 121 Python tests).
 
 **Sources**: vibe 000021
+
+---
+
+## Phase 13.9 — Non-circular proofs for cross-product theorems ✓ COMPLETE
+
+**Goal**: replace circular "proofs" (theorems that assumed their own conclusions
+as axioms) with genuine first-principles derivations, and remove the asserted
+identities they supersede.
+
+1. **`eps_anticomm`** added to `definitions.py` — axiom `ε:(a⊗b) = -ε:(b⊗a)`, the
+   antisymmetry of the Levi-Civita tensor (no cross products involved).
+2. **`eps_delta`** added to `definitions.py` — axiom `ε:(a⊗(ε:(b⊗c))) = b(a·c)−c(a·b)`,
+   the ε-δ contraction identity in tensor form.
+3. **`cross_def_rev`** defined (not in `ALL`) — reverse of `cross_def`; excluded
+   to prevent infinite rewrites in `search_apply`.
+4. **`cross_anticommutativity`** proof: `cross_def` → `eps_anticomm` →
+   `cross_def_rev` (via `_find_and_rewrite_all` for the sub-expression match).
+5. **`bac_cab`** proof: `cross_def` (root) → `cross_def` (subtree via
+   `_find_and_rewrite_all`) → `eps_delta`.
+6. **`epsilon.py`** — `anti_commutativity` and `bac_cab` Identity objects
+   removed; `ALL = []`; docstring explains the promotion to theorems.
+7. **`vectors.py`** — `cross_anticomm` defined directly; added to `ALL` (5 items).
+8. **Coverage** ≥ 90% maintained (658 C++ tests, 121 Python tests).
+
+**Sources**: vibe 000022
 
 ---
 

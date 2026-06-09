@@ -536,7 +536,10 @@ def test_find_matches_no_match():
 
 
 def test_apply_identity_auto_bac_cab():
-    from tender.lib.identities.epsilon import bac_cab
+    a = make_pattern_var("a"); a.constrain_rank(1)
+    b = make_pattern_var("b"); b.constrain_rank(1)
+    c = make_pattern_var("c"); c.constrain_rank(1)
+    bac_cab = Identity("BAC-CAB", cross(a, cross(b, c)), tp(b, dot(a, c)) - tp(c, dot(a, b)))
     u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
     expr = cross(u, cross(v, w))
     step = apply_identity_auto(bac_cab, expr)
@@ -570,10 +573,11 @@ def test_doc_latex():
 
 
 def test_standard_library_epsilon():
-    from tender.lib.identities.epsilon import bac_cab, anti_commutativity, ALL
-    assert bac_cab.name == "BAC-CAB"
-    assert anti_commutativity.name == "cross-anticomm"
-    assert len(ALL) == 2
+    from tender.lib.identities.epsilon import ALL
+    # bac_cab and anti_commutativity were promoted to proved theorems in
+    # tender.lib.theorems (Phase 13.9) and removed from the asserted-identities
+    # list.
+    assert len(ALL) == 0
 
 
 def test_standard_library_identity_tensor():
@@ -685,16 +689,24 @@ def test_collect_then_localize_pvw_pattern():
     assert result.rhs is du
 
 
+def _make_bac_cab_identity():
+    """Create a local BAC-CAB Identity for use as a rewrite rule in tests."""
+    a = make_pattern_var("a"); a.constrain_rank(1)
+    b = make_pattern_var("b"); b.constrain_rank(1)
+    c = make_pattern_var("c"); c.constrain_rank(1)
+    return (
+        Identity("BAC-CAB", cross(a, cross(b, c)), tp(b, dot(a, c)) - tp(c, dot(a, b))),
+        a, b, c,
+    )
+
+
 def test_apply_identity_wrong_expression_raises():
     # Regression: apply_identity must validate the binding against the actual
     # expression, not silently substitute into the wrong one.
     # BAC-CAB LHS: a×(b×c).  Using mapping {a:u, b:v, c:w} on (v×w)×u
     # (operands swapped) must raise, not produce a silently wrong result.
-    from tender.lib.identities.epsilon import bac_cab
+    bac_cab, a, b, c = _make_bac_cab_identity()
     u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
-    a, b, c = [make_pattern_var(n) for n in ("a", "b", "c")]
-    for pv in (a, b, c):
-        pv.constrain_rank(1)
 
     step = apply_identity(bac_cab, {a: u, b: v, c: w})
 
@@ -711,7 +723,7 @@ def test_apply_identity_wrong_expression_raises():
 
 def test_search_apply_direct():
     # When target already applies, search_apply returns one step (the application).
-    from tender.lib.identities.epsilon import bac_cab
+    bac_cab, *_ = _make_bac_cab_identity()
     u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
     expr = cross(u, cross(v, w))
     steps = search_apply(bac_cab, expr, timeout=2.0)
@@ -724,7 +736,7 @@ def test_search_apply_direct():
 
 def test_search_apply_needs_anticomm():
     # cross(cross(v,w), u) needs anti-commutativity before BAC-CAB applies.
-    from tender.lib.identities.epsilon import bac_cab
+    bac_cab, *_ = _make_bac_cab_identity()
     u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
     expr = cross(cross(v, w), u)
     steps = search_apply(bac_cab, expr, timeout=5.0)
@@ -736,7 +748,7 @@ def test_search_apply_needs_anticomm():
 
 def test_search_apply_exhausted():
     # An unreachable target raises RuntimeError.
-    from tender.lib.identities.epsilon import bac_cab
+    bac_cab, *_ = _make_bac_cab_identity()
     u = tensor("u", 1); v = tensor("v", 1); w = tensor("w", 1)
     # A plain tensor product: no cross products, so BAC-CAB can never apply.
     expr = dot(u, v)
@@ -862,11 +874,13 @@ def test_definitions_library():
         tp_contract_right, tp_contract_left, trace_dyad,
         identity_vec, cross_def, scalar_comm, ALL,
     )
-    assert len(ALL) == 6
+    assert len(ALL) == 8  # added eps_anticomm, eps_delta in Phase 13.9
     names = {id_.name for id_ in ALL}
     assert "tp-contract-right" in names
     assert "scalar-comm" in names
     assert "cross-def" in names
+    assert "eps-anticomm" in names
+    assert "eps-delta" in names
 
 
 def test_from_derivation_pattern_vars():
@@ -907,13 +921,13 @@ def test_vectors_library():
         dot_comm, cross_self_zero, cross_anticomm,
         double_cross, jacobi, ALL,
     )
-    assert len(ALL) == 4  # cross_anticomm excluded (already in epsilon)
+    assert len(ALL) == 5  # cross_anticomm now included (Phase 13.9)
     names = {id_.name for id_ in ALL}
     assert "dot-comm" in names
     assert "cross-self-zero" in names
+    assert "cross-anticomm" in names
     assert "double-cross" in names
     assert "jacobi" in names
-    # cross_anticomm is re-exported but not in ALL
     assert cross_anticomm.name == "cross-anticomm"
 
 
