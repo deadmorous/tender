@@ -1072,9 +1072,10 @@ def test_abstract_comp_sym_latex():
 
 
 def test_abstract_dot_simplify():
-    """Abstract-index dot product: a^i e_i · b_j e^j → AbstractIndexedSum."""
+    """Abstract-index dot product: a^i e_i · b_j e^j δ_j^i → a^i b_i."""
     from tender import (
-        expand_in_basis_step, simplify_basis_dot_step, AbstractIndexedSum
+        expand_in_basis_step, simplify_basis_dot_step, contract_kronecker_step,
+        Product, AbstractComp,
     )
     a = tensor("a", 1)
     b = tensor("b", 1)
@@ -1082,10 +1083,13 @@ def test_abstract_dot_simplify():
         expand_in_basis_step(a, wcs, covariant=True, abstract=True),
         expand_in_basis_step(b, wcs, covariant=False, abstract=True),
         simplify_basis_dot_step(wcs),
+        contract_kronecker_step(),
     ]
     result = Derivation(steps).apply(State(dot(a, b)))[-1].expr
 
-    assert isinstance(result, AbstractIndexedSum)
+    assert isinstance(result, Product)
+    assert isinstance(result.lhs, AbstractComp)
+    assert isinstance(result.rhs, AbstractComp)
     assert result.lhs.base_sym == "a"
     assert result.rhs.base_sym == "b"
     # latex renders as "a^{i} b_{i}" (enrich assigns "i" to the shared index_id)
@@ -1108,10 +1112,11 @@ def test_abstract_dot_derivation_steps():
 
 
 def test_prove_equal_by_components_abstract():
-    """prove_equal_by_components works with abstract (AbstractIndexedSum) endpoints."""
+    """prove_equal_by_components works with abstract contracted endpoints."""
     from tender import (
         expand_in_basis_step, simplify_basis_dot_step,
-        prove_equal_by_components, AbstractIndexedSum,
+        prove_equal_by_components, contract_kronecker_step,
+        Product, AbstractComp,
     )
     a = tensor("a", 1)
     b = tensor("b", 1)
@@ -1120,18 +1125,144 @@ def test_prove_equal_by_components_abstract():
         expand_in_basis_step(a, wcs, covariant=True, abstract=True),
         expand_in_basis_step(b, wcs, covariant=False, abstract=True),
         simplify_basis_dot_step(wcs),
+        contract_kronecker_step(),
     ]
     rhs_steps = [
         expand_in_basis_step(b, wcs, covariant=False, abstract=True),
         expand_in_basis_step(a, wcs, covariant=True, abstract=True),
         simplify_basis_dot_step(wcs),
+        contract_kronecker_step(),
     ]
     lhs_hist, rhs_hist = prove_equal_by_components(
         dot(a, b), dot(b, a), lhs_steps, rhs_steps
     )
-    assert isinstance(lhs_hist[-1].expr, AbstractIndexedSum)
-    assert isinstance(rhs_hist[-1].expr, AbstractIndexedSum)
+    assert isinstance(lhs_hist[-1].expr, Product)
+    assert isinstance(rhs_hist[-1].expr, Product)
     # Both sides reduce to the same base symbols (letter-invariant)
     assert lhs_hist[-1].expr.latex() == "a^{i} b_{i}"
     # rhs: b is expanded first (contravariant) then a (covariant) → b_{i} a^{i}
     assert rhs_hist[-1].expr.latex() == "b_{i} a^{i}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 13.8: KroneckerDelta, LeviCivitaSymbol, contract_kronecker_step
+# ---------------------------------------------------------------------------
+
+def test_kronecker_delta_equal_ids_folds_to_one():
+    """KroneckerDelta with equal IDs folds to RationalConst(1)."""
+    from tender import make_kronecker_delta, RationalConst
+    kd = make_kronecker_delta(5, 5)
+    assert isinstance(kd, RationalConst)
+    assert kd.python() == "Rational(1)"
+
+
+def test_kronecker_delta_distinct_ids():
+    """KroneckerDelta with distinct IDs stays as KroneckerDelta."""
+    from tender import make_kronecker_delta, KroneckerDelta
+    kd = make_kronecker_delta(0, 1)
+    assert isinstance(kd, KroneckerDelta)
+    assert kd.lower_id == 0
+    assert kd.upper_id == 1
+
+
+def test_kronecker_delta_latex():
+    """KroneckerDelta renders with subscript/superscript."""
+    from tender import make_kronecker_delta
+    kd = make_kronecker_delta(0, 1)
+    assert kd.latex() == r"\delta_{i}^{j}"
+
+
+def test_kronecker_delta_python():
+    """KroneckerDelta python() round-trips correctly."""
+    from tender import make_kronecker_delta, KroneckerDelta
+    kd = make_kronecker_delta(2, 7)
+    assert kd.python() == "make_kronecker_delta(2, 7)"
+
+
+def test_levi_civita_symbol_all_lower():
+    """LeviCivitaSymbol with all-lower indices renders simply."""
+    from tender import make_levi_civita_symbol, LeviCivitaSymbol
+    lcs = make_levi_civita_symbol([0, 1, 2], [False, False, False])
+    assert isinstance(lcs, LeviCivitaSymbol)
+    assert lcs.latex() == r"\varepsilon_{ijk}"
+
+
+def test_levi_civita_symbol_all_upper():
+    """LeviCivitaSymbol with all-upper indices renders simply."""
+    from tender import make_levi_civita_symbol, LeviCivitaSymbol
+    lcs = make_levi_civita_symbol([0, 1, 2], [True, True, True])
+    assert lcs.latex() == r"\varepsilon^{ijk}"
+
+
+def test_levi_civita_symbol_mixed_indices():
+    """LeviCivitaSymbol with mixed indices uses dot-placeholder scheme."""
+    from tender import make_levi_civita_symbol
+    # index 0 upper, 1 lower, 2 lower
+    lcs = make_levi_civita_symbol([0, 1, 2], [True, False, False])
+    assert lcs.latex() == r"\varepsilon^{i{\cdot}{\cdot}}_{{\cdot}jk}"
+
+
+def test_levi_civita_symbol_python():
+    """LeviCivitaSymbol python() round-trips correctly."""
+    from tender import make_levi_civita_symbol
+    lcs = make_levi_civita_symbol([0, 1, 2], [False, False, False])
+    assert lcs.python() == "make_levi_civita_symbol([0, 1, 2], [False, False, False])"
+
+
+def test_contract_kronecker_step_basic():
+    """contract_kronecker_step: δ_i^j a^i b_j → a^i b_i (via dot path)."""
+    from tender import (
+        expand_in_basis_step, simplify_basis_dot_step,
+        contract_kronecker_step, KroneckerDelta, Product,
+    )
+    a = tensor("a", 1)
+    b = tensor("b", 1)
+    # After expand+simplify we get Product(Product(AC_a, AC_b), KroneckerDelta)
+    intermediate = Derivation([
+        expand_in_basis_step(a, wcs, covariant=True, abstract=True),
+        expand_in_basis_step(b, wcs, covariant=False, abstract=True),
+        simplify_basis_dot_step(wcs),
+    ]).apply(State(dot(a, b)))[-1].expr
+    assert isinstance(intermediate, Product)
+    assert isinstance(intermediate.rhs, KroneckerDelta)
+    # contract_kronecker_step removes the delta
+    result = Derivation([contract_kronecker_step()]).apply(State(intermediate))[-1].expr
+    assert isinstance(result, Product)
+    assert not isinstance(result.rhs, KroneckerDelta)
+    assert result.latex() == "a^{i} b_{i}"
+
+
+def test_contract_kronecker_step_full_dot_path():
+    """End-to-end: a·b → a^i b_j δ_i^j → a^i b_i."""
+    from tender import (
+        expand_in_basis_step, simplify_basis_dot_step,
+        contract_kronecker_step, Product, AbstractComp,
+    )
+    a = tensor("a", 1)
+    b = tensor("b", 1)
+    steps = [
+        expand_in_basis_step(a, wcs, covariant=True, abstract=True),
+        expand_in_basis_step(b, wcs, covariant=False, abstract=True),
+        simplify_basis_dot_step(wcs),
+        contract_kronecker_step(),
+    ]
+    result = Derivation(steps).apply(State(dot(a, b)))[-1].expr
+    assert isinstance(result, Product)
+    assert isinstance(result.lhs, AbstractComp)
+    assert isinstance(result.rhs, AbstractComp)
+    assert result.lhs.base_sym == "a"
+    assert result.rhs.base_sym == "b"
+    # Shared index ID — same slot in both factors
+    assert result.lhs.indices[0][0] == result.rhs.indices[0][0]
+    assert result.latex() == "a^{i} b_{i}"
+
+
+def test_theorems_import():
+    """tender.lib.theorems imports cleanly and all three theorems are proved."""
+    import tender.lib.theorems as thm
+    assert hasattr(thm, "dot_commutativity")
+    assert hasattr(thm, "cross_anticommutativity")
+    assert hasattr(thm, "bac_cab")
+    assert thm.dot_commutativity.name == "dot_commutativity"
+    assert thm.cross_anticommutativity.name == "cross_anticommutativity"
+    assert thm.bac_cab.name == "bac_cab"

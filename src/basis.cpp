@@ -9,6 +9,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace tender
@@ -58,29 +59,23 @@ static auto simplify_contract(
                         auto* ac_b = dynamic_cast<AbstractComp*>(tpr->lhs());
                         if (ac_a && ac_b)
                         {
-                            // Use the lhs index_id as the contracted dummy
-                            // index. If rhs has a different index_id on its
-                            // SBV, rewrite rhs's spec so the SBV index is
-                            // unified.
-                            int const dummy = sbvl->index_id();
-                            int const rhs_sbv_id = sbvr->index_id();
-                            AbstractComp const* rhs_comp = ac_b;
-                            if (dummy != rhs_sbv_id)
+                            int const lhs_id = sbvl->index_id();
+                            int const rhs_id = sbvr->index_id();
+                            if (lhs_id == rhs_id)
                             {
-                                // Replace rhs_sbv_id → dummy in ac_b's index
-                                // spec
-                                AbstractComp::IndexSpec new_spec;
-                                new_spec.reserve(ac_b->indices().size());
-                                for (auto const& [id, upper]: ac_b->indices())
-                                {
-                                    new_spec.push_back(
-                                        {id == rhs_sbv_id ? dummy : id, upper});
-                                }
-                                rhs_comp = make_abstract_comp(
-                                    rl, ac_b->base_sym(), std::move(new_spec));
+                                // Same ID: direct shortcut — skip
+                                // KroneckerDelta
+                                return make_abstract_indexed_sum(
+                                    rl, ac_a, ac_b, lhs_id, 0);
                             }
-                            return make_abstract_indexed_sum(
-                                rl, ac_a, rhs_comp, dummy, 0);
+                            // Different IDs: general path via KroneckerDelta.
+                            // cobasis SBV is the lower index (covariant),
+                            // basis SBV is the upper index (contravariant).
+                            int lo_id = sbvl->is_cobasis() ? rhs_id : lhs_id;
+                            int hi_id = sbvl->is_cobasis() ? lhs_id : rhs_id;
+                            auto* kd = make_kronecker_delta(rl, lo_id, hi_id);
+                            Expr* prod = make_product(rl, ac_a, ac_b);
+                            return make_product(rl, prod, kd);
                         }
                     }
                 }
@@ -816,6 +811,287 @@ auto reassemble_dot_step(CoordSystem const& cs) -> DerivationStep
     return DerivationStep{
         "reassemble_dot", [&cs](ResourceList& rl, Expr* e) -> Expr* {
             return reassemble_dot_impl(rl, e, cs);
+        }};
+}
+
+// ===========================================================================
+// contract_kronecker_step
+// ===========================================================================
+
+// Count every abstract index ID occurrence in the tree.
+static auto count_all_index_ids(
+    Expr const* e, std::unordered_map<int, int>& counts) -> void
+{
+    if (!e)
+        return;
+    if (auto const* ac = dynamic_cast<AbstractComp const*>(e))
+    {
+        for (auto const& [id, up]: ac->indices())
+            counts[id]++;
+        return;
+    }
+    if (auto const* sbv = dynamic_cast<SymBasisVec const*>(e))
+    {
+        counts[sbv->index_id()]++;
+        return;
+    }
+    if (auto const* kd = dynamic_cast<KroneckerDelta const*>(e))
+    {
+        counts[kd->lower_id()]++;
+        counts[kd->upper_id()]++;
+        return;
+    }
+    if (auto const* lcs = dynamic_cast<LeviCivitaSymbol const*>(e))
+    {
+        for (int id: lcs->ids())
+            counts[id]++;
+        return;
+    }
+    if (auto const* ais = dynamic_cast<AbstractIndexedSum const*>(e))
+    {
+        count_all_index_ids(ais->lhs(), counts);
+        count_all_index_ids(ais->rhs(), counts);
+        return;
+    }
+    if (auto const* tp = dynamic_cast<TensorProduct const*>(e))
+    {
+        count_all_index_ids(tp->lhs(), counts);
+        count_all_index_ids(tp->rhs(), counts);
+        return;
+    }
+    if (auto const* pr = dynamic_cast<Product const*>(e))
+    {
+        count_all_index_ids(pr->lhs(), counts);
+        count_all_index_ids(pr->rhs(), counts);
+        return;
+    }
+    if (auto const* s = dynamic_cast<Sum const*>(e))
+    {
+        for (auto const* t: s->terms())
+            count_all_index_ids(t, counts);
+        return;
+    }
+    if (auto const* sc = dynamic_cast<Scale const*>(e))
+    {
+        count_all_index_ids(sc->expr(), counts);
+        return;
+    }
+    if (auto const* co = dynamic_cast<Contract const*>(e))
+    {
+        count_all_index_ids(co->lhs(), counts);
+        count_all_index_ids(co->rhs(), counts);
+        return;
+    }
+    if (auto const* dc = dynamic_cast<DoubleContract const*>(e))
+    {
+        count_all_index_ids(dc->lhs(), counts);
+        count_all_index_ids(dc->rhs(), counts);
+        return;
+    }
+    if (auto const* dr = dynamic_cast<DoubleContractReversed const*>(e))
+    {
+        count_all_index_ids(dr->lhs(), counts);
+        count_all_index_ids(dr->rhs(), counts);
+        return;
+    }
+    if (auto const* tr = dynamic_cast<Trace const*>(e))
+    {
+        count_all_index_ids(tr->arg(), counts);
+        return;
+    }
+}
+
+// Find the first KroneckerDelta in the tree (DFS order).
+static auto find_first_kronecker(Expr* e) -> KroneckerDelta*
+{
+    if (!e)
+        return nullptr;
+    if (auto* kd = dynamic_cast<KroneckerDelta*>(e))
+        return kd;
+    if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        if (auto* kd = find_first_kronecker(tp->lhs()))
+            return kd;
+        return find_first_kronecker(tp->rhs());
+    }
+    if (auto* pr = dynamic_cast<Product*>(e))
+    {
+        if (auto* kd = find_first_kronecker(pr->lhs()))
+            return kd;
+        return find_first_kronecker(pr->rhs());
+    }
+    if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        for (auto* t: s->terms())
+            if (auto* kd = find_first_kronecker(t))
+                return kd;
+        return nullptr;
+    }
+    if (auto* sc = dynamic_cast<Scale*>(e))
+        return find_first_kronecker(sc->expr());
+    if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        if (auto* kd = find_first_kronecker(co->lhs()))
+            return kd;
+        return find_first_kronecker(co->rhs());
+    }
+    if (auto* dc = dynamic_cast<DoubleContract*>(e))
+    {
+        if (auto* kd = find_first_kronecker(dc->lhs()))
+            return kd;
+        return find_first_kronecker(dc->rhs());
+    }
+    if (auto* dr = dynamic_cast<DoubleContractReversed*>(e))
+    {
+        if (auto* kd = find_first_kronecker(dr->lhs()))
+            return kd;
+        return find_first_kronecker(dr->rhs());
+    }
+    if (auto* tr = dynamic_cast<Trace*>(e))
+        return find_first_kronecker(tr->arg());
+    return nullptr;
+}
+
+// Substitute old_id → new_id in the tree AND replace target_kd with 1.
+static auto substitute_and_remove(
+    ResourceList& rl,
+    Expr* e,
+    int old_id,
+    int new_id,
+    KroneckerDelta const* target_kd) -> Expr*
+{
+    if (e == target_kd)
+        return make_rational(rl, Rational{1});
+    return substitute_index(rl, e, old_id, new_id);
+}
+
+// Full tree walk for substitute_and_remove: recurses through compound nodes.
+static auto substitute_remove_impl(
+    ResourceList& rl,
+    Expr* e,
+    int old_id,
+    int new_id,
+    KroneckerDelta const* target_kd) -> Expr*
+{
+    if (e == target_kd)
+        return make_rational(rl, Rational{1});
+
+    // For leaf-level index nodes, substitute without further recursion.
+    if (dynamic_cast<AbstractComp*>(e) || dynamic_cast<SymBasisVec*>(e)
+        || dynamic_cast<KroneckerDelta*>(e)
+        || dynamic_cast<LeviCivitaSymbol*>(e)
+        || dynamic_cast<AbstractIndexedSum*>(e))
+    {
+        return substitute_index(rl, e, old_id, new_id);
+    }
+    if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        auto* l =
+            substitute_remove_impl(rl, tp->lhs(), old_id, new_id, target_kd);
+        auto* r =
+            substitute_remove_impl(rl, tp->rhs(), old_id, new_id, target_kd);
+        return (l == tp->lhs() && r == tp->rhs()) ?
+                   e :
+                   make_tensor_product(rl, l, r);
+    }
+    if (auto* pr = dynamic_cast<Product*>(e))
+    {
+        auto* l =
+            substitute_remove_impl(rl, pr->lhs(), old_id, new_id, target_kd);
+        auto* r =
+            substitute_remove_impl(rl, pr->rhs(), old_id, new_id, target_kd);
+        return (l == pr->lhs() && r == pr->rhs()) ? e : make_product(rl, l, r);
+    }
+    if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        std::vector<Expr*> terms;
+        terms.reserve(s->terms().size());
+        bool changed = false;
+        for (auto* t: s->terms())
+        {
+            auto* sub =
+                substitute_remove_impl(rl, t, old_id, new_id, target_kd);
+            if (sub != t)
+                changed = true;
+            terms.push_back(sub);
+        }
+        return changed ? make_sum(rl, std::move(terms)) : e;
+    }
+    if (auto* sc = dynamic_cast<Scale*>(e))
+    {
+        auto* inner =
+            substitute_remove_impl(rl, sc->expr(), old_id, new_id, target_kd);
+        return inner == sc->expr() ? e : make_scale(rl, sc->coeff(), inner);
+    }
+    if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        auto* l =
+            substitute_remove_impl(rl, co->lhs(), old_id, new_id, target_kd);
+        auto* r =
+            substitute_remove_impl(rl, co->rhs(), old_id, new_id, target_kd);
+        return (l == co->lhs() && r == co->rhs()) ? e : make_contract(rl, l, r);
+    }
+    if (auto* dc = dynamic_cast<DoubleContract*>(e))
+    {
+        auto* l =
+            substitute_remove_impl(rl, dc->lhs(), old_id, new_id, target_kd);
+        auto* r =
+            substitute_remove_impl(rl, dc->rhs(), old_id, new_id, target_kd);
+        return (l == dc->lhs() && r == dc->rhs()) ?
+                   e :
+                   make_double_contract(rl, l, r);
+    }
+    if (auto* dr = dynamic_cast<DoubleContractReversed*>(e))
+    {
+        auto* l =
+            substitute_remove_impl(rl, dr->lhs(), old_id, new_id, target_kd);
+        auto* r =
+            substitute_remove_impl(rl, dr->rhs(), old_id, new_id, target_kd);
+        return (l == dr->lhs() && r == dr->rhs()) ?
+                   e :
+                   make_double_contract_reversed(rl, l, r);
+    }
+    if (auto* tr = dynamic_cast<Trace*>(e))
+    {
+        auto* inner =
+            substitute_remove_impl(rl, tr->arg(), old_id, new_id, target_kd);
+        return inner == tr->arg() ? e : make_trace(rl, inner);
+    }
+    return e;
+}
+
+auto contract_kronecker_step() -> DerivationStep
+{
+    return DerivationStep{
+        "contract_kronecker",
+        [](ResourceList& rl, Expr* e) -> Expr*
+        {
+            KroneckerDelta* kd = find_first_kronecker(e);
+            if (!kd)
+                return e;
+
+            // Count all index-ID occurrences in the full tree.
+            std::unordered_map<int, int> counts;
+            count_all_index_ids(e, counts);
+
+            int lo = kd->lower_id();
+            int hi = kd->upper_id();
+            // Subtract the delta's own contributions to get external counts.
+            int lo_ext = counts[lo] - 1;
+            int hi_ext = counts[hi] - 1;
+
+            int dummy_id, free_id;
+            if (lo_ext == 1 && hi_ext != 1)
+                dummy_id = lo, free_id = hi;
+            else if (hi_ext == 1 && lo_ext != 1)
+                dummy_id = hi, free_id = lo;
+            else if (lo_ext == 1 && hi_ext == 1)
+                // Both are dummy; prefer to eliminate hi → lo.
+                dummy_id = hi, free_id = lo;
+            else
+                return e; // no dummy index; leave as-is
+
+            return substitute_remove_impl(rl, e, dummy_id, free_id, kd);
         }};
 }
 

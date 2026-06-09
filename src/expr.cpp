@@ -50,6 +50,18 @@ static auto collect_index_ids_impl(
         collect_index_ids_impl(ais->rhs(), order, seen);
         return;
     }
+    if (auto const* kd = dynamic_cast<KroneckerDelta const*>(e))
+    {
+        add_id(kd->lower_id(), order, seen);
+        add_id(kd->upper_id(), order, seen);
+        return;
+    }
+    if (auto const* lcs = dynamic_cast<LeviCivitaSymbol const*>(e))
+    {
+        for (int id: lcs->ids())
+            add_id(id, order, seen);
+        return;
+    }
     if (auto const* tp = dynamic_cast<TensorProduct const*>(e))
     {
         collect_index_ids_impl(tp->lhs(), order, seen);
@@ -794,34 +806,56 @@ AbstractComp::AbstractComp(std::string base_sym, IndexSpec indices) :
 
 auto AbstractComp::latex(IndexNameMap const& map) const -> std::string
 {
-    std::string result = sym_to_latex(base_sym_);
-    // Group consecutive same-direction indices: "^{ij}" or "_{k}"
-    char current_sep = '\0';
-    std::string current_group;
-    auto flush = [&]()
-    {
-        if (!current_group.empty())
-            result += (current_sep == '^') ? "^{" + current_group + "}" :
-                                             "_{" + current_group + "}";
-    };
+    if (indices_.empty())
+        return sym_to_latex(base_sym_);
+
+    bool all_upper = true;
+    bool all_lower = true;
     for (auto const& [id, is_upper]: indices_)
     {
-        char sep = is_upper ? '^' : '_';
-        std::string ltr =
-            map.count(id) ? map.at(id) : ("?" + std::to_string(id));
-        if (sep == current_sep)
+        if (!is_upper)
+            all_upper = false;
+        if (is_upper)
+            all_lower = false;
+    }
+
+    std::string result = sym_to_latex(base_sym_);
+
+    auto get_ltr = [&](int id) -> std::string
+    { return map.count(id) ? map.at(id) : ("?" + std::to_string(id)); };
+
+    if (all_upper)
+    {
+        std::string letters;
+        for (auto const& [id, up]: indices_)
+            letters += get_ltr(id);
+        return result + "^{" + letters + "}";
+    }
+    if (all_lower)
+    {
+        std::string letters;
+        for (auto const& [id, up]: indices_)
+            letters += get_ltr(id);
+        return result + "_{" + letters + "}";
+    }
+
+    // Mixed indices: dot-placeholder scheme — one upper row, one lower row.
+    std::string upper_row, lower_row;
+    for (auto const& [id, is_upper]: indices_)
+    {
+        std::string ltr = get_ltr(id);
+        if (is_upper)
         {
-            current_group += ltr;
+            upper_row += ltr;
+            lower_row += "{\\cdot}";
         }
         else
         {
-            flush();
-            current_sep = sep;
-            current_group = ltr;
+            upper_row += "{\\cdot}";
+            lower_row += ltr;
         }
     }
-    flush();
-    return result;
+    return result + "^{" + upper_row + "}_{" + lower_row + "}";
 }
 
 auto AbstractComp::python() const -> std::string
@@ -874,6 +908,88 @@ auto make_abstract_indexed_sum(
     int rank) -> AbstractIndexedSum*
 {
     return rl.make<AbstractIndexedSum>(lhs, rhs, index_id, rank);
+}
+
+// ===========================================================================
+// KroneckerDelta
+// ===========================================================================
+
+auto KroneckerDelta::latex(IndexNameMap const& map) const -> std::string
+{
+    auto get = [&](int id) -> std::string
+    { return map.count(id) ? map.at(id) : ("?" + std::to_string(id)); };
+    return "\\delta_{" + get(lower_id_) + "}^{" + get(upper_id_) + "}";
+}
+
+auto KroneckerDelta::python() const -> std::string
+{
+    return "make_kronecker_delta(" + std::to_string(lower_id_) + ", "
+           + std::to_string(upper_id_) + ")";
+}
+
+auto make_kronecker_delta(ResourceList& rl, int lower_id, int upper_id) -> Expr*
+{
+    if (lower_id == upper_id)
+        return make_rational(rl, Rational{1});
+    return rl.make<KroneckerDelta>(lower_id, upper_id);
+}
+
+// ===========================================================================
+// LeviCivitaSymbol
+// ===========================================================================
+
+auto LeviCivitaSymbol::latex(IndexNameMap const& map) const -> std::string
+{
+    auto get = [&](int i) -> std::string
+    {
+        int id = ids_[i];
+        return map.count(id) ? map.at(id) : ("?" + std::to_string(id));
+    };
+
+    bool all_lower = !upper_[0] && !upper_[1] && !upper_[2];
+    bool all_upper = upper_[0] && upper_[1] && upper_[2];
+
+    if (all_lower)
+        return "\\varepsilon_{" + get(0) + get(1) + get(2) + "}";
+    if (all_upper)
+        return "\\varepsilon^{" + get(0) + get(1) + get(2) + "}";
+
+    // Mixed: dot-placeholder scheme
+    std::string upper_row, lower_row;
+    for (int i = 0; i < 3; ++i)
+    {
+        if (upper_[i])
+        {
+            upper_row += get(i);
+            lower_row += "{\\cdot}";
+        }
+        else
+        {
+            upper_row += "{\\cdot}";
+            lower_row += get(i);
+        }
+    }
+    return "\\varepsilon^{" + upper_row + "}_{" + lower_row + "}";
+}
+
+auto LeviCivitaSymbol::python() const -> std::string
+{
+    std::string ids_str = "[" + std::to_string(ids_[0]) + ", "
+                          + std::to_string(ids_[1]) + ", "
+                          + std::to_string(ids_[2]) + "]";
+    std::string upper_str = "[" + std::string(upper_[0] ? "True" : "False")
+                            + ", " + std::string(upper_[1] ? "True" : "False")
+                            + ", " + std::string(upper_[2] ? "True" : "False")
+                            + "]";
+    return "make_levi_civita_symbol(" + ids_str + ", " + upper_str + ")";
+}
+
+auto make_levi_civita_symbol(
+    ResourceList& rl,
+    std::array<int, 3> ids,
+    std::array<bool, 3> upper) -> LeviCivitaSymbol*
+{
+    return rl.make<LeviCivitaSymbol>(ids, upper);
 }
 
 // ===========================================================================
@@ -1714,6 +1830,148 @@ auto ddt(ResourceList& rl, Expr* e) -> Expr*
 auto make_material_deriv(ResourceList& rl, Expr* velocity, Expr* field) -> Expr*
 {
     return rl.make<MaterialDeriv>(velocity, field);
+}
+
+// ===========================================================================
+// substitute_index
+// ===========================================================================
+
+auto substitute_index(ResourceList& rl, Expr* e, int old_id, int new_id) -> Expr*
+{
+    if (old_id == new_id)
+        return e;
+
+    if (auto* ac = dynamic_cast<AbstractComp*>(e))
+    {
+        bool changed = false;
+        AbstractComp::IndexSpec spec;
+        spec.reserve(ac->indices().size());
+        for (auto const& [id, up]: ac->indices())
+        {
+            int mapped = (id == old_id) ? new_id : id;
+            if (mapped != id)
+                changed = true;
+            spec.push_back({mapped, up});
+        }
+        return changed ?
+                   make_abstract_comp(rl, ac->base_sym(), std::move(spec)) :
+                   e;
+    }
+    if (auto* sbv = dynamic_cast<SymBasisVec*>(e))
+    {
+        if (sbv->index_id() != old_id)
+            return e;
+        return make_sym_basis_vec(rl, sbv->cs(), new_id, sbv->is_cobasis());
+    }
+    if (auto* ais = dynamic_cast<AbstractIndexedSum*>(e))
+    {
+        auto* new_lhs = dynamic_cast<AbstractComp*>(substitute_index(
+            rl, const_cast<AbstractComp*>(ais->lhs()), old_id, new_id));
+        auto* new_rhs = dynamic_cast<AbstractComp*>(substitute_index(
+            rl, const_cast<AbstractComp*>(ais->rhs()), old_id, new_id));
+        int new_idx = (ais->index_id() == old_id) ? new_id : ais->index_id();
+        if (new_lhs == ais->lhs() && new_rhs == ais->rhs()
+            && new_idx == ais->index_id())
+            return e;
+        return make_abstract_indexed_sum(
+            rl,
+            new_lhs ? new_lhs : ais->lhs(),
+            new_rhs ? new_rhs : ais->rhs(),
+            new_idx,
+            ais->rank());
+    }
+    if (auto* kd = dynamic_cast<KroneckerDelta*>(e))
+    {
+        int lo = (kd->lower_id() == old_id) ? new_id : kd->lower_id();
+        int hi = (kd->upper_id() == old_id) ? new_id : kd->upper_id();
+        if (lo == kd->lower_id() && hi == kd->upper_id())
+            return e;
+        return make_kronecker_delta(rl, lo, hi);
+    }
+    if (auto* lcs = dynamic_cast<LeviCivitaSymbol*>(e))
+    {
+        auto ids = lcs->ids();
+        bool changed = false;
+        for (int& id: ids)
+        {
+            if (id == old_id)
+            {
+                id = new_id;
+                changed = true;
+            }
+        }
+        return changed ? make_levi_civita_symbol(rl, ids, lcs->upper()) : e;
+    }
+    // Compound nodes — recurse
+    if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        auto* l = substitute_index(rl, tp->lhs(), old_id, new_id);
+        auto* r = substitute_index(rl, tp->rhs(), old_id, new_id);
+        return (l == tp->lhs() && r == tp->rhs()) ?
+                   e :
+                   make_tensor_product(rl, l, r);
+    }
+    if (auto* pr = dynamic_cast<Product*>(e))
+    {
+        auto* l = substitute_index(rl, pr->lhs(), old_id, new_id);
+        auto* r = substitute_index(rl, pr->rhs(), old_id, new_id);
+        return (l == pr->lhs() && r == pr->rhs()) ? e : make_product(rl, l, r);
+    }
+    if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        std::vector<Expr*> terms;
+        terms.reserve(s->terms().size());
+        bool changed = false;
+        for (auto* t: s->terms())
+        {
+            auto* sub = substitute_index(rl, t, old_id, new_id);
+            if (sub != t)
+                changed = true;
+            terms.push_back(sub);
+        }
+        return changed ? make_sum(rl, std::move(terms)) : e;
+    }
+    if (auto* sc = dynamic_cast<Scale*>(e))
+    {
+        auto* inner = substitute_index(rl, sc->expr(), old_id, new_id);
+        return inner == sc->expr() ? e : make_scale(rl, sc->coeff(), inner);
+    }
+    if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        auto* l = substitute_index(rl, co->lhs(), old_id, new_id);
+        auto* r = substitute_index(rl, co->rhs(), old_id, new_id);
+        return (l == co->lhs() && r == co->rhs()) ? e : make_contract(rl, l, r);
+    }
+    if (auto* dc = dynamic_cast<DoubleContract*>(e))
+    {
+        auto* l = substitute_index(rl, dc->lhs(), old_id, new_id);
+        auto* r = substitute_index(rl, dc->rhs(), old_id, new_id);
+        return (l == dc->lhs() && r == dc->rhs()) ?
+                   e :
+                   make_double_contract(rl, l, r);
+    }
+    if (auto* dr = dynamic_cast<DoubleContractReversed*>(e))
+    {
+        auto* l = substitute_index(rl, dr->lhs(), old_id, new_id);
+        auto* r = substitute_index(rl, dr->rhs(), old_id, new_id);
+        return (l == dr->lhs() && r == dr->rhs()) ?
+                   e :
+                   make_double_contract_reversed(rl, l, r);
+    }
+    if (auto* cp = dynamic_cast<CrossProduct*>(e))
+    {
+        auto* l = substitute_index(rl, cp->lhs(), old_id, new_id);
+        auto* r = substitute_index(rl, cp->rhs(), old_id, new_id);
+        return (l == cp->lhs() && r == cp->rhs()) ? e :
+                                                    rl.make<CrossProduct>(l, r);
+    }
+    if (auto* tr = dynamic_cast<Trace*>(e))
+    {
+        auto* inner = substitute_index(rl, tr->arg(), old_id, new_id);
+        return inner == tr->arg() ? e : make_trace(rl, inner);
+    }
+    // Leaf nodes (no index IDs): return unchanged
+    return e;
 }
 
 } // namespace tender

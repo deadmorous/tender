@@ -43,4 +43,11 @@ auto reassemble_vector_step(CoordSystem const& cs) -> DerivationStep;
 // Recurses bottom-up; passes unrecognised sub-expressions through.
 auto reassemble_dot_step(CoordSystem const& cs) -> DerivationStep;
 
+// Contract one dummy-index Kronecker delta.
+// Scans the tree for a KroneckerDelta(lo, hi) where one index appears exactly
+// once outside the delta (dummy index); replaces that ID throughout the tree
+// with the free index and removes the delta.  One application per call;
+// repeated calls handle multiple deltas.
+auto contract_kronecker_step() -> DerivationStep;
+
 } // namespace tender

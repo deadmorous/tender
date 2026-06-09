@@ -5,10 +5,12 @@
 // interpreter.
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/array.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <tender/basis.hpp>
 #include <tender/context.hpp>
 #include <tender/tender.hpp>
 
@@ -934,6 +936,52 @@ NB_MODULE(_tender, m)
         "indices"_a);
 
     // =======================================================================
+    // KroneckerDelta node
+    // =======================================================================
+    nb::class_<KroneckerDelta, Expr>(m, "KroneckerDelta")
+        .def_prop_ro(
+            "lower_id", [](KroneckerDelta const* n) { return n->lower_id(); })
+        .def_prop_ro(
+            "upper_id", [](KroneckerDelta const* n) { return n->upper_id(); });
+
+    m.def(
+        "make_kronecker_delta",
+        [](int lower_id, int upper_id) -> Expr*
+        { return make_kronecker_delta(g_ctx.rl, lower_id, upper_id); },
+        nb::rv_policy::reference,
+        "lower_id"_a,
+        "upper_id"_a);
+
+    // =======================================================================
+    // LeviCivitaSymbol node
+    // =======================================================================
+    nb::class_<LeviCivitaSymbol, Expr>(m, "LeviCivitaSymbol")
+        .def_prop_ro(
+            "ids",
+            [](LeviCivitaSymbol const* n) -> std::vector<int>
+            { return {n->ids()[0], n->ids()[1], n->ids()[2]}; })
+        .def_prop_ro(
+            "upper",
+            [](LeviCivitaSymbol const* n) -> std::vector<bool>
+            { return {n->upper()[0], n->upper()[1], n->upper()[2]}; });
+
+    m.def(
+        "make_levi_civita_symbol",
+        [](std::vector<int> ids, std::vector<bool> upper) -> LeviCivitaSymbol*
+        {
+            if (ids.size() != 3 || upper.size() != 3)
+                throw std::invalid_argument(
+                    "make_levi_civita_symbol: ids and upper must have length 3");
+            return make_levi_civita_symbol(
+                g_ctx.rl,
+                {ids[0], ids[1], ids[2]},
+                {upper[0], upper[1], upper[2]});
+        },
+        nb::rv_policy::reference,
+        "ids"_a,
+        "upper"_a);
+
+    // =======================================================================
     // AbstractIndexedSum node
     // =======================================================================
     nb::class_<AbstractIndexedSum, Expr>(m, "AbstractIndexedSum")
@@ -986,6 +1034,17 @@ NB_MODULE(_tender, m)
         "reassemble_dot_step",
         [](CoordSystem const* cs) { return reassemble_dot_step(*cs); },
         "cs"_a);
+
+    m.def("contract_kronecker_step", &contract_kronecker_step);
+
+    m.def(
+        "substitute_index",
+        [](Expr* e, int old_id, int new_id) -> Expr*
+        { return substitute_index(g_ctx.rl, e, old_id, new_id); },
+        nb::rv_policy::reference,
+        "expr"_a,
+        "old_id"_a,
+        "new_id"_a);
 
     // =======================================================================
     // Singleton getters — called once from __init__.py to create module attrs

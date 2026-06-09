@@ -449,3 +449,197 @@ TEST(SymToLatex, EmptyBase)
     auto* n = make_named_tensor(rl, "^i", 0, {});
     EXPECT_EQ(n->latex(), "^{i}");
 }
+
+// ===========================================================================
+// substitute_index
+// ===========================================================================
+
+#include <tender/basis.hpp>
+#include <tender/coord_system.hpp>
+
+static auto& test_wcs()
+{
+    return tender::wcs();
+}
+
+TEST(SubstituteIndex, NoopWhenSameId)
+{
+    auto rl = make_rl();
+    auto* ac = make_abstract_comp(rl, "a", {{0, true}});
+    auto* result = substitute_index(rl, ac, 0, 0);
+    EXPECT_EQ(result, ac);
+}
+
+TEST(SubstituteIndex, AbstractCompUnchanged)
+{
+    auto rl = make_rl();
+    auto* ac = make_abstract_comp(rl, "a", {{1, true}});
+    // Substituting id=2 when ac only has id=1 → no change
+    auto* result = substitute_index(rl, ac, 2, 5);
+    EXPECT_EQ(result, ac);
+}
+
+TEST(SubstituteIndex, SymBasisVecChanged)
+{
+    auto rl = make_rl();
+    auto* sbv = make_sym_basis_vec(rl, test_wcs(), 0, false);
+    auto* result = substitute_index(rl, sbv, 0, 3);
+    auto* rsbv = dynamic_cast<SymBasisVec*>(result);
+    ASSERT_NE(rsbv, nullptr);
+    EXPECT_EQ(rsbv->index_id(), 3);
+    EXPECT_EQ(rsbv->is_cobasis(), false);
+}
+
+TEST(SubstituteIndex, SymBasisVecUnchanged)
+{
+    auto rl = make_rl();
+    auto* sbv = make_sym_basis_vec(rl, test_wcs(), 1, true);
+    auto* result = substitute_index(rl, sbv, 0, 3);
+    EXPECT_EQ(result, sbv);
+}
+
+TEST(SubstituteIndex, AbstractIndexedSum)
+{
+    auto rl = make_rl();
+    auto* lhs = make_abstract_comp(rl, "a", {{0, true}});
+    auto* rhs = make_abstract_comp(rl, "b", {{0, false}});
+    auto* ais = make_abstract_indexed_sum(rl, lhs, rhs, 0, 0);
+    auto* result = substitute_index(rl, ais, 0, 5);
+    auto* rais = dynamic_cast<AbstractIndexedSum*>(result);
+    ASSERT_NE(rais, nullptr);
+    EXPECT_EQ(rais->index_id(), 5);
+}
+
+TEST(SubstituteIndex, LeviCivitaSymbol)
+{
+    auto rl = make_rl();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* result = substitute_index(rl, lcs, 1, 7);
+    auto* rlcs = dynamic_cast<LeviCivitaSymbol*>(result);
+    ASSERT_NE(rlcs, nullptr);
+    EXPECT_EQ(rlcs->ids()[0], 0);
+    EXPECT_EQ(rlcs->ids()[1], 7);
+    EXPECT_EQ(rlcs->ids()[2], 2);
+}
+
+TEST(SubstituteIndex, LeviCivitaUnchanged)
+{
+    auto rl = make_rl();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* result = substitute_index(rl, lcs, 9, 7);
+    EXPECT_EQ(result, lcs);
+}
+
+TEST(SubstituteIndex, TensorProduct)
+{
+    auto rl = make_rl();
+    auto* ac_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* ac_b = make_abstract_comp(rl, "b", {{0, false}});
+    auto* tp = make_tensor_product(rl, ac_a, ac_b);
+    auto* result = substitute_index(rl, tp, 0, 3);
+    auto* rtp = dynamic_cast<TensorProduct*>(result);
+    ASSERT_NE(rtp, nullptr);
+    auto* rl_a = dynamic_cast<AbstractComp*>(rtp->lhs());
+    ASSERT_NE(rl_a, nullptr);
+    EXPECT_EQ(rl_a->indices()[0].first, 3);
+}
+
+TEST(SubstituteIndex, Sum)
+{
+    auto rl = make_rl();
+    auto* ac_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* ac_b = make_abstract_comp(rl, "b", {{0, true}});
+    auto* s = make_sum(rl, {ac_a, ac_b});
+    auto* result = substitute_index(rl, s, 0, 4);
+    auto* rs = dynamic_cast<Sum*>(result);
+    ASSERT_NE(rs, nullptr);
+    auto* rt0 = dynamic_cast<AbstractComp*>(rs->terms()[0]);
+    ASSERT_NE(rt0, nullptr);
+    EXPECT_EQ(rt0->indices()[0].first, 4);
+}
+
+TEST(SubstituteIndex, Scale)
+{
+    auto rl = make_rl();
+    auto* ac = make_abstract_comp(rl, "a", {{0, true}});
+    auto* sc = make_scale(rl, Rational{2}, ac);
+    auto* result = substitute_index(rl, sc, 0, 6);
+    auto* rsc = dynamic_cast<Scale*>(result);
+    ASSERT_NE(rsc, nullptr);
+    auto* rac = dynamic_cast<AbstractComp*>(rsc->expr());
+    ASSERT_NE(rac, nullptr);
+    EXPECT_EQ(rac->indices()[0].first, 6);
+}
+
+TEST(SubstituteIndex, LeafNoIndex)
+{
+    auto rl = make_rl();
+    auto* rc = make_rational(rl, Rational{3});
+    auto* result = substitute_index(rl, rc, 0, 1);
+    EXPECT_EQ(result, rc);
+}
+
+TEST(SubstituteIndex, ProductUnchanged)
+{
+    auto rl = make_rl();
+    auto* ac_a = make_abstract_comp(rl, "a", {{1, true}});
+    auto* ac_b = make_abstract_comp(rl, "b", {{2, false}});
+    auto* pr = make_product(rl, ac_a, ac_b);
+    // Substituting id=9 (not present) → no change
+    auto* result = substitute_index(rl, pr, 9, 5);
+    EXPECT_EQ(result, pr);
+}
+
+TEST(SubstituteIndex, ContractChanged)
+{
+    // Contract needs rank-1 on both sides.
+    // Use SymBasisVec (rank 1) from test_wcs().
+    auto rl = make_rl();
+    auto* sbv_a = make_sym_basis_vec(rl, test_wcs(), 0, false); // e_0, rank 1
+    auto* sbv_b = make_sym_basis_vec(rl, test_wcs(), 0, true);  // e^0, rank 1
+    auto* co = make_contract(rl, sbv_a, sbv_b);
+    // substitute index 0 → 3 in both operands
+    auto* result = substitute_index(rl, co, 0, 3);
+    EXPECT_NE(result, co);
+    auto* rco = dynamic_cast<Contract*>(result);
+    ASSERT_NE(rco, nullptr);
+    auto* rlhs = dynamic_cast<SymBasisVec*>(rco->lhs());
+    ASSERT_NE(rlhs, nullptr);
+    EXPECT_EQ(rlhs->index_id(), 3);
+}
+
+TEST(SubstituteIndex, CrossProductChanged)
+{
+    auto rl = make_rl();
+    auto* sbv_a = make_sym_basis_vec(rl, test_wcs(), 0, false); // rank 1
+    auto* sbv_b = make_sym_basis_vec(rl, test_wcs(), 0, true);  // rank 1
+    auto* cp = make_cross_product(rl, sbv_a, sbv_b);
+    // substitute index 0 → 2
+    auto* result = substitute_index(rl, cp, 0, 2);
+    EXPECT_NE(result, cp);
+    auto* rcp = dynamic_cast<CrossProduct*>(result);
+    ASSERT_NE(rcp, nullptr);
+    auto* rlhs = dynamic_cast<SymBasisVec*>(rcp->lhs());
+    ASSERT_NE(rlhs, nullptr);
+    EXPECT_EQ(rlhs->index_id(), 2);
+}
+
+TEST(SubstituteIndex, TraceChanged)
+{
+    // Trace requires rank-2. TensorProduct(SBV, SBV) is rank 2.
+    auto rl = make_rl();
+    auto* sbv_a = make_sym_basis_vec(rl, test_wcs(), 0, false); // rank 1
+    auto* sbv_b = make_sym_basis_vec(rl, test_wcs(), 1, true);  // rank 1
+    auto* tp = make_tensor_product(rl, sbv_a, sbv_b);           // rank 2
+    auto* tr = make_trace(rl, tp);
+    // substitute index 0 → 5 (present in sbv_a)
+    auto* result = substitute_index(rl, tr, 0, 5);
+    EXPECT_NE(result, tr);
+    auto* rtr = dynamic_cast<Trace*>(result);
+    ASSERT_NE(rtr, nullptr);
+    auto* rtp = dynamic_cast<TensorProduct*>(rtr->arg());
+    ASSERT_NE(rtp, nullptr);
+    auto* rsbv = dynamic_cast<SymBasisVec*>(rtp->lhs());
+    ASSERT_NE(rsbv, nullptr);
+    EXPECT_EQ(rsbv->index_id(), 5);
+}

@@ -120,6 +120,14 @@ from ._tender import (
     make_abstract_comp,
     make_abstract_indexed_sum,
     alloc_index_id,
+    # KroneckerDelta and LeviCivitaSymbol nodes
+    KroneckerDelta,
+    LeviCivitaSymbol,
+    make_kronecker_delta,
+    make_levi_civita_symbol,
+    # contract_kronecker_step and substitute_index
+    contract_kronecker_step,
+    substitute_index,
     # Singleton getters (private)
     _identity_singleton,
     _levi_civita_singleton,
@@ -247,6 +255,86 @@ def expand_in_basis_step(tensor_expr, cs, covariant=True, abstract=False):
     for t in terms[1:]:
         expansion = expansion + t
     return substitute_step(tensor_expr, expansion)
+
+
+class Theorem:
+    """A mathematical statement that has been verified within the system.
+
+    Unlike Identity (an asserted axiom), a Theorem requires a proof callable
+    that is invoked at construction.  If the proof raises or returns False,
+    construction fails.  A failed proof in tender.lib.theorems makes the
+    module unimportable, surfacing regressions immediately.
+    """
+
+    def __init__(self, name, lhs, rhs, proof):
+        result = proof(lhs, rhs)
+        if result is False:
+            raise ValueError(f"Theorem '{name}': proof failed")
+        self.name = name
+        self.lhs = lhs
+        self.rhs = rhs
+
+    @classmethod
+    def by_components(cls, name, lhs, rhs, lhs_steps, rhs_steps=None):
+        """Prove lhs == rhs by reducing both sides to component form.
+
+        Applies lhs_steps to lhs and rhs_steps (or lhs_steps if omitted) to
+        rhs, then compares the terminal expressions via _normalize_component_form.
+        """
+        _rhs_steps = rhs_steps if rhs_steps is not None else lhs_steps
+
+        def proof(l, r):
+            prove_equal_by_components(l, r, lhs_steps, _rhs_steps)
+            return True
+
+        return cls(name, lhs, rhs, proof)
+
+    @classmethod
+    def by_derivation(cls, name, lhs, rhs, steps):
+        """Prove lhs == rhs by applying steps to lhs and comparing to rhs.
+
+        The final expression in the derivation is compared to rhs using
+        python() string equality.
+        """
+
+        def proof(l, r):
+            result = Derivation(steps).apply(State(l))[-1].expr
+            if result.python() != r.python():
+                raise ValueError(
+                    f"Theorem '{name}': derivation produced\n"
+                    f"  {result.python()}\nbut expected\n  {r.python()}"
+                )
+            return True
+
+        return cls(name, lhs, rhs, proof)
+
+
+def expand_identity_step(cs):
+    """Replace IdentityTensor with e^{i} ⊗ e_{i} (orthonormal CS only)."""
+    if not cs.is_orthonormal:
+        raise NotImplementedError(
+            "expand_identity_step: non-orthonormal CS not supported"
+        )
+    idx = alloc_index_id()
+    expansion = make_sym_basis_vec(cs, idx, True) * make_sym_basis_vec(cs, idx, False)
+    return substitute_step(I, expansion)
+
+
+def expand_levi_civita_step(cs):
+    """Replace LeviCivitaTensor with ε_{ijk} e^{i} ⊗ e^{j} ⊗ e^{k} (orthonormal CS only)."""
+    if not cs.is_orthonormal:
+        raise NotImplementedError(
+            "expand_levi_civita_step: non-orthonormal CS not supported"
+        )
+    i_id = alloc_index_id()
+    j_id = alloc_index_id()
+    k_id = alloc_index_id()
+    lcs = make_levi_civita_symbol([i_id, j_id, k_id], [False, False, False])
+    sbv_i = make_sym_basis_vec(cs, i_id, True)
+    sbv_j = make_sym_basis_vec(cs, j_id, True)
+    sbv_k = make_sym_basis_vec(cs, k_id, True)
+    expansion = lcs * sbv_i * sbv_j * sbv_k
+    return substitute_step(eps, expansion)
 
 
 def doc(entry, format="latex"):
@@ -447,9 +535,17 @@ def _normalize_component_form(expr):
         terms = sorted(_normalize_component_form(t) for t in expr.terms)
         return "Sum[" + ",".join(terms) + "]"
     if isinstance(expr, Product):
+        lhs, rhs = expr.lhs, expr.rhs
+        # Detect implicit summation: both factors are AbstractComps sharing index IDs
+        if isinstance(lhs, AbstractComp) and isinstance(rhs, AbstractComp):
+            lhs_ids = {idx for idx, _ in lhs.indices}
+            rhs_ids = {idx for idx, _ in rhs.indices}
+            if lhs_ids & rhs_ids:
+                parts = sorted([lhs.base_sym, rhs.base_sym])
+                return "AbstractIndexedSum[" + ",".join(parts) + "]"
         factors = sorted([
-            _normalize_component_form(expr.lhs),
-            _normalize_component_form(expr.rhs),
+            _normalize_component_form(lhs),
+            _normalize_component_form(rhs),
         ])
         return "Prod[" + "*".join(factors) + "]"
     return expr.python()
@@ -552,10 +648,15 @@ __all__ = [
     "expand_in_basis_step", "simplify_basis_dot_step",
     "collect_zero_terms_step", "reassemble_from_components_step",
     "collect_repeated_sum_step", "reassemble_vector_step", "reassemble_dot_step",
+    "contract_kronecker_step", "expand_identity_step", "expand_levi_civita_step",
     "IndexedSum", "make_indexed_sum",
     "SymBasisVec", "make_sym_basis_vec",
     "AbstractComp", "AbstractIndexedSum",
     "make_abstract_comp", "make_abstract_indexed_sum", "alloc_index_id",
+    "KroneckerDelta", "LeviCivitaSymbol",
+    "make_kronecker_delta", "make_levi_civita_symbol",
+    "substitute_index",
+    "Theorem",
     "prove_equal_by_components",
     "apply_identity", "find_matches", "apply_identity_auto", "matches_at_root",
     "search_apply",

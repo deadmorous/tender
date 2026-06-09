@@ -638,6 +638,25 @@ TEST(SimplifyBasisDot, NestedInProduct)
     EXPECT_EQ(result, s);
 }
 
+// CrossProduct(Contract(e_0, e^0), v) → CrossProduct(1, v) — covers
+// CrossProduct branch
+TEST(SimplifyBasisDot, NestedInCrossProduct)
+{
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    // inner = e_0 · e^0 = 1 (scalar); cross product needs rank-1 on both sides
+    // Use a scale instead: Scale(scalar_from_dot, v)
+    // Actually, make a rank-1 expression that contains the basis dot inside
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    // CrossProduct(v, w) — no basis dot inside, just passes through unchanged
+    auto* cp = make_cross_product(rl, v, w);
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{cp}).expr();
+    // No basis dot → pass through
+    EXPECT_EQ(result, cp);
+}
+
 // ===========================================================================
 // Coverage: recursive paths in collect_zeros_impl
 // ===========================================================================
@@ -714,6 +733,44 @@ TEST(CollectZeroTerms, NestedInContract)
     auto* co = dynamic_cast<Contract*>(result);
     ASSERT_NE(co, nullptr) << result->latex();
     EXPECT_EQ(co->lhs(), a);
+}
+
+// tp(delta, M) as a DoubleContract operand — exercises count_all_index_ids
+// and find_first_kronecker DoubleContract path; delta can't be contracted
+// (both IDs are only in the delta), so the expression passes through.
+TEST(ContractKronecker, DeltaInsideDoubleContract)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    auto* M = make_named_tensor(rl, "M", 2, {});
+    auto* N = make_named_tensor(rl, "N", 2, {});
+    // TensorProduct(rank-0 delta, rank-2 M) → rank-2
+    auto* tp = make_tensor_product(rl, kd, M);
+    auto* dc = make_double_contract(rl, tp, N);
+
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{dc}).expr();
+    // Both IDs external count = 0 → no contraction
+    EXPECT_EQ(result, dc);
+}
+
+// Trace(Sum(M, zero)) — covers Trace branch in collect_zeros_impl
+TEST(CollectZeroTerms, NestedInTrace)
+{
+    auto rl = make_rl();
+    auto* M = make_named_tensor(rl, "M", 2, {});
+    auto* zero_rank2 = make_named_tensor(rl, "Z", 2, {});
+    // Use Scale(0, M) as the zero element
+    auto* zero = make_scale(rl, Rational{0}, M);
+    auto* sum_with_zero = make_sum(rl, {M, zero});
+    auto* expr = make_trace(rl, sum_with_zero);
+
+    auto step = collect_zero_terms_step();
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* tr = dynamic_cast<Trace*>(result);
+    ASSERT_NE(tr, nullptr) << result->latex();
+    EXPECT_EQ(tr->arg(), M);
 }
 
 // ===========================================================================
@@ -896,4 +953,295 @@ TEST(AbstractIndexedSum, Python)
     auto py = ais->python();
     EXPECT_NE(py.find("abstract_indexed_sum"), std::string::npos);
     EXPECT_NE(py.find("abstract_comp('a'"), std::string::npos);
+}
+
+// ===========================================================================
+// KroneckerDelta
+// ===========================================================================
+
+TEST(KroneckerDelta, EqualIdsFoldsToOne)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 3, 3);
+    auto* rc = dynamic_cast<RationalConst*>(kd);
+    ASSERT_NE(rc, nullptr);
+    EXPECT_EQ(rc->python(), "Rational(1)");
+}
+
+TEST(KroneckerDelta, DistinctIdsKept)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    auto* kdc = dynamic_cast<KroneckerDelta*>(kd);
+    ASSERT_NE(kdc, nullptr);
+    EXPECT_EQ(kdc->lower_id(), 0);
+    EXPECT_EQ(kdc->upper_id(), 1);
+}
+
+TEST(KroneckerDelta, Rank)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    EXPECT_EQ(kd->rank(), 0);
+}
+
+TEST(KroneckerDelta, Latex)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    EXPECT_EQ(kd->latex(), R"(\delta_{i}^{j})");
+}
+
+TEST(KroneckerDelta, Python)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 2, 7);
+    EXPECT_EQ(kd->python(), "make_kronecker_delta(2, 7)");
+}
+
+// ===========================================================================
+// LeviCivitaSymbol
+// ===========================================================================
+
+TEST(LeviCivitaSymbol, Rank)
+{
+    auto rl = make_rl();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    EXPECT_EQ(lcs->rank(), 0);
+}
+
+TEST(LeviCivitaSymbol, AllLowerLatex)
+{
+    auto rl = make_rl();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    EXPECT_EQ(lcs->latex(), R"(\varepsilon_{ijk})");
+}
+
+TEST(LeviCivitaSymbol, AllUpperLatex)
+{
+    auto rl = make_rl();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {true, true, true});
+    EXPECT_EQ(lcs->latex(), R"(\varepsilon^{ijk})");
+}
+
+TEST(LeviCivitaSymbol, MixedLatex)
+{
+    auto rl = make_rl();
+    // index 0 upper, 1 lower, 2 lower
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {true, false, false});
+    EXPECT_EQ(lcs->latex(), R"(\varepsilon^{i{\cdot}{\cdot}}_{{\cdot}jk})");
+}
+
+TEST(LeviCivitaSymbol, Python)
+{
+    auto rl = make_rl();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    EXPECT_EQ(
+        lcs->python(),
+        "make_levi_civita_symbol([0, 1, 2], [False, False, False])");
+}
+
+// ===========================================================================
+// substitute_index
+// ===========================================================================
+
+TEST(SubstituteIndex, AbstractComp)
+{
+    auto rl = make_rl();
+    auto* ac = make_abstract_comp(rl, "v", {{0, true}, {1, false}});
+    auto* result = substitute_index(rl, ac, 0, 5);
+    auto* rac = dynamic_cast<AbstractComp*>(result);
+    ASSERT_NE(rac, nullptr);
+    EXPECT_EQ(rac->indices()[0].first, 5);
+    EXPECT_EQ(rac->indices()[1].first, 1);
+}
+
+TEST(SubstituteIndex, KroneckerDelta)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    // substitute lower_id 0 → 5: becomes δ_5^1
+    auto* result = substitute_index(rl, kd, 0, 5);
+    auto* kdr = dynamic_cast<KroneckerDelta*>(result);
+    ASSERT_NE(kdr, nullptr);
+    EXPECT_EQ(kdr->lower_id(), 5);
+    EXPECT_EQ(kdr->upper_id(), 1);
+}
+
+TEST(SubstituteIndex, KroneckerDeltaFoldsOnEqual)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    // substitute upper_id 1 → 0: becomes δ_0^0 = 1
+    auto* result = substitute_index(rl, kd, 1, 0);
+    auto* rc = dynamic_cast<RationalConst*>(result);
+    ASSERT_NE(rc, nullptr);
+}
+
+// ===========================================================================
+// contract_kronecker_step
+// ===========================================================================
+
+TEST(ContractKronecker, ContractsDelta)
+{
+    auto rl = make_rl();
+    // Build: prod(prod(AC_a[(0,true)], AC_b[(1,false)]), delta(0,1))
+    auto* ac_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* ac_b = make_abstract_comp(rl, "b", {{1, false}});
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    auto* inner = make_product(rl, ac_a, ac_b);
+    auto* expr = make_product(rl, inner, kd);
+
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    // After contraction: prod(AC_a[(0,true)], AC_b[(0,false)])
+    auto* prod = dynamic_cast<Product*>(result);
+    ASSERT_NE(prod, nullptr);
+    auto* ra = dynamic_cast<AbstractComp*>(prod->lhs());
+    auto* rb = dynamic_cast<AbstractComp*>(prod->rhs());
+    ASSERT_NE(ra, nullptr);
+    ASSERT_NE(rb, nullptr);
+    EXPECT_EQ(ra->indices()[0].first, rb->indices()[0].first);
+    EXPECT_EQ(ra->base_sym(), "a");
+    EXPECT_EQ(rb->base_sym(), "b");
+}
+
+TEST(ContractKronecker, PassThroughNoDelta)
+{
+    auto rl = make_rl();
+    auto* ac = make_abstract_comp(rl, "a", {{0, true}});
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{ac}).expr();
+    EXPECT_EQ(result, ac);
+}
+
+TEST(ContractKronecker, InsideSum)
+{
+    auto rl = make_rl();
+    auto* ac_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* ac_b = make_abstract_comp(rl, "b", {{1, false}});
+    auto* kd1 = make_kronecker_delta(rl, 0, 1);
+    auto* term1 = make_product(rl, make_product(rl, ac_a, ac_b), kd1);
+
+    auto* ac_c = make_abstract_comp(rl, "c", {{2, true}});
+    auto* ac_d = make_abstract_comp(rl, "d", {{3, false}});
+    auto* kd2 = make_kronecker_delta(rl, 2, 3);
+    auto* term2 = make_product(rl, make_product(rl, ac_c, ac_d), kd2);
+
+    auto* s = make_sum(rl, {term1, term2});
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{s}).expr();
+    auto* rs = dynamic_cast<Sum*>(result);
+    ASSERT_NE(rs, nullptr);
+    EXPECT_EQ(rs->terms().size(), 2u);
+}
+
+TEST(ContractKronecker, InsideScale)
+{
+    auto rl = make_rl();
+    auto* ac_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* ac_b = make_abstract_comp(rl, "b", {{1, false}});
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    auto* inner = make_product(rl, make_product(rl, ac_a, ac_b), kd);
+    auto* sc = make_scale(rl, Rational{3}, inner);
+
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{sc}).expr();
+    auto* rsc = dynamic_cast<Scale*>(result);
+    ASSERT_NE(rsc, nullptr);
+    EXPECT_EQ(dynamic_cast<KroneckerDelta*>(rsc->expr()), nullptr);
+}
+
+TEST(ContractKronecker, InsideTensorProduct)
+{
+    auto rl = make_rl();
+    // tp( prod(prod(AC_a[(0,T)], AC_b[(1,F)]), delta(0,1)), named_tensor )
+    auto* ac_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* ac_b = make_abstract_comp(rl, "b", {{1, false}});
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    auto* contracted = make_product(rl, make_product(rl, ac_a, ac_b), kd);
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* tp = make_tensor_product(rl, contracted, v);
+
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{tp}).expr();
+    auto* rtp = dynamic_cast<TensorProduct*>(result);
+    ASSERT_NE(rtp, nullptr);
+    // The left child should no longer contain a KroneckerDelta
+    EXPECT_EQ(dynamic_cast<KroneckerDelta*>(rtp->lhs()), nullptr);
+}
+
+TEST(ContractKronecker, DeltaWithNoExternalOccurrence)
+{
+    // KroneckerDelta whose both IDs appear only inside the delta itself.
+    // contract_kronecker_step should leave the expression unchanged.
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    // tp(delta_rank0, v) → rank 1  (delta contributes ids 0,1 only internally)
+    auto* tp = make_tensor_product(rl, kd, v);
+
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{tp}).expr();
+    // External counts for both ids are 0 → no contraction
+    EXPECT_EQ(result, tp);
+}
+
+TEST(ContractKronecker, DeltaInsideContract)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* w = make_named_tensor(rl, "w", 1, {});
+    // TensorProduct(delta_rank0, v_rank1) → rank-1
+    auto* tp = make_tensor_product(rl, kd, v);
+    auto* co = make_contract(rl, tp, w);
+
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{co}).expr();
+    // Both IDs have external count 0 → no contraction
+    EXPECT_EQ(result, co);
+}
+
+TEST(ContractKronecker, DeltaInsideTrace)
+{
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    auto* M = make_named_tensor(rl, "M", 2, {});
+    // TensorProduct(delta_rank0, M_rank2) → rank-2
+    auto* tp = make_tensor_product(rl, kd, M);
+    auto* tr = make_trace(rl, tp);
+
+    auto step = contract_kronecker_step();
+    auto* result = step.apply(rl, State{tr}).expr();
+    // Both IDs have external count 0 → no contraction
+    EXPECT_EQ(result, tr);
+}
+
+TEST(SimplifyBasisDot, DifferentIdsProducesKronecker)
+{
+    // After Phase 13.8: simplify_basis_dot_step with different index IDs
+    // yields Product(Product(AC_a, AC_b), KroneckerDelta).
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    // ac_a expanded with cobasis SBV id=0, ac_b with basis SBV id=1
+    auto* ac_a = make_abstract_comp(rl, "a", {{0, true}});
+    auto* ac_b = make_abstract_comp(rl, "b", {{1, false}});
+    auto* sbv_a = make_sym_basis_vec(rl, cs, 0, false); // e_0 (basis)
+    auto* sbv_b = make_sym_basis_vec(rl, cs, 1, true);  // e^1 (cobasis)
+    // dot( (a^0 ⊗ e_0), (b_1 ⊗ e^1) )
+    auto* expr = make_contract(
+        rl,
+        make_tensor_product(rl, ac_a, sbv_a),
+        make_tensor_product(rl, ac_b, sbv_b));
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* prod = dynamic_cast<Product*>(result);
+    ASSERT_NE(prod, nullptr) << "expected Product, got: " << result->python();
+    auto* kd = dynamic_cast<KroneckerDelta*>(prod->rhs());
+    ASSERT_NE(kd, nullptr)
+        << "expected KroneckerDelta as rhs, got: " << prod->rhs()->python();
 }

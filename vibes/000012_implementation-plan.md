@@ -46,6 +46,8 @@ Each phase below cites the vibes where its design decisions live.
 | 000017 | Phase 13.5 — identity derivation and library growth |
 | 000018 | Phase 13.2 — index/basis bridge, expand-in-basis tooling |
 | 000019 | Phase 13.6 — component-form bridge: indexed notation and invariant reconstruction |
+| 000020 | Phase 13.7 — Context refactoring and structural (anonymous) index IDs |
+| 000021 | Phase 13.8 — Kronecker delta, Levi-Civita symbol, and basis expansions |
 
 ---
 
@@ -601,6 +603,42 @@ component forms.  Three capabilities:
 - 13 new C++ tests; Python bindings for all new types and steps
 
 **Sources**: vibe 000019
+
+---
+
+## Phase 13.7 — Context refactoring and structural index IDs ✓ COMPLETE
+
+**Goal**: replace string-based abstract index letters with opaque integer index IDs so that independent `expand_in_basis_step` calls never produce letter clashes.
+
+1. **`Context` struct** (`context.hpp`) — wraps `ResourceList` and provides `alloc_index_id()`; `_tender.cpp` replaces `g_rl` with `g_ctx` and exposes `alloc_index_id()` to Python.
+2. **`AbstractComp` node** — replaces the `NamedTensor("a^i", 0)` hack; stores `base_sym` + `vector<{index_id, is_upper}>`.
+3. **`SymBasisVec`** — `std::string letter_` → `int index_id_`.
+4. **`AbstractIndexedSum`** — new node for the abstract `simplify_basis_dot_step` path; old concrete `IndexedSum` unchanged.
+5. **`enrich()` + `EnrichedExpr`** — two-pass DFS that assigns letters (`i, j, k, …`) to index IDs in first-appearance order and returns `EnrichedExpr{expr, IndexNameMap}`.
+6. **`Expr::latex(IndexNameMap const&)`** — new pure-virtual render method; `Expr::latex()` is a non-virtual convenience that enriches then dispatches.
+7. **`expand_in_basis_step`** allocates fresh IDs per index slot; `letter` parameter retired for abstract mode.
+
+**Sources**: vibe 000020
+
+---
+
+## Phase 13.8 — Kronecker delta, Levi-Civita symbol, and basis expansions ✓ COMPLETE
+
+**Goal**: complete the abstract-index algebra pipeline so that inner products and cross products can be derived purely in abstract notation, and machine-proved theorems (`Theorem` class) can be registered at import time.
+
+1. **`KroneckerDelta`** — rank-0 AST node with `lower_id`, `upper_id`; factory folds equal IDs → `Rational(1)` (Rule 2).
+2. **`LeviCivitaSymbol`** — rank-0 AST node with `ids[3]`, `upper[3]`; dot-placeholder rendering for mixed indices.
+3. **`substitute_index`** — recursive tree walk substituting one abstract index ID with another across all node types.
+4. **`simplify_basis_dot_step` update** — different-ID case now produces `Product(Product(AC_a, AC_b), KroneckerDelta)` instead of rewriting the rhs; same-ID case still returns `AbstractIndexedSum` directly.
+5. **`contract_kronecker_step`** — counts external index occurrences, identifies the dummy index, substitutes dummy→free, replaces delta with 1.
+6. **`expand_identity_step(cs)`** — replaces `IdentityTensor` with `SBV ⊗ SBV` using a fresh shared index ID.
+7. **`expand_levi_civita_step(cs)`** — replaces `LeviCivitaTensor` with `ε_{ijk} e^i ⊗ e^j ⊗ e^k`.
+8. **`Theorem` class** — proof-carrying wrapper; `by_components` uses `prove_equal_by_components`; `by_derivation` applies steps and compares `python()` strings.
+9. **`tender.lib.theorems`** — module with three theorems proved at import time: `dot_commutativity`, `cross_anticommutativity`, `bac_cab`.
+10. **`_normalize_component_form` update** — detects `Product(AC_a, AC_b)` with shared contracted indices and normalises letter-invariantly.
+11. **Coverage** ≥ 90% maintained (658 C++ tests, 121 Python tests).
+
+**Sources**: vibe 000021
 
 ---
 

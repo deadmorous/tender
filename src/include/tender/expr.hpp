@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -537,6 +538,76 @@ auto make_abstract_indexed_sum(
     AbstractComp const* rhs,
     int index_id,
     int rank) -> AbstractIndexedSum*;
+
+// Kronecker delta δ_{lower}^{upper}.  Rank 0.
+// Factory make_kronecker_delta returns Expr* so it can fold equal IDs → 1.
+class KroneckerDelta : public Expr
+{
+public:
+    KroneckerDelta(int lower_id, int upper_id) :
+      lower_id_(lower_id), upper_id_(upper_id)
+    {
+    }
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 0;
+    }
+    [[nodiscard]] auto latex(IndexNameMap const&) const -> std::string override;
+    using Expr::latex;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto lower_id() const noexcept -> int
+    {
+        return lower_id_;
+    }
+    [[nodiscard]] auto upper_id() const noexcept -> int
+    {
+        return upper_id_;
+    }
+
+private:
+    int lower_id_;
+    int upper_id_;
+};
+
+// Returns RationalConst(1) when lower_id == upper_id (Rule 2: trace = 1 slot).
+auto make_kronecker_delta(ResourceList& rl, int lower_id, int upper_id) -> Expr*;
+
+// Levi-Civita symbol ε with three abstract index IDs and upper/lower flags.
+// Distinct from LeviCivitaTensor (the invariant rank-3 tensor object).
+class LeviCivitaSymbol : public Expr
+{
+public:
+    LeviCivitaSymbol(std::array<int, 3> ids, std::array<bool, 3> upper) :
+      ids_(ids), upper_(upper)
+    {
+    }
+
+    [[nodiscard]] auto rank() const noexcept -> int override
+    {
+        return 0;
+    }
+    [[nodiscard]] auto latex(IndexNameMap const&) const -> std::string override;
+    using Expr::latex;
+    [[nodiscard]] auto python() const -> std::string override;
+    [[nodiscard]] auto ids() const noexcept -> std::array<int, 3> const&
+    {
+        return ids_;
+    }
+    [[nodiscard]] auto upper() const noexcept -> std::array<bool, 3> const&
+    {
+        return upper_;
+    }
+
+private:
+    std::array<int, 3> ids_;
+    std::array<bool, 3> upper_;
+};
+
+auto make_levi_civita_symbol(
+    ResourceList& rl,
+    std::array<int, 3> ids,
+    std::array<bool, 3> upper) -> LeviCivitaSymbol*;
 
 // Result of convolve(): pairs one slot from lhs with one slot from rhs.
 // Rank = lhs.rank() + rhs.rank() − 2.
@@ -1126,6 +1197,16 @@ auto make_material_deriv(ResourceList& rl, Expr* velocity, Expr* field) -> Expr*
 // Polynomial node. var->rank() must be 0 or 2.
 auto make_polynomial_expr(ResourceList& rl, Polynomial poly, Expr* var)
     -> PolynomialExpr*;
+
+// ===========================================================================
+// substitute_index — replace one abstract index ID with another throughout
+// a tree.  Affects AbstractComp, SymBasisVec, AbstractIndexedSum,
+// KroneckerDelta, and LeviCivitaSymbol nodes, as well as all compound nodes.
+// Returns the same pointer if no substitution was needed.
+// ===========================================================================
+
+auto substitute_index(ResourceList& rl, Expr* e, int old_id, int new_id)
+    -> Expr*;
 
 // ===========================================================================
 // EnrichedExpr — pre-rendering stage for abstract-index nodes
