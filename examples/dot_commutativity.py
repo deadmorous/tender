@@ -19,6 +19,7 @@ from tender import (
     State, Derivation,
     expand_in_basis_step,
     simplify_basis_dot_step,
+    contract_kronecker_step,
     prove_equal_by_components,
     show, to_latex_document,
 )
@@ -34,8 +35,10 @@ steps = [
     expand_in_basis_step(a, cs, covariant=True, abstract=True),
     # b → b_j e^j  (contravariant components, abstract index j)
     expand_in_basis_step(b, cs, covariant=False, abstract=True),
-    # (a^i e_i)·(b_j e^j)  →  a^i b_i  via e_i·e^j = δ^j_i
+    # (a^i e_i)·(b_j e^j)  →  a^i b_j δ_i^j
     simplify_basis_dot_step(cs),
+    # a^i b_j δ_i^j  →  a^i b_i  (contract the Kronecker delta)
+    contract_kronecker_step(),
 ]
 
 history = Derivation(steps).apply(State(dot(a, b)))
@@ -47,12 +50,14 @@ lhs_steps = [
     expand_in_basis_step(a, cs, covariant=True, abstract=True),
     expand_in_basis_step(b, cs, covariant=False, abstract=True),
     simplify_basis_dot_step(cs),
+    contract_kronecker_step(),
 ]
 rhs_steps = [
     # swap to contravariant b · covariant a so both sides yield b_i a^i → same normal form
     expand_in_basis_step(b, cs, covariant=False, abstract=True),
     expand_in_basis_step(a, cs, covariant=True, abstract=True),
     simplify_basis_dot_step(cs),
+    contract_kronecker_step(),
 ]
 
 lhs_hist, rhs_hist = prove_equal_by_components(
