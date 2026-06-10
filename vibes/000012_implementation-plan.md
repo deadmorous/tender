@@ -674,24 +674,30 @@ identities they supersede.
 **Goal**: replace the `eps_delta` axiom with a machine-verified proof, grounding
 the entire `bac_cab` theorem chain in component algebra.
 
-The classical proof (`vibes/images/bac-cab.png`, vibe 000023) uses the
-determinant formula for ε and the identity det(AB) = det A · det B.
-It maps onto six tender proof steps:
+The classical proof (`vibes/images/bac-cab.png`, vibe 000023, LaTeX in
+`vibes/notes/bac-cab.tex`) uses the determinant formula for ε and the identity
+det(AB) = det A · det B.  It maps onto seven tender proof steps:
 
 1. **`Det3` AST node** — 3×3 determinant of Expr entries (holds `KroneckerDelta`
    nodes); `latex()` renders as `\begin{vmatrix}…\end{vmatrix}`.
 2. **`eps_to_det_step`** — rewrites `LeviCivitaSymbol(i,j,k)` as `Det3([δ_{ia}])`
    (the determinant whose columns are δ_{i·}, δ_{j·}, δ_{k·}).
-3. **`contract_eps_pair_step`** — detects `Product(ε, ε)` sharing a dummy index,
-   cycles both so the dummy is first (tracking sign of each cyclic permutation),
-   and applies det(A)det(B)=det(AB) to yield a single `Det3` of contracted δ's.
-4. **`expand_det3_step`** — cofactor-expands a `Det3` along row 0, producing a
+3. **`cycle_eps_indices_step`** — explicitly rewrites `ε_{jks}` → `ε_{sjk}` (and
+   likewise for the second ε), recording the sign of the cyclic permutation as a
+   named derivation step.  A two-swap chain $jks \to kjs \to sjk$ is even (+1).
+   This step makes the permutation auditable rather than silent.
+4. **`contract_eps_pair_step`** — detects `Product(ε, ε)` already in canonical
+   form (dummy index first in both) and applies det(A)det(B) = det(AB) to yield
+   a single `Det3` of contracted δ's.
+5. **`expand_det3_step`** — cofactor-expands a `Det3` along row 0, producing a
    Sum of Products of 2×2 minors.
-5. **Extended `contract_kronecker_step`** — additionally handles `δ_{ss}` → 3
+6. **Extended `contract_kronecker_step`** — additionally handles `δ_{ss}` → 3
    (trace in 3D) alongside its existing off-diagonal contraction logic.
-6. **Extended `_normalize_component_form`** — handles rank-2 (dyadic) results so
+7. **Extended `_normalize_component_form`** — handles rank-2 (dyadic) results so
    that `prove_equal_by_components` can verify the final `tp(b, dot(a,c)) − …`
    expression.
+
+See also `vibes/notes/ocr.md` for handwritten-notation conventions.
 
 **Exit criterion**: `eps_delta` constructed via `Theorem.by_components`; 658+ C++
 tests and 121+ Python tests pass; line coverage ≥ 90%.

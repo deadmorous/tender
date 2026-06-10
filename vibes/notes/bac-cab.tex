@@ -1,0 +1,122 @@
+\documentclass{article}
+\usepackage{amsmath}
+
+% Underline notation for vectors (rank-1) as used in the original hand-written derivation.
+\newcommand{\vv}[1]{\underline{#1}}
+
+\title{BAC-CAB identity: hand-written proof transcription}
+\date{2026-06-10}
+\author{Stepan Orlov (original); transcribed from \texttt{vibes/images/bac-cab.png}}
+
+\begin{document}
+\maketitle
+
+\noindent
+Notation: single underline denotes a vector (rank-1 tensor).
+
+%
+% ── Step 1: expand vectors in basis, apply cross-product definition twice ──
+%
+\begin{align*}
+\vv{a} \times (\vv{b} \times \vv{c})
+  &= a_i \vv{e}_i \times (b_j \vv{e}_j \times c_k \vv{e}_k) \\
+  &= a_i b_j c_k \;\vv{e}_i \times (\varepsilon_{jks}\, \vv{e}_s) \\
+  &= a_i b_j c_k \;\varepsilon_{jks}\, \varepsilon_{isp}\; \vv{e}_p
+\end{align*}
+
+%
+% ── Definition: ε as a determinant of Kronecker deltas ──
+%
+\noindent
+\textbf{Definition.}
+\[
+  \varepsilon_{ijk} = (\vv{e}_i \times \vv{e}_j)\cdot \vv{e}_k,
+  \qquad
+  \vv{e}_i = \delta_{ij}\,\vv{e}_j
+  \;\implies\;
+  \varepsilon_{ijk}
+  = \begin{vmatrix}
+      \delta_{i1} & \delta_{j1} & \delta_{k1} \\
+      \delta_{i2} & \delta_{j2} & \delta_{k2} \\
+      \delta_{i3} & \delta_{j3} & \delta_{k3}
+    \end{vmatrix}
+\]
+
+%
+% ── Key contraction: ε_{jks} ε_{isp} ──
+%
+\noindent
+\textbf{Note:} $\det A = \det A^{\mathsf{T}}$,\quad $\det(AB) = \det A\,\det B$.
+
+\medskip\noindent
+Cycle both $\varepsilon$'s to bring the dummy index $s$ to the first position
+(each cyclic permutation is even, so the sign is $+1$):
+\[
+  \varepsilon_{jks} = \varepsilon_{sjk},
+  \qquad
+  \varepsilon_{isp} = \varepsilon_{spi}.
+\]
+Then
+\begin{align*}
+  \varepsilon_{jks}\,\varepsilon_{isp}
+  &= \varepsilon_{sjk}\,\varepsilon_{spi} \\
+  &=
+  \begin{vmatrix}
+    \delta_{s1} & \delta_{s2} & \delta_{s3} \\
+    \delta_{j1} & \delta_{j2} & \delta_{j3} \\
+    \delta_{k1} & \delta_{k2} & \delta_{k3}
+  \end{vmatrix}
+  \begin{vmatrix}
+    \delta_{s1} & \delta_{p1} & \delta_{i1} \\
+    \delta_{s2} & \delta_{p2} & \delta_{i2} \\
+    \delta_{s3} & \delta_{p3} & \delta_{i3}
+  \end{vmatrix}
+\end{align*}
+
+\noindent
+Using
+$\delta_{i1}\delta_{j1}+\delta_{i2}\delta_{j2}+\delta_{i3}\delta_{j3}
+ = \delta_{ik}\delta_{jk} = \delta_{ij}$,
+the product of determinants equals $\det(AB)$ where the matrix product
+contracts on $s$:
+\[
+  \varepsilon_{jks}\,\varepsilon_{isp}
+  =
+  \begin{vmatrix}
+    \delta_{ss} & \delta_{sp} & \delta_{si} \\
+    \delta_{js} & \delta_{jp} & \delta_{ji} \\
+    \delta_{ks} & \delta_{kp} & \delta_{ki}
+  \end{vmatrix}
+\]
+
+%
+% ── Expand determinant by cofactors along row 1 ──
+%
+\noindent
+Expanding along the first row:
+\begin{align*}
+  &= \delta_{ss}\bigl(\delta_{jp}\delta_{ki} - \delta_{ji}\delta_{kp}\bigr)
+   - \delta_{js}\bigl(\delta_{sp}\delta_{ki} - \delta_{si}\delta_{kp}\bigr)
+   + \delta_{ks}\bigl(\delta_{sp}\delta_{ji} - \delta_{si}\delta_{jp}\bigr) \\[4pt]
+  &= 3\bigl(\delta_{jp}\delta_{ki} - \delta_{ji}\delta_{kp}\bigr)
+   - \bigl(\delta_{jp}\delta_{ki} - \delta_{ji}\delta_{kp}\bigr)
+   + \bigl(\delta_{kp}\delta_{ji} - \delta_{ki}\delta_{jp}\bigr) \\[4pt]
+  &= \delta_{jp}\delta_{ki} - \delta_{ji}\delta_{kp}
+\end{align*}
+
+%
+% ── Substitute back and collect ──
+%
+\noindent
+Substituting back:
+\begin{align*}
+  \vv{a}\times(\vv{b}\times\vv{c})
+  &= a_i b_j c_k
+     \bigl(\delta_{jp}\delta_{ki} - \delta_{ji}\delta_{kp}\bigr)\vv{e}_p \\
+  &= a_i b_j c_i\,\vv{e}_j \;-\; a_i b_i c_k\,\vv{e}_k \\
+  &= a_i c_i\,\vv{b} \;-\; a_i b_i\,\vv{c} \\
+  &= (\vv{a}\cdot\vv{c})\,\vv{b} - (\vv{a}\cdot\vv{b})\,\vv{c}
+   = \vv{b}(\vv{a}\cdot\vv{c}) - \vv{c}(\vv{a}\cdot\vv{b})
+\end{align*}
+
+\end{document}
