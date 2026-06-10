@@ -49,6 +49,7 @@ Each phase below cites the vibes where its design decisions live.
 | 000020 | Phase 13.7 — Context refactoring and structural (anonymous) index IDs |
 | 000021 | Phase 13.8 — Kronecker delta, Levi-Civita symbol, and basis expansions |
 | 000022 | Phase 13.9 — Non-circular proofs for cross-product theorems |
+| 000023 | Phase 13.91 — Proving eps_delta from first principles (ε-δ identity) |
 
 ---
 
@@ -665,6 +666,37 @@ identities they supersede.
 8. **Coverage** ≥ 90% maintained (658 C++ tests, 121 Python tests).
 
 **Sources**: vibe 000022
+
+---
+
+## Phase 13.91 — Prove eps_delta from first principles
+
+**Goal**: replace the `eps_delta` axiom with a machine-verified proof, grounding
+the entire `bac_cab` theorem chain in component algebra.
+
+The classical proof (`vibes/images/bac-cab.png`, vibe 000023) uses the
+determinant formula for ε and the identity det(AB) = det A · det B.
+It maps onto six tender proof steps:
+
+1. **`Det3` AST node** — 3×3 determinant of Expr entries (holds `KroneckerDelta`
+   nodes); `latex()` renders as `\begin{vmatrix}…\end{vmatrix}`.
+2. **`eps_to_det_step`** — rewrites `LeviCivitaSymbol(i,j,k)` as `Det3([δ_{ia}])`
+   (the determinant whose columns are δ_{i·}, δ_{j·}, δ_{k·}).
+3. **`contract_eps_pair_step`** — detects `Product(ε, ε)` sharing a dummy index,
+   cycles both so the dummy is first (tracking sign of each cyclic permutation),
+   and applies det(A)det(B)=det(AB) to yield a single `Det3` of contracted δ's.
+4. **`expand_det3_step`** — cofactor-expands a `Det3` along row 0, producing a
+   Sum of Products of 2×2 minors.
+5. **Extended `contract_kronecker_step`** — additionally handles `δ_{ss}` → 3
+   (trace in 3D) alongside its existing off-diagonal contraction logic.
+6. **Extended `_normalize_component_form`** — handles rank-2 (dyadic) results so
+   that `prove_equal_by_components` can verify the final `tp(b, dot(a,c)) − …`
+   expression.
+
+**Exit criterion**: `eps_delta` constructed via `Theorem.by_components`; 658+ C++
+tests and 121+ Python tests pass; line coverage ≥ 90%.
+
+**Sources**: vibe 000023
 
 ---
 
