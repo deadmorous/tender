@@ -94,14 +94,27 @@ static auto simplify_contract(
         }
     }
 
-    // Pull rank-0 scalar out of rhs TensorProduct.
+    // Pull rank-0 scalar out of rhs TensorProduct (scalar on lhs of rhs TP).
     if (auto* tpr = dynamic_cast<TensorProduct*>(r))
     {
         if (tpr->lhs()->rank() == 0)
         {
             auto* inner = simplify_basis_dot_impl(
                 rl, make_contract(rl, l, tpr->rhs()), cs);
-            return make_product(rl, tpr->lhs(), inner);
+            if (inner->rank() == 0)
+                return make_product(rl, tpr->lhs(), inner);
+        }
+    }
+
+    // Pull rank-0 scalar out of rhs TensorProduct (scalar on rhs of rhs TP).
+    if (auto* tpr = dynamic_cast<TensorProduct*>(r))
+    {
+        if (tpr->rhs()->rank() == 0)
+        {
+            auto* inner = simplify_basis_dot_impl(
+                rl, make_contract(rl, l, tpr->lhs()), cs);
+            if (inner->rank() == 0)
+                return make_product(rl, tpr->rhs(), inner);
         }
     }
 
@@ -111,6 +124,42 @@ static auto simplify_contract(
     int ri = find_basis_index(r, cs);
     if (li >= 0 && ri >= 0)
         return make_rational(rl, Rational{li == ri ? 1 : 0});
+
+    // Abstract SBV dot: Contract(SBV(id_l, cob_l), SBV(id_r, cob_r)).
+    // Opposite cobasis → KroneckerDelta (works in any CS).
+    // Same cobasis in orthonormal CS → KroneckerDelta (g^{ij}=δ^{ij}).
+    if (auto* sbvl = dynamic_cast<SymBasisVec*>(l))
+    {
+        if (auto* sbvr = dynamic_cast<SymBasisVec*>(r))
+        {
+            if (&sbvl->cs() == &cs && &sbvr->cs() == &cs)
+            {
+                bool opp = (sbvl->is_cobasis() != sbvr->is_cobasis());
+                bool same_ortho =
+                    (sbvl->is_cobasis() == sbvr->is_cobasis()
+                     && cs.is_orthonormal());
+                if (opp || same_ortho)
+                {
+                    // Lower id = the basis (non-cobasis) one; upper = cobasis.
+                    // For same-cobasis orthonormal, pick lo < hi by convention.
+                    int lo_id, hi_id;
+                    if (opp)
+                    {
+                        lo_id = sbvl->is_cobasis() ? sbvr->index_id() :
+                                                     sbvl->index_id();
+                        hi_id = sbvl->is_cobasis() ? sbvl->index_id() :
+                                                     sbvr->index_id();
+                    }
+                    else
+                    {
+                        lo_id = sbvl->index_id();
+                        hi_id = sbvr->index_id();
+                    }
+                    return make_kronecker_delta(rl, lo_id, hi_id);
+                }
+            }
+        }
+    }
 
     return make_contract(rl, l, r);
 }
@@ -151,6 +200,10 @@ static auto simplify_basis_dot_impl(
     {
         auto* l = simplify_basis_dot_impl(rl, tp->lhs(), cs);
         auto* r = simplify_basis_dot_impl(rl, tp->rhs(), cs);
+        // Fold TP(1, x) → x after basis-dot simplification.
+        if (auto* lrc = dynamic_cast<RationalConst*>(l))
+            if (lrc->value() == Rational{1})
+                return r;
         return (l == tp->lhs() && r == tp->rhs()) ?
                    e :
                    make_tensor_product(rl, l, r);
@@ -160,6 +213,34 @@ static auto simplify_basis_dot_impl(
     {
         auto* l = simplify_basis_dot_impl(rl, dc->lhs(), cs);
         auto* r = simplify_basis_dot_impl(rl, dc->rhs(), cs);
+        // Try to expand ddot(TP(TP(A_prefix, A_mid), A_last), TP(B_first,
+        // B_second)) → TP(A_prefix, Product(Contract(A_mid, B_first),
+        // Contract(A_last, B_second)))
+        auto* tp_l_outer = dynamic_cast<TensorProduct*>(l);
+        auto* tp_r = dynamic_cast<TensorProduct*>(r);
+        if (tp_l_outer && tp_r)
+        {
+            auto* a_last = tp_l_outer->rhs();
+            auto* tp_l_inner = dynamic_cast<TensorProduct*>(tp_l_outer->lhs());
+            if (tp_l_inner && a_last->rank() == 1)
+            {
+                auto* a_mid = tp_l_inner->rhs();
+                auto* a_prefix = tp_l_inner->lhs();
+                auto* b_first = tp_r->lhs();
+                auto* b_second = tp_r->rhs();
+                if (a_mid->rank() == 1 && b_first->rank() == 1
+                    && b_second->rank() == 1)
+                {
+                    auto* dot1 = simplify_basis_dot_impl(
+                        rl, make_contract(rl, a_mid, b_first), cs);
+                    auto* dot2 = simplify_basis_dot_impl(
+                        rl, make_contract(rl, a_last, b_second), cs);
+                    if (dot1->rank() == 0 && dot2->rank() == 0)
+                        return make_tensor_product(
+                            rl, a_prefix, make_product(rl, dot1, dot2));
+                }
+            }
+        }
         return (l == dc->lhs() && r == dc->rhs()) ?
                    e :
                    make_double_contract(rl, l, r);
@@ -1092,6 +1173,181 @@ auto contract_kronecker_step() -> DerivationStep
                 return e; // no dummy index; leave as-is
 
             return substitute_remove_impl(rl, e, dummy_id, free_id, kd);
+        }};
+}
+
+// ===========================================================================
+// replace_first_lct_step
+// ===========================================================================
+
+static auto replace_first_lct_impl(
+    ResourceList& rl, Expr* e, Expr* expansion, bool& replaced) -> Expr*
+{
+    if (replaced)
+        return e;
+    if (dynamic_cast<LeviCivitaTensor*>(e))
+    {
+        replaced = true;
+        return expansion;
+    }
+    if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        auto* l = replace_first_lct_impl(rl, tp->lhs(), expansion, replaced);
+        auto* r = replace_first_lct_impl(rl, tp->rhs(), expansion, replaced);
+        return (l == tp->lhs() && r == tp->rhs()) ?
+                   e :
+                   make_tensor_product(rl, l, r);
+    }
+    if (auto* sc = dynamic_cast<Scale*>(e))
+    {
+        auto* inner =
+            replace_first_lct_impl(rl, sc->expr(), expansion, replaced);
+        return inner == sc->expr() ? e : make_scale(rl, sc->coeff(), inner);
+    }
+    if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        std::vector<Expr*> terms;
+        terms.reserve(s->terms().size());
+        bool changed = false;
+        for (auto* t: s->terms())
+        {
+            auto* sub = replace_first_lct_impl(rl, t, expansion, replaced);
+            if (sub != t)
+                changed = true;
+            terms.push_back(sub);
+        }
+        return changed ? make_sum(rl, std::move(terms)) : e;
+    }
+    if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        auto* l = replace_first_lct_impl(rl, co->lhs(), expansion, replaced);
+        auto* r = replace_first_lct_impl(rl, co->rhs(), expansion, replaced);
+        return (l == co->lhs() && r == co->rhs()) ? e : make_contract(rl, l, r);
+    }
+    if (auto* dc = dynamic_cast<DoubleContract*>(e))
+    {
+        auto* l = replace_first_lct_impl(rl, dc->lhs(), expansion, replaced);
+        auto* r = replace_first_lct_impl(rl, dc->rhs(), expansion, replaced);
+        return (l == dc->lhs() && r == dc->rhs()) ?
+                   e :
+                   make_double_contract(rl, l, r);
+    }
+    if (auto* pr = dynamic_cast<Product*>(e))
+    {
+        auto* l = replace_first_lct_impl(rl, pr->lhs(), expansion, replaced);
+        auto* r = replace_first_lct_impl(rl, pr->rhs(), expansion, replaced);
+        return (l == pr->lhs() && r == pr->rhs()) ? e : make_product(rl, l, r);
+    }
+    return e;
+}
+
+auto replace_first_lct_step(Expr* expansion) -> DerivationStep
+{
+    return DerivationStep{
+        "expand_levi_civita_first",
+        [expansion](ResourceList& rl, Expr* e) -> Expr*
+        {
+            bool replaced = false;
+            return replace_first_lct_impl(rl, e, expansion, replaced);
+        }};
+}
+
+// ===========================================================================
+// contract_eps_pair_step
+// ===========================================================================
+
+static void collect_lcs_nodes(Expr* e, std::vector<LeviCivitaSymbol*>& out)
+{
+    if (auto* lcs = dynamic_cast<LeviCivitaSymbol*>(e))
+    {
+        out.push_back(lcs);
+        return;
+    }
+    if (auto* tp = dynamic_cast<TensorProduct*>(e))
+    {
+        collect_lcs_nodes(tp->lhs(), out);
+        collect_lcs_nodes(tp->rhs(), out);
+    }
+    else if (auto* sc = dynamic_cast<Scale*>(e))
+    {
+        collect_lcs_nodes(sc->expr(), out);
+    }
+    else if (auto* s = dynamic_cast<Sum*>(e))
+    {
+        for (auto* t: s->terms())
+            collect_lcs_nodes(t, out);
+    }
+    else if (auto* co = dynamic_cast<Contract*>(e))
+    {
+        collect_lcs_nodes(co->lhs(), out);
+        collect_lcs_nodes(co->rhs(), out);
+    }
+    else if (auto* dc = dynamic_cast<DoubleContract*>(e))
+    {
+        collect_lcs_nodes(dc->lhs(), out);
+        collect_lcs_nodes(dc->rhs(), out);
+    }
+    else if (auto* pr = dynamic_cast<Product*>(e))
+    {
+        collect_lcs_nodes(pr->lhs(), out);
+        collect_lcs_nodes(pr->rhs(), out);
+    }
+}
+
+auto contract_eps_pair_step() -> DerivationStep
+{
+    return DerivationStep{
+        "contract_eps_pair",
+        [](ResourceList& rl, Expr* e) -> Expr*
+        {
+            std::vector<LeviCivitaSymbol*> lcs_nodes;
+            collect_lcs_nodes(e, lcs_nodes);
+            if (lcs_nodes.size() < 2)
+                return e;
+
+            auto* lcs1 = lcs_nodes[0];
+            auto* lcs2 = lcs_nodes[1];
+
+            // Find shared dummy index
+            int dummy = -1;
+            int p1 = -1, p2 = -1;
+            for (int i = 0; i < 3 && dummy < 0; ++i)
+                for (int j = 0; j < 3 && dummy < 0; ++j)
+                    if (lcs1->ids()[i] == lcs2->ids()[j])
+                    {
+                        dummy = lcs1->ids()[i];
+                        p1 = i;
+                        p2 = j;
+                    }
+
+            if (dummy < 0)
+                return e;
+
+            // Free indices from each ε (cyclic positions after removing dummy)
+            int a1 = lcs1->ids()[(p1 + 1) % 3];
+            int a2 = lcs1->ids()[(p1 + 2) % 3];
+            int b1 = lcs2->ids()[(p2 + 1) % 3];
+            int b2 = lcs2->ids()[(p2 + 2) % 3];
+
+            // Σ_s ε_{..s..} ε_{..s..} = δ_{a1,b1}δ_{a2,b2} - δ_{a1,b2}δ_{a2,b1}
+            auto* kd_a1b1 = make_kronecker_delta(rl, a1, b1);
+            auto* kd_a2b2 = make_kronecker_delta(rl, a2, b2);
+            auto* kd_a1b2 = make_kronecker_delta(rl, a1, b2);
+            auto* kd_a2b1 = make_kronecker_delta(rl, a2, b1);
+
+            auto* term1_kd = make_product(rl, kd_a1b1, kd_a2b2);
+            auto* term2_kd = make_product(rl, kd_a1b2, kd_a2b1);
+            auto* one = make_rational(rl, Rational{1});
+
+            // vA: replace lcs1 → term1_kd, lcs2 → 1
+            Expr* vA = replace_in_tree(rl, e, lcs1, term1_kd);
+            vA = replace_in_tree(rl, vA, lcs2, one);
+
+            // vB: replace lcs1 → term2_kd, lcs2 → 1
+            Expr* vB = replace_in_tree(rl, e, lcs1, term2_kd);
+            vB = replace_in_tree(rl, vB, lcs2, one);
+
+            return make_sum(rl, {vA, make_scale(rl, Rational{-1}, vB)});
         }};
 }
 

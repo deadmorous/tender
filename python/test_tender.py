@@ -1272,11 +1272,75 @@ def test_contract_kronecker_step_full_dot_path():
 
 
 def test_theorems_import():
-    """tender.lib.theorems imports cleanly and all three theorems are proved."""
+    """tender.lib.theorems imports cleanly and all theorems are proved."""
     import tender.lib.theorems as thm
     assert hasattr(thm, "dot_commutativity")
     assert hasattr(thm, "cross_anticommutativity")
     assert hasattr(thm, "bac_cab")
+    assert hasattr(thm, "eps_delta_theorem")
     assert thm.dot_commutativity.name == "dot_commutativity"
     assert thm.cross_anticommutativity.name == "cross_anticommutativity"
     assert thm.bac_cab.name == "bac_cab"
+    assert thm.eps_delta_theorem.name == "eps_delta"
+
+
+def test_expand_levi_civita_first_step():
+    """expand_levi_civita_first_step replaces only the first eps, not both."""
+    from tender import (
+        expand_levi_civita_first_step, LeviCivitaTensor, LeviCivitaSymbol,
+        TensorProduct,
+    )
+    a = tensor("a", 1)
+    b = tensor("b", 1)
+    c = tensor("c", 1)
+    expr = ddot(eps, tp(a, ddot(eps, tp(b, c))))
+
+    # One application should replace the outer eps only.
+    step = expand_levi_civita_first_step(wcs)
+    result = Derivation([step]).apply(State(expr))[-1].expr
+
+    # The outer eps should be gone (no LeviCivitaTensor at top-level).
+    # The inner eps is still a LeviCivitaTensor.
+    lct_nodes = []
+    def _collect(e):
+        if isinstance(e, LeviCivitaTensor):
+            lct_nodes.append(e)
+        if isinstance(e, TensorProduct):
+            _collect(e.lhs); _collect(e.rhs)
+        if hasattr(e, "lhs") and not isinstance(e, TensorProduct):
+            _collect(e.lhs); _collect(e.rhs)
+    _collect(result)
+    # Exactly one LeviCivitaTensor remains (the inner one).
+    assert len(lct_nodes) == 1
+
+
+def test_contract_eps_pair_step():
+    """contract_eps_pair_step applies the ε-δ formula for two LCS sharing a dummy."""
+    from tender import (
+        contract_eps_pair_step, make_levi_civita_symbol, alloc_index_id,
+        Sum, Scale,
+    )
+    # Build ε_{ijk} ε_{ilm}: dummy = i (shared at position 0 in both)
+    i = alloc_index_id()
+    j = alloc_index_id()
+    k = alloc_index_id()
+    l = alloc_index_id()
+    m = alloc_index_id()
+    lcs1 = make_levi_civita_symbol([i, j, k], [False, False, False])
+    lcs2 = make_levi_civita_symbol([i, l, m], [False, False, False])
+    prod = lcs1 * lcs2  # TensorProduct (both rank-0)
+
+    result = Derivation([contract_eps_pair_step()]).apply(State(prod))[-1].expr
+    # Result should be a Sum of two terms (δδ - δδ form).
+    assert isinstance(result, Sum)
+    assert len(result.terms) == 2
+
+
+def test_eps_delta_theorem_lhs_rhs():
+    """eps_delta_theorem has the expected lhs and rhs forms."""
+    from tender.lib.theorems import eps_delta_theorem
+    assert "eps" in eps_delta_theorem.lhs.python()
+    assert "eps" in eps_delta_theorem.lhs.python()
+    # RHS should contain tp and dot
+    rhs_py = eps_delta_theorem.rhs.python()
+    assert "tp(" in rhs_py

@@ -50,4 +50,13 @@ auto reassemble_dot_step(CoordSystem const& cs) -> DerivationStep;
 // repeated calls handle multiple deltas.
 auto contract_kronecker_step() -> DerivationStep;
 
+// Replace only the first LeviCivitaTensor occurrence (DFS, lhs before rhs)
+// with the given expansion Expr*.  Subsequent calls replace later occurrences.
+auto replace_first_lct_step(Expr* expansion) -> DerivationStep;
+
+// Contract a pair of LeviCivitaSymbol nodes that share exactly one dummy index
+// via the ε-δ formula: Σ_s ε_{..s..}ε_{..s..} = δδ - δδ.
+// Returns unchanged if no such pair is found.
+auto contract_eps_pair_step() -> DerivationStep;
+
 } // namespace tender

@@ -125,9 +125,11 @@ from ._tender import (
     LeviCivitaSymbol,
     make_kronecker_delta,
     make_levi_civita_symbol,
-    # contract_kronecker_step and substitute_index
+    # contract_kronecker_step, substitute_index, eps-pair steps
     contract_kronecker_step,
     substitute_index,
+    replace_first_lct_step,
+    contract_eps_pair_step,
     # Singleton getters (private)
     _identity_singleton,
     _levi_civita_singleton,
@@ -337,6 +339,23 @@ def expand_levi_civita_step(cs):
     return substitute_step(eps, expansion)
 
 
+def expand_levi_civita_first_step(cs):
+    """Replace only the FIRST LeviCivitaTensor with ε_{ijk} e^{i} ⊗ e^{j} ⊗ e^{k}."""
+    if not cs.is_orthonormal:
+        raise NotImplementedError(
+            "expand_levi_civita_first_step: non-orthonormal CS not supported"
+        )
+    i_id = alloc_index_id()
+    j_id = alloc_index_id()
+    k_id = alloc_index_id()
+    lcs = make_levi_civita_symbol([i_id, j_id, k_id], [False, False, False])
+    sbv_i = make_sym_basis_vec(cs, i_id, True)
+    sbv_j = make_sym_basis_vec(cs, j_id, True)
+    sbv_k = make_sym_basis_vec(cs, k_id, True)
+    expansion = lcs * sbv_i * sbv_j * sbv_k
+    return replace_first_lct_step(expansion)
+
+
 def doc(entry, format="latex"):
     """Render an Identity (or future Theorem) as LaTeX, plain text, or Jupyter math.
 
@@ -513,6 +532,132 @@ def prove_equal_by_components(lhs_expr, rhs_expr, lhs_steps, rhs_steps):
     return lhs_history, rhs_history
 
 
+def _collect_ac_nodes(expr, out):
+    """DFS-collect all AbstractComp nodes in expr."""
+    if isinstance(expr, AbstractComp):
+        out.append(expr)
+    elif isinstance(expr, TensorProduct):
+        _collect_ac_nodes(expr.lhs, out)
+        _collect_ac_nodes(expr.rhs, out)
+    elif isinstance(expr, Product):
+        _collect_ac_nodes(expr.lhs, out)
+        _collect_ac_nodes(expr.rhs, out)
+    elif isinstance(expr, Scale):
+        _collect_ac_nodes(expr.expr, out)
+
+
+def _collect_sbv_nodes(expr, out):
+    """DFS-collect all SymBasisVec nodes in expr."""
+    if isinstance(expr, SymBasisVec):
+        out.append(expr)
+    elif isinstance(expr, TensorProduct):
+        _collect_sbv_nodes(expr.lhs, out)
+        _collect_sbv_nodes(expr.rhs, out)
+    elif isinstance(expr, Product):
+        _collect_sbv_nodes(expr.lhs, out)
+        _collect_sbv_nodes(expr.rhs, out)
+
+
+def _collect_kd_nodes(expr, out):
+    """DFS-collect all KroneckerDelta nodes in expr."""
+    if isinstance(expr, KroneckerDelta):
+        out.append(expr)
+    elif isinstance(expr, TensorProduct):
+        _collect_kd_nodes(expr.lhs, out)
+        _collect_kd_nodes(expr.rhs, out)
+    elif isinstance(expr, Product):
+        _collect_kd_nodes(expr.lhs, out)
+        _collect_kd_nodes(expr.rhs, out)
+    elif isinstance(expr, Scale):
+        _collect_kd_nodes(expr.expr, out)
+
+
+def _count_index_ids_local(expr, counts):
+    """Count index ID occurrences within a local expression (not crossing Sum boundaries)."""
+    if isinstance(expr, AbstractComp):
+        for idx, _ in expr.indices:
+            counts[idx] = counts.get(idx, 0) + 1
+    elif isinstance(expr, SymBasisVec):
+        counts[expr.index_id] = counts.get(expr.index_id, 0) + 1
+    elif isinstance(expr, KroneckerDelta):
+        counts[expr.lower_id] = counts.get(expr.lower_id, 0) + 1
+        counts[expr.upper_id] = counts.get(expr.upper_id, 0) + 1
+    elif isinstance(expr, TensorProduct):
+        _count_index_ids_local(expr.lhs, counts)
+        _count_index_ids_local(expr.rhs, counts)
+    elif isinstance(expr, Product):
+        _count_index_ids_local(expr.lhs, counts)
+        _count_index_ids_local(expr.rhs, counts)
+    elif isinstance(expr, Scale):
+        _count_index_ids_local(expr.expr, counts)
+
+
+def _contract_kds_locally(expr):
+    """Contract KroneckerDelta nodes within a single expression (locally).
+
+    Repeatedly finds a KD whose one or both indices appear exactly once outside
+    any KD in this local expression, then calls substitute_index to rename the
+    dummy index (which collapses the KD to RationalConst(1) via make_kronecker_delta).
+    """
+    for _ in range(20):  # safety cap
+        kds = []
+        _collect_kd_nodes(expr, kds)
+        if not kds:
+            break
+        kd = kds[0]
+        lo, hi = kd.lower_id, kd.upper_id
+        counts = {}
+        _count_index_ids_local(expr, counts)
+        lo_ext = counts.get(lo, 0) - 1  # subtract the KD's own contribution
+        hi_ext = counts.get(hi, 0) - 1
+        if lo_ext == 1 and hi_ext != 1:
+            dummy, free = lo, hi
+        elif hi_ext == 1 and lo_ext != 1:
+            dummy, free = hi, lo
+        elif lo_ext == 1 and hi_ext == 1:
+            dummy, free = hi, lo
+        else:
+            break
+        expr = substitute_index(expr, dummy, free)
+    return expr
+
+
+def _try_normalize_rank1_form(expr):
+    """Try to normalise a rank-1 component expression to 'Rank1[v,dot(s1,s2)]'.
+
+    First contracts any remaining KroneckerDelta nodes locally (term-by-term),
+    then recognises expressions with exactly 1 SymBasisVec and 3 AbstractComps:
+    - one AC shares its index ID with the SBV  (identifies the vector symbol)
+    - the remaining two ACs share a different index ID  (identifies the dot product)
+    Returns None if the pattern is not matched.
+    """
+    expr = _contract_kds_locally(expr)
+    acs = []
+    _collect_ac_nodes(expr, acs)
+    sbvs = []
+    _collect_sbv_nodes(expr, sbvs)
+
+    if len(sbvs) != 1 or len(acs) != 3:
+        return None
+
+    sbv_idx = sbvs[0].index_id
+
+    vec_acs = [ac for ac in acs if any(idx == sbv_idx for idx, _ in ac.indices)]
+    dot_acs = [ac for ac in acs if not any(idx == sbv_idx for idx, _ in ac.indices)]
+
+    if len(vec_acs) != 1 or len(dot_acs) != 2:
+        return None
+
+    dot_ids0 = {idx for idx, _ in dot_acs[0].indices}
+    dot_ids1 = {idx for idx, _ in dot_acs[1].indices}
+    if not (dot_ids0 & dot_ids1):
+        return None
+
+    vec_sym = vec_acs[0].base_sym
+    dot_syms = sorted([dot_acs[0].base_sym, dot_acs[1].base_sym])
+    return f"Rank1[{vec_sym},dot({','.join(dot_syms)})]"
+
+
 def _normalize_component_form(expr):
     """Return a canonical string for component-form equality checks.
 
@@ -523,6 +668,11 @@ def _normalize_component_form(expr):
     IndexedSum nodes are normalised letter-invariantly: ``a^i b_i`` and
     ``a^j b_j`` are considered equal, and factor order is ignored so that
     ``a^i b_i`` and ``b_i a^i`` compare equal.
+
+    Scale nodes are normalised as ``Scale[coeff,inner]``.
+
+    TensorProduct nodes that match the rank-1 pattern ``v*(s1·s2)`` are
+    normalised as ``Rank1[v,dot(s1,s2)]``.
     """
     if isinstance(expr, AbstractIndexedSum):
         # Normalise letter-invariantly: only the base symbols matter
@@ -534,6 +684,13 @@ def _normalize_component_form(expr):
     if isinstance(expr, Sum):
         terms = sorted(_normalize_component_form(t) for t in expr.terms)
         return "Sum[" + ",".join(terms) + "]"
+    if isinstance(expr, Scale):
+        inner = _normalize_component_form(expr.expr)
+        return f"Scale[{expr.coeff},{inner}]"
+    if isinstance(expr, TensorProduct):
+        rank1 = _try_normalize_rank1_form(expr)
+        if rank1 is not None:
+            return rank1
     if isinstance(expr, Product):
         lhs, rhs = expr.lhs, expr.rhs
         # Detect implicit summation: both factors are AbstractComps sharing index IDs
@@ -649,6 +806,7 @@ __all__ = [
     "collect_zero_terms_step", "reassemble_from_components_step",
     "collect_repeated_sum_step", "reassemble_vector_step", "reassemble_dot_step",
     "contract_kronecker_step", "expand_identity_step", "expand_levi_civita_step",
+    "expand_levi_civita_first_step", "contract_eps_pair_step",
     "IndexedSum", "make_indexed_sum",
     "SymBasisVec", "make_sym_basis_vec",
     "AbstractComp", "AbstractIndexedSum",

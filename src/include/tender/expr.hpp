@@ -598,6 +598,22 @@ public:
     {
         return upper_;
     }
+    // +1 if ids_ is an even permutation of sorted order, -1 if odd, 0 if
+    // repeated.
+    [[nodiscard]] auto sign() const noexcept -> int
+    {
+        auto const a = ids_[0], b = ids_[1], c = ids_[2];
+        if (a == b || b == c || a == c)
+            return 0;
+        int inv = 0;
+        if (a > b)
+            inv++;
+        if (a > c)
+            inv++;
+        if (b > c)
+            inv++;
+        return (inv % 2 == 0) ? 1 : -1;
+    }
 
 private:
     std::array<int, 3> ids_;

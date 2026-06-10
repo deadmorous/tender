@@ -7,12 +7,14 @@ surfacing regressions immediately.
 
 from tender import (
     Theorem,
-    tensor, dot, cross, tp,
+    tensor, dot, cross, tp, ddot, eps,
     State, Derivation,
     wcs,
     expand_in_basis_step,
     simplify_basis_dot_step,
     contract_kronecker_step,
+    expand_levi_civita_first_step,
+    contract_eps_pair_step,
     apply_identity_auto,
     _find_and_rewrite_all,
     _capture_step,
@@ -31,6 +33,48 @@ from tender.lib.identities.definitions import (
 _a = tensor("a", 1)
 _b = tensor("b", 1)
 _c = tensor("c", 1)
+
+# ---------------------------------------------------------------------------
+# eps_delta:  ε:(a⊗(ε:(b⊗c))) = b(a·c) − c(a·b)
+#
+# Proof (non-circular — first-principles component expansion):
+#   Step 1-2: Expand both ε tensors in basis (first the outer, then the inner)
+#   Step 3-5: Expand a, b, c in basis (abstract component form)
+#   Step 6:   simplify_basis_dot — collapses double-contractions, SBV·SBV → KD
+#   Step 7-10: contract 4 Kronecker deltas (from SBV dot products)
+#   Step 11:  contract ε-pair sharing one dummy index → δδ − δδ
+#   Step 12-15: contract 4 remaining Kronecker deltas
+# ---------------------------------------------------------------------------
+
+eps_delta_theorem = Theorem.by_components(
+    "eps_delta",
+    ddot(eps, tp(_a, ddot(eps, tp(_b, _c)))),
+    tp(_b, dot(_a, _c)) - tp(_c, dot(_a, _b)),
+    lhs_steps=[
+        expand_levi_civita_first_step(wcs),
+        expand_levi_civita_first_step(wcs),
+        expand_in_basis_step(_a, wcs, covariant=False, abstract=True),
+        expand_in_basis_step(_b, wcs, covariant=True, abstract=True),
+        expand_in_basis_step(_c, wcs, covariant=True, abstract=True),
+        simplify_basis_dot_step(wcs),
+        contract_kronecker_step(),
+        contract_kronecker_step(),
+        contract_kronecker_step(),
+        contract_kronecker_step(),
+        contract_eps_pair_step(),
+        contract_kronecker_step(),
+        contract_kronecker_step(),
+        contract_kronecker_step(),
+        contract_kronecker_step(),
+    ],
+    rhs_steps=[
+        expand_in_basis_step(_b, wcs, covariant=True, abstract=True),
+        expand_in_basis_step(_a, wcs, covariant=False, abstract=True),
+        expand_in_basis_step(_c, wcs, covariant=True, abstract=True),
+        simplify_basis_dot_step(wcs),
+        contract_kronecker_step(),
+    ],
+)
 
 # ---------------------------------------------------------------------------
 # dot_commutativity:  a · b = b · a
@@ -113,4 +157,4 @@ bac_cab = Theorem.by_derivation(
     steps=[_bc_step1, _bc_step2, _bc_step3],
 )
 
-__all__ = ["dot_commutativity", "cross_anticommutativity", "bac_cab"]
+__all__ = ["dot_commutativity", "cross_anticommutativity", "bac_cab", "eps_delta_theorem"]

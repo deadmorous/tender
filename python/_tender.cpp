@@ -963,7 +963,9 @@ NB_MODULE(_tender, m)
         .def_prop_ro(
             "upper",
             [](LeviCivitaSymbol const* n) -> std::vector<bool>
-            { return {n->upper()[0], n->upper()[1], n->upper()[2]}; });
+            { return {n->upper()[0], n->upper()[1], n->upper()[2]}; })
+        .def_prop_ro(
+            "sign", [](LeviCivitaSymbol const* n) { return n->sign(); });
 
     m.def(
         "make_levi_civita_symbol",
@@ -1036,6 +1038,14 @@ NB_MODULE(_tender, m)
         "cs"_a);
 
     m.def("contract_kronecker_step", &contract_kronecker_step);
+
+    m.def(
+        "replace_first_lct_step",
+        [](Expr* expansion) { return replace_first_lct_step(expansion); },
+        nb::rv_policy::copy,
+        "expansion"_a);
+
+    m.def("contract_eps_pair_step", &contract_eps_pair_step);
 
     m.def(
         "substitute_index",
