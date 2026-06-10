@@ -1245,3 +1245,319 @@ TEST(SimplifyBasisDot, DifferentIdsProducesKronecker)
     ASSERT_NE(kd, nullptr)
         << "expected KroneckerDelta as rhs, got: " << prod->rhs()->python();
 }
+
+// ===========================================================================
+// LeviCivitaSymbol::sign()
+// ===========================================================================
+
+TEST(LeviCivitaSymbol, SignEvenPermutation)
+{
+    auto rl = make_rl();
+    // (0,1,2) → identity: even → +1
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    EXPECT_EQ(lcs->sign(), 1);
+    // (1,2,0) → cyclic: 2 swaps (0→1→2→0 is even): +1
+    auto* lcs2 = make_levi_civita_symbol(rl, {1, 2, 0}, {false, false, false});
+    EXPECT_EQ(lcs2->sign(), 1);
+    // (2,0,1) → another even cyclic: +1
+    auto* lcs3 = make_levi_civita_symbol(rl, {2, 0, 1}, {false, false, false});
+    EXPECT_EQ(lcs3->sign(), 1);
+}
+
+TEST(LeviCivitaSymbol, SignOddPermutation)
+{
+    auto rl = make_rl();
+    // (1,0,2) → one swap: odd → -1
+    auto* lcs = make_levi_civita_symbol(rl, {1, 0, 2}, {false, false, false});
+    EXPECT_EQ(lcs->sign(), -1);
+    // (0,2,1) → one swap: -1
+    auto* lcs2 = make_levi_civita_symbol(rl, {0, 2, 1}, {false, false, false});
+    EXPECT_EQ(lcs2->sign(), -1);
+    // (2,1,0) → two swaps from (0,1,2): odd → -1
+    auto* lcs3 = make_levi_civita_symbol(rl, {2, 1, 0}, {false, false, false});
+    EXPECT_EQ(lcs3->sign(), -1);
+}
+
+TEST(LeviCivitaSymbol, SignZeroOnRepeat)
+{
+    auto rl = make_rl();
+    // Repeated index → sign = 0
+    auto* lcs = make_levi_civita_symbol(rl, {0, 0, 1}, {false, false, false});
+    EXPECT_EQ(lcs->sign(), 0);
+    auto* lcs2 = make_levi_civita_symbol(rl, {1, 2, 2}, {false, false, false});
+    EXPECT_EQ(lcs2->sign(), 0);
+}
+
+// ===========================================================================
+// replace_first_lct_step
+// ===========================================================================
+
+TEST(ReplaceFirstLct, ReplacesOnlyFirstInTensorProduct)
+{
+    // ddot(eps, tp(eps, v)) — two LeviCivitaTensor nodes; only the first should
+    // be replaced.
+    auto rl = make_rl();
+    auto* eps1 = make_levi_civita(rl);
+    auto* eps2 = make_levi_civita(rl);
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    // Build eps1 ⊗ (eps2 ⊗ v) as a stand-in
+    auto* inner = make_tensor_product(rl, eps2, v);
+    auto* expr = make_tensor_product(rl, eps1, inner);
+
+    auto* replacement = make_named_tensor(rl, "R", 3, {});
+    auto step = replace_first_lct_step(replacement);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    // Outer LeviCivitaTensor is gone; the inner one remains.
+    auto* tp = dynamic_cast<TensorProduct*>(result);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(tp->lhs(), replacement);
+    // Inner is still tp(eps2, v).
+    auto* inner_tp = dynamic_cast<TensorProduct*>(tp->rhs());
+    ASSERT_NE(inner_tp, nullptr);
+    EXPECT_NE(dynamic_cast<LeviCivitaTensor*>(inner_tp->lhs()), nullptr);
+}
+
+TEST(ReplaceFirstLct, NoOpWhenNoLct)
+{
+    auto rl = make_rl();
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* replacement = make_named_tensor(rl, "R", 3, {});
+    auto step = replace_first_lct_step(replacement);
+    auto* result = step.apply(rl, State{v}).expr();
+    EXPECT_EQ(result, v);
+}
+
+TEST(ReplaceFirstLct, ReplacesLctInScale)
+{
+    auto rl = make_rl();
+    auto* eps = make_levi_civita(rl);
+    auto* scaled = make_scale(rl, Rational{2}, eps);
+    auto* replacement = make_named_tensor(rl, "R", 3, {});
+    auto step = replace_first_lct_step(replacement);
+    auto* result = step.apply(rl, State{scaled}).expr();
+    auto* sc = dynamic_cast<Scale*>(result);
+    ASSERT_NE(sc, nullptr);
+    EXPECT_EQ(sc->expr(), replacement);
+}
+
+TEST(ReplaceFirstLct, ReplacesFirstInSum)
+{
+    auto rl = make_rl();
+    auto* eps1 = make_levi_civita(rl);
+    auto* eps2 = make_levi_civita(rl);
+    auto* s = make_sum(rl, {eps1, eps2});
+    auto* replacement = make_named_tensor(rl, "R", 3, {});
+    auto step = replace_first_lct_step(replacement);
+    auto* result = step.apply(rl, State{s}).expr();
+    // After first application: Sum(R, eps2)
+    auto* sum = dynamic_cast<Sum*>(result);
+    ASSERT_NE(sum, nullptr);
+    ASSERT_EQ(sum->terms().size(), 2u);
+    EXPECT_EQ(sum->terms()[0], replacement);
+    EXPECT_NE(dynamic_cast<LeviCivitaTensor*>(sum->terms()[1]), nullptr);
+}
+
+TEST(ReplaceFirstLct, ReplacesLctInContract)
+{
+    auto rl = make_rl();
+    auto* eps = make_levi_civita(rl);
+    auto* v = make_named_tensor(rl, "v", 1, {});
+    auto* co = make_contract(rl, eps, v);
+    auto* replacement = make_named_tensor(rl, "R", 3, {});
+    auto step = replace_first_lct_step(replacement);
+    auto* result = step.apply(rl, State{co}).expr();
+    auto* co2 = dynamic_cast<Contract*>(result);
+    ASSERT_NE(co2, nullptr);
+    EXPECT_EQ(co2->lhs(), replacement);
+}
+
+TEST(ReplaceFirstLct, ReplacesLctInDoubleContract)
+{
+    auto rl = make_rl();
+    auto* eps = make_levi_civita(rl);
+    auto* v = make_named_tensor(rl, "v", 2, {});
+    auto* dc = make_double_contract(rl, eps, v);
+    auto* replacement = make_named_tensor(rl, "R", 3, {});
+    auto step = replace_first_lct_step(replacement);
+    auto* result = step.apply(rl, State{dc}).expr();
+    auto* dc2 = dynamic_cast<DoubleContract*>(result);
+    ASSERT_NE(dc2, nullptr);
+    EXPECT_EQ(dc2->lhs(), replacement);
+}
+
+TEST(ReplaceFirstLct, ReplacesLctInProduct)
+{
+    // Product(KD, LCS) — both rank-0, no LeviCivitaTensor present.
+    // Exercises the Product branch in replace_first_lct_impl (pass-through).
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 0, 1);
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* pr = make_product(rl, kd, lcs);
+    auto* replacement =
+        make_levi_civita_symbol(rl, {6, 7, 8}, {false, false, false});
+    auto step = replace_first_lct_step(replacement);
+    auto* result = step.apply(rl, State{pr}).expr();
+    EXPECT_EQ(result, pr); // no LeviCivitaTensor → unchanged
+}
+
+// ===========================================================================
+// contract_eps_pair_step
+// ===========================================================================
+
+TEST(ContractEpsPair, BasicEpsDeltaFormula)
+{
+    // ε_{ijk} ε_{ilm}: dummy = i (pos 0 in both)
+    // Expect Sum(δ_{j,l}δ_{k,m}, Scale(-1, δ_{j,m}δ_{k,l}))
+    auto rl = make_rl();
+    auto* lcs1 = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* lcs2 = make_levi_civita_symbol(rl, {0, 3, 4}, {false, false, false});
+    auto* expr = make_product(rl, lcs1, lcs2);
+
+    auto step = contract_eps_pair_step();
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* s = dynamic_cast<Sum*>(result);
+    ASSERT_NE(s, nullptr) << "expected Sum, got: " << result->python();
+    ASSERT_EQ(s->terms().size(), 2u);
+    // First term: Product(KD(a1,b1), KD(a2,b2))
+    auto* t0 = dynamic_cast<Product*>(s->terms()[0]);
+    ASSERT_NE(t0, nullptr);
+    EXPECT_NE(dynamic_cast<KroneckerDelta*>(t0->lhs()), nullptr);
+    EXPECT_NE(dynamic_cast<KroneckerDelta*>(t0->rhs()), nullptr);
+    // Second term: Scale(-1, Product(KD, KD))
+    auto* t1 = dynamic_cast<Scale*>(s->terms()[1]);
+    ASSERT_NE(t1, nullptr);
+    EXPECT_EQ(t1->coeff(), (Rational{-1}));
+}
+
+TEST(ContractEpsPair, NoPairPassThrough)
+{
+    // Single LCS — no pair, should return unchanged.
+    auto rl = make_rl();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto step = contract_eps_pair_step();
+    auto* result = step.apply(rl, State{lcs}).expr();
+    EXPECT_EQ(result, lcs);
+}
+
+TEST(ContractEpsPair, NoDummyPassThrough)
+{
+    // Two LCS with no shared index ID — no contraction possible.
+    auto rl = make_rl();
+    auto* lcs1 = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* lcs2 = make_levi_civita_symbol(rl, {3, 4, 5}, {false, false, false});
+    auto* expr = make_product(rl, lcs1, lcs2);
+    auto step = contract_eps_pair_step();
+    auto* result = step.apply(rl, State{expr}).expr();
+    // No shared dummy → unchanged
+    EXPECT_EQ(result, expr);
+}
+
+// ===========================================================================
+// simplify_basis_dot_step: SBV-SBV contraction
+// ===========================================================================
+
+TEST(SimplifyBasisDot, SbvSbvOppositeCobasis)
+{
+    // Contract(SBV(id=5, cobasis=true), SBV(id=7, cobasis=false)) → KD(7,5)
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_co = make_sym_basis_vec(rl, cs, 5, true);
+    auto* sbv_ba = make_sym_basis_vec(rl, cs, 7, false);
+    auto* expr = make_contract(rl, sbv_co, sbv_ba);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* kd = dynamic_cast<KroneckerDelta*>(result);
+    ASSERT_NE(kd, nullptr)
+        << "expected KroneckerDelta, got: " << result->python();
+    // Lower id = basis (non-cobasis) = 7; upper id = cobasis = 5
+    EXPECT_EQ(kd->lower_id(), 7);
+    EXPECT_EQ(kd->upper_id(), 5);
+}
+
+TEST(SimplifyBasisDot, SbvSbvSameCobasisOrthonormal)
+{
+    // Contract(SBV(5, cobasis=true), SBV(7, cobasis=true)) in WCS (orthonormal)
+    // → KD(5,7) (same cobasis → lo=lhs_id, hi=rhs_id)
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv1 = make_sym_basis_vec(rl, cs, 5, true);
+    auto* sbv2 = make_sym_basis_vec(rl, cs, 7, true);
+    auto* expr = make_contract(rl, sbv1, sbv2);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* kd = dynamic_cast<KroneckerDelta*>(result);
+    ASSERT_NE(kd, nullptr)
+        << "expected KroneckerDelta, got: " << result->python();
+}
+
+// ===========================================================================
+// simplify_basis_dot_step: pull rank-0 from rhs TP (scalar on rhs)
+// ===========================================================================
+
+TEST(SimplifyBasisDot, PullRank0FromRhsRhsTP)
+{
+    // Contract(SBV^{5}, TP(SBV_{7}, KD(5,7)))
+    // → KD(7,5) pulls out; then Contract(SBV^5, SBV_7) → KD(7,5)
+    // The new rhs-rhs pull: Contract(l, TP(rank1, rank0)) → Product(rank0,
+    // Contract(l, rank1))
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_co = make_sym_basis_vec(rl, cs, 5, true);
+    auto* sbv_ba = make_sym_basis_vec(rl, cs, 7, false);
+    auto* kd = make_kronecker_delta(rl, 7, 5);
+    // TP(SBV_7_basis, KD) — rank-0 scalar on rhs
+    auto* tp = make_tensor_product(rl, sbv_ba, kd);
+    auto* expr = make_contract(rl, sbv_co, tp);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    // Should produce Product(KD, inner_dot) where inner_dot contracts SBV^5
+    // with SBV_7
+    auto* prod = dynamic_cast<Product*>(result);
+    ASSERT_NE(prod, nullptr) << "expected Product, got: " << result->python();
+}
+
+// ===========================================================================
+// simplify_basis_dot_step: DoubleContract expansion
+// ===========================================================================
+
+TEST(SimplifyBasisDot, DoubleContractExpansion)
+{
+    // ddot(TP(TP(LCS, SBV^{j}), SBV^{k}), TP(SBV_{j2}, SBV_{k2}))
+    // → TP(LCS, Product(Contract(SBV^{j}, SBV_{j2}), Contract(SBV^{k},
+    // SBV_{k2}))) = TP(LCS, Product(KD(j2,j), KD(k2,k)))
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* sbv_j = make_sym_basis_vec(rl, cs, 1, true);   // SBV^{1}
+    auto* sbv_k = make_sym_basis_vec(rl, cs, 2, true);   // SBV^{2}
+    auto* sbv_j2 = make_sym_basis_vec(rl, cs, 3, false); // SBV_{3}
+    auto* sbv_k2 = make_sym_basis_vec(rl, cs, 4, false); // SBV_{4}
+
+    // TP(TP(LCS, SBV^{1}), SBV^{2}) — rank-1 (LCS rank-0)
+    auto* tp_inner = make_tensor_product(rl, lcs, sbv_j);
+    auto* tp_lhs = make_tensor_product(rl, tp_inner, sbv_k);
+    // TP(SBV_{3}, SBV_{4}) — rank-2
+    auto* tp_rhs = make_tensor_product(rl, sbv_j2, sbv_k2);
+    auto* dc = make_double_contract(rl, tp_lhs, tp_rhs);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{dc}).expr();
+
+    // Expect TP(TP(LCS, SBV^{1}), Product(KD(3,1), KD(4,2)))
+    auto* tp = dynamic_cast<TensorProduct*>(result);
+    ASSERT_NE(tp, nullptr)
+        << "expected TensorProduct, got: " << result->python();
+    auto* prod = dynamic_cast<Product*>(tp->rhs());
+    ASSERT_NE(prod, nullptr)
+        << "expected Product as rhs, got: " << tp->rhs()->python();
+    EXPECT_NE(dynamic_cast<KroneckerDelta*>(prod->lhs()), nullptr);
+    EXPECT_NE(dynamic_cast<KroneckerDelta*>(prod->rhs()), nullptr);
+}
