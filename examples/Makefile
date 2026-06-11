@@ -20,7 +20,7 @@ OUTDIR   := out
 
 PYTHONPATH_VAR  := PYTHONPATH=$(BUILD)/python
 
-EXAMPLES := pvw_continuum bac_cab bac_cab_search dot_commutativity
+EXAMPLES := pvw_continuum bac_cab bac_cab_search dot_commutativity tensor_expansions
 
 .PHONY: all clean
 

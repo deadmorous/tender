@@ -15,9 +15,7 @@ Derivations 2 and 3 therefore use a *concrete* 3-D WCS expansion of ε to
 obtain the correct numerical results.
 """
 
-import pathlib, sys, os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'build', 'python'))
+import pathlib
 
 from tender import (
     wcs, rational, trace, ddot,
@@ -66,7 +64,6 @@ def eps_wcs_expansion(cs):
 # ===========================================================================
 # derivation_1 — abstract formula: ε_{ijk}ε_{isp} = δ_{js}δ_{kp} − δ_{jp}δ_{ks}
 # ===========================================================================
-# Allocate fresh abstract index IDs for each tensor; i is the shared (dummy) index.
 
 i_id = alloc_index_id()
 j_id = alloc_index_id()
@@ -77,11 +74,10 @@ p_id = alloc_index_id()
 lcs_ijk = make_levi_civita_symbol([i_id, j_id, k_id], [False, False, False])
 lcs_isp = make_levi_civita_symbol([i_id, s_id, p_id], [False, False, False])
 
-# The product has a single shared index i — a Levi-Civita scalar pair.
 eps_pair = lcs_ijk * lcs_isp
 
 derivation_1 = Derivation([
-    contract_eps_pair_step(),           # ε_{ijk}ε_{isp} → δ_{js}δ_{kp} − δ_{jp}δ_{ks}
+    contract_eps_pair_step(),
 ])
 history_1 = derivation_1.apply(State(eps_pair))
 
@@ -93,30 +89,8 @@ print(show(history_1))
 # ===========================================================================
 # derivation_2 — ε_{ijk}ε_{ijp} = 2δ_{kp}
 # ===========================================================================
-# Specialising s → j in derivation_1 would require evaluating the trace
-# δ_{jj} = dim = 3, which the abstract framework cannot do (it gives 1).
-#
-# Instead we build ε_{ijk}ε_{ijp} directly from the concrete WCS expansion
-# and evaluate using concrete 3-D basis arithmetic.
 
-eps_exp = eps_wcs_expansion(cs)        # Σ ε_{ijk} e^i⊗e^j⊗e^k  (concrete, rank 3)
-
-# Build Σ_{ij} ε_{ijk} ε_{ijp} as tr_{ij}(eps_exp ⊗ eps_exp) contracted
-# over first two indices.  In practice: contract eps over first two indices
-# with itself, leaving a rank-2 result.
-# For orthonormal WCS, Contract over first 2: this equals eps_exp : eps_exp
-# but keeping the LAST index of lhs and rhs — i.e. the conventional outer
-# product contraction over the FIRST two indices.
-# We express this as: tr₂(eps:eps) where tr₂ is trace over first index pair.
-# Equivalently: for concrete e^i ⊗ e^j ⊗ e^k contracted with e^l⊗e^m⊗e^n:
-# Σ_{ij} (e^i · e^l)(e^j · e^m) e^k⊗e^n  (double contract over LEADING pair).
-# tender's ddot contracts the TRAILING pair of lhs with the LEADING pair of rhs,
-# so we need ddot(eps_exp^T, eps_exp) in a sense — but it's simplest to just
-# compute the result directly.
-
-# Compute Σ_{ij} ε_{ijk} ε_{ijp} for k,p ∈ {0,1,2} using Python arithmetic
-# (basis indices 0,1,2 correspond to i,j,k).
-result_2d = [[0]*3 for _ in range(3)]
+result_2d = [[0] * 3 for _ in range(3)]
 for k in range(3):
     for p in range(3):
         for i in range(3):
@@ -135,8 +109,6 @@ print("→ This is 2 * Identity (2δ_{kp})")
 # ===========================================================================
 # derivation_3 — ε_{ijk}ε_{ijk} = 6
 # ===========================================================================
-# Full contraction = trace(eps:eps) = trace(2*I) = 2*dim = 6.
-# Computed via concrete WCS expansion using tender's algebraic engine.
 
 eps_wcs = eps_wcs_expansion(cs)
 expr_3 = trace(ddot(eps_wcs, eps_wcs))
@@ -153,3 +125,72 @@ print("derivation_3 : ε_{ijk}ε_{ijk} = trace(ε:ε)")
 print("=" * 70)
 print(show(history_3))
 print("Result:", show_final(history_3))
+
+
+# ===========================================================================
+# LaTeX output
+# ===========================================================================
+
+def _state_lines(history):
+    """Yield LaTeX display-equation lines for each state in history."""
+    for state in history:
+        label = state.label or "initial"
+        safe_label = label.replace("_", r"\_").replace("^", r"\^{}")
+        yield r"\[" + r"\text{[" + safe_label + r":] }" + state.expr.latex() + r"\]"
+
+
+def build_latex_document(sections):
+    """Build a multi-section standalone LaTeX document.
+
+    sections: list of (title, lines) where lines is an iterable of raw LaTeX lines.
+    """
+    parts = [
+        r"\documentclass{article}",
+        r"\usepackage[utf8]{inputenc}",
+        r"\usepackage{amsmath,amssymb}",
+        r"\begin{document}",
+        r"\section*{Levi-Civita symbol products}",
+    ]
+    for title, lines in sections:
+        parts.append(r"\subsection*{" + title + "}")
+        parts.extend(lines)
+    parts.append(r"\end{document}")
+    return "\n".join(parts)
+
+
+# Derivation 2 result as a LaTeX matrix equation
+_mat_rows = r" \\ ".join(
+    " & ".join(str(result_2d[k][p]) for p in range(3))
+    for k in range(3)
+)
+_d2_lines = [
+    r"\[ \sum_{i,j} \varepsilon_{ijk}\,\varepsilon_{ijp} = "
+    r"2\delta_{kp} \]",
+    r"\[ \text{Verified numerically: } "
+    r"\begin{pmatrix}" + _mat_rows + r"\end{pmatrix} = 2 I \]",
+]
+
+tex = build_latex_document([
+    (
+        r"Abstract formula: "
+        r"$\varepsilon_{ijk}\varepsilon_{isp} = "
+        r"\delta_{js}\delta_{kp} - \delta_{jp}\delta_{ks}$",
+        list(_state_lines(history_1)),
+    ),
+    (
+        r"Two shared indices: "
+        r"$\sum_{ij}\varepsilon_{ijk}\varepsilon_{ijp} = 2\delta_{kp}$",
+        _d2_lines,
+    ),
+    (
+        r"Full contraction: $\varepsilon_{ijk}\varepsilon_{ijk} = 6$",
+        list(_state_lines(history_3)),
+    ),
+])
+
+out_dir = pathlib.Path(__file__).parent / "out"
+out_dir.mkdir(exist_ok=True)
+out = out_dir / "tensor_expansions.tex"
+out.write_text(tex)
+print(f"\nLaTeX document written to {out}")
+print("Compile with: pdflatex -output-directory out out/tensor_expansions.tex")
