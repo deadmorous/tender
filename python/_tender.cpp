@@ -1048,6 +1048,13 @@ NB_MODULE(_tender, m)
     m.def("contract_eps_pair_step", &contract_eps_pair_step);
 
     m.def(
+        "merge_index_step",
+        &merge_index_step,
+        nb::rv_policy::copy,
+        "old_id"_a,
+        "new_id"_a);
+
+    m.def(
         "substitute_index",
         [](Expr* e, int old_id, int new_id) -> Expr*
         { return substitute_index(g_ctx.rl, e, old_id, new_id); },

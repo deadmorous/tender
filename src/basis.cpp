@@ -213,9 +213,50 @@ static auto simplify_basis_dot_impl(
     {
         auto* l = simplify_basis_dot_impl(rl, dc->lhs(), cs);
         auto* r = simplify_basis_dot_impl(rl, dc->rhs(), cs);
-        // Try to expand ddot(TP(TP(A_prefix, A_mid), A_last), TP(B_first,
-        // B_second)) → TP(A_prefix, Product(Contract(A_mid, B_first),
-        // Contract(A_last, B_second)))
+        // Distribute over Sum (bilinearity): ddot(a+b, c) → ddot(a,c)+ddot(b,c)
+        if (auto* sl = dynamic_cast<Sum*>(l))
+        {
+            std::vector<Expr*> terms;
+            for (auto* t: sl->terms())
+                terms.push_back(simplify_basis_dot_impl(
+                    rl, make_double_contract(rl, t, r), cs));
+            return make_sum(rl, std::move(terms));
+        }
+        if (auto* sr = dynamic_cast<Sum*>(r))
+        {
+            std::vector<Expr*> terms;
+            for (auto* t: sr->terms())
+                terms.push_back(simplify_basis_dot_impl(
+                    rl, make_double_contract(rl, l, t), cs));
+            return make_sum(rl, std::move(terms));
+        }
+        // Unwrap Scale: ddot(α*A, B) → α * ddot(A, B)
+        if (auto* sc_l = dynamic_cast<Scale*>(l))
+            return simplify_basis_dot_impl(
+                rl,
+                make_scale(
+                    rl,
+                    sc_l->coeff(),
+                    make_double_contract(rl, sc_l->expr(), r)),
+                cs);
+        if (auto* sc_r = dynamic_cast<Scale*>(r))
+            return simplify_basis_dot_impl(
+                rl,
+                make_scale(
+                    rl,
+                    sc_r->coeff(),
+                    make_double_contract(rl, l, sc_r->expr())),
+                cs);
+        // Try to expand ddot(TP(TP(A_prefix, A_mid), A_last), rhs)
+        // where A_mid and A_last are rank 1.
+        // Case 1: rhs = TP(B_first, B_second) where B_first and B_second are
+        // rank 1
+        //   → TP(A_prefix, Product(Contract(A_mid, B_first), Contract(A_last,
+        //   B_second)))
+        // Case 2: rhs = TP(TP(B_prefix, B_mid), B_last) where B_mid and B_last
+        //   are rank 1 (left-nested, same structure as lhs)
+        //   → TP(TP(A_prefix, B_prefix), Product(Contract(A_mid, B_mid),
+        //   Contract(A_last, B_last)))
         auto* tp_l_outer = dynamic_cast<TensorProduct*>(l);
         auto* tp_r = dynamic_cast<TensorProduct*>(r);
         if (tp_l_outer && tp_r)
@@ -226,18 +267,48 @@ static auto simplify_basis_dot_impl(
             {
                 auto* a_mid = tp_l_inner->rhs();
                 auto* a_prefix = tp_l_inner->lhs();
-                auto* b_first = tp_r->lhs();
-                auto* b_second = tp_r->rhs();
-                if (a_mid->rank() == 1 && b_first->rank() == 1
-                    && b_second->rank() == 1)
+                if (a_mid->rank() == 1)
                 {
-                    auto* dot1 = simplify_basis_dot_impl(
-                        rl, make_contract(rl, a_mid, b_first), cs);
-                    auto* dot2 = simplify_basis_dot_impl(
-                        rl, make_contract(rl, a_last, b_second), cs);
-                    if (dot1->rank() == 0 && dot2->rank() == 0)
-                        return make_tensor_product(
-                            rl, a_prefix, make_product(rl, dot1, dot2));
+                    auto* b_second = tp_r->rhs();
+                    auto* b_rest = tp_r->lhs();
+                    if (b_second->rank() == 1)
+                    {
+                        // Peel rightmost index from rhs; remainder is b_rest.
+                        if (b_rest->rank() == 1)
+                        {
+                            // Case 1: rhs = TP(b_rest=rank1, b_second=rank1)
+                            auto* dot1 = simplify_basis_dot_impl(
+                                rl, make_contract(rl, a_mid, b_rest), cs);
+                            auto* dot2 = simplify_basis_dot_impl(
+                                rl, make_contract(rl, a_last, b_second), cs);
+                            if (dot1->rank() == 0 && dot2->rank() == 0)
+                                return make_tensor_product(
+                                    rl, a_prefix, make_product(rl, dot1, dot2));
+                        }
+                        else if (
+                            auto* tp_r_inner =
+                                dynamic_cast<TensorProduct*>(b_rest))
+                        {
+                            // Case 2: rhs = TP(TP(b_prefix, b_mid), b_last)
+                            auto* b_mid = tp_r_inner->rhs();
+                            auto* b_prefix = tp_r_inner->lhs();
+                            if (b_mid->rank() == 1)
+                            {
+                                auto* dot1 = simplify_basis_dot_impl(
+                                    rl, make_contract(rl, a_mid, b_mid), cs);
+                                auto* dot2 = simplify_basis_dot_impl(
+                                    rl,
+                                    make_contract(rl, a_last, b_second),
+                                    cs);
+                                if (dot1->rank() == 0 && dot2->rank() == 0)
+                                    return make_tensor_product(
+                                        rl,
+                                        make_tensor_product(
+                                            rl, a_prefix, b_prefix),
+                                        make_product(rl, dot1, dot2));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -273,6 +344,41 @@ static auto simplify_basis_dot_impl(
     if (auto* tr = dynamic_cast<Trace*>(e))
     {
         auto* inner = simplify_basis_dot_impl(rl, tr->arg(), cs);
+        // Distribute Trace over Sum: tr(a+b+...) → tr(a)+tr(b)+...
+        if (auto* s = dynamic_cast<Sum*>(inner))
+        {
+            std::vector<Expr*> terms;
+            for (auto* t: s->terms())
+                terms.push_back(
+                    simplify_basis_dot_impl(rl, make_trace(rl, t), cs));
+            return make_sum(rl, std::move(terms));
+        }
+        // Distribute Trace over Scale: tr(α*A) → α*tr(A)
+        if (auto* sc = dynamic_cast<Scale*>(inner))
+            return simplify_basis_dot_impl(
+                rl,
+                make_scale(rl, sc->coeff(), make_trace(rl, sc->expr())),
+                cs);
+        // Reduce tr(TP(a, b)) → Contract(a, b) for rank-1 a, b.
+        // Also handles tr(TP(rank2_A, rank0_s)) → s * tr(rank2_A) by
+        // recurring after pulling the scalar.
+        if (auto* tp = dynamic_cast<TensorProduct*>(inner))
+        {
+            if (tp->lhs()->rank() == 1 && tp->rhs()->rank() == 1)
+                return simplify_contract(rl, tp->lhs(), tp->rhs(), cs);
+            // Pull rank-0 scalar from rhs: tr(TP(A, s)) → s * tr(A)
+            if (tp->rhs()->rank() == 0)
+                return simplify_basis_dot_impl(
+                    rl,
+                    make_product(rl, tp->rhs(), make_trace(rl, tp->lhs())),
+                    cs);
+            // Pull rank-0 scalar from lhs: tr(TP(s, A)) → s * tr(A)
+            if (tp->lhs()->rank() == 0)
+                return simplify_basis_dot_impl(
+                    rl,
+                    make_product(rl, tp->lhs(), make_trace(rl, tp->rhs())),
+                    cs);
+        }
         return inner == tr->arg() ? e : make_trace(rl, inner);
     }
 
@@ -1238,6 +1344,12 @@ static auto replace_first_lct_impl(
         auto* r = replace_first_lct_impl(rl, pr->rhs(), expansion, replaced);
         return (l == pr->lhs() && r == pr->rhs()) ? e : make_product(rl, l, r);
     }
+    if (auto* tr = dynamic_cast<Trace*>(e))
+    {
+        auto* inner =
+            replace_first_lct_impl(rl, tr->arg(), expansion, replaced);
+        return inner == tr->arg() ? e : make_trace(rl, inner);
+    }
     return e;
 }
 
@@ -1348,6 +1460,18 @@ auto contract_eps_pair_step() -> DerivationStep
             vB = replace_in_tree(rl, vB, lcs2, one);
 
             return make_sum(rl, {vA, make_scale(rl, Rational{-1}, vB)});
+        }};
+}
+
+// ===========================================================================
+// merge_index_step
+// ===========================================================================
+
+auto merge_index_step(int old_id, int new_id) -> DerivationStep
+{
+    return DerivationStep{
+        "merge_index", [old_id, new_id](ResourceList& rl, Expr* e) -> Expr* {
+            return substitute_index(rl, e, old_id, new_id);
         }};
 }
 

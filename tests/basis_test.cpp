@@ -1561,3 +1561,365 @@ TEST(SimplifyBasisDot, DoubleContractExpansion)
     EXPECT_NE(dynamic_cast<KroneckerDelta*>(prod->lhs()), nullptr);
     EXPECT_NE(dynamic_cast<KroneckerDelta*>(prod->rhs()), nullptr);
 }
+
+// ===========================================================================
+// merge_index_step
+// ===========================================================================
+
+TEST(MergeIndex, SubstitutesIndexInKroneckerDelta)
+{
+    // KD(s=3, p=4) after merge_index_step(3 → 1) should give KD(1, 4).
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 3, 4);
+    auto step = merge_index_step(3, 1);
+    auto* result = step.apply(rl, State{kd}).expr();
+    auto* kd2 = dynamic_cast<KroneckerDelta*>(result);
+    ASSERT_NE(kd2, nullptr);
+    EXPECT_EQ(kd2->lower_id(), 1);
+    EXPECT_EQ(kd2->upper_id(), 4);
+}
+
+TEST(MergeIndex, FoldsKdWhenLoEqualsHi)
+{
+    // KD(j=1, s=3); merge_index_step(3 → 1) → KD(1,1) → RationalConst(1).
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 1, 3);
+    auto step = merge_index_step(3, 1);
+    auto* result = step.apply(rl, State{kd}).expr();
+    auto* rc = dynamic_cast<RationalConst*>(result);
+    ASSERT_NE(rc, nullptr)
+        << "expected RationalConst(1), got: " << result->python();
+    EXPECT_EQ(rc->value(), Rational{1});
+}
+
+TEST(MergeIndex, PassesThroughUnrelatedExpr)
+{
+    // Expr with no index 99 → unchanged.
+    auto rl = make_rl();
+    auto* kd = make_kronecker_delta(rl, 1, 2);
+    auto step = merge_index_step(99, 1);
+    auto* result = step.apply(rl, State{kd}).expr();
+    EXPECT_EQ(result, kd);
+}
+
+// ===========================================================================
+// simplify_basis_dot_step: DoubleContract over Sum (bilinearity)
+// ===========================================================================
+
+TEST(SimplifyBasisDot, DoubleContractDistributesOverSum)
+{
+    // ddot(a + b, r) → ddot(a, r) + ddot(b, r) for rank-3 Sum.
+    // Here a = TP(TP(SBV^{j}, SBV^{k}), SBV^{k2}) and r = a.
+    // The Sum on lhs triggers the bilinearity distribution code path.
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_j = make_sym_basis_vec(rl, cs, 1, true);
+    auto* sbv_k = make_sym_basis_vec(rl, cs, 2, true);
+    auto* sbv_j2 = make_sym_basis_vec(rl, cs, 3, false);
+    auto* sbv_k2 = make_sym_basis_vec(rl, cs, 4, false);
+
+    auto* tp_a = make_tensor_product(
+        rl, make_tensor_product(rl, sbv_j, sbv_k), sbv_k); // intentional dup
+    auto* tp_b =
+        make_tensor_product(rl, make_tensor_product(rl, sbv_j2, sbv_k2), sbv_k);
+    auto* sum_lhs = make_sum(rl, {tp_a, tp_b});
+    auto* rhs = make_tensor_product(rl, sbv_j2, sbv_k2);
+    auto* dc = make_double_contract(rl, sum_lhs, rhs);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{dc}).expr();
+    // The bilinearity distribution code path was exercised — result is no
+    // longer the original DoubleContract node (it has been distributed).
+    EXPECT_NE(result, dc);
+}
+
+// ===========================================================================
+// simplify_basis_dot_step: DoubleContract Case-2 (left-nested rhs)
+// ===========================================================================
+
+TEST(SimplifyBasisDot, DoubleContractLeftNestedRhs)
+{
+    // ddot(TP(TP(lcs,sbv_i), sbv_j), sbv_k),
+    //      TP(TP(lcs2,sbv_l), sbv_m), sbv_n))
+    // → TP(TP(lcs*sbv_i, lcs2*sbv_l), Product(KD, KD))
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* lcs1 = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* lcs2 = make_levi_civita_symbol(rl, {3, 4, 5}, {false, false, false});
+    auto* sbv_i = make_sym_basis_vec(rl, cs, 0, true);
+    auto* sbv_j = make_sym_basis_vec(rl, cs, 1, true);
+    auto* sbv_k = make_sym_basis_vec(rl, cs, 2, true);
+    auto* sbv_l = make_sym_basis_vec(rl, cs, 3, true);
+    auto* sbv_m = make_sym_basis_vec(rl, cs, 4, true);
+    auto* sbv_n = make_sym_basis_vec(rl, cs, 5, true);
+
+    auto* lhs = make_tensor_product(
+        rl,
+        make_tensor_product(rl, make_tensor_product(rl, lcs1, sbv_i), sbv_j),
+        sbv_k);
+    auto* rhs = make_tensor_product(
+        rl,
+        make_tensor_product(rl, make_tensor_product(rl, lcs2, sbv_l), sbv_m),
+        sbv_n);
+    auto* dc = make_double_contract(rl, lhs, rhs);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{dc}).expr();
+
+    // Result should be a TensorProduct (Case 2 expansion).
+    auto* tp = dynamic_cast<TensorProduct*>(result);
+    ASSERT_NE(tp, nullptr)
+        << "expected TensorProduct, got: " << result->python();
+    // Rhs of result should be a Product (of two KDs).
+    auto* pr = dynamic_cast<Product*>(tp->rhs());
+    ASSERT_NE(pr, nullptr)
+        << "expected Product as rhs, got: " << tp->rhs()->python();
+}
+
+// ===========================================================================
+// simplify_basis_dot_step: Trace reduction
+// ===========================================================================
+
+TEST(SimplifyBasisDot, TraceOfRank2TensorProduct)
+{
+    // tr(TP(SBV^{i}, SBV_{j})) → Contract(SBV^i, SBV_j) → KD(j, i)
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_co = make_sym_basis_vec(rl, cs, 5, true);
+    auto* sbv_ba = make_sym_basis_vec(rl, cs, 7, false);
+    auto* tp = make_tensor_product(rl, sbv_co, sbv_ba);
+    auto* tr_expr = make_trace(rl, tp);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{tr_expr}).expr();
+
+    auto* kd = dynamic_cast<KroneckerDelta*>(result);
+    ASSERT_NE(kd, nullptr)
+        << "expected KroneckerDelta, got: " << result->python();
+}
+
+TEST(SimplifyBasisDot, TraceDistributesOverSum)
+{
+    // tr(a + b) → tr(a) + tr(b)
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_co = make_sym_basis_vec(rl, cs, 5, true);
+    auto* sbv_ba = make_sym_basis_vec(rl, cs, 7, false);
+    auto* tp = make_tensor_product(rl, sbv_co, sbv_ba);
+    auto* sum_inner = make_sum(rl, {tp, tp});
+    auto* tr_expr = make_trace(rl, sum_inner);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{tr_expr}).expr();
+
+    // Trace distributes over Sum and each tr(TP(SBV,SBV)) reduces to a KD.
+    // Result is rank 0 (scalar) — Trace node must be gone.
+    EXPECT_EQ(dynamic_cast<Trace*>(result), nullptr);
+    EXPECT_EQ(result->rank(), 0);
+}
+
+TEST(SimplifyBasisDot, TraceOfScaleTimesTP)
+{
+    // tr(Scale(2, TP(SBV^i, SBV_j))) → Scale(2, KD)
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_co = make_sym_basis_vec(rl, cs, 5, true);
+    auto* sbv_ba = make_sym_basis_vec(rl, cs, 7, false);
+    auto* tp = make_tensor_product(rl, sbv_co, sbv_ba);
+    auto* sc = make_scale(rl, Rational{2}, tp);
+    auto* tr_expr = make_trace(rl, sc);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{tr_expr}).expr();
+
+    // Should yield Scale(2, KD) or equivalent scalar.
+    EXPECT_EQ(result->rank(), 0);
+}
+
+TEST(SimplifyBasisDot, TraceOfTpWithScalarOnRhs)
+{
+    // tr(TP(rank2_A, scalar)) → scalar * tr(A)
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_co = make_sym_basis_vec(rl, cs, 5, true);
+    auto* sbv_ba = make_sym_basis_vec(rl, cs, 7, false);
+    auto* rank2 = make_tensor_product(rl, sbv_co, sbv_ba);
+    auto* scalar = make_rational(rl, Rational{3});
+    auto* tp = make_tensor_product(rl, rank2, scalar);
+    auto* tr_expr = make_trace(rl, tp);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{tr_expr}).expr();
+
+    // Should reduce to scalar result.
+    EXPECT_EQ(result->rank(), 0);
+}
+
+// ===========================================================================
+// replace_first_lct_step: Trace traversal
+// ===========================================================================
+
+// ===========================================================================
+// simplify_basis_dot_step: DoubleContract — RHS Sum and Scale unwrapping
+// ===========================================================================
+
+TEST(SimplifyBasisDot, DoubleContractRhsSumDistributes)
+{
+    // ddot(lhs, sum_rhs) → sum of ddot terms (bilinearity on rhs).
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_j = make_sym_basis_vec(rl, cs, 1, true);
+    auto* sbv_k = make_sym_basis_vec(rl, cs, 2, true);
+    auto* sbv_j2 = make_sym_basis_vec(rl, cs, 3, false);
+    auto* sbv_k2 = make_sym_basis_vec(rl, cs, 4, false);
+
+    // lhs is a valid rank-2 tensor; rhs is a Sum of rank-2 tensors.
+    auto* lhs = make_tensor_product(rl, sbv_j, sbv_k);
+    auto* tp_r1 = make_tensor_product(rl, sbv_j2, sbv_k2);
+    auto* tp_r2 = make_tensor_product(rl, sbv_k2, sbv_j2);
+    auto* sum_rhs = make_sum(rl, {tp_r1, tp_r2});
+    auto* dc = make_double_contract(rl, lhs, sum_rhs);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{dc}).expr();
+    // Bilinearity on rhs was triggered: result differs from original.
+    EXPECT_NE(result, dc);
+}
+
+TEST(SimplifyBasisDot, DoubleContractScaleOnLhsUnwraps)
+{
+    // ddot(α * TP(TP(lcs,i),j,k), TP(j2,k2)) → α * result
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* sbv_i = make_sym_basis_vec(rl, cs, 0, true);
+    auto* sbv_j = make_sym_basis_vec(rl, cs, 1, true);
+    auto* sbv_k = make_sym_basis_vec(rl, cs, 2, true);
+    auto* sbv_j2 = make_sym_basis_vec(rl, cs, 3, false);
+    auto* sbv_k2 = make_sym_basis_vec(rl, cs, 4, false);
+
+    auto* inner = make_tensor_product(
+        rl,
+        make_tensor_product(rl, make_tensor_product(rl, lcs, sbv_i), sbv_j),
+        sbv_k);
+    auto* scaled = make_scale(rl, Rational{2}, inner);
+    auto* rhs = make_tensor_product(rl, sbv_j2, sbv_k2);
+    auto* dc = make_double_contract(rl, scaled, rhs);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{dc}).expr();
+    // Scale unwrap exercised: result is Scale(2, ...) or a TensorProduct.
+    EXPECT_NE(result, dc);
+    auto* sc = dynamic_cast<Scale*>(result);
+    ASSERT_NE(sc, nullptr) << "expected Scale, got: " << result->python();
+    EXPECT_EQ(sc->coeff(), Rational{2});
+}
+
+TEST(SimplifyBasisDot, DoubleContractScaleOnRhsUnwraps)
+{
+    // ddot(TP(TP(lcs,i),j,k), α * TP(j2,k2)) → α * result
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* lcs = make_levi_civita_symbol(rl, {0, 1, 2}, {false, false, false});
+    auto* sbv_i = make_sym_basis_vec(rl, cs, 0, true);
+    auto* sbv_j = make_sym_basis_vec(rl, cs, 1, true);
+    auto* sbv_k = make_sym_basis_vec(rl, cs, 2, true);
+    auto* sbv_j2 = make_sym_basis_vec(rl, cs, 3, false);
+    auto* sbv_k2 = make_sym_basis_vec(rl, cs, 4, false);
+
+    auto* lhs = make_tensor_product(
+        rl,
+        make_tensor_product(rl, make_tensor_product(rl, lcs, sbv_i), sbv_j),
+        sbv_k);
+    auto* rhs_inner = make_tensor_product(rl, sbv_j2, sbv_k2);
+    auto* rhs_scaled = make_scale(rl, Rational{3}, rhs_inner);
+    auto* dc = make_double_contract(rl, lhs, rhs_scaled);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{dc}).expr();
+    auto* sc = dynamic_cast<Scale*>(result);
+    ASSERT_NE(sc, nullptr)
+        << "expected Scale(3,...), got: " << result->python();
+    EXPECT_EQ(sc->coeff(), Rational{3});
+}
+
+// ===========================================================================
+// simplify_basis_dot_step: Contract(SBV_basis, SBV_cobasis) — reversed order
+// ===========================================================================
+
+TEST(SimplifyBasisDot, SbvBasisCobasisReversed)
+{
+    // Contract(SBV(id=5, cobasis=false), SBV(id=7, cobasis=true)) → KD(5,7)
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_ba = make_sym_basis_vec(rl, cs, 5, false); // basis (not cobasis)
+    auto* sbv_co = make_sym_basis_vec(rl, cs, 7, true);  // cobasis
+    auto* expr = make_contract(rl, sbv_ba, sbv_co);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{expr}).expr();
+
+    auto* kd = dynamic_cast<KroneckerDelta*>(result);
+    ASSERT_NE(kd, nullptr)
+        << "expected KroneckerDelta, got: " << result->python();
+    // lower_id = basis = 5, upper_id = cobasis = 7
+    EXPECT_EQ(kd->lower_id(), 5);
+    EXPECT_EQ(kd->upper_id(), 7);
+}
+
+// ===========================================================================
+// simplify_basis_dot_step: Trace(TP(rank0, rank2)) — lhs scalar pull
+// ===========================================================================
+
+TEST(SimplifyBasisDot, TraceOfTpWithScalarOnLhs)
+{
+    // tr(TP(scalar, TP(SBV^i, SBV_j))) → scalar * tr(TP(SBV^i, SBV_j))
+    auto rl = make_rl();
+    auto const& cs = wcs();
+    auto* sbv_co = make_sym_basis_vec(rl, cs, 5, true);
+    auto* sbv_ba = make_sym_basis_vec(rl, cs, 7, false);
+    auto* rank2 = make_tensor_product(rl, sbv_co, sbv_ba);
+    auto* scalar = make_rational(rl, Rational{5});
+    auto* tp = make_tensor_product(rl, scalar, rank2); // scalar on LHS
+    auto* tr_expr = make_trace(rl, tp);
+
+    auto step = simplify_basis_dot_step(cs);
+    auto* result = step.apply(rl, State{tr_expr}).expr();
+
+    // Should reduce to scalar result (Trace resolved).
+    EXPECT_EQ(dynamic_cast<Trace*>(result), nullptr);
+    EXPECT_EQ(result->rank(), 0);
+}
+
+// ===========================================================================
+// Replace first LCT: Trace traversal
+// ===========================================================================
+
+TEST(ReplaceFirstLct, ReplacesLctInTrace)
+{
+    // Trace(ddot(LCT, LCT)) — replace_first_lct must recurse into Trace.
+    // ddot(rank3, rank3) is rank 2, so it's valid inside Trace.
+    auto rl = make_rl();
+    auto* lct1 = make_levi_civita(rl);
+    auto* lct2 = make_levi_civita(rl);
+    auto* dc = make_double_contract(rl, lct1, lct2);
+    auto* tr_expr = make_trace(rl, dc);
+
+    // Use a rank-3 expansion as the replacement so it can substitute LCT.
+    auto* sbv_i = make_sym_basis_vec(rl, wcs(), 0, true);
+    auto* sbv_j = make_sym_basis_vec(rl, wcs(), 1, true);
+    auto* sbv_k = make_sym_basis_vec(rl, wcs(), 2, true);
+    auto* replacement =
+        make_tensor_product(rl, make_tensor_product(rl, sbv_i, sbv_j), sbv_k);
+
+    auto step = replace_first_lct_step(replacement);
+    auto result_state = step.apply(rl, State{tr_expr});
+    auto* result = result_state.expr();
+
+    // The Trace node must be rebuilt (inner DoubleContract has changed).
+    EXPECT_NE(result, tr_expr);
+    auto* tr = dynamic_cast<Trace*>(result);
+    ASSERT_NE(tr, nullptr) << "expected Trace node, got: " << result->python();
+    // The inner DC must have been changed (first LCT replaced).
+    EXPECT_NE(tr->arg(), dc);
+}

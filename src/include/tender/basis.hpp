@@ -59,4 +59,9 @@ auto replace_first_lct_step(Expr* expansion) -> DerivationStep;
 // Returns unchanged if no such pair is found.
 auto contract_eps_pair_step() -> DerivationStep;
 
+// Substitute old_id → new_id everywhere in the expression tree.
+// Useful for merging two abstract indices (e.g. renaming s→j after applying
+// the eps-delta identity).
+auto merge_index_step(int old_id, int new_id) -> DerivationStep;
+
 } // namespace tender

@@ -130,6 +130,7 @@ from ._tender import (
     substitute_index,
     replace_first_lct_step,
     contract_eps_pair_step,
+    merge_index_step,
     # Singleton getters (private)
     _identity_singleton,
     _levi_civita_singleton,
@@ -806,7 +807,7 @@ __all__ = [
     "collect_zero_terms_step", "reassemble_from_components_step",
     "collect_repeated_sum_step", "reassemble_vector_step", "reassemble_dot_step",
     "contract_kronecker_step", "expand_identity_step", "expand_levi_civita_step",
-    "expand_levi_civita_first_step", "contract_eps_pair_step",
+    "expand_levi_civita_first_step", "contract_eps_pair_step", "merge_index_step",
     "IndexedSum", "make_indexed_sum",
     "SymBasisVec", "make_sym_basis_vec",
     "AbstractComp", "AbstractIndexedSum",
