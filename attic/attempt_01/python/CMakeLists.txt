@@ -1,7 +1,7 @@
 find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
 nanobind_add_module(_tender NB_STATIC _tender.cpp)
 
-target_link_libraries(_tender PRIVATE tender::tender)
+target_link_libraries(_tender PRIVATE attempt01::tender)
 
 # Put the compiled extension inside the tender/ package directory so that
 # PYTHONPATH=<build>/python makes "import tender" work.

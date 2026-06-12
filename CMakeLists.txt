@@ -11,6 +11,7 @@ option(TENDER_BUILD_TESTS "Build test targets" ON)
 option(TENDER_BUILD_BENCHMARKS "Build benchmark targets" ON)
 option(TENDER_BUILD_PYTHON "Build Python bindings (requires nanobind)" OFF)
 option(TENDER_BUILD_COVERAGE "Build with GCC coverage instrumentation" OFF)
+option(TENDER_BUILD_ATTEMPT_01 "Build attempt-01 targets (prefixed attempt01_)" OFF)
 
 if(TENDER_BUILD_COVERAGE)
     include(cmake/coverage.cmake)
@@ -53,7 +54,13 @@ if(TENDER_BUILD_PYTHON)
     FetchContent_MakeAvailable(nanobind)
 endif()
 
-# --- tender library ---
+# --- Attempt 01 (archived) ---
+
+if(TENDER_BUILD_ATTEMPT_01)
+    add_subdirectory(attic/attempt_01)
+endif()
+
+# --- tender library (attempt 02) ---
 
 add_subdirectory(src)
 
@@ -61,14 +68,6 @@ add_subdirectory(src)
 
 if(TENDER_BUILD_TESTS)
     add_subdirectory(tests)
-endif()
-
-if(TENDER_BUILD_BENCHMARKS)
-    add_subdirectory(benchmarks)
-endif()
-
-if(TENDER_BUILD_PYTHON)
-    add_subdirectory(python)
 endif()
 
 if(TENDER_BUILD_COVERAGE)

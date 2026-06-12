@@ -8,5 +8,5 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
-examples/out/
+out/
 .ipynb_checkpoints/
