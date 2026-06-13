@@ -79,6 +79,44 @@ a 4D Oblique space uses Greek letters `μ, ν, ρ, σ, …`.  Keeping the
 naming policy in the space (rather than in the renderer) means the
 renderer is policy-free.
 
+### Parametric cardinality
+
+Some index spaces have an abstract, symbolically-specified cardinality.
+The canonical example is a Ritz/FEM problem with N shape functions,
+where N is unknown at derivation time:
+
+```
+u = Σ_{i=1}^{N} uᵢ φᵢ
+```
+
+Here `i` is a Collection index over a space whose value set is
+`{1, 2, …, N}` for some symbolic scalar `N` that will only be
+instantiated when a concrete problem is solved.
+
+**Design decision (Option A):** `IndexSpace` always stores a concrete,
+explicit value set (`std::vector<int>`).  It does not carry a symbolic
+count.  For a parametric space:
+
+- The `IndexSpace` stores only the **naming schema** and carries an
+  **empty value set**, signalling "cardinality is not known concretely".
+- The actual symbolic upper bound `N` is a scalar expression in the
+  **expression tree** — specifically, it is the second argument of the
+  `ExplicitSum` node (see §Explicit override below).
+- Whenever the derivation reaches a step requiring concrete evaluation
+  (sum expansion, numerical substitution), the user substitutes a
+  concrete value for `N` in the expression tree.  The `IndexSpace` object
+  itself never changes.
+
+This keeps `IndexSpace` structurally simple and avoids any circular
+dependency between index spaces and expression nodes.  The expression
+tree is the single source of truth for all symbolic algebra; index spaces
+are identity tokens and naming policies, nothing more.
+
+An `IndexSpace` with an empty value set may carry an optional
+**display hint** — a short string such as `"N"` — used by the renderer
+to emit `Σ_{i=1}^{N}` when no explicit bound expression is available.
+This hint is cosmetic only and has no algebraic role.
+
 ---
 
 ## Index slots on tensor objects
@@ -260,10 +298,18 @@ state.  The implicit rule decides which:
 Explicit annotations always take precedence over the implicit rule.
 Two annotations are available:
 
-- **`ExplicitSum(index)`** — force summation over this index regardless
-  of realm or occurrence count.  Required whenever the implicit rule
-  cannot apply: Collection realm, or ≥ 3 occurrences of the same id
-  in a term.
+- **`ExplicitSum(index, body)`** — force summation over `index` in
+  `body` regardless of realm or occurrence count.  Required whenever
+  the implicit rule cannot apply: Collection realm, or ≥ 3 occurrences
+  of the same id in a term.  The summation range is taken from the
+  concrete value set of the index's space.
+
+- **`ExplicitSum(index, body, N_expr)`** — same, but the summation
+  range is `{1, …, N_expr}` where `N_expr` is a symbolic scalar
+  expression.  Required when the index belongs to a parametric-
+  cardinality space (empty value set).  `N_expr` is an ordinary node
+  in the expression tree and participates in all symbolic operations
+  (substitution, simplification, etc.).
 
 - **`NoSum(index)`** — suppress summation for this index even when the
   implicit rule would contract it.  Makes the index free.
@@ -276,10 +322,20 @@ A symmetric tensor expressed in its eigenbasis:
 A = ExplicitSum(i,  a[i] * v[i] * v[i] )
 ```
 
-Here `i` is a Collection index (ordinal of eigenvalue/eigenvector).
-It appears three times in the term; Collection realm has no implicit
-summation.  `ExplicitSum` both enables summation and resolves the
-three-occurrence case.
+Here `i` is a Collection index (ordinal of eigenvalue/eigenvector)
+over a space with a concrete value set (say `{1, 2, 3}` for a 3-mode
+truncation).  It appears three times in the term; Collection realm has
+no implicit summation.  `ExplicitSum` both enables summation and
+resolves the three-occurrence case.
+
+When the number of eigenmodes is symbolic (e.g. the first `N` modes):
+
+```
+A = ExplicitSum(i,  a[i] * v[i] * v[i],  N )
+```
+
+The index space for `i` has an empty value set; `N` is the symbolic
+scalar expression giving the upper bound.
 
 To select a single eigenmode without summing:
 

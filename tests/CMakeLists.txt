@@ -8,3 +8,6 @@ endfunction()
 
 tender_add_test(rational_test)
 tender_add_test(polynomial_test)
+tender_add_test(name_test)
+tender_add_test(index_test)
+tender_add_test(context_test)
