@@ -5,53 +5,19 @@
 namespace tender
 {
 
-// ---- internal helpers --------------------------------------------------
-
-static auto count_index_slots(std::vector<Slot> const& slots) -> std::size_t
-{
-    std::size_t n = 0;
-    for (auto const& s: slots)
-        if (std::holds_alternative<IndexSlot>(s))
-            ++n;
-    return n;
-}
-
-// Build a two-slot TensorObject under a given name. Used by make_delta and
-// make_identity which share identical slot layouts.
-static auto make_two_slot_tensor(
-    Context& ctx,
-    TensorName name,
-    Realm realm,
-    IndexSpace const* space,
-    Level level0,
-    Level level1,
-    IndexAssoc index0,
-    IndexAssoc index1) -> Expr const*
-{
-    return ctx.make<Expr>(TensorObject{
-        std::move(name),
-        {IndexSlot{level0, realm, space}, IndexSlot{level1, realm, space}},
-        {std::move(index0), std::move(index1)}});
-}
-
 // ---- Generic factories -------------------------------------------------
 
 auto make_tensor_object(
     Context& ctx,
     TensorName name,
-    std::vector<Slot> slots,
-    std::vector<IndexAssoc> indices) -> Expr const*
+    std::vector<SlotBinding> slots,
+    std::optional<int> rank) -> Expr const*
 {
-    if (indices.size() != count_index_slots(slots))
-        throw std::invalid_argument(
-            "make_tensor_object: indices.size() must equal number of IndexSlots in slots");
-    return ctx.make<Expr>(
-        TensorObject{std::move(name), std::move(slots), std::move(indices)});
-}
-
-auto make_scalar_object(Context& ctx, TensorName name) -> Expr const*
-{
-    return ctx.make<Expr>(TensorObject{std::move(name), {}, {}});
+    return ctx.make<Expr>(TensorObject{
+        .name = std::move(name),
+        .rank = rank,
+        .label = std::nullopt,
+        .slots = std::move(slots)});
 }
 
 auto make_scalar(Context& ctx, Rational value) -> Expr const*
@@ -131,6 +97,15 @@ auto make_no_sum(Context& ctx, CountableIndex index, Expr const* body)
 
 // ---- Well-known tensor factories ---------------------------------------
 
+auto make_identity(Context& ctx) -> Expr const*
+{
+    return ctx.make<Expr>(TensorObject{
+        .name = make_tensor_name("I"),
+        .rank = 2,
+        .label = TensorLabel::Identity,
+        .slots = {}});
+}
+
 auto make_delta(
     Context& ctx,
     Realm realm,
@@ -140,35 +115,13 @@ auto make_delta(
     IndexAssoc index0,
     IndexAssoc index1) -> Expr const*
 {
-    return make_two_slot_tensor(
-        ctx,
-        make_tensor_name("\\delta"),
-        realm,
-        space,
-        level0,
-        level1,
-        std::move(index0),
-        std::move(index1));
-}
-
-auto make_identity(
-    Context& ctx,
-    Realm realm,
-    IndexSpace const* space,
-    Level level0,
-    Level level1,
-    IndexAssoc index0,
-    IndexAssoc index1) -> Expr const*
-{
-    return make_two_slot_tensor(
-        ctx,
-        make_tensor_name("I"),
-        realm,
-        space,
-        level0,
-        level1,
-        std::move(index0),
-        std::move(index1));
+    return ctx.make<Expr>(TensorObject{
+        .name = make_tensor_name("\\delta"),
+        .rank = 2,
+        .label = TensorLabel::Delta,
+        .slots = {
+            SlotBinding{IndexSlot{level0, realm, space}, std::move(index0)},
+            SlotBinding{IndexSlot{level1, realm, space}, std::move(index1)}}});
 }
 
 auto make_levi_civita(
@@ -186,13 +139,17 @@ auto make_levi_civita(
         throw std::invalid_argument(
             "make_levi_civita: indices.size() must equal space dimension");
 
-    std::vector<Slot> slots;
+    std::vector<SlotBinding> slots;
     slots.reserve(n);
-    for (auto level: levels)
-        slots.push_back(IndexSlot{level, realm, space});
+    for (std::size_t k = 0; k < n; ++k)
+        slots.push_back(SlotBinding{
+            IndexSlot{levels[k], realm, space}, std::move(indices[k])});
 
     return ctx.make<Expr>(TensorObject{
-        make_tensor_name("\\varepsilon"), std::move(slots), std::move(indices)});
+        .name = make_tensor_name("\\varepsilon"),
+        .rank = static_cast<int>(n),
+        .label = TensorLabel::LeviCivita,
+        .slots = std::move(slots)});
 }
 
 } // namespace tender

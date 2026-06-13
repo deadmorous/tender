@@ -12,75 +12,72 @@ TEST(MakeScalar, StoresValue)
     auto* e = make_scalar(ctx, Rational{3, 2});
     ASSERT_NE(e, nullptr);
     ASSERT_TRUE(std::holds_alternative<ScalarLiteral>(e->node));
-    auto const& s = std::get<ScalarLiteral>(e->node);
-    EXPECT_EQ(s.value, (Rational{3, 2}));
-}
-
-// ---- make_scalar_object ------------------------------------------------
-
-TEST(MakeScalarObject, ZeroSlots)
-{
-    Context ctx;
-    auto* e = make_scalar_object(ctx, make_tensor_name("f"));
-    ASSERT_NE(e, nullptr);
-    ASSERT_TRUE(std::holds_alternative<TensorObject>(e->node));
-    auto const& t = std::get<TensorObject>(e->node);
-    EXPECT_EQ(t.name.v.view(), "f");
-    EXPECT_TRUE(t.slots.empty());
-    EXPECT_TRUE(t.indices.empty());
+    EXPECT_EQ(std::get<ScalarLiteral>(e->node).value, (Rational{3, 2}));
 }
 
 // ---- make_tensor_object ------------------------------------------------
 
-TEST(MakeTensorObject, MatchingSlotsAndIndices)
+TEST(MakeTensorObject, AbstractNoSlots)
 {
     Context ctx;
-    auto idx = ctx.alloc_index_id();
-    std::vector<Slot> slots = {
-        IndexSlot{Level::Upper, Realm::Oblique, space_3d()}};
-    std::vector<IndexAssoc> indices = {CountableIndex{idx}};
-    auto* e = make_tensor_object(
-        ctx, make_tensor_name("v"), std::move(slots), std::move(indices));
+    auto* e = make_tensor_object(ctx, make_tensor_name("f"));
     ASSERT_NE(e, nullptr);
+    auto const& t = std::get<TensorObject>(e->node);
+    EXPECT_EQ(t.name.v.view(), "f");
+    EXPECT_FALSE(t.rank.has_value());
+    EXPECT_FALSE(t.label.has_value());
+    EXPECT_TRUE(t.slots.empty());
+}
+
+TEST(MakeTensorObject, AbstractWithRank)
+{
+    Context ctx;
+    auto* e = make_tensor_object(ctx, make_tensor_name("T"), {}, 2);
+    auto const& t = std::get<TensorObject>(e->node);
+    EXPECT_EQ(t.rank, std::optional<int>{2});
+    EXPECT_TRUE(t.slots.empty());
+}
+
+TEST(MakeTensorObject, SlotWithFilledIndex)
+{
+    Context ctx;
+    auto id = ctx.alloc_index_id();
+    std::vector<SlotBinding> slots = {SlotBinding{
+        IndexSlot{Level::Upper, Realm::Oblique, space_3d()},
+        CountableIndex{id}}};
+    auto* e = make_tensor_object(ctx, make_tensor_name("v"), std::move(slots));
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "v");
     ASSERT_EQ(t.slots.size(), 1u);
-    ASSERT_EQ(t.indices.size(), 1u);
-    EXPECT_EQ(std::get<CountableIndex>(t.indices[0]).id, idx);
+    EXPECT_EQ(t.slots[0].slot.level, Level::Upper);
+    EXPECT_EQ(t.slots[0].slot.realm, Realm::Oblique);
+    ASSERT_TRUE(t.slots[0].index.has_value());
+    EXPECT_EQ(std::get<CountableIndex>(*t.slots[0].index).id, id);
 }
 
-TEST(MakeTensorObject, VoidSlotNotCounted)
+TEST(MakeTensorObject, SlotWithNullIndex)
 {
     Context ctx;
-    auto idx = ctx.alloc_index_id();
-    std::vector<Slot> slots = {
-        VoidSlot{Level::Upper},
-        IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()}};
-    std::vector<IndexAssoc> indices = {CountableIndex{idx}};
-    auto* e = make_tensor_object(
-        ctx, make_tensor_name("A"), std::move(slots), std::move(indices));
-    ASSERT_NE(e, nullptr);
+    std::vector<SlotBinding> slots = {SlotBinding{
+        IndexSlot{Level::Upper, Realm::Oblique, space_3d()}, std::nullopt}};
+    auto* e = make_tensor_object(ctx, make_tensor_name("A"), std::move(slots));
     auto const& t = std::get<TensorObject>(e->node);
-    EXPECT_EQ(t.slots.size(), 2u);
-    EXPECT_EQ(t.indices.size(), 1u);
+    ASSERT_EQ(t.slots.size(), 1u);
+    EXPECT_FALSE(t.slots[0].index.has_value());
 }
 
-TEST(MakeTensorObject, MismatchedIndicesThrows)
+TEST(MakeTensorObject, SlotCountIndependentOfRank)
 {
+    // A rank-3 tensor with only 1 slot currently bound — valid by design.
     Context ctx;
-    std::vector<Slot> slots = {
-        IndexSlot{Level::Upper, Realm::Oblique, space_3d()},
-        IndexSlot{Level::Upper, Realm::Oblique, space_3d()}};
-    std::vector<IndexAssoc> indices = {CountableIndex{0}};
-    EXPECT_THROW(
-        {
-            (void)make_tensor_object(
-                ctx,
-                make_tensor_name("T"),
-                std::move(slots),
-                std::move(indices));
-        },
-        std::invalid_argument);
+    std::vector<SlotBinding> slots = {SlotBinding{
+        IndexSlot{Level::Lower, Realm::Oblique, space_3d()},
+        CountableIndex{ctx.alloc_index_id()}}};
+    auto* e =
+        make_tensor_object(ctx, make_tensor_name("T"), std::move(slots), 3);
+    auto const& t = std::get<TensorObject>(e->node);
+    EXPECT_EQ(*t.rank, 3);
+    EXPECT_EQ(t.slots.size(), 1u);
 }
 
 // ---- Unary: make_negate ------------------------------------------------
@@ -90,7 +87,6 @@ TEST(MakeNegate, StoresOperand)
     Context ctx;
     auto* operand = make_scalar(ctx, Rational{1});
     auto* e = make_negate(ctx, operand);
-    ASSERT_NE(e, nullptr);
     ASSERT_TRUE(std::holds_alternative<Negate>(e->node));
     EXPECT_EQ(std::get<Negate>(e->node).operand, operand);
 }
@@ -112,17 +108,16 @@ TEST(MakeBinary, SumStoresChildren)
 TEST(MakeBinary, DifferenceStoresChildren)
 {
     Context ctx;
-    auto* l = make_scalar(ctx, Rational{3});
-    auto* r = make_scalar(ctx, Rational{1});
-    auto* e = make_difference(ctx, l, r);
+    auto* e = make_difference(
+        ctx, make_scalar(ctx, Rational{3}), make_scalar(ctx, Rational{1}));
     ASSERT_TRUE(std::holds_alternative<Difference>(e->node));
 }
 
 TEST(MakeBinary, TensorProductStoresChildren)
 {
     Context ctx;
-    auto* a = make_scalar_object(ctx, make_tensor_name("a"));
-    auto* b = make_scalar_object(ctx, make_tensor_name("b"));
+    auto* a = make_tensor_object(ctx, make_tensor_name("a"));
+    auto* b = make_tensor_object(ctx, make_tensor_name("b"));
     auto* e = make_tensor_product(ctx, a, b);
     ASSERT_TRUE(std::holds_alternative<TensorProduct>(e->node));
     EXPECT_EQ(std::get<TensorProduct>(e->node).left, a);
@@ -132,45 +127,48 @@ TEST(MakeBinary, TensorProductStoresChildren)
 TEST(MakeBinary, ScalarDivStoresChildren)
 {
     Context ctx;
-    auto* n = make_scalar(ctx, Rational{1});
-    auto* d = make_scalar(ctx, Rational{2});
-    auto* e = make_scalar_div(ctx, n, d);
+    auto* e = make_scalar_div(
+        ctx, make_scalar(ctx, Rational{1}), make_scalar(ctx, Rational{2}));
     ASSERT_TRUE(std::holds_alternative<ScalarDiv>(e->node));
 }
 
 TEST(MakeBinary, DotStoresChildren)
 {
     Context ctx;
-    auto* l = make_scalar_object(ctx, make_tensor_name("u"));
-    auto* r = make_scalar_object(ctx, make_tensor_name("v"));
-    auto* e = make_dot(ctx, l, r);
+    auto* e = make_dot(
+        ctx,
+        make_tensor_object(ctx, make_tensor_name("u")),
+        make_tensor_object(ctx, make_tensor_name("v")));
     ASSERT_TRUE(std::holds_alternative<Dot>(e->node));
 }
 
 TEST(MakeBinary, DDotStoresChildren)
 {
     Context ctx;
-    auto* l = make_scalar_object(ctx, make_tensor_name("A"));
-    auto* r = make_scalar_object(ctx, make_tensor_name("B"));
-    auto* e = make_ddot(ctx, l, r);
+    auto* e = make_ddot(
+        ctx,
+        make_tensor_object(ctx, make_tensor_name("A")),
+        make_tensor_object(ctx, make_tensor_name("B")));
     ASSERT_TRUE(std::holds_alternative<DDot>(e->node));
 }
 
 TEST(MakeBinary, DDotAltStoresChildren)
 {
     Context ctx;
-    auto* l = make_scalar_object(ctx, make_tensor_name("A"));
-    auto* r = make_scalar_object(ctx, make_tensor_name("B"));
-    auto* e = make_ddot_alt(ctx, l, r);
+    auto* e = make_ddot_alt(
+        ctx,
+        make_tensor_object(ctx, make_tensor_name("A")),
+        make_tensor_object(ctx, make_tensor_name("B")));
     ASSERT_TRUE(std::holds_alternative<DDotAlt>(e->node));
 }
 
 TEST(MakeBinary, CrossStoresChildren)
 {
     Context ctx;
-    auto* l = make_scalar_object(ctx, make_tensor_name("u"));
-    auto* r = make_scalar_object(ctx, make_tensor_name("v"));
-    auto* e = make_cross(ctx, l, r);
+    auto* e = make_cross(
+        ctx,
+        make_tensor_object(ctx, make_tensor_name("u")),
+        make_tensor_object(ctx, make_tensor_name("v")));
     ASSERT_TRUE(std::holds_alternative<Cross>(e->node));
 }
 
@@ -194,10 +192,9 @@ TEST(MakeExplicitSum, SymbolicBound)
     Context ctx;
     CountableIndex idx{ctx.alloc_index_id()};
     auto* body = make_scalar(ctx, Rational{1});
-    auto* bound = make_scalar_object(ctx, make_tensor_name("N"));
+    auto* bound = make_tensor_object(ctx, make_tensor_name("N"));
     auto* e = make_explicit_sum(ctx, idx, body, bound);
-    auto const& es = std::get<ExplicitSum>(e->node);
-    EXPECT_EQ(es.bound, bound);
+    EXPECT_EQ(std::get<ExplicitSum>(e->node).bound, bound);
 }
 
 TEST(MakeNoSum, StoresIndexAndBody)
@@ -212,7 +209,21 @@ TEST(MakeNoSum, StoresIndexAndBody)
     EXPECT_EQ(ns.body, body);
 }
 
-// ---- Well-known tensors ------------------------------------------------
+// ---- Well-known tensors: identity --------------------------------------
+
+TEST(MakeIdentity, AbstractForm)
+{
+    Context ctx;
+    auto* e = make_identity(ctx);
+    ASSERT_NE(e, nullptr);
+    auto const& t = std::get<TensorObject>(e->node);
+    EXPECT_EQ(t.name.v.view(), "I");
+    EXPECT_EQ(t.rank, std::optional<int>{2});
+    EXPECT_EQ(t.label, std::optional<TensorLabel>{TensorLabel::Identity});
+    EXPECT_TRUE(t.slots.empty());
+}
+
+// ---- Well-known tensors: Kronecker delta -------------------------------
 
 TEST(MakeDelta, SlotLayout)
 {
@@ -224,16 +235,17 @@ TEST(MakeDelta, SlotLayout)
     ASSERT_NE(e, nullptr);
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "\\delta");
+    EXPECT_EQ(t.rank, std::optional<int>{2});
+    EXPECT_EQ(t.label, std::optional<TensorLabel>{TensorLabel::Delta});
     ASSERT_EQ(t.slots.size(), 2u);
-    ASSERT_EQ(t.indices.size(), 2u);
-    auto const& s0 = std::get<IndexSlot>(t.slots[0]);
-    auto const& s1 = std::get<IndexSlot>(t.slots[1]);
-    EXPECT_EQ(s0.level, Level::Upper);
-    EXPECT_EQ(s0.realm, Realm::Oblique);
-    EXPECT_EQ(s0.space, space_3d());
-    EXPECT_EQ(s1.level, Level::Lower);
-    EXPECT_EQ(std::get<CountableIndex>(t.indices[0]).id, i.id);
-    EXPECT_EQ(std::get<CountableIndex>(t.indices[1]).id, j.id);
+    EXPECT_EQ(t.slots[0].slot.level, Level::Upper);
+    EXPECT_EQ(t.slots[0].slot.realm, Realm::Oblique);
+    EXPECT_EQ(t.slots[0].slot.space, space_3d());
+    EXPECT_EQ(t.slots[1].slot.level, Level::Lower);
+    ASSERT_TRUE(t.slots[0].index.has_value());
+    ASSERT_TRUE(t.slots[1].index.has_value());
+    EXPECT_EQ(std::get<CountableIndex>(*t.slots[0].index).id, i.id);
+    EXPECT_EQ(std::get<CountableIndex>(*t.slots[1].index).id, j.id);
 }
 
 TEST(MakeDelta, BothLevelsUpper)
@@ -244,22 +256,11 @@ TEST(MakeDelta, BothLevelsUpper)
     auto* e = make_delta(
         ctx, Realm::Oblique, space_3d(), Level::Upper, Level::Upper, i, j);
     auto const& t = std::get<TensorObject>(e->node);
-    EXPECT_EQ(std::get<IndexSlot>(t.slots[0]).level, Level::Upper);
-    EXPECT_EQ(std::get<IndexSlot>(t.slots[1]).level, Level::Upper);
+    EXPECT_EQ(t.slots[0].slot.level, Level::Upper);
+    EXPECT_EQ(t.slots[1].slot.level, Level::Upper);
 }
 
-TEST(MakeIdentity, NameIsI)
-{
-    Context ctx;
-    auto i = CountableIndex{ctx.alloc_index_id()};
-    auto j = CountableIndex{ctx.alloc_index_id()};
-    auto* e = make_identity(
-        ctx, Realm::Orthonormal, space_3d(), Level::Lower, Level::Lower, i, j);
-    ASSERT_NE(e, nullptr);
-    auto const& t = std::get<TensorObject>(e->node);
-    EXPECT_EQ(t.name.v.view(), "I");
-    ASSERT_EQ(t.slots.size(), 2u);
-}
+// ---- Well-known tensors: Levi-Civita -----------------------------------
 
 TEST(MakeLeviCivita, Rank3)
 {
@@ -276,15 +277,19 @@ TEST(MakeLeviCivita, Rank3)
     ASSERT_NE(e, nullptr);
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "\\varepsilon");
+    EXPECT_EQ(t.rank, std::optional<int>{3});
+    EXPECT_EQ(t.label, std::optional<TensorLabel>{TensorLabel::LeviCivita});
     ASSERT_EQ(t.slots.size(), 3u);
-    ASSERT_EQ(t.indices.size(), 3u);
-    for (auto const& slot: t.slots)
+    for (auto const& sb: t.slots)
     {
-        auto const& is = std::get<IndexSlot>(slot);
-        EXPECT_EQ(is.level, Level::Lower);
-        EXPECT_EQ(is.realm, Realm::Orthonormal);
-        EXPECT_EQ(is.space, space_3d());
+        EXPECT_EQ(sb.slot.level, Level::Lower);
+        EXPECT_EQ(sb.slot.realm, Realm::Orthonormal);
+        EXPECT_EQ(sb.slot.space, space_3d());
+        EXPECT_TRUE(sb.index.has_value());
     }
+    EXPECT_EQ(std::get<CountableIndex>(*t.slots[0].index).id, i.id);
+    EXPECT_EQ(std::get<CountableIndex>(*t.slots[1].index).id, j.id);
+    EXPECT_EQ(std::get<CountableIndex>(*t.slots[2].index).id, k.id);
 }
 
 TEST(MakeLeviCivita, Rank2)
@@ -296,6 +301,7 @@ TEST(MakeLeviCivita, Rank2)
         ctx, Realm::Oblique, space_2d(), {Level::Upper, Level::Upper}, {i, j});
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.slots.size(), 2u);
+    EXPECT_EQ(t.rank, std::optional<int>{2});
 }
 
 TEST(MakeLeviCivita, LevelsMismatchThrows)
@@ -303,14 +309,15 @@ TEST(MakeLeviCivita, LevelsMismatchThrows)
     Context ctx;
     auto i = CountableIndex{ctx.alloc_index_id()};
     auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
     EXPECT_THROW(
         {
             (void)make_levi_civita(
                 ctx,
                 Realm::Orthonormal,
                 space_3d(),
-                {Level::Lower, Level::Lower}, // only 2 for rank-3 space
-                {i, j, CountableIndex{ctx.alloc_index_id()}});
+                {Level::Lower, Level::Lower},
+                {i, j, k});
         },
         std::invalid_argument);
 }
@@ -326,7 +333,7 @@ TEST(MakeLeviCivita, IndicesMismatchThrows)
                 Realm::Orthonormal,
                 space_3d(),
                 {Level::Lower, Level::Lower, Level::Lower},
-                {i}); // only 1 index for rank-3 space
+                {i});
         },
         std::invalid_argument);
 }
@@ -364,7 +371,6 @@ TEST(Visit, DispatchesCorrectAlternative)
 
 TEST(Visit, TreeDepthCounter)
 {
-    // Visitor that returns the depth of the expression tree.
     struct DepthCounter
     {
         auto operator()(TensorObject const&) const -> int

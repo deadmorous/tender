@@ -19,7 +19,7 @@ namespace tender
 // Identity is by pointer. Two IndexSpace objects with identical value sets
 // are still distinct if they are different instances — an index may only be
 // attached to slots that refer to the same IndexSpace instance.
-class IndexSpace
+class IndexSpace final
 {
 public:
     IndexSpace(std::vector<int> values, std::vector<IndexName> schema);
@@ -54,14 +54,13 @@ private:
 // These are process-lifetime singletons. Use pointer equality to compare
 // identity. They are not owned by any Context.
 
-// 3D spatial Orthonormal: values {1,2,3}, schema
-// i,j,k,l,m,n,p,q,r,s,t,u,v,w,x,y,z
+// 3D spatial: values {1,2,3}, schema i,j,k,l,m,n,p,q,r,s,t,u,v,w,x,y,z
 auto space_3d() -> IndexSpace const*;
 
-// 2D spatial Orthonormal: values {1,2}, schema \alpha..\theta
+// 2D spatial: values {1,2}, schema \alpha..\theta
 auto space_2d() -> IndexSpace const*;
 
-// 4D spacetime Oblique: values {0,1,2,3}, schema \mu..\omega (12 names)
+// 4D spacetime: values {0,1,2,3}, schema \mu..\omega (12 names)
 auto space_4d() -> IndexSpace const*;
 
 } // namespace tender

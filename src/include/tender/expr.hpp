@@ -5,6 +5,7 @@
 #include <tender/rational.hpp>
 
 #include <concepts>
+#include <optional>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -15,72 +16,97 @@ namespace tender
 // Forward declaration — node types hold Expr const* for child nodes.
 struct Expr;
 
+// ---- TensorLabel -------------------------------------------------------
+
+// Tags for well-known tensor objects. Derivation rules use this field
+// to identify tensors by role rather than by name string comparison.
+enum class TensorLabel
+{
+    Identity,   // identity tensor I
+    Delta,      // Kronecker delta δ
+    LeviCivita, // Levi-Civita symbol ε
+};
+
+// ---- SlotBinding -------------------------------------------------------
+
+// One positional cell of a TensorObject: the slot descriptor (level, realm,
+// index space) paired with its optional index association.  When index is
+// nullopt the position exists in the layout but is not yet filled.
+struct SlotBinding final
+{
+    IndexSlot slot;
+    std::optional<IndexAssoc> index;
+};
+
 // ---- Leaf nodes --------------------------------------------------------
 
-// A named tensor object with a complete slot layout.
+// A named tensor object.
 //
-// slots: ordered list of positional cells (VoidSlot or IndexSlot).
-// indices: one entry per IndexSlot in slots, in slot order.
-// Invariant: indices.size() == count of IndexSlot alternatives in slots.
-// A rank-0 scalar object has empty slots and indices.
-struct TensorObject
+// rank:  abstract mathematical rank (nullopt = unknown / not yet declared).
+// label: non-null for well-known tensors recognised by derivation rules.
+// slots: positional layout with optional index fillings. The slot count
+//        has no enforced relationship to rank; abstract tensors carry an
+//        empty slots vector, while the same tensor in an indexed expression
+//        carries the relevant SlotBindings.
+struct TensorObject final
 {
     TensorName name;
-    std::vector<Slot> slots;
-    std::vector<IndexAssoc> indices;
+    std::optional<int> rank;
+    std::optional<TensorLabel> label;
+    std::vector<SlotBinding> slots;
 };
 
 // A numeric scalar literal.
-struct ScalarLiteral
+struct ScalarLiteral final
 {
     Rational value;
 };
 
 // ---- Unary node --------------------------------------------------------
 
-struct Negate
+struct Negate final
 {
     Expr const* operand;
 };
 
 // ---- Binary operation nodes --------------------------------------------
 
-struct Sum
+struct Sum final
 {
     Expr const* left;
     Expr const* right;
 };
-struct Difference
+struct Difference final
 {
     Expr const* left;
     Expr const* right;
 };
-struct TensorProduct
+struct TensorProduct final
 {
     Expr const* left;
     Expr const* right;
 }; // ⊗
-struct ScalarDiv
+struct ScalarDiv final
 {
     Expr const* left;
     Expr const* right;
-}; // / (right must be rank-0)
-struct Dot
+}; // / (right rank-0)
+struct Dot final
 {
     Expr const* left;
     Expr const* right;
 }; // ·
-struct DDot
+struct DDot final
 {
     Expr const* left;
     Expr const* right;
 }; // :
-struct DDotAlt
+struct DDotAlt final
 {
     Expr const* left;
     Expr const* right;
 }; // ··
-struct Cross
+struct Cross final
 {
     Expr const* left;
     Expr const* right;
@@ -89,10 +115,10 @@ struct Cross
 // ---- Summation annotation nodes ----------------------------------------
 
 // Force summation over index in body.
-// bound == nullptr  → concrete range from the index's slot space.
-// bound != nullptr  → symbolic upper bound (parametric cardinality, see vibe
+// bound == nullptr → concrete range from the index's slot space.
+// bound != nullptr → symbolic upper bound (parametric cardinality, vibe
 // 000028).
-struct ExplicitSum
+struct ExplicitSum final
 {
     CountableIndex index;
     Expr const* body;
@@ -100,7 +126,7 @@ struct ExplicitSum
 };
 
 // Suppress automatic contraction for index in body.
-struct NoSum
+struct NoSum final
 {
     CountableIndex index;
     Expr const* body;
@@ -114,7 +140,7 @@ struct NoSum
 //
 // Use tender::visit (below) instead of std::visit; it unwraps the .node
 // member so that the visitor sees the concrete node types directly.
-struct Expr
+struct Expr final
 {
     using Node = std::variant<
         TensorObject,
@@ -166,16 +192,13 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 
 // ---- Factory function declarations -------------------------------------
 
-// Generic: tensor object with explicit slot layout and index associations.
-// Precondition: indices.size() == count of IndexSlot in slots.
+// Generic tensor object.  slots defaults to empty (abstract form).
+// rank is independent of slot count.
 [[nodiscard]] auto make_tensor_object(
     Context&,
     TensorName,
-    std::vector<Slot>,
-    std::vector<IndexAssoc>) -> Expr const*;
-
-// Zero-slot tensor object (symbolic scalar field or invariant scalar).
-[[nodiscard]] auto make_scalar_object(Context&, TensorName) -> Expr const*;
+    std::vector<SlotBinding> slots = {},
+    std::optional<int> rank = std::nullopt) -> Expr const*;
 
 // Numeric scalar literal.
 [[nodiscard]] auto make_scalar(Context&, Rational) -> Expr const*;
@@ -208,7 +231,10 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 
 // Well-known tensors
 //
-// Kronecker delta δ: two independent levels, one realm, one index space.
+// Identity tensor I: invariant, rank 2, no slots.
+[[nodiscard]] auto make_identity(Context&) -> Expr const*;
+
+// Kronecker delta δ: two independently chosen levels, one realm, one space.
 [[nodiscard]] auto make_delta(
     Context&,
     Realm,
@@ -218,17 +244,7 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
     IndexAssoc index0,
     IndexAssoc index1) -> Expr const*;
 
-// Identity tensor I: same slot layout as delta, different name.
-[[nodiscard]] auto make_identity(
-    Context&,
-    Realm,
-    IndexSpace const*,
-    Level level0,
-    Level level1,
-    IndexAssoc index0,
-    IndexAssoc index1) -> Expr const*;
-
-// Levi-Civita symbol ε: rank N where N = space->values().size().
+// Levi-Civita symbol ε: rank N = space->values().size().
 // Precondition: levels.size() == indices.size() == space->values().size().
 [[nodiscard]] auto make_levi_civita(
     Context&,

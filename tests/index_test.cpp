@@ -147,16 +147,7 @@ TEST(WellKnownSpaces, DistinctInstancesAreDistinct)
     EXPECT_NE(space_2d(), space_4d());
 }
 
-// ---- Slot types --------------------------------------------------------
-
-TEST(VoidSlot, Construction)
-{
-    VoidSlot s{Level::Upper};
-    EXPECT_EQ(s.level, Level::Upper);
-
-    VoidSlot s2{Level::Lower};
-    EXPECT_EQ(s2.level, Level::Lower);
-}
+// ---- Slot type ---------------------------------------------------------
 
 TEST(IndexSlot, ConstructionWithSpace)
 {
@@ -171,18 +162,6 @@ TEST(IndexSlot, NullSpaceForLabelRealm)
     IndexSlot s{Level::Lower, Realm::Label, nullptr};
     EXPECT_EQ(s.realm, Realm::Label);
     EXPECT_EQ(s.space, nullptr);
-}
-
-TEST(Slot, HoldsVoidSlot)
-{
-    Slot s = VoidSlot{Level::Upper};
-    EXPECT_TRUE(std::holds_alternative<VoidSlot>(s));
-}
-
-TEST(Slot, HoldsIndexSlot)
-{
-    Slot s = IndexSlot{Level::Lower, Realm::Collection, space_3d()};
-    EXPECT_TRUE(std::holds_alternative<IndexSlot>(s));
 }
 
 // ---- Index association types -------------------------------------------

@@ -18,7 +18,7 @@ namespace tender
 // Plain pointers returned by make<T>() are valid for the lifetime of the
 // Context that allocated them; data structures store plain pointers, not
 // shared_ptr.
-class Context
+class Context final
 {
 public:
     Context() : id_factory_{std::make_shared<IdFactory>()}
@@ -52,7 +52,7 @@ public:
     }
 
 private:
-    struct IdFactory
+    struct IdFactory final
     {
         int next = 0;
     };
