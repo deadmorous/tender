@@ -14,43 +14,43 @@ TEST(MakeTensorName, SingleLetterAccepted)
 
 TEST(MakeTensorName, AllCasesAccepted)
 {
-    EXPECT_NO_THROW(make_tensor_name("a"));
-    EXPECT_NO_THROW(make_tensor_name("Z"));
+    EXPECT_NO_THROW((void)make_tensor_name("a"));
+    EXPECT_NO_THROW((void)make_tensor_name("Z"));
 }
 
 TEST(MakeTensorName, LatexCommandAccepted)
 {
     auto n = make_tensor_name("\\sigma");
     EXPECT_EQ(n.v.view(), "\\sigma");
-    EXPECT_NO_THROW(make_tensor_name("\\Phi"));
-    EXPECT_NO_THROW(make_tensor_name("\\varepsilon"));
+    EXPECT_NO_THROW((void)make_tensor_name("\\Phi"));
+    EXPECT_NO_THROW((void)make_tensor_name("\\varepsilon"));
 }
 
 TEST(MakeTensorName, MultiLetterWordRejected)
 {
-    EXPECT_THROW(make_tensor_name("ab"), std::invalid_argument);
-    EXPECT_THROW(make_tensor_name("sigma"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("ab"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("sigma"), std::invalid_argument);
 }
 
 TEST(MakeTensorName, EmptyRejected)
 {
-    EXPECT_THROW(make_tensor_name(""), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name(""), std::invalid_argument);
 }
 
 TEST(MakeTensorName, DigitRejected)
 {
-    EXPECT_THROW(make_tensor_name("1"), std::invalid_argument);
-    EXPECT_THROW(make_tensor_name("A1"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("1"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("A1"), std::invalid_argument);
 }
 
 TEST(MakeTensorName, BareBackslashRejected)
 {
-    EXPECT_THROW(make_tensor_name("\\"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("\\"), std::invalid_argument);
 }
 
 TEST(MakeTensorName, LatexCommandWithDigitRejected)
 {
-    EXPECT_THROW(make_tensor_name("\\sig3ma"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("\\sig3ma"), std::invalid_argument);
 }
 
 // ---- make_index_name ---------------------------------------------------
@@ -65,31 +65,31 @@ TEST(MakeIndexName, LatexCommandAccepted)
 {
     auto n = make_index_name("\\mu");
     EXPECT_EQ(n.v.view(), "\\mu");
-    EXPECT_NO_THROW(make_index_name("\\alpha"));
+    EXPECT_NO_THROW((void)make_index_name("\\alpha"));
 }
 
 TEST(MakeIndexName, MultiLetterWordAccepted)
 {
     auto n = make_index_name("vol");
     EXPECT_EQ(n.v.view(), "vol");
-    EXPECT_NO_THROW(make_index_name("surf"));
-    EXPECT_NO_THROW(make_index_name("ref"));
+    EXPECT_NO_THROW((void)make_index_name("surf"));
+    EXPECT_NO_THROW((void)make_index_name("ref"));
 }
 
 TEST(MakeIndexName, EmptyRejected)
 {
-    EXPECT_THROW(make_index_name(""), std::invalid_argument);
+    EXPECT_THROW((void)make_index_name(""), std::invalid_argument);
 }
 
 TEST(MakeIndexName, WordWithDigitRejected)
 {
-    EXPECT_THROW(make_index_name("a1"), std::invalid_argument);
-    EXPECT_THROW(make_index_name("1a"), std::invalid_argument);
+    EXPECT_THROW((void)make_index_name("a1"), std::invalid_argument);
+    EXPECT_THROW((void)make_index_name("1a"), std::invalid_argument);
 }
 
 TEST(MakeIndexName, BareBackslashRejected)
 {
-    EXPECT_THROW(make_index_name("\\"), std::invalid_argument);
+    EXPECT_THROW((void)make_index_name("\\"), std::invalid_argument);
 }
 
 // ---- Equality ----------------------------------------------------------

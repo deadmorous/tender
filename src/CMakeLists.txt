@@ -11,6 +11,8 @@ set_target_properties(tender PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(tender PUBLIC mpk_mix::headers)
 
+target_compile_options(tender PRIVATE -Wall -Wextra -Werror)
+
 if(TENDER_BUILD_COVERAGE)
     tender_enable_coverage(tender)
 endif()
