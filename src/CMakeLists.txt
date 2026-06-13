@@ -1,4 +1,4 @@
-add_library(tender polynomial.cpp index_space.cpp)
+add_library(tender polynomial.cpp index_space.cpp expr.cpp)
 add_library(tender::tender ALIAS tender)
 
 target_include_directories(tender PUBLIC
