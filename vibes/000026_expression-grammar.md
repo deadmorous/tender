@@ -75,12 +75,55 @@ fit alongside `*`, `@`, `:`, `//` at the same level.  The grammar here
 uses `//` for the alternate ordering at mul precedence, and `**` is
 dropped from the operator set.
 
-### Cross product non-associativity
+### Cross product: rank-dependent associativity and mixed-operator hazard
 
-`%` is not associative: `(a × b) × c ≠ a × (b × c)` in general.
-Therefore `a % b % c` must be a construction-time error; users must
-write `(a%b)%c` or `a%(b%c)` explicitly.  The free function `cross(a,b)`
-has no such ambiguity and should be preferred when chaining.
+#### Associativity depends on the rank of the middle operand
+
+`a % b % c` is only non-associative when `b` is a vector (rank 1).
+When `rank(b) > 1` associativity holds.  Example with `b = p*q` (a dyad):
+
+```
+a % (p*q) % c  =  (a%p) * (q%c)       # same result regardless of bracketing
+```
+
+Therefore the construction-time rule for a chain `a % b % c` is:
+- `rank(b) == 1` → **error**; user must parenthesise explicitly.
+- `rank(b) > 1`  → left-to-right is safe and accepted.
+
+#### Mixing `%` with other `mul` operators is always an error
+
+Consider `a @ b % c` where `b` and `c` are vectors.  With left-to-right
+parsing this is `(a @ b) % c`.  If `a` is a vector this does not
+type-check (`a @ b` is a scalar).  If `a` is a dyad `p*q`, *both*
+bracketings type-check but give different results:
+
+```
+a @ (b % c)  =  (p*q) @ (b%c)  =  p * (q @ (b%c))
+(a @ b) % c  =  (p * (q@b)) % c  =  (p%c) * (q@b)    # different
+```
+
+This is a silent correctness hazard: the grammar resolves the ambiguity
+one way, but the other bracketing is equally valid and often intended.
+
+**Rule:** the construction-time check for any mixed `mul` chain
+containing `%` is: inspect every operand that sits between a `%` and
+another `mul` operator (`@`, `:`, `//`, `/`) or between two `%`
+operators — if that operand is rank-1 it is an error; if it is rank > 1
+it acts as an independence barrier (it "carries at least one tensor
+product inside it") and the expression is accepted.  `*` is always a
+barrier regardless of the rank of its operands, so `%` mixed with `*`
+is unconditionally allowed.
+
+```python
+a % p * q % c    # ok — * is always a barrier; expands to (a%p) * (q%c)
+a @ b % c        # error if rank(b) == 1; ok if rank(b) > 1
+a % b % c        # error if rank(b) == 1; ok if rank(b) > 1
+a @ (b % c)      # ok — % operands are both Factors
+(a @ b) % c      # ok — % operands are both Factors
+```
+
+This rule never rejects an unambiguous expression and prevents the
+silent wrong-result case when both bracketings are type-valid.
 
 ## Precedence and associativity
 
