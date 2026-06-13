@@ -54,12 +54,20 @@ mul  ::= "*" | "@" | "%" | "//" | ":" | "/"
 
 The distinction between `:` and `//` matters for tensors of rank ≥ 2
 that are not symmetric.  For a symmetric rank-2 tensor `A : B = A // B`.
-For higher-rank tensors the ordering of which free-slot pair contracts
-first follows the same logic: `:` pairs outermost slots
-(first-of-left with first-of-right, last-of-left with last-of-right),
-while `//` pairs innermost slots (last-of-left with first-of-right,
-then first-of-left with last-of-right).  See vibe 000005 for the
-original motivation.
+
+The clearest way to see the difference is via dyads (rank-2 tensors
+written as tensor products of vectors):
+
+```
+(a*b) :  (c*d)  =  (a@c) * (b@d)   # first-of-left ↔ first-of-right,
+                                    # second-of-left ↔ second-of-right
+(a*b) // (c*d)  =  (b@c) * (a@d)   # last-of-left  ↔ first-of-right (closest),
+                                    # first-of-left ↔ last-of-right  (next)
+```
+
+The same principle extends to higher-rank tensors: `:` contracts the
+outermost free-slot pairs, `//` contracts the innermost ones first.
+See vibe 000005 for the original motivation.
 
 Note: vibe 000005 assigned `**` to the reversed double contraction.
 `**` has power precedence in Python (higher than mul), so it does not
@@ -161,9 +169,9 @@ independent of whether a tensor happens to carry indices.
 ### Formatted output
 
 The formatter may suppress operator symbols for readability:
-- `@` (single contraction) → juxtaposition or `·` in LaTeX
+- `@` (single contraction) → `·` in LaTeX
 - `:` → `:`  or `∶` glyph
-- `//` → `··` or `∶∶` (two-dot variants differ from `:`)
+- `//` → `··`
 - `%` → `×`
 - `*` → juxtaposition (default); `⊗` only when explicitly requested
 
@@ -195,9 +203,11 @@ name and could in principle be given a zero-length index list, even
 though it has no free slots.  A numeric literal is never a tensor object;
 it carries no name and cannot be indexed.
 
-## Open questions
+## `nabla` is a `TensorObject`
 
-1. For rank > 2 tensors, spell out the full slot-pairing rules for `:`
-   and `//` with examples.
-2. Decide whether `nabla` is a `TensorObject` in the grammar or a
-   special-cased node kind (see vibe 000005).
+`nabla` (∇) is a rank-1 named object in the grammar — a `TensorObject`
+with a pre-assigned name.  Its differential semantics (it differentiates
+whatever it is combined with) are handled by the evaluator and
+simplification rules, not by the grammar or the AST node type.  At the
+expression-building level it participates in all the same operations as
+any other rank-1 tensor object.
