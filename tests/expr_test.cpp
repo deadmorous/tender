@@ -235,7 +235,7 @@ TEST(MakeDelta, SlotLayout)
     ASSERT_NE(e, nullptr);
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "\\delta");
-    EXPECT_EQ(t.rank, std::optional<int>{2});
+    EXPECT_EQ(t.rank, std::optional<int>{0});
     EXPECT_EQ(t.label, std::optional<TensorLabel>{TensorLabel::Delta});
     ASSERT_EQ(t.slots.size(), 2u);
     EXPECT_EQ(t.slots[0].slot.level, Level::Upper);
@@ -277,7 +277,7 @@ TEST(MakeLeviCivita, Rank3)
     ASSERT_NE(e, nullptr);
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "\\varepsilon");
-    EXPECT_EQ(t.rank, std::optional<int>{3});
+    EXPECT_EQ(t.rank, std::optional<int>{0});
     EXPECT_EQ(t.label, std::optional<TensorLabel>{TensorLabel::LeviCivita});
     ASSERT_EQ(t.slots.size(), 3u);
     for (auto const& sb: t.slots)
@@ -301,7 +301,7 @@ TEST(MakeLeviCivita, Rank2)
         ctx, Realm::Oblique, space_2d(), {Level::Upper, Level::Upper}, {i, j});
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.slots.size(), 2u);
-    EXPECT_EQ(t.rank, std::optional<int>{2});
+    EXPECT_EQ(t.rank, std::optional<int>{0});
 }
 
 TEST(MakeLeviCivita, LevelsMismatchThrows)

@@ -153,22 +153,60 @@ struct Renderer
         return is_cmd ? "\\boldsymbol{" + n + "}" : "\\mathbf{" + n + "}";
     }
 
-    // Stacked upper/lower index groups.  Positional interleaving is a
-    // display-time concern handled separately when needed.
+    // Render index slots.
+    //
+    // Pure-level tensors (all upper or all lower): flat grouping, e.g. ^{ijk}.
+    //
+    // Mixed-level tensors: positional interleaving — each slot position
+    // contributes its index to its own band and \cdot to the other band,
+    // making the index position explicit.  E.g. two slots [upper-i, lower-j]
+    // render as ^{i\cdot}_{\cdot j}.
     auto slots_str(std::vector<SlotBinding> const& slots) -> std::string
     {
+        if (slots.empty())
+            return {};
+
+        bool has_upper = false, has_lower = false;
+        for (auto const& sb: slots)
+        {
+            if (sb.slot.level == Level::Upper)
+                has_upper = true;
+            else
+                has_lower = true;
+        }
+
+        if (!has_upper || !has_lower)
+        {
+            std::string s;
+            for (auto const& sb: slots)
+                s += index_str(sb.index, sb.slot.space);
+            return has_upper ? "^{" + s + "}" : "_{" + s + "}";
+        }
+
+        // Mixed: build both bands positionally.
+        // "\\cdot " (with trailing space) safely terminates the LaTeX
+        // command before any following letter or command.  The trailing
+        // space is trimmed from the end of each band to keep output clean.
         std::string upper, lower;
         for (auto const& sb: slots)
         {
             auto s = index_str(sb.index, sb.slot.space);
-            (sb.slot.level == Level::Upper ? upper : lower) += s;
+            if (sb.slot.level == Level::Upper)
+            {
+                upper += s;
+                lower += "\\cdot ";
+            }
+            else
+            {
+                upper += "\\cdot ";
+                lower += s;
+            }
         }
-        std::string result;
-        if (!upper.empty())
-            result += "^{" + upper + "}";
-        if (!lower.empty())
-            result += "_{" + lower + "}";
-        return result;
+        if (!upper.empty() && upper.back() == ' ')
+            upper.pop_back();
+        if (!lower.empty() && lower.back() == ' ')
+            lower.pop_back();
+        return "^{" + upper + "}_{" + lower + "}";
     }
 
     static auto rational_str(Rational const& r) -> std::string

@@ -219,9 +219,13 @@ class TestDelta:
         j = tender.alloc_index()
         d = tender.delta(Realm.Oblique, sp, Level.Upper, Level.Lower, i, j)
         latex = d.latex()
-        assert r"\boldsymbol{\delta}" in latex
-        assert "^{" in latex
-        assert "_{" in latex
+        # rank=0 → plain (no bold)
+        assert r"\delta" in latex
+        assert r"\boldsymbol" not in latex
+        # positional interleaving: upper band has \cdot placeholder, lower band has \cdot placeholder
+        assert r"^{" in latex
+        assert r"_{" in latex
+        assert r"\cdot" in latex
 
     def test_orthonormal_2d(self):
         sp = tender.space_2d
@@ -229,7 +233,8 @@ class TestDelta:
         j = tender.alloc_index()
         d = tender.delta(Realm.Orthonormal, sp, Level.Lower, Level.Lower, i, j)
         latex = d.latex()
-        assert r"\boldsymbol{\delta}" in latex
+        assert r"\delta" in latex
+        assert r"\boldsymbol" not in latex
 
     def test_concrete_index(self):
         sp = tender.space_3d
@@ -265,8 +270,11 @@ class TestLeviCivita:
             [i, j, k],
         )
         latex = lc.latex()
-        assert r"\boldsymbol{\varepsilon}" in latex
+        # rank=0 → plain (no bold), pure lower → flat grouping, no \cdot
+        assert r"\varepsilon" in latex
+        assert r"\boldsymbol" not in latex
         assert "_{" in latex
+        assert r"\cdot" not in latex
 
     def test_wrong_size_raises(self):
         sp = tender.space_3d

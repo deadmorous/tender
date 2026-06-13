@@ -219,7 +219,7 @@ TEST(RenderTensorObject, UpperAndLowerStacked)
     IndexNameMap map;
     map.assign(i, make_index_name("i"));
     map.assign(j, make_index_name("j"));
-    EXPECT_EQ(render_latex(*e, map), "\\mathbf{T}^{i}_{j}");
+    EXPECT_EQ(render_latex(*e, map), "\\mathbf{T}^{i\\cdot}_{\\cdot j}");
 }
 
 TEST(RenderTensorObject, ConcreteIndex)
@@ -264,7 +264,7 @@ TEST(RenderTensorObject, DeltaWithIndices)
     IndexNameMap map;
     map.assign(i, make_index_name("i"));
     map.assign(j, make_index_name("j"));
-    EXPECT_EQ(render_latex(*e, map), "\\boldsymbol{\\delta}^{i}_{j}");
+    EXPECT_EQ(render_latex(*e, map), "\\delta^{i\\cdot}_{\\cdot j}");
 }
 
 TEST(RenderTensorObject, LeviCivitaRank3)
@@ -284,7 +284,7 @@ TEST(RenderTensorObject, LeviCivitaRank3)
     map.assign(i, make_index_name("i"));
     map.assign(j, make_index_name("j"));
     map.assign(k, make_index_name("k"));
-    EXPECT_EQ(render_latex(*e, map), "\\boldsymbol{\\varepsilon}_{ijk}");
+    EXPECT_EQ(render_latex(*e, map), "\\varepsilon_{ijk}");
 }
 
 // ---- Unary -------------------------------------------------------------

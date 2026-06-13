@@ -117,7 +117,7 @@ auto make_delta(
 {
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("\\delta"),
-        .rank = 2,
+        .rank = 0,
         .label = TensorLabel::Delta,
         .slots = {
             SlotBinding{IndexSlot{level0, realm, space}, std::move(index0)},
@@ -147,7 +147,7 @@ auto make_levi_civita(
 
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("\\varepsilon"),
-        .rank = static_cast<int>(n),
+        .rank = 0,
         .label = TensorLabel::LeviCivita,
         .slots = std::move(slots)});
 }
