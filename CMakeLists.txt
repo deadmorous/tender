@@ -70,6 +70,10 @@ if(TENDER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+if(TENDER_BUILD_PYTHON)
+    add_subdirectory(python)
+endif()
+
 if(TENDER_BUILD_COVERAGE)
     tender_add_coverage_target()
 endif()
