@@ -63,9 +63,7 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Python tests
-        run: |
-          cd build/python
-          PYTHONPATH=. pytest test_tender.py -v
+        run: PYTHONPATH=python pytest python/tests/ -v
 
   notebooks-clean:
     runs-on: ubuntu-24.04
