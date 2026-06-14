@@ -2,6 +2,7 @@
 
 #include <tender/expr.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <vector>
 
@@ -87,6 +88,24 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*;
 // replaces the whole ExplicitSum with a single delta over the remaining
 // indices.
 auto contract_delta(Context& ctx, Expr const* e) -> Expr const*;
+
+// Like unroll_sums but restricted to ExplicitSum nodes whose summation index
+// appears in `indices`.  Sums over other indices are left untouched.
+auto unroll_sums_for(
+    Context& ctx,
+    Expr const* e,
+    std::vector<CountableIndex> const& indices) -> Expr const*;
+
+// Return true if `e` contains at least one ExplicitSum whose summation index
+// appears in `indices`.
+auto has_explicit_sum_for(
+    Expr const* e, std::vector<CountableIndex> const& indices) -> bool;
+
+// Collect addends from a Sum tree and group those with the same core
+// expression (extracted coefficient-core pairs).  Groups with total
+// coefficient n > 1 are folded into n·core; n == -1 becomes -core;
+// n == 0 is dropped.  No-op if no merging occurs.
+auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*;
 
 } // namespace steps
 } // namespace tender

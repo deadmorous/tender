@@ -548,4 +548,28 @@ NB_MODULE(_core, m)
         { return derive(e, steps::contract_delta(*e.ctx, e.expr)); },
         "expr"_a,
         "Contract ExplicitSum{m, δ^m_a · δ^m_b} into δ_{ab}.");
+
+    md.def(
+        "_unroll_sums_for",
+        [](PyExpr const& e,
+           std::vector<CountableIndex> const& indices) -> PyExpr
+        { return derive(e, steps::unroll_sums_for(*e.ctx, e.expr, indices)); },
+        "expr"_a,
+        "indices"_a,
+        "Unroll only ExplicitSum nodes whose index is in `indices`.");
+
+    md.def(
+        "_has_explicit_sum_for",
+        [](PyExpr const& e, std::vector<CountableIndex> const& indices) -> bool
+        { return steps::has_explicit_sum_for(e.expr, indices); },
+        "expr"_a,
+        "indices"_a,
+        "Return True if `expr` contains an ExplicitSum for any index in `indices`.");
+
+    md.def(
+        "_fold_equal_addends",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::fold_equal_addends(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Group identical addends: X + X → 2X, n*X + X → (n+1)*X.");
 }

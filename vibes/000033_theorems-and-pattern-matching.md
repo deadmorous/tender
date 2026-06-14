@@ -3,169 +3,158 @@
 ## Context
 
 The eps-delta derivation exposed a gap: after `fold_sums` and `contract_delta`, the
-one-index case ($\varepsilon^{ijk}\varepsilon_{iml}$) still ends in 12 concrete
+one-index case ($\varepsilon^{ijk}\varepsilon_{iml}$) ends in 12 concrete
 Kronecker-delta products.  Folding them into
 $\delta^j_m\delta^k_l - \delta^j_l\delta^k_m$ requires recognising the identity
 $\sum_p \delta^p_A\delta^p_B = \delta_{AB}$, but that identity is itself a theorem.
 `contract_delta` is a hard-coded special case of it; the general machinery does not
 yet exist.
 
-This vibe maps out what needs to be built.
+This vibe maps out what needs to be built.  Updated after a round of design review.
 
 ---
 
 ## 1. What is a theorem?
 
-A **theorem** is a universally-quantified rewrite rule of the form
+A **theorem** is a concrete derivation:
 
 ```
-LHS(x₁, …, xₙ) = RHS(x₁, …, xₙ)
+LHS  =  RHS
 ```
 
-where `LHS` and `RHS` are expression templates with free *pattern variables*
-`x₁, …, xₙ` matching sub-expressions.  Applying the theorem means:
+Both `LHS` and `RHS` are ordinary `Expr` trees, built with the same API used for
+expressions.  Any **named tensor object** that appears in `LHS` acts implicitly as
+a *pattern variable*: it matches any sub-expression during matching, and the same
+name must match the same sub-expression throughout a single match attempt.
 
-1. find a sub-expression that matches `LHS` under some variable binding σ,
-2. replace it with `RHS[σ]`.
+**Example** — delta contraction:
 
-Theorems in tender are distinct from *derivation steps* (algorithmic
-transformations like `fold_sums`) because they:
+```python
+A = tender.tensor("A")          # pattern variable (any sub-expression)
+B = tender.tensor("B")
+p, space = ctx.alloc_index(), space_3d
 
-- are stated in the object language (as `Expr` trees with unbound slots), and
-- have a human-readable name / citation that can be tracked in a derivation history.
+lhs = explicit_sum(p, delta(Upper, Lower, p, A) * delta(Upper, Lower, p, B))
+rhs = delta(Upper, Lower, A, B)   # A, B slots inherit from lhs binding
+
+theorem_delta_contraction = Theorem(name="delta-contraction", lhs=lhs, rhs=rhs)
+```
+
+This is more concrete than an abstract "pattern variable" node — the LHS is itself
+a valid expression and the role of each named tensor is self-documenting.
 
 ---
 
-## 2. Do we need an identity library?
+## 2. Identities vs. theorems
 
-Yes — but a small, typed one, not a flat list.
+**Identity** = an *axiom*, not derivable from other rules.  Examples: the symmetry
+of the metric, the permutation sign of ε, `δ^i_i = n` (dimension).  These are
+most naturally encoded in `TensorTraits` at the C++ level — they are built-in
+properties of specific tensor types, not deduced from other expressions.
 
-Attempt-1 had a bag of identities applied via BFS.  The problem is the search
-space explodes: every identity is tried at every sub-tree node at every step,
-with no guidance on termination.
+**Theorem** = *derivable* from axioms plus arithmetic rules.  Examples: the
+eps-delta identity, delta contraction, the Binet–Cauchy identity.  Theorems live
+in a theorem library (see §3) and are applied as named derivation steps.
 
-The right structure is a **tiered library**:
-
-| Tier | Content | How applied |
-|------|---------|-------------|
-| **Arithmetic** | `0+x=x`, `1*x=x`, `-(-x)=x`, … | `fold_arithmetic` (already done) |
-| **Index identities** | `δ^i_j δ^j_k = δ^i_k`, `Σ_p δ^p_A δ^p_B = δ_AB`, … | pattern-match + theorem step |
-| **Structural** | eps-delta, curl-of-gradient, … | dedicated steps or e-graph rules |
-
-The index-identity tier is where the gap is.  It is small (maybe a dozen entries)
-and the identities are well-known, so it is feasible to enumerate them explicitly
-rather than discover them.
+The hard-coded step `contract_delta` is currently filling the role of a theorem.
+Once the theorem machinery exists, `contract_delta` should become an application of
+the `delta-contraction` theorem — with the hard-coded step kept as a fast-path
+fallback if performance requires it.
 
 ---
 
-## 3. Pattern matching
+## 3. Theorem library
 
-Pattern matching maps a concrete `Expr` tree against a template tree containing
-*pattern variables*.  Requirements:
+A small, explicit set of named theorems covering index algebra:
 
-- **Pattern variables** match any sub-expression (initially: match any `Expr`).
-- **Index slots** may be concrete (`ConcreteIndex`) or abstract (`CountableIndex`);
-  the matcher must handle both.
-- **Commutativity / associativity** of `Sum` and `TensorProduct` makes naïve
-  structural matching insufficient.  For the short term, canonical ordering (sort
-  children by a stable key) is enough.  Long term, e-graph saturation handles this
-  properly (see vibe 000034).
-- **Binding occurs**: once a pattern variable is bound to a sub-expression, every
-  subsequent occurrence of the same variable must match the *same* sub-expression
-  (modulo `structural_eq`).
+| Name | LHS | RHS |
+|------|-----|-----|
+| `delta-contraction` | `Σ_p δ^p_A δ^p_B` | `δ_{AB}` |
+| `delta-substitution` | `Σ_p δ^p_A f(p, …)` | `f(A, …)` |
+| `delta-trace` | `Σ_p δ^p_p` | `ScalarLiteral(n)` (dimension) |
+| `eps-delta-2` | `Σ_{ij} ε^{ijk} ε_{ijl}` | `2 δ^k_l` |
+| `eps-delta-1` | `Σ_i ε^{ijk} ε_{iml}` | `δ^j_m δ^k_l - δ^j_l δ^k_m` |
 
-### 3.1 Sketch of the matcher interface
+Note: `delta-trace` (`δ_ii = 3` in 3D) involves an *unbound slot* (both indices the
+same concrete value).  This cannot be expressed as a pattern with the current
+"named tensor as variable" approach, because there is no way to force two slots of
+the same delta to match the same bound index.  **This remains an open limitation.**
+`delta-trace` will need either a dedicated hard-coded step or an extended pattern
+language with explicit variable constraints.
+
+---
+
+## 4. Pattern matching
+
+### 4.1 Core match interface
 
 ```cpp
-struct PatternVar { int id; };
+using Binding = std::unordered_map<std::string, Expr const*>;
+// key = TensorName string of the pattern variable
 
-// A pattern is just an Expr tree where some leaves are PatternVar nodes.
-// PatternVar is added to the node variant.
-
-using Binding = std::unordered_map<int, Expr const*>;
-
-auto match(Expr const* pattern, Expr const* target, Binding& out)
-    -> bool;
+auto match(Expr const* pattern, Expr const* target, Binding& out) -> bool;
 ```
 
 `match` is recursive:
 
-- If `pattern` is a `PatternVar`, try to unify with `out[id]`.
-- If `pattern` is a `ScalarLiteral` / `ConcreteIndex` / etc., require exact equality.
-- If `pattern` is a composite (`Sum`, `TensorProduct`, …), require same node type
-  and recursively match children.
+- If `pattern` is a `TensorObject` with no slots (a "free" named tensor), look up its
+  name in `out`.  If already bound, require `structural_eq` with the bound value.
+  Otherwise bind it.
+- If `pattern` is a `TensorObject` with slots, require the same name and recurse into
+  slots.
+- If `pattern` is a composite (`Sum`, `TensorProduct`, `ExplicitSum`, …), require same
+  node type and recurse into children.
+- If `pattern` is a `ScalarLiteral` / `ConcreteIndex`, require exact equality.
 
-### 3.2 Sub-tree search
+### 4.2 Trait-based constraints
 
-`apply_theorem(ctx, expr, theorem)` walks `expr` bottom-up and tries to match
-`theorem.lhs` at each node.  On the first match, it substitutes `theorem.rhs[σ]`
-and returns the new tree.  (Multiple matches in one pass is a future extension.)
+The user raised a valid concern: if we allow matching modulo tensor properties
+(e.g., "any symmetric tensor"), every possible sub-expression must be tested for
+the given property.  For a 36-term sum of delta products this could mean thousands
+of symmetry checks per match attempt — potentially unacceptable.
+
+**Resolution**: for the first version, pattern variables match *any* sub-expression,
+with no trait filtering.  Structural matching alone is sufficient for the index
+identities listed in §3.  Trait-constrained patterns are deferred to a later version
+where we can benchmark the cost and decide whether to invest in pruning heuristics.
+
+### 4.3 Sub-tree search
+
+`apply_theorem(ctx, expr, theorem)` walks `expr` bottom-up and tries `match` at
+each node.  On the first successful match it substitutes `theorem.rhs` under the
+binding and returns the result.  Applying all matches in one pass is a future
+extension.
 
 ---
 
-## 4. Theorem application as a derivation step
-
-A theorem is itself a first-class object:
-
-```cpp
-struct Theorem {
-    std::string name;   // e.g. "delta-contraction"
-    Expr const* lhs;
-    Expr const* rhs;
-    // optional: proof context (future)
-};
-```
-
-Applying it produces a derivation step:
+## 5. Theorem application as a derivation step
 
 ```python
-drv.step(td.apply_theorem(delta_contraction))
+drv.step(td.apply_theorem(theorems.delta_contraction))
 ```
 
-where `apply_theorem(t)` returns a callable `(Expr) -> Expr`.
-
-The derivation history then contains the theorem name at each step, making
-proofs human-readable.
+`apply_theorem(t)` returns a `(Expr) -> Expr` callable.  The derivation history
+records the theorem name at each step, making proofs human-readable.
 
 ---
 
-## 5. The identity needed to close the one-index eps-delta
+## 6. Open questions
 
-```
-Σ_p δ^p_A δ^p_B = δ_AB
-```
-
-This is exactly what `contract_delta` hard-codes.  With a general theorem layer,
-`contract_delta` becomes an application of this named theorem rather than bespoke
-code.  The index-identity library entry is:
-
-```
-name   : "delta-contraction"
-LHS    : ExplicitSum{ p, TensorProduct{ δ(p, A), δ(p, B) } }
-RHS    : δ(A, B)
-```
-
-where `A` and `B` are pattern variables ranging over index slots.
-
-Once this theorem is in the library, the one-index eps-delta derivation closes:
-
-```python
-drv.step(td.apply_theorem(theorems.delta_contraction))  # applied twice
-```
+- **`delta-trace` (`δ_ii = n`)**: requires a pattern language extended with
+  "same-index" constraints.  Either a dedicated step or a future extension.
+- **Commutativity / associativity**: naïve structural matching misses `A + B` when
+  the theorem is written as `B + A`.  Short-term: canonical ordering before matching.
+  Long-term: match modulo AC (or e-graph saturation; see vibe 000034).
+- **Matching depth**: apply_theorem currently finds the first (deepest-first) match.
+  Applying all matches simultaneously requires a sweep or multiple passes.
 
 ---
 
-## 6. Immediate next steps (priority order)
+## 7. Priority implementation order
 
-1. **Add `PatternVar` to the node variant** — minimal change, no existing code
-   affected.
-2. **Implement `match()`** — recursive, handles binding.
-3. **Implement `apply_theorem()`** — bottom-up sub-tree search + substitution.
-4. **Encode the delta-contraction theorem** — replace the hard-coded `contract_delta`
-   step with `apply_theorem(theorems::delta_contraction)`.
-5. **Close the one-index eps-delta example** using the theorem step.
-6. **Expand the index-identity library** — at minimum: `δ^i_j δ^j_k = δ^i_k`
-   (delta product / index substitution), which is also needed for chained
-   contractions.
-7. **Commutativity/associativity** — canonical child ordering as a preprocessing
-   normalisation pass, so pattern matching does not need to enumerate permutations.
+1. `match()` — recursive, handles `Binding`, named-tensor pattern variables.
+2. `apply_theorem()` — bottom-up search + substitution.
+3. Encode `delta-contraction` as a theorem; make `contract_delta` call it.
+4. Close the one-index eps-delta example.
+5. Add `delta-substitution` and `eps-delta-1` to the library.
+6. Canonical child ordering as a preprocessing pass (commutativity/AC readiness).

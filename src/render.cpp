@@ -286,8 +286,13 @@ struct Renderer
                     return sub(*d.left, ADD_PREC) + " - "
                            + sub_diff_right(*d.right);
                 },
-                [&](TensorProduct const& p) -> std::string {
-                    return sub(*p.left, MUL_PREC) + " \\, "
+                [&](TensorProduct const& p) -> std::string
+                {
+                    bool both_scalar =
+                        std::holds_alternative<ScalarLiteral>(p.left->node)
+                        && std::holds_alternative<ScalarLiteral>(p.right->node);
+                    std::string sep = both_scalar ? " \\cdot " : " \\, ";
+                    return sub(*p.left, MUL_PREC) + sep
                            + sub(*p.right, MUL_PREC);
                 },
                 [&](ScalarDiv const& d) -> std::string {

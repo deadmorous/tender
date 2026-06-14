@@ -6,6 +6,7 @@ Demonstrates the derivation steps:
   expand_products    — distribute tensor products over sums (expand brackets)
   fold_sums          — fold a concrete N-addend cycle back into an ExplicitSum
   contract_delta     — contract Σ_m δ^m_k δ^m_l into δ_kl
+  fold_equal_addends — collect equal addends: X + X → 2X
 
 Four derivations are shown:
 
@@ -36,15 +37,19 @@ def derivation_to_latex(drv, labels=None, steps=None):
 
     labels : labels[k] is the annotation for drv.history[k+1]
     steps  : list of history indices to include (None = all steps)
+
+    If drv.index_map is set, it is used for all latex() calls so that
+    index names stay consistent across all steps.
     """
     history = drv.history
+    imap = drv.index_map
     if steps is None:
         steps = list(range(len(history)))
 
     blocks = []
     first = True
     for k in steps:
-        eq_latex = history[k].latex()
+        eq_latex = drv.latex(k) if imap else history[k].latex()
         if first:
             body = eq_latex
             first = False
@@ -93,6 +98,10 @@ ctx2 = tender.Context()
 k2 = ctx2.alloc_index()
 l2 = ctx2.alloc_index()
 
+imap2 = tender.IndexNameMap()
+imap2.assign(k2, "k")
+imap2.assign(l2, "l")
+
 def delta_upper(v, idx):
     return tender.delta(Realm.Oblique, sp, Level.Upper, Level.Lower, v, idx, ctx=ctx2)
 
@@ -102,7 +111,7 @@ concrete_sum = (
     + delta_upper(3, k2) * delta_upper(3, l2)
 )
 
-drv2 = td.Derivation(concrete_sum)
+drv2 = td.Derivation(concrete_sum, index_map=imap2)
 drv2.step(td.fold_sums).step(td.contract_delta)
 
 labels2 = [
@@ -113,7 +122,7 @@ labels2 = [
 print("Derivation 2: Σ_m δ^m_k δ^m_l = δ_kl")
 for k, e in enumerate(drv2.history):
     tag = f"  [{labels2[k-1]}]" if k > 0 else "  [initial]"
-    print(f"  step {k}: {e.latex()}{tag}")
+    print(f"  step {k}: {drv2.latex(k)}{tag}")
 print()
 
 block2 = derivation_to_latex(drv2, labels2)
@@ -129,6 +138,12 @@ j3 = ctx3.alloc_index()
 k3 = ctx3.alloc_index()
 l3 = ctx3.alloc_index()
 
+imap3 = tender.IndexNameMap()
+imap3.assign(i3, "i")
+imap3.assign(j3, "j")
+imap3.assign(k3, "k")
+imap3.assign(l3, "l")
+
 eps3a = tender.levi_civita(
     Realm.Oblique, sp,
     [Level.Upper, Level.Upper, Level.Upper], [i3, j3, k3], ctx=ctx3)
@@ -140,7 +155,7 @@ ei3 = tender.explicit_sum(j3,
         tender.explicit_sum(i3, eps3a * eps3b, ctx=ctx3),
         ctx=ctx3)
 
-drv3 = td.Derivation(ei3)
+drv3 = td.Derivation(ei3, index_map=imap3)
 
 labels3 = [
     "expand both $\\varepsilon$ symbols",
@@ -152,6 +167,7 @@ labels3 = [
     "fold first 3-cycle into $\\sum_p$",
     "fold second 3-cycle into $\\sum_p$",
     r"contract both $\sum_p \delta^p_k\,\delta^p_l \to \delta^k_l$",
+    "fold equal addends: $\\delta^k_l + \\delta^k_l \\to 2\\delta^k_l$",
 ]
 
 (drv3
@@ -163,19 +179,21 @@ labels3 = [
  .step(td.fold_arithmetic)
  .step(td.fold_sums)
  .step(td.fold_sums)
- .step(td.contract_delta))
+ .step(td.contract_delta)
+ .step(td.fold_equal_addends))
 
 print("Derivation 3: Σ_{ij} ε^{ijk} ε_{ijl} = 2δ^k_l")
 for k, e in enumerate(drv3.history):
     tag = f"  [{labels3[k-1]}]" if k > 0 else "  [initial]"
-    print(f"  step {k}: {e.latex()[:100]}{tag}")
-print(f"  result: {drv3.current.latex()}")
+    print(f"  step {k}: {drv3.latex(k)[:100]}{tag}")
+print(f"  result: {drv3.latex(-1)}")
 print()
 
 # For the PDF, skip the large intermediate steps (1–5: unrolled sums and
 # distributed products contain hundreds of delta symbols).  Show only the
-# initial expression, the state after arithmetic folding, and the final result.
-block3 = derivation_to_latex(drv3, labels3, steps=[0, 6, 7, 9])
+# initial expression, the state after arithmetic folding, the two fold_sums
+# steps, the contracted result, and the final collapsed result.
+block3 = derivation_to_latex(drv3, labels3, steps=[0, 6, 7, 9, 10])
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +210,13 @@ k4 = ctx4.alloc_index()
 m4 = ctx4.alloc_index()
 l4 = ctx4.alloc_index()
 
+imap4 = tender.IndexNameMap()
+imap4.assign(i4, "i")
+imap4.assign(j4, "j")
+imap4.assign(k4, "k")
+imap4.assign(m4, "m")
+imap4.assign(l4, "l")
+
 eps4a = tender.levi_civita(
     Realm.Oblique, sp,
     [Level.Upper, Level.Upper, Level.Upper], [i4, j4, k4], ctx=ctx4)
@@ -201,7 +226,7 @@ eps4b = tender.levi_civita(
 
 ei4 = tender.explicit_sum(i4, eps4a * eps4b, ctx=ctx4)
 
-drv4 = td.Derivation(ei4)
+drv4 = td.Derivation(ei4, index_map=imap4)
 
 labels4 = [
     "expand both $\\varepsilon$ symbols",
@@ -221,7 +246,7 @@ labels4 = [
 print("Derivation 4: Σ_i ε^{ijk} ε_{iml} (expands to 12 delta-pair terms)")
 for k, e in enumerate(drv4.history):
     tag = f"  [{labels4[k-1]}]" if k > 0 else "  [initial]"
-    print(f"  step {k}: {e.latex()[:100]}{tag}")
+    print(f"  step {k}: {drv4.latex(k)[:100]}{tag}")
 print("  (= δ^j_m δ^k_l - δ^j_l δ^k_m; final folding needs theorem Σ_p δ^p_A δ^p_B = δ_AB)")
 print()
 

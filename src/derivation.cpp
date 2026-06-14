@@ -578,32 +578,49 @@ auto substitute_concrete(
         });
 }
 
-// Fully distribute a TensorProduct over Sum/Difference (both sides).
-// Recursively descends into left and right Sum/Difference trees.
-auto distribute_product(Context& ctx, Expr const* l, Expr const* r)
+// Generic product distribution: distribute any binary product over
+// Sum/Difference. make_prod(l, r) creates the leaf product node.
+template <typename F>
+auto distribute_any(
+    Context& ctx, Expr const* l, Expr const* r, F const& make_prod)
     -> Expr const*
 {
     if (auto const* s = std::get_if<Sum>(&l->node))
         return make_sum(
             ctx,
-            distribute_product(ctx, s->left, r),
-            distribute_product(ctx, s->right, r));
+            distribute_any(ctx, s->left, r, make_prod),
+            distribute_any(ctx, s->right, r, make_prod));
     if (auto const* d = std::get_if<Difference>(&l->node))
         return make_difference(
             ctx,
-            distribute_product(ctx, d->left, r),
-            distribute_product(ctx, d->right, r));
+            distribute_any(ctx, d->left, r, make_prod),
+            distribute_any(ctx, d->right, r, make_prod));
     if (auto const* s = std::get_if<Sum>(&r->node))
         return make_sum(
             ctx,
-            distribute_product(ctx, l, s->left),
-            distribute_product(ctx, l, s->right));
+            distribute_any(ctx, l, s->left, make_prod),
+            distribute_any(ctx, l, s->right, make_prod));
     if (auto const* d = std::get_if<Difference>(&r->node))
         return make_difference(
             ctx,
-            distribute_product(ctx, l, d->left),
-            distribute_product(ctx, l, d->right));
-    return make_tensor_product(ctx, l, r);
+            distribute_any(ctx, l, d->left, make_prod),
+            distribute_any(ctx, l, d->right, make_prod));
+    return make_prod(l, r);
+}
+
+// Extract (integer coefficient, core expression) from an addend.
+// Returns {1, e}       for a plain expression.
+// Returns {n, core}    for TensorProduct(ScalarLiteral(n), core).
+// Returns {-1, core}   for Negate(core).
+auto extract_coeff(Expr const* e) -> std::pair<int64_t, Expr const*>
+{
+    if (auto const* tp = std::get_if<TensorProduct>(&e->node))
+        if (auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node))
+            if (sl->value.is_integer())
+                return {sl->value.num(), tp->right};
+    if (auto const* neg = std::get_if<Negate>(&e->node))
+        return {-1, neg->operand};
+    return {1, e};
 }
 
 } // namespace
@@ -683,6 +700,12 @@ auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
                             return s.right;
                         if (r && r->value == Rational{0})
                             return s.left;
+                        // X + (-Y) → X - Y  (cleaner rendering, no "(-(Y))")
+                        if (std::holds_alternative<Negate>(s.right->node))
+                        {
+                            auto const& neg = std::get<Negate>(s.right->node);
+                            return make_difference(ctx, s.left, neg.operand);
+                        }
                         return e;
                     },
                     [&](Difference const& s) -> Expr const*
@@ -695,6 +718,12 @@ auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
                             return make_scalar(ctx, l->value - r->value);
                         if (r && r->value == Rational{0})
                             return s.left;
+                        // X - (-Y) → X + Y
+                        if (std::holds_alternative<Negate>(s.right->node))
+                        {
+                            auto const& neg = std::get<Negate>(s.right->node);
+                            return make_sum(ctx, s.left, neg.operand);
+                        }
                         return e;
                     },
                     [&](TensorProduct const& s) -> Expr const*
@@ -719,6 +748,16 @@ auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
                         if (nl && nr)
                             return make_tensor_product(
                                 ctx, nl->operand, nr->operand);
+                        // (-A) * B → -(A * B)  and  A * (-B) → -(A * B)
+                        // Pull the sign out so it can be absorbed by Sum/Diff.
+                        if (nl)
+                            return make_negate(
+                                ctx,
+                                make_tensor_product(ctx, nl->operand, s.right));
+                        if (nr)
+                            return make_negate(
+                                ctx,
+                                make_tensor_product(ctx, s.left, nr->operand));
                         return e;
                     },
                     [&](ScalarDiv const& s) -> Expr const*
@@ -756,10 +795,56 @@ auto expand_products(Context& ctx, Expr const* e) -> Expr const*
         e,
         [](Context& ctx, Expr const* e) -> Expr const*
         {
-            auto const* tp = std::get_if<TensorProduct>(&e->node);
-            if (!tp)
-                return e;
-            return distribute_product(ctx, tp->left, tp->right);
+            return visit(
+                Overloads{
+                    [&](TensorProduct const& p) -> Expr const*
+                    {
+                        return distribute_any(
+                            ctx,
+                            p.left,
+                            p.right,
+                            [&](Expr const* a, Expr const* b)
+                            { return make_tensor_product(ctx, a, b); });
+                    },
+                    [&](Dot const& p) -> Expr const*
+                    {
+                        return distribute_any(
+                            ctx,
+                            p.left,
+                            p.right,
+                            [&](Expr const* a, Expr const* b)
+                            { return make_dot(ctx, a, b); });
+                    },
+                    [&](DDot const& p) -> Expr const*
+                    {
+                        return distribute_any(
+                            ctx,
+                            p.left,
+                            p.right,
+                            [&](Expr const* a, Expr const* b)
+                            { return make_ddot(ctx, a, b); });
+                    },
+                    [&](DDotAlt const& p) -> Expr const*
+                    {
+                        return distribute_any(
+                            ctx,
+                            p.left,
+                            p.right,
+                            [&](Expr const* a, Expr const* b)
+                            { return make_ddot_alt(ctx, a, b); });
+                    },
+                    [&](Cross const& p) -> Expr const*
+                    {
+                        return distribute_any(
+                            ctx,
+                            p.left,
+                            p.right,
+                            [&](Expr const* a, Expr const* b)
+                            { return make_cross(ctx, a, b); });
+                    },
+                    [&](auto const&) -> Expr const* { return e; },
+                },
+                *e);
         });
 }
 
@@ -993,6 +1078,181 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
                 sur2.slot.level,
                 *sur1.index,
                 *sur2.index);
+        });
+}
+
+auto unroll_sums_for(
+    Context& ctx,
+    Expr const* e,
+    std::vector<CountableIndex> const& indices) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [&indices](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* s = std::get_if<ExplicitSum>(&e->node);
+            if (!s || s->bound)
+                return e;
+
+            bool requested = false;
+            for (auto const& idx: indices)
+                if (idx.id == s->index.id)
+                {
+                    requested = true;
+                    break;
+                }
+            if (!requested)
+                return e;
+
+            IndexSpace const* space = find_index_space(e, s->index.id);
+            if (!space)
+                return e;
+
+            auto const vals = space->values();
+            Expr const* result = nullptr;
+            for (int v: vals)
+            {
+                Expr const* term =
+                    substitute(ctx, s->body, s->index.id, ConcreteIndex{v});
+                result = result ? make_sum(ctx, result, term) : term;
+            }
+            return result ? result : make_scalar(ctx, Rational{0});
+        });
+}
+
+auto has_explicit_sum_for(
+    Expr const* e, std::vector<CountableIndex> const& indices) -> bool
+{
+    bool found = false;
+    std::function<void(Expr const*)> go = [&](Expr const* node)
+    {
+        if (found)
+            return;
+        visit(
+            Overloads{
+                [&](ExplicitSum const& s)
+                {
+                    for (auto const& idx: indices)
+                        if (idx.id == s.index.id)
+                        {
+                            found = true;
+                            return;
+                        }
+                    if (!found)
+                        go(s.body);
+                    if (!found && s.bound)
+                        go(s.bound);
+                },
+                [&](TensorObject const&) {},
+                [&](ScalarLiteral const&) {},
+                [&](Negate const& n) { go(n.operand); },
+                [&](Sum const& s)
+                {
+                    go(s.left);
+                    go(s.right);
+                },
+                [&](Difference const& s)
+                {
+                    go(s.left);
+                    go(s.right);
+                },
+                [&](TensorProduct const& s)
+                {
+                    go(s.left);
+                    go(s.right);
+                },
+                [&](ScalarDiv const& s)
+                {
+                    go(s.left);
+                    go(s.right);
+                },
+                [&](Dot const& s)
+                {
+                    go(s.left);
+                    go(s.right);
+                },
+                [&](DDot const& s)
+                {
+                    go(s.left);
+                    go(s.right);
+                },
+                [&](DDotAlt const& s)
+                {
+                    go(s.left);
+                    go(s.right);
+                },
+                [&](Cross const& s)
+                {
+                    go(s.left);
+                    go(s.right);
+                },
+                [&](NoSum const& s) { go(s.body); },
+            },
+            *node);
+    };
+    go(e);
+    return found;
+}
+
+auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& ctx, Expr const* e) -> Expr const*
+        {
+            std::vector<Expr const*> addends;
+            collect_addends(e, addends);
+            if (addends.size() < 2)
+                return e;
+
+            // Group addends by structural equality of core expression.
+            // Each group accumulates the integer coefficient total.
+            std::vector<bool> used(addends.size(), false);
+            std::vector<std::pair<int64_t, Expr const*>> groups;
+
+            for (std::size_t i = 0; i < addends.size(); ++i)
+            {
+                if (used[i])
+                    continue;
+                auto [ci, corei] = extract_coeff(addends[i]);
+                used[i] = true;
+
+                for (std::size_t j = i + 1; j < addends.size(); ++j)
+                {
+                    if (used[j])
+                        continue;
+                    auto [cj, corej] = extract_coeff(addends[j]);
+                    if (structural_eq(corei, corej))
+                    {
+                        ci += cj;
+                        used[j] = true;
+                    }
+                }
+                groups.emplace_back(ci, corei);
+            }
+
+            if (groups.size() == addends.size())
+                return e; // no merging happened
+
+            // Rebuild sum from groups.
+            Expr const* result = nullptr;
+            for (auto const& [cnt, core]: groups)
+            {
+                if (cnt == 0)
+                    continue;
+                Expr const* term;
+                if (cnt == 1)
+                    term = core;
+                else if (cnt == -1)
+                    term = make_negate(ctx, core);
+                else
+                    term = make_tensor_product(
+                        ctx, make_scalar(ctx, Rational{cnt}), core);
+                result = result ? make_sum(ctx, result, term) : term;
+            }
+            return result ? result : make_scalar(ctx, Rational{0});
         });
 }
 

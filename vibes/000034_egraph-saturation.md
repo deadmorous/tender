@@ -88,7 +88,7 @@ to detect newly equal nodes.
 
 ---
 
-## Saturation loop
+## Saturation loop and termination
 
 ```cpp
 auto saturate(EGraph& eg, EClassId root,
@@ -120,6 +120,46 @@ After saturation, extract the cheapest expression from the root e-class:
 ```cpp
 Expr const* extract(EGraph& eg, EClassId cls, Context& ctx);
 ```
+
+### Saturation criterion and graph growth
+
+**When does the loop terminate?**
+
+The loop exits when `changed == false` after a full pass — i.e., no rule merges
+any two previously distinct e-classes.  At that point the e-graph has reached a
+*fixed point*: the rule set applied to the current set of expressions produces no
+new equivalences.
+
+**Can the graph grow without bound?**
+
+Yes, in the presence of rules that *increase* expression size:
+
+- `x → x + 0` (additive zero) is size-increasing and creates infinitely many new
+  e-nodes.
+- `x + y → y + x` (commutativity) is size-neutral but applied repeatedly to every
+  sub-tree it generates exponentially many equivalent orderings.
+
+Practical e-graph libraries (Egg, egglog) deal with this in two ways:
+
+1. **Canonical ordering** — handle commutativity and associativity not as rewrite
+   rules but as an invariant enforced during e-node insertion (sort children of
+   symmetric nodes by a stable key).  This is sufficient for tender's current rule
+   set.
+
+2. **Size / iteration limit** — set a cap on the number of e-nodes or iterations.
+   After the cap, extract the best available expression even if the graph is not
+   fully saturated.  This is the standard production approach.
+
+For the tender rule set (delta contraction, eps-delta, etc.) all productive rules
+are *size-reducing* (they replace a larger pattern with a smaller expression).
+Size-reducing rules always terminate: each application strictly decreases the
+expression size, and the e-graph cannot merge an infinite number of non-equivalent
+expressions whose sizes are bounded by the initial size.
+
+The only size-neutral rules tender might need are commutativity and associativity,
+which are handled by canonical ordering (§ "Commutativity and associativity" below),
+not as explicit rewrite rules.  With this design, the tender rule set is guaranteed
+to saturate in finite iterations.
 
 ---
 

@@ -1658,3 +1658,268 @@ TEST(ExpandEps, DeltaUnchanged)
     auto const* after = steps::expand_eps(ctx, d);
     EXPECT_EQ(after, d);
 }
+
+// ---- fold_arithmetic: Sum/Difference normalisation with Negate -------------
+
+TEST(FoldArithmetic, SumWithNegateRightBecomeDiff)
+{
+    // Sum(A, -B)  →  Diff(A, B)
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr = make_sum(ctx, A, make_negate(ctx, B));
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* d = std::get_if<Difference>(&after->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->left, A);
+    EXPECT_EQ(d->right, B);
+}
+
+TEST(FoldArithmetic, DiffWithNegateRightBecomeSum)
+{
+    // Diff(A, -B)  →  Sum(A, B)
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr = make_difference(ctx, A, make_negate(ctx, B));
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* s = std::get_if<Sum>(&after->node);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->left, A);
+    EXPECT_EQ(s->right, B);
+}
+
+TEST(FoldArithmetic, ProductRightNegateBecomesNegateProduct)
+{
+    // A * (-B)  →  -(A * B)
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr = make_tensor_product(ctx, A, make_negate(ctx, B));
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* neg = std::get_if<Negate>(&after->node);
+    ASSERT_NE(neg, nullptr);
+    auto const* tp = std::get_if<TensorProduct>(&neg->operand->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(tp->left, A);
+    EXPECT_EQ(tp->right, B);
+}
+
+TEST(FoldArithmetic, ProductLeftNegateBecomesNegateProduct)
+{
+    // (-A) * B  →  -(A * B)
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr = make_tensor_product(ctx, make_negate(ctx, A), B);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* neg = std::get_if<Negate>(&after->node);
+    ASSERT_NE(neg, nullptr);
+    auto const* tp = std::get_if<TensorProduct>(&neg->operand->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(tp->left, A);
+    EXPECT_EQ(tp->right, B);
+}
+
+// ---- fold_equal_addends ---------------------------------------------------
+
+TEST(FoldEqualAddends, DuplicateBecomesScalarMultiple)
+{
+    // A + A  →  2 * A
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* expr = make_sum(ctx, A, A);
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* tp = std::get_if<TensorProduct>(&after->node);
+    ASSERT_NE(tp, nullptr);
+    auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node);
+    ASSERT_NE(sl, nullptr);
+    EXPECT_EQ(sl->value, Rational{2});
+    EXPECT_EQ(tp->right, A);
+}
+
+TEST(FoldEqualAddends, ExistingCoefficientAccumulates)
+{
+    // 2*A + A  →  3 * A
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* two = make_scalar(ctx, Rational{2});
+    auto const* expr = make_sum(ctx, make_tensor_product(ctx, two, A), A);
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* tp = std::get_if<TensorProduct>(&after->node);
+    ASSERT_NE(tp, nullptr);
+    auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node);
+    ASSERT_NE(sl, nullptr);
+    EXPECT_EQ(sl->value, Rational{3});
+    EXPECT_EQ(tp->right, A);
+}
+
+TEST(FoldEqualAddends, DifferentAddendsUnchanged)
+{
+    // A + B  —  different objects, no merging possible.
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr = make_sum(ctx, A, B);
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+TEST(FoldEqualAddends, NegatedCoefficientMerges)
+{
+    // (-A) + A  →  0
+    // Negate acts as coefficient -1; -1 + 1 = 0 → dropped.
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* neg_a = make_negate(ctx, A);
+    auto const* expr = make_sum(ctx, neg_a, A);
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* sl = std::get_if<ScalarLiteral>(&after->node);
+    ASSERT_NE(sl, nullptr);
+    EXPECT_EQ(sl->value, Rational{0});
+}
+
+// ---- expand_products: Dot / Cross distribution ----------------------------
+
+TEST(ExpandProducts, DotLeftSumDistributes)
+{
+    // Dot(A + B, C)  →  Dot(A, C) + Dot(B, C)
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* expr = make_dot(ctx, make_sum(ctx, A, B), C);
+    auto const* after = steps::expand_products(ctx, expr);
+    auto const* s = std::get_if<Sum>(&after->node);
+    ASSERT_NE(s, nullptr);
+    EXPECT_NE(std::get_if<Dot>(&s->left->node), nullptr);
+    EXPECT_NE(std::get_if<Dot>(&s->right->node), nullptr);
+}
+
+TEST(ExpandProducts, CrossRightDiffDistributes)
+{
+    // Cross(A, B - C)  →  Cross(A, B) - Cross(A, C)
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* expr = make_cross(ctx, A, make_difference(ctx, B, C));
+    auto const* after = steps::expand_products(ctx, expr);
+    EXPECT_NE(std::get_if<Difference>(&after->node), nullptr);
+}
+
+// ---- unroll_sums_for / has_explicit_sum_for --------------------------------
+
+TEST(UnrollSumsFor, OnlySpecifiedIndexUnrolled)
+{
+    // ExplicitSum{i, ExplicitSum{j, δ^i_j}}  — ask to unroll only j.
+    // After the call, the outer sum (i) must remain; the inner (j) is gone.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* inner = make_explicit_sum(ctx, j, d);
+    auto* expr = make_explicit_sum(ctx, i, inner);
+
+    auto const* after = steps::unroll_sums_for(ctx, expr, {CountableIndex{j}});
+
+    // Outer ExplicitSum (i) must survive.
+    auto const* outer = std::get_if<ExplicitSum>(&after->node);
+    ASSERT_NE(outer, nullptr);
+    EXPECT_EQ(outer->index.id, i.id);
+    // Body must no longer be an ExplicitSum (j was unrolled).
+    EXPECT_EQ(std::get_if<ExplicitSum>(&outer->body->node), nullptr);
+}
+
+TEST(HasExplicitSumFor, ReturnsTrueWhenPresent)
+{
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto* body = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* expr = make_explicit_sum(ctx, i, body);
+    EXPECT_TRUE(steps::has_explicit_sum_for(expr, {CountableIndex{i}}));
+}
+
+TEST(HasExplicitSumFor, ReturnsFalseWhenAbsent)
+{
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto* body = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* expr = make_explicit_sum(ctx, i, body);
+    // j is not in expr
+    EXPECT_FALSE(steps::has_explicit_sum_for(expr, {CountableIndex{j}}));
+}
+
+TEST(HasExplicitSumFor, NestedInsideBinaryNodes)
+{
+    // ExplicitSum nested inside Dot / ScalarDiv / Negate — the walker must
+    // descend through all binary node types.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto* body = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* es = make_explicit_sum(ctx, i, body);
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+
+    // Wrap in Dot, Negate, ScalarDiv, DDot, DDotAlt, Cross — walker must find
+    // i.
+    EXPECT_TRUE(
+        steps::has_explicit_sum_for(make_dot(ctx, es, B), {CountableIndex{i}}));
+    EXPECT_TRUE(steps::has_explicit_sum_for(
+        make_scalar_div(ctx, es, B), {CountableIndex{i}}));
+    EXPECT_TRUE(
+        steps::has_explicit_sum_for(make_negate(ctx, es), {CountableIndex{i}}));
+    EXPECT_TRUE(
+        steps::has_explicit_sum_for(make_ddot(ctx, es, B), {CountableIndex{i}}));
+    EXPECT_TRUE(steps::has_explicit_sum_for(
+        make_ddot_alt(ctx, es, B), {CountableIndex{i}}));
+    EXPECT_TRUE(steps::has_explicit_sum_for(
+        make_cross(ctx, es, B), {CountableIndex{i}}));
+    EXPECT_TRUE(
+        steps::has_explicit_sum_for(make_sum(ctx, es, B), {CountableIndex{i}}));
+    EXPECT_TRUE(steps::has_explicit_sum_for(
+        make_difference(ctx, es, B), {CountableIndex{i}}));
+    // NoSum body
+    CountableIndex k{ctx.alloc_index_id()};
+    EXPECT_TRUE(steps::has_explicit_sum_for(
+        make_no_sum(ctx, k, es), {CountableIndex{i}}));
+    // Bounded ExplicitSum body — the walker must check the bound too.
+    auto* bound_es =
+        make_explicit_sum(ctx, i, body, make_scalar(ctx, Rational{3}));
+    EXPECT_TRUE(steps::has_explicit_sum_for(bound_es, {CountableIndex{i}}));
+}
+
+TEST(ExpandProducts, DDotDistributes)
+{
+    // DDot(A + B, C)  →  DDot(A, C) + DDot(B, C)
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* expr = make_ddot(ctx, make_sum(ctx, A, B), C);
+    auto const* after = steps::expand_products(ctx, expr);
+    auto const* s = std::get_if<Sum>(&after->node);
+    ASSERT_NE(s, nullptr);
+    EXPECT_NE(std::get_if<DDot>(&s->left->node), nullptr);
+}
+
+TEST(ExpandProducts, DDotAltDistributes)
+{
+    // DDotAlt(A, B + C)  →  DDotAlt(A, B) + DDotAlt(A, C)
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* expr = make_ddot_alt(ctx, A, make_sum(ctx, B, C));
+    auto const* after = steps::expand_products(ctx, expr);
+    EXPECT_NE(std::get_if<Sum>(&after->node), nullptr);
+}

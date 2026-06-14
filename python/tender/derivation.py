@@ -30,6 +30,7 @@ __all__ = [
     "expand_eps",
     "fold_sums",
     "contract_delta",
+    "fold_equal_addends",
 ]
 
 
@@ -38,10 +39,14 @@ class Derivation:
 
     ``history[0]`` is the initial expression; ``history[k]`` is the result
     after applying the k-th step.
+
+    Pass an ``index_map`` (a :class:`tender.IndexNameMap`) at construction to
+    keep index names consistent across all rendering calls on the history.
     """
 
-    def __init__(self, initial):
+    def __init__(self, initial, index_map=None):
         self._history = [initial]
+        self.index_map = index_map
 
     def step(self, step_fn):
         """Apply *step_fn* to the current expression; return *self* for chaining."""
@@ -63,10 +68,29 @@ class Derivation:
         """The expression this derivation started from."""
         return self._history[0]
 
+    def latex(self, k, index_map=None):
+        """Render history step k to LaTeX, using the derivation's index map."""
+        imap = index_map or self.index_map
+        return self._history[k].latex(imap)
 
-def unroll_sums(expr):
-    """Expand each ``ExplicitSum`` with a concrete index space into a ``Sum`` tree."""
-    return _d._unroll_sums(expr)
+
+def unroll_sums(expr, *indices):
+    """Expand ``ExplicitSum`` nodes into concrete ``Sum`` trees.
+
+    If *indices* are provided, only unroll sums whose summation index appears
+    in that list; raises ``ValueError`` if none of the given indices are found
+    as an ``ExplicitSum`` in *expr*.  With no *indices*, all sums with a
+    concrete index space are expanded (original behaviour).
+    """
+    if not indices:
+        return _d._unroll_sums(expr)
+    idx_list = list(indices)
+    if not _d._has_explicit_sum_for(expr, idx_list):
+        ids = ", ".join(str(i.id) for i in idx_list)
+        raise ValueError(
+            f"No ExplicitSum found for any of the given indices (ids: {ids})"
+        )
+    return _d._unroll_sums_for(expr, idx_list)
 
 
 def eval_delta_concrete(expr):
@@ -75,12 +99,15 @@ def eval_delta_concrete(expr):
 
 
 def fold_arithmetic(expr):
-    """Constant-fold arithmetic: reduce ``Sum``/``Difference``/``TensorProduct``/``ScalarDiv``/``Negate`` of scalar literals."""
+    """Constant-fold arithmetic: reduce ``Sum``/``Difference``/``TensorProduct``/``ScalarDiv``/``Negate`` of scalar literals.
+
+    Also normalises ``X + (-Y)`` → ``X - Y`` and ``X - (-Y)`` → ``X + Y``.
+    """
     return _d._fold_arithmetic(expr)
 
 
 def expand_products(expr):
-    """Distribute TensorProduct over Sum/Difference (expand brackets)."""
+    """Distribute product nodes (TensorProduct, Dot, DDot, DDotAlt, Cross) over Sum/Difference."""
     return _d._expand_products(expr)
 
 
@@ -97,3 +124,8 @@ def fold_sums(expr):
 def contract_delta(expr):
     """Contract ``ExplicitSum{m, δ^m_a · δ^m_b}`` into ``δ_{ab}``."""
     return _d._contract_delta(expr)
+
+
+def fold_equal_addends(expr):
+    """Group identical addends: ``X + X → 2X``, ``n·X + X → (n+1)·X``, etc."""
+    return _d._fold_equal_addends(expr)
