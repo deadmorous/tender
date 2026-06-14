@@ -901,15 +901,126 @@ TEST(UnrollSums, DifferenceBody)
 
 // ---- fold_arithmetic: non-scalar TensorProduct guard -----------------------
 
-TEST(FoldArithmetic, NonScalarTensorProductUnchanged)
+TEST(FoldArithmetic, TensorProductWithOneSimplifies)
 {
-    // TensorProduct(A, 1) → unchanged (left is not a scalar literal).
+    // TensorProduct(A, 1) → A (multiplicative identity).
     Context ctx;
     auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
     auto const* one = make_scalar(ctx, Rational{1});
     auto const* expr = make_tensor_product(ctx, a, one);
     auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, a);
+}
+
+TEST(FoldArithmetic, TensorProductWithZeroCollapses)
+{
+    // TensorProduct(A, 0) → 0.
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* zero = make_scalar(ctx, Rational{0});
+    auto const* expr = make_tensor_product(ctx, a, zero);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* sl = std::get_if<ScalarLiteral>(&after->node);
+    ASSERT_NE(sl, nullptr);
+    EXPECT_EQ(sl->value, Rational{0});
+}
+
+TEST(FoldArithmetic, SumWithZeroSimplifies)
+{
+    // Sum(0, A) → A (additive identity).
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* zero = make_scalar(ctx, Rational{0});
+    auto const* expr = make_sum(ctx, zero, a);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, a);
+}
+
+TEST(FoldArithmetic, NonScalarTensorProductUnchanged)
+{
+    // TensorProduct(A, 2) — neither 0 nor 1 on the right, left is non-scalar.
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* two = make_scalar(ctx, Rational{2});
+    auto const* expr = make_tensor_product(ctx, a, two);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
     EXPECT_EQ(after, expr);
+}
+
+TEST(FoldArithmetic, NegateOfNegateSimplifies)
+{
+    // -(-A) → A
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* neg_a = make_negate(ctx, a);
+    auto const* neg_neg_a = make_negate(ctx, neg_a);
+    auto const* after = steps::fold_arithmetic(ctx, neg_neg_a);
+    EXPECT_EQ(after, a);
+}
+
+TEST(FoldArithmetic, NegTimesNegSimplifies)
+{
+    // (-A)(-B) → A*B
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* b = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr =
+        make_tensor_product(ctx, make_negate(ctx, a), make_negate(ctx, b));
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* tp = std::get_if<TensorProduct>(&after->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(tp->left, a);
+    EXPECT_EQ(tp->right, b);
+}
+
+TEST(FoldSums, PartialCycleInLargerSum)
+{
+    // 6-addend sum containing two copies of a 3-cycle:
+    // δ^1^k δ^1_j, δ^2^k δ^2_j, δ^3^k δ^3_j repeated twice.
+    // fold_sums should fold one 3-cycle into ExplicitSum, leaving 3 addends.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+
+    auto mk = [&](int v) -> Expr const*
+    {
+        return make_tensor_product(
+            ctx,
+            make_delta(
+                ctx,
+                Realm::Oblique,
+                sp,
+                Level::Upper,
+                Level::Upper,
+                IndexAssoc{CountableIndex{k}},
+                IndexAssoc{ConcreteIndex{v}}),
+            make_delta(
+                ctx,
+                Realm::Oblique,
+                sp,
+                Level::Upper,
+                Level::Lower,
+                IndexAssoc{CountableIndex{k}},
+                IndexAssoc{CountableIndex{j}}));
+    };
+
+    // Build 6-addend sum: mk(1)+mk(2)+mk(3)+mk(1)+mk(2)+mk(3)
+    auto const* sum = make_sum(
+        ctx,
+        make_sum(
+            ctx,
+            make_sum(
+                ctx, make_sum(ctx, make_sum(ctx, mk(1), mk(2)), mk(3)), mk(1)),
+            mk(2)),
+        mk(3));
+
+    auto const* after = steps::fold_sums(ctx, sum);
+    // One 3-cycle folded: the result should be Sum(ExplicitSum, 3 remaining).
+    EXPECT_NE(after, sum);
+    // The sum should not be entirely gone — it still has remaining addends.
+    auto const* s = std::get_if<Sum>(&after->node);
+    EXPECT_NE(s, nullptr);
 }
 
 // ---- unroll_sums: more body types ------------------------------------------

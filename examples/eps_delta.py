@@ -1,15 +1,18 @@
 """Expanding ε_ijk and deriving Kronecker-delta identities.
 
-Demonstrates the three new derivation steps:
+Demonstrates the derivation steps:
 
   expand_eps         — replace ε_ijk with its 6-term cofactor expansion
+  expand_products    — distribute tensor products over sums (expand brackets)
   fold_sums          — fold a concrete N-addend cycle back into an ExplicitSum
   contract_delta     — contract Σ_m δ^m_k δ^m_l into δ_kl
 
-Two derivations are shown:
+Four derivations are shown:
 
-1. ε(1,2,3) = +1  (concrete evaluation via expand_eps)
-2. Σ_m δ^m_k δ^m_l = δ_kl  (fold_sums + contract_delta)
+1. ε(1,2,3) = +1         — concrete evaluation via expand_eps
+2. Σ_m δ^m_k δ^m_l = δ_kl — fold_sums + contract_delta
+3. Σ_{ij} ε^{ijk} ε_{ijl} = 2δ^k_l   — full two-index automated derivation
+4. Σ_i ε^{ijk} ε_{iml}               — one-index: expands to 12 delta terms
 """
 
 import pathlib
@@ -58,13 +61,14 @@ labels1 = [
 ]
 
 assert drv1.current.latex() == "1", f"expected 1, got {drv1.current.latex()}"
-print("ε(1,2,3) derivation:")
+print("Derivation 1: ε(1,2,3) = +1")
 for k, e in enumerate(drv1.history):
     tag = f"  [{labels1[k-1]}]" if k > 0 else "  [initial]"
     print(f"  step {k}: {e.latex()}{tag}")
 print()
 
 block1 = derivation_to_latex(drv1, labels1)
+
 
 # ---------------------------------------------------------------------------
 # 2. Contraction: Σ_m δ^m_k δ^m_l = δ_kl
@@ -88,17 +92,123 @@ drv2.step(td.fold_sums).step(td.contract_delta)
 
 labels2 = [
     "fold concrete sum into $\\sum_m$",
-    r"contract $\sum_m \delta^m{}_k\,\delta^m{}_l \to \delta_{kl}$",
+    r"contract $\sum_m \delta^m_k\,\delta^m_l \to \delta_{kl}$",
 ]
 
-result_latex = drv2.current.latex()
-print("Σ_m δ^m_k δ^m_l = δ_kl derivation:")
+print("Derivation 2: Σ_m δ^m_k δ^m_l = δ_kl")
 for k, e in enumerate(drv2.history):
     tag = f"  [{labels2[k-1]}]" if k > 0 else "  [initial]"
     print(f"  step {k}: {e.latex()}{tag}")
 print()
 
 block2 = derivation_to_latex(drv2, labels2)
+
+
+# ---------------------------------------------------------------------------
+# 3. Two-index contraction: Σ_{ij} ε^{ijk} ε_{ijl} = 2δ^k_l
+# ---------------------------------------------------------------------------
+
+ctx3 = tender.Context()
+i3 = ctx3.alloc_index()
+j3 = ctx3.alloc_index()
+k3 = ctx3.alloc_index()
+l3 = ctx3.alloc_index()
+
+eps3a = tender.levi_civita(
+    Realm.Oblique, sp,
+    [Level.Upper, Level.Upper, Level.Upper], [i3, j3, k3], ctx=ctx3)
+eps3b = tender.levi_civita(
+    Realm.Oblique, sp,
+    [Level.Lower, Level.Lower, Level.Lower], [i3, j3, l3], ctx=ctx3)
+
+ei3 = tender.explicit_sum(j3,
+        tender.explicit_sum(i3, eps3a * eps3b, ctx=ctx3),
+        ctx=ctx3)
+
+drv3 = td.Derivation(ei3)
+
+labels3 = [
+    "expand both $\\varepsilon$ symbols",
+    "unroll $\\sum_i$",
+    "unroll $\\sum_j$",
+    "distribute products over sums",
+    "evaluate $\\delta$ on concrete indices",
+    "fold arithmetic (incl.\\ $(-A)(-B)=AB$)",
+    "fold first 3-cycle into $\\sum_p$",
+    "fold second 3-cycle into $\\sum_p$",
+    r"contract both $\sum_p \delta^p_{k}\delta^p_{l} \to \delta^k_l$",
+]
+
+(drv3
+ .step(td.expand_eps)
+ .step(td.unroll_sums)
+ .step(td.unroll_sums)
+ .step(td.expand_products)
+ .step(td.eval_delta_concrete)
+ .step(td.fold_arithmetic)
+ .step(td.fold_sums)
+ .step(td.fold_sums)
+ .step(td.contract_delta))
+
+print("Derivation 3: Σ_{ij} ε^{ijk} ε_{ijl} = 2δ^k_l")
+for k, e in enumerate(drv3.history):
+    tag = f"  [{labels3[k-1]}]" if k > 0 else "  [initial]"
+    print(f"  step {k}: {e.latex()[:100]}{tag}")
+print(f"  result: {drv3.current.latex()}")
+print()
+
+block3 = derivation_to_latex(drv3, labels3)
+
+
+# ---------------------------------------------------------------------------
+# 4. One-index contraction: Σ_i ε^{ijk} ε_{iml} = δ^j_m δ^k_l - δ^j_l δ^k_m
+#    Automated steps expand to 12 concrete delta products.
+#    Folding into two abstract delta pairs requires a theorem step
+#    of the form Σ_p δ^p_A δ^p_B = δ_AB (future work).
+# ---------------------------------------------------------------------------
+
+ctx4 = tender.Context()
+i4 = ctx4.alloc_index()
+j4 = ctx4.alloc_index()
+k4 = ctx4.alloc_index()
+m4 = ctx4.alloc_index()
+l4 = ctx4.alloc_index()
+
+eps4a = tender.levi_civita(
+    Realm.Oblique, sp,
+    [Level.Upper, Level.Upper, Level.Upper], [i4, j4, k4], ctx=ctx4)
+eps4b = tender.levi_civita(
+    Realm.Oblique, sp,
+    [Level.Lower, Level.Lower, Level.Lower], [i4, m4, l4], ctx=ctx4)
+
+ei4 = tender.explicit_sum(i4, eps4a * eps4b, ctx=ctx4)
+
+drv4 = td.Derivation(ei4)
+
+labels4 = [
+    "expand both $\\varepsilon$ symbols",
+    "unroll $\\sum_i$ (concrete values $i=1,2,3$)",
+    "distribute products over sums",
+    "evaluate $\\delta$ on concrete $i$",
+    "fold arithmetic (12 concrete delta-pair terms remain)",
+]
+
+(drv4
+ .step(td.expand_eps)
+ .step(td.unroll_sums)
+ .step(td.expand_products)
+ .step(td.eval_delta_concrete)
+ .step(td.fold_arithmetic))
+
+print("Derivation 4: Σ_i ε^{ijk} ε_{iml} (expands to 12 delta-pair terms)")
+for k, e in enumerate(drv4.history):
+    tag = f"  [{labels4[k-1]}]" if k > 0 else "  [initial]"
+    print(f"  step {k}: {e.latex()[:100]}{tag}")
+print("  (= δ^j_m δ^k_l - δ^j_l δ^k_m; final folding needs theorem Σ_p δ^p_A δ^p_B = δ_AB)")
+print()
+
+block4 = derivation_to_latex(drv4, labels4)
+
 
 # ---------------------------------------------------------------------------
 # Write LaTeX document
@@ -109,7 +219,7 @@ doc = r"""\documentclass{article}
 \usepackage{amsmath,amssymb}
 \begin{document}
 
-\section*{Expanding $\varepsilon_{ijk}$ and contracting Kronecker deltas}
+\section*{Levi-Civita symbol and Kronecker-delta identities}
 
 The Levi-Civita symbol in 3D oblique space can be written as a
 $3\times3$ determinant of Kronecker deltas (cofactor expansion):
@@ -117,9 +227,9 @@ $3\times3$ determinant of Kronecker deltas (cofactor expansion):
 \[
   \varepsilon_{ijk}
   = \det\!\begin{pmatrix}
-      \delta^1{}_i & \delta^1{}_j & \delta^1{}_k \\
-      \delta^2{}_i & \delta^2{}_j & \delta^2{}_k \\
-      \delta^3{}_i & \delta^3{}_j & \delta^3{}_k
+      \delta^1_i & \delta^1_j & \delta^1_k \\
+      \delta^2_i & \delta^2_j & \delta^2_k \\
+      \delta^3_i & \delta^3_j & \delta^3_k
     \end{pmatrix}.
 \]
 
@@ -127,12 +237,36 @@ $3\times3$ determinant of Kronecker deltas (cofactor expansion):
 
 """ + block1 + r"""
 
-\subsection*{2.\quad Contraction identity: $\displaystyle\sum_m \delta^m{}_k\,\delta^m{}_l = \delta_{kl}$}
+\subsection*{2.\quad Contraction identity: $\displaystyle\sum_m \delta^m_k\,\delta^m_l = \delta_{kl}$}
 
-Starting from the explicit concrete sum $\delta^1{}_k\delta^1{}_l
-+ \delta^2{}_k\delta^2{}_l + \delta^3{}_k\delta^3{}_l$:
+Starting from the explicit concrete sum $\delta^1_k\delta^1_l
++ \delta^2_k\delta^2_l + \delta^3_k\delta^3_l$:
 
 """ + block2 + r"""
+
+\subsection*{3.\quad Two-index contraction: $\displaystyle\sum_{i,j} \varepsilon^{ijk} \varepsilon_{ijl} = 2\delta^k_l$}
+
+Both Levi-Civita symbols are expanded, the double sum is unrolled concretely,
+brackets are distributed, each $\delta$ is evaluated, arithmetic is folded
+(including $(-A)(-B)=AB$), the resulting 6 concrete delta-pair terms are
+collected into two 3-cycles via \texttt{fold\_sums}, and each cycle is then
+contracted by \texttt{contract\_delta}:
+
+""" + block3 + r"""
+
+\subsection*{4.\quad One-index contraction: $\displaystyle\sum_i \varepsilon^{ijk} \varepsilon_{iml}$}
+
+Expanding over $i$ concretely yields 12 Kronecker-delta product terms
+representing $\delta^j_m\delta^k_l - \delta^j_l\delta^k_m$.
+The final folding step requires a theorem
+$\displaystyle\sum_p \delta^p_A \delta^p_B = \delta_{AB}$
+and will be added once theorem-application machinery is available.
+
+""" + block4 + r"""
+
+\noindent\textbf{Expected result:}\quad
+$\displaystyle\sum_i\varepsilon^{ijk}\varepsilon_{iml}
+  = \delta^j_m\delta^k_l - \delta^j_l\delta^k_m$.
 
 \end{document}
 """

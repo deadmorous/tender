@@ -522,6 +522,13 @@ NB_MODULE(_core, m)
         "Constant-fold arithmetic operations on scalar literals.");
 
     md.def(
+        "_expand_products",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::expand_products(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Distribute TensorProduct over Sum/Difference (expand brackets).");
+
+    md.def(
         "_expand_eps",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::expand_eps(*e.ctx, e.expr)); },

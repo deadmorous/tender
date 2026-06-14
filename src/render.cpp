@@ -114,12 +114,24 @@ struct Renderer
         return prec(e) < min_prec ? "(" + s + ")" : s;
     }
 
+    // Child of a Sum: wrap lower-precedence nodes, and also Negate nodes
+    // so that "A + -B" becomes "A + (-B)" instead of "A + -(B)".
+    auto sub_sum_child(Expr const& e) -> std::string
+    {
+        auto s = render(e);
+        bool wrap =
+            prec(e) < ADD_PREC || std::holds_alternative<Negate>(e.node);
+        return wrap ? "(" + s + ")" : s;
+    }
+
     // Right child of Difference: also wrap same-precedence nodes
-    // (prevents a - b + c being read as a - (b + c)).
+    // (prevents a - b + c being read as a - (b + c)), and Negate nodes.
     auto sub_diff_right(Expr const& e) -> std::string
     {
         auto s = render(e);
-        return prec(e) <= ADD_PREC ? "(" + s + ")" : s;
+        bool wrap =
+            prec(e) <= ADD_PREC || std::holds_alternative<Negate>(e.node);
+        return wrap ? "(" + s + ")" : s;
     }
 
     // ---- leaves --------------------------------------------------------
@@ -267,8 +279,8 @@ struct Renderer
                 [&](Negate const& n) -> std::string
                 { return "-" + sub(*n.operand, UNARY_PREC); },
                 [&](Sum const& s) -> std::string {
-                    return sub(*s.left, ADD_PREC) + " + "
-                           + sub(*s.right, ADD_PREC);
+                    return sub_sum_child(*s.left) + " + "
+                           + sub_sum_child(*s.right);
                 },
                 [&](Difference const& d) -> std::string {
                     return sub(*d.left, ADD_PREC) + " - "

@@ -26,6 +26,7 @@ __all__ = [
     "unroll_sums",
     "eval_delta_concrete",
     "fold_arithmetic",
+    "expand_products",
     "expand_eps",
     "fold_sums",
     "contract_delta",
@@ -76,6 +77,11 @@ def eval_delta_concrete(expr):
 def fold_arithmetic(expr):
     """Constant-fold arithmetic: reduce ``Sum``/``Difference``/``TensorProduct``/``ScalarDiv``/``Negate`` of scalar literals."""
     return _d._fold_arithmetic(expr)
+
+
+def expand_products(expr):
+    """Distribute TensorProduct over Sum/Difference (expand brackets)."""
+    return _d._expand_products(expr)
 
 
 def expand_eps(expr):

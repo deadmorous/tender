@@ -64,6 +64,12 @@ auto eval_delta_concrete(Context& ctx, Expr const* e) -> Expr const*;
 // applied to scalar literals are reduced to a single ScalarLiteral.
 auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*;
 
+// Distribute TensorProduct over Sum and Difference (expand brackets):
+//   (A + B) \, C  →  A \, C + B \, C
+//   A \, (B + C)  →  A \, B + A \, C
+// Applied bottom-up in one pass, so nested distributions are fully resolved.
+auto expand_products(Context& ctx, Expr const* e) -> Expr const*;
+
 // Replace every rank-3 LeviCivita tensor ε_{ijk} with its 6-term cofactor
 // (Laplace) expansion in Kronecker deltas over the 3-value IndexSpace.
 // Only 3D (|space| == 3) is supported; other ranks are left unchanged.

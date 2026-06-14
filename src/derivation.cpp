@@ -578,6 +578,34 @@ auto substitute_concrete(
         });
 }
 
+// Fully distribute a TensorProduct over Sum/Difference (both sides).
+// Recursively descends into left and right Sum/Difference trees.
+auto distribute_product(Context& ctx, Expr const* l, Expr const* r)
+    -> Expr const*
+{
+    if (auto const* s = std::get_if<Sum>(&l->node))
+        return make_sum(
+            ctx,
+            distribute_product(ctx, s->left, r),
+            distribute_product(ctx, s->right, r));
+    if (auto const* d = std::get_if<Difference>(&l->node))
+        return make_difference(
+            ctx,
+            distribute_product(ctx, d->left, r),
+            distribute_product(ctx, d->right, r));
+    if (auto const* s = std::get_if<Sum>(&r->node))
+        return make_sum(
+            ctx,
+            distribute_product(ctx, l, s->left),
+            distribute_product(ctx, l, s->right));
+    if (auto const* d = std::get_if<Difference>(&r->node))
+        return make_difference(
+            ctx,
+            distribute_product(ctx, l, d->left),
+            distribute_product(ctx, l, d->right));
+    return make_tensor_product(ctx, l, r);
+}
+
 } // namespace
 
 namespace steps
@@ -649,9 +677,13 @@ auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
                             std::get_if<ScalarLiteral>(&s.left->node);
                         auto const* r =
                             std::get_if<ScalarLiteral>(&s.right->node);
-                        if (!l || !r)
-                            return e;
-                        return make_scalar(ctx, l->value + r->value);
+                        if (l && r)
+                            return make_scalar(ctx, l->value + r->value);
+                        if (l && l->value == Rational{0})
+                            return s.right;
+                        if (r && r->value == Rational{0})
+                            return s.left;
+                        return e;
                     },
                     [&](Difference const& s) -> Expr const*
                     {
@@ -659,9 +691,11 @@ auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
                             std::get_if<ScalarLiteral>(&s.left->node);
                         auto const* r =
                             std::get_if<ScalarLiteral>(&s.right->node);
-                        if (!l || !r)
-                            return e;
-                        return make_scalar(ctx, l->value - r->value);
+                        if (l && r)
+                            return make_scalar(ctx, l->value - r->value);
+                        if (r && r->value == Rational{0})
+                            return s.left;
+                        return e;
                     },
                     [&](TensorProduct const& s) -> Expr const*
                     {
@@ -669,9 +703,23 @@ auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
                             std::get_if<ScalarLiteral>(&s.left->node);
                         auto const* r =
                             std::get_if<ScalarLiteral>(&s.right->node);
-                        if (!l || !r)
-                            return e;
-                        return make_scalar(ctx, l->value * r->value);
+                        if (l && r)
+                            return make_scalar(ctx, l->value * r->value);
+                        if (l && l->value == Rational{0})
+                            return make_scalar(ctx, Rational{0});
+                        if (r && r->value == Rational{0})
+                            return make_scalar(ctx, Rational{0});
+                        if (l && l->value == Rational{1})
+                            return s.right;
+                        if (r && r->value == Rational{1})
+                            return s.left;
+                        // (-A)(-B) = A*B
+                        auto const* nl = std::get_if<Negate>(&s.left->node);
+                        auto const* nr = std::get_if<Negate>(&s.right->node);
+                        if (nl && nr)
+                            return make_tensor_product(
+                                ctx, nl->operand, nr->operand);
+                        return e;
                     },
                     [&](ScalarDiv const& s) -> Expr const*
                     {
@@ -687,13 +735,31 @@ auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
                     {
                         auto const* v =
                             std::get_if<ScalarLiteral>(&n.operand->node);
-                        if (!v)
-                            return e;
-                        return make_scalar(ctx, -v->value);
+                        if (v)
+                            return make_scalar(ctx, -v->value);
+                        // -(-A) = A
+                        if (auto const* nn =
+                                std::get_if<Negate>(&n.operand->node))
+                            return nn->operand;
+                        return e;
                     },
                     [&](auto const&) -> Expr const* { return e; },
                 },
                 *e);
+        });
+}
+
+auto expand_products(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* tp = std::get_if<TensorProduct>(&e->node);
+            if (!tp)
+                return e;
+            return distribute_product(ctx, tp->left, tp->right);
         });
 }
 
@@ -780,63 +846,77 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*
             if (addends.size() < 2)
                 return e;
 
-            // Find an IndexSpace from concrete slots in the first addend.
-            IndexSpace const* space = find_space_from_concrete(addends[0]);
-            if (!space)
-                return e;
-
-            auto const vals = space->values();
-            if (vals.size() != addends.size())
-                return e;
-
-            // Collect unique ConcreteIndex values in addend[0].
-            std::vector<int> cvals;
-            collect_concrete_values(addends[0], cvals);
-
             CountableIndex fresh{ctx.alloc_index_id()};
 
-            for (int try_val: cvals)
+            // Try each addend as the anchor for a cycle search.
+            for (std::size_t anchor = 0; anchor < addends.size(); ++anchor)
             {
-                // try_val must be a member of the space.
-                if (std::find(vals.begin(), vals.end(), try_val) == vals.end())
+                IndexSpace const* space =
+                    find_space_from_concrete(addends[anchor]);
+                if (!space)
                     continue;
 
-                // Build template: replace all ConcreteIndex{try_val} with
-                // fresh.
-                auto const* templ =
-                    substitute_concrete(ctx, addends[0], try_val, fresh);
-                if (templ == addends[0])
-                    continue; // nothing replaced
+                auto const vals = space->values();
+                if (vals.size() < 2 || vals.size() > addends.size())
+                    continue;
 
-                // For each remaining addend, find the unique space value that
-                // makes the template match.
-                std::set<int> used = {try_val};
-                bool ok = true;
-                for (std::size_t k = 1; k < addends.size(); ++k)
+                std::vector<int> cvals;
+                collect_concrete_values(addends[anchor], cvals);
+
+                for (int try_val: cvals)
                 {
-                    bool found = false;
+                    if (std::find(vals.begin(), vals.end(), try_val)
+                        == vals.end())
+                        continue;
+
+                    auto const* templ = substitute_concrete(
+                        ctx, addends[anchor], try_val, fresh);
+                    if (templ == addends[anchor])
+                        continue;
+
+                    // Find one addend per remaining value, without reuse.
+                    std::set<int> used = {try_val};
+                    std::vector<std::size_t> matched = {anchor};
+
                     for (int v: vals)
                     {
                         if (used.count(v))
                             continue;
-                        auto const* cand =
-                            substitute(ctx, templ, fresh.id, ConcreteIndex{v});
-                        if (structural_eq(cand, addends[k]))
+                        for (std::size_t k = 0; k < addends.size(); ++k)
                         {
-                            used.insert(v);
-                            found = true;
-                            break;
+                            if (std::find(matched.begin(), matched.end(), k)
+                                != matched.end())
+                                continue;
+                            auto const* cand = substitute(
+                                ctx, templ, fresh.id, ConcreteIndex{v});
+                            if (structural_eq(cand, addends[k]))
+                            {
+                                used.insert(v);
+                                matched.push_back(k);
+                                break;
+                            }
                         }
                     }
-                    if (!found)
-                    {
-                        ok = false;
-                        break;
-                    }
-                }
 
-                if (ok && used.size() == vals.size())
-                    return make_explicit_sum(ctx, fresh, templ);
+                    if (used.size() != vals.size())
+                        continue;
+
+                    // Cycle found: fold matched addends into ExplicitSum.
+                    auto const* folded = make_explicit_sum(ctx, fresh, templ);
+                    if (matched.size() == addends.size())
+                        return folded;
+
+                    // Rebuild sum with unmatched addends + folded.
+                    Expr const* result = folded;
+                    for (std::size_t k = 0; k < addends.size(); ++k)
+                    {
+                        if (std::find(matched.begin(), matched.end(), k)
+                            != matched.end())
+                            continue;
+                        result = make_sum(ctx, result, addends[k]);
+                    }
+                    return result;
+                }
             }
 
             return e; // no fold pattern matched
