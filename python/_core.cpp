@@ -136,7 +136,11 @@ NB_MODULE(_core, m)
     // Context
     // ------------------------------------------------------------------ //
     nb::class_<Context>(m, "Context")
-        .def(nb::init<>())
+        .def(
+            "__init__",
+            [](Context* self)
+            { new (self) Context(g_default_ctx.new_context()); },
+            "Create a context that shares the global index-id factory.")
         .def(
             "alloc_index",
             [](Context& self) -> CountableIndex

@@ -318,90 +318,6 @@ auto find_space_from_concrete(Expr const* e) -> IndexSpace const*
     return found;
 }
 
-// Walk e and return the largest CountableIndex id present in any TensorObject
-// slot (-1 when none are found).
-auto max_countable_id(Expr const* e) -> int
-{
-    int max_id = -1;
-    std::function<void(Expr const*)> go = [&](Expr const* node)
-    {
-        visit(
-            Overloads{
-                [&](TensorObject const& t)
-                {
-                    for (auto const& sb: t.slots)
-                    {
-                        if (!sb.index)
-                            continue;
-                        if (auto const* ci =
-                                std::get_if<CountableIndex>(&*sb.index))
-                            if (ci->id > max_id)
-                                max_id = ci->id;
-                    }
-                },
-                [&](ScalarLiteral const&) {},
-                [&](Negate const& n) { go(n.operand); },
-                [&](Sum const& s)
-                {
-                    go(s.left);
-                    go(s.right);
-                },
-                [&](Difference const& s)
-                {
-                    go(s.left);
-                    go(s.right);
-                },
-                [&](TensorProduct const& s)
-                {
-                    go(s.left);
-                    go(s.right);
-                },
-                [&](ScalarDiv const& s)
-                {
-                    go(s.left);
-                    go(s.right);
-                },
-                [&](Dot const& s)
-                {
-                    go(s.left);
-                    go(s.right);
-                },
-                [&](DDot const& s)
-                {
-                    go(s.left);
-                    go(s.right);
-                },
-                [&](DDotAlt const& s)
-                {
-                    go(s.left);
-                    go(s.right);
-                },
-                [&](Cross const& s)
-                {
-                    go(s.left);
-                    go(s.right);
-                },
-                [&](ExplicitSum const& s)
-                {
-                    if (s.index.id > max_id)
-                        max_id = s.index.id;
-                    go(s.body);
-                    if (s.bound)
-                        go(s.bound);
-                },
-                [&](NoSum const& s)
-                {
-                    if (s.index.id > max_id)
-                        max_id = s.index.id;
-                    go(s.body);
-                },
-            },
-            *node);
-    };
-    go(e);
-    return max_id;
-}
-
 // Collect unique ConcreteIndex values appearing in TensorObject slots of e.
 void collect_concrete_values(Expr const* e, std::vector<int>& out)
 {
@@ -877,15 +793,7 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*
             std::vector<int> cvals;
             collect_concrete_values(addends[0], cvals);
 
-            // Allocate a fresh CountableIndex whose id exceeds all ids already
-            // in the expression (guards against mixed-context id collisions).
-            int max_id = max_countable_id(e);
-            int fresh_id;
-            do
-            {
-                fresh_id = ctx.alloc_index_id();
-            } while (fresh_id <= max_id);
-            CountableIndex fresh{fresh_id};
+            CountableIndex fresh{ctx.alloc_index_id()};
 
             for (int try_val: cvals)
             {
@@ -912,7 +820,7 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*
                         if (used.count(v))
                             continue;
                         auto const* cand =
-                            substitute(ctx, templ, fresh_id, ConcreteIndex{v});
+                            substitute(ctx, templ, fresh.id, ConcreteIndex{v});
                         if (structural_eq(cand, addends[k]))
                         {
                             used.insert(v);
