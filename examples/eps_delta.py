@@ -28,17 +28,32 @@ sp = tender.space_3d
 # Helper
 # ---------------------------------------------------------------------------
 
-def derivation_to_latex(drv, labels=None):
-    lines = []
-    for k, expr in enumerate(drv.history):
-        latex = expr.latex()
-        if k == 0:
-            lines.append(f"  &= {latex}")
+def derivation_to_latex(drv, labels=None, steps=None):
+    """Render selected derivation steps as LaTeX dmath* blocks.
+
+    Each step occupies its own dmath* environment (from the breqn package),
+    which auto-breaks long equations across lines.
+
+    labels : labels[k] is the annotation for drv.history[k+1]
+    steps  : list of history indices to include (None = all steps)
+    """
+    history = drv.history
+    if steps is None:
+        steps = list(range(len(history)))
+
+    blocks = []
+    first = True
+    for k in steps:
+        eq_latex = history[k].latex()
+        if first:
+            body = eq_latex
+            first = False
         else:
             label = labels[k - 1] if labels and k - 1 < len(labels) else ""
             comment = rf"\quad\text{{{label}}}" if label else ""
-            lines.append(f"  &= {latex}{comment}")
-    return "\\begin{align*}\n" + " \\\\\n".join(lines) + "\n\\end{align*}"
+            body = f"= {eq_latex}{comment}"
+        blocks.append(f"\\begin{{dmath*}}\n  {body}\n\\end{{dmath*}}")
+    return "\n".join(blocks)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +151,7 @@ labels3 = [
     "fold arithmetic (incl.\\ $(-A)(-B)=AB$)",
     "fold first 3-cycle into $\\sum_p$",
     "fold second 3-cycle into $\\sum_p$",
-    r"contract both $\sum_p \delta^p_{k}\delta^p_{l} \to \delta^k_l$",
+    r"contract both $\sum_p \delta^p_k\,\delta^p_l \to \delta^k_l$",
 ]
 
 (drv3
@@ -157,7 +172,10 @@ for k, e in enumerate(drv3.history):
 print(f"  result: {drv3.current.latex()}")
 print()
 
-block3 = derivation_to_latex(drv3, labels3)
+# For the PDF, skip the large intermediate steps (1–5: unrolled sums and
+# distributed products contain hundreds of delta symbols).  Show only the
+# initial expression, the state after arithmetic folding, and the final result.
+block3 = derivation_to_latex(drv3, labels3, steps=[0, 6, 7, 9])
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +225,9 @@ for k, e in enumerate(drv4.history):
 print("  (= δ^j_m δ^k_l - δ^j_l δ^k_m; final folding needs theorem Σ_p δ^p_A δ^p_B = δ_AB)")
 print()
 
-block4 = derivation_to_latex(drv4, labels4)
+# Show only the initial expression and the final 12-term delta expansion;
+# the intermediate unrolled/distributed forms are too large for the page.
+block4 = derivation_to_latex(drv4, labels4, steps=[0, 5])
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +237,7 @@ block4 = derivation_to_latex(drv4, labels4)
 doc = r"""\documentclass{article}
 \usepackage[utf8]{inputenc}
 \usepackage{amsmath,amssymb}
+\usepackage{breqn}   % automatic line-breaking of long display equations
 \begin{document}
 
 \section*{Levi-Civita symbol and Kronecker-delta identities}
@@ -237,30 +258,34 @@ $3\times3$ determinant of Kronecker deltas (cofactor expansion):
 
 """ + block1 + r"""
 
-\subsection*{2.\quad Contraction identity: $\displaystyle\sum_m \delta^m_k\,\delta^m_l = \delta_{kl}$}
+\subsection*{2.\quad Contraction identity:
+  $\displaystyle\sum_m \delta^m_k\,\delta^m_l = \delta_{kl}$}
 
-Starting from the explicit concrete sum $\delta^1_k\delta^1_l
-+ \delta^2_k\delta^2_l + \delta^3_k\delta^3_l$:
+Starting from the explicit concrete sum
+$\delta^1_k\delta^1_l + \delta^2_k\delta^2_l + \delta^3_k\delta^3_l$:
 
 """ + block2 + r"""
 
-\subsection*{3.\quad Two-index contraction: $\displaystyle\sum_{i,j} \varepsilon^{ijk} \varepsilon_{ijl} = 2\delta^k_l$}
+\subsection*{3.\quad Two-index contraction:
+  $\displaystyle\sum_{i,j} \varepsilon^{ijk} \varepsilon_{ijl} = 2\delta^k_l$}
 
-Both Levi-Civita symbols are expanded, the double sum is unrolled concretely,
-brackets are distributed, each $\delta$ is evaluated, arithmetic is folded
-(including $(-A)(-B)=AB$), the resulting 6 concrete delta-pair terms are
-collected into two 3-cycles via \texttt{fold\_sums}, and each cycle is then
-contracted by \texttt{contract\_delta}:
+Steps: expand both $\varepsilon$ symbols, unroll $\sum_i$ and $\sum_j$
+concretely, distribute tensor products over sums, evaluate concrete
+$\delta$s, and fold arithmetic (including $(-A)(-B)=AB$).
+The intermediate expressions contain hundreds of delta symbols and are
+omitted; we resume after arithmetic folding:
 
 """ + block3 + r"""
 
-\subsection*{4.\quad One-index contraction: $\displaystyle\sum_i \varepsilon^{ijk} \varepsilon_{iml}$}
+\subsection*{4.\quad One-index contraction:
+  $\displaystyle\sum_i \varepsilon^{ijk} \varepsilon_{iml}$}
 
-Expanding over $i$ concretely yields 12 Kronecker-delta product terms
-representing $\delta^j_m\delta^k_l - \delta^j_l\delta^k_m$.
-The final folding step requires a theorem
-$\displaystyle\sum_p \delta^p_A \delta^p_B = \delta_{AB}$
-and will be added once theorem-application machinery is available.
+Expanding $\varepsilon$, unrolling $\sum_i$ concretely, distributing
+products, evaluating concrete $\delta$s, and folding arithmetic yields
+12 Kronecker-delta terms representing
+$\delta^j_m\delta^k_l - \delta^j_l\delta^k_m$.
+Closing this to two abstract delta pairs requires a theorem
+$\displaystyle\sum_p \delta^p_A \delta^p_B = \delta_{AB}$ (future work):
 
 """ + block4 + r"""
 
