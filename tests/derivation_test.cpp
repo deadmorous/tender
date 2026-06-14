@@ -424,6 +424,640 @@ TEST(ContractDelta, NoContractWithMismatchedLevels)
     EXPECT_EQ(after, expr); // unchanged — levels don't match
 }
 
+// ---- fold_arithmetic: Difference, ScalarDiv, Negate -----------------------
+
+TEST(FoldArithmetic, DifferenceOfScalars)
+{
+    // 5 - 2 → 3
+    Context ctx;
+    auto* a = make_scalar(ctx, Rational{5});
+    auto* b = make_scalar(ctx, Rational{2});
+    auto* expr = make_difference(ctx, a, b);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(scalar_value(after), Rational{3});
+}
+
+TEST(FoldArithmetic, DifferenceWithNonScalar)
+{
+    // A - 1 → unchanged (left is not a scalar)
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* b = make_scalar(ctx, Rational{1});
+    auto const* expr = make_difference(ctx, a, b);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+TEST(FoldArithmetic, ScalarDivision)
+{
+    // 6 / 3 → 2
+    Context ctx;
+    auto* a = make_scalar(ctx, Rational{6});
+    auto* b = make_scalar(ctx, Rational{3});
+    auto* expr = make_scalar_div(ctx, a, b);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(scalar_value(after), Rational{2});
+}
+
+TEST(FoldArithmetic, NegateOfScalar)
+{
+    // -3 → scalar -3
+    Context ctx;
+    auto* v = make_scalar(ctx, Rational{3});
+    auto* expr = make_negate(ctx, v);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(scalar_value(after), Rational{-3});
+}
+
+TEST(FoldArithmetic, NegateNonScalarUnchanged)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* expr = make_negate(ctx, a);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+// ---- rewrite_tree traversal: Dot, DDot, DDotAlt, Cross, NoSum ------------
+// These exercises ensure every structural node type is traversed when a step
+// recurses into a tree.  The inner scalars get folded; the wrapper node is
+// rebuilt if its child changed.
+
+TEST(FoldArithmetic, DotChildFolds)
+{
+    // dot(1+1, 1+1) — fold_arithmetic folds the leaves, Dot is rebuilt.
+    Context ctx;
+    auto* one = make_scalar(ctx, Rational{1});
+    auto* sum = make_sum(ctx, one, one);
+    auto* expr = make_dot(ctx, sum, sum);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* d = std::get_if<Dot>(&after->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(scalar_value(d->left), Rational{2});
+    EXPECT_EQ(scalar_value(d->right), Rational{2});
+}
+
+TEST(FoldArithmetic, DDotChildFolds)
+{
+    Context ctx;
+    auto* one = make_scalar(ctx, Rational{1});
+    auto* sum = make_sum(ctx, one, one);
+    auto* expr = make_ddot(ctx, sum, sum);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* d = std::get_if<DDot>(&after->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(scalar_value(d->left), Rational{2});
+}
+
+TEST(FoldArithmetic, DDotAltChildFolds)
+{
+    Context ctx;
+    auto* one = make_scalar(ctx, Rational{1});
+    auto* sum = make_sum(ctx, one, one);
+    auto* expr = make_ddot_alt(ctx, sum, sum);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* d = std::get_if<DDotAlt>(&after->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(scalar_value(d->left), Rational{2});
+}
+
+TEST(FoldArithmetic, CrossChildFolds)
+{
+    Context ctx;
+    auto* one = make_scalar(ctx, Rational{1});
+    auto* sum = make_sum(ctx, one, one);
+    auto* expr = make_cross(ctx, sum, sum);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* d = std::get_if<Cross>(&after->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(scalar_value(d->left), Rational{2});
+}
+
+TEST(FoldArithmetic, ScalarDivChildFolds)
+{
+    // (1+1) / (1+2) → 2/3
+    Context ctx;
+    auto* one = make_scalar(ctx, Rational{1});
+    auto* two = make_scalar(ctx, Rational{2});
+    auto* num = make_sum(ctx, one, one);
+    auto* den = make_sum(ctx, one, two);
+    auto* expr = make_scalar_div(ctx, num, den);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(scalar_value(after), Rational(2, 3));
+}
+
+TEST(FoldArithmetic, DifferenceChildFolds)
+{
+    // (1+4) - (1+1) → 3
+    Context ctx;
+    auto* one = make_scalar(ctx, Rational{1});
+    auto* four = make_scalar(ctx, Rational{4});
+    auto* lhs = make_sum(ctx, one, four);
+    auto* rhs = make_sum(ctx, one, one);
+    auto* expr = make_difference(ctx, lhs, rhs);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(scalar_value(after), Rational{3});
+}
+
+TEST(FoldArithmetic, NoSumBodyFolds)
+{
+    // NoSum(i, 1+1) → NoSum(i, 2)
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto* one = make_scalar(ctx, Rational{1});
+    auto* expr = make_no_sum(ctx, i, make_sum(ctx, one, one));
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* ns = std::get_if<NoSum>(&after->node);
+    ASSERT_NE(ns, nullptr);
+    EXPECT_EQ(scalar_value(ns->body), Rational{2});
+}
+
+// ---- unroll_sums: edge cases -----------------------------------------------
+
+TEST(UnrollSums, IndexNotInBodyUnchanged)
+{
+    // ExplicitSum{i, A} where A doesn't contain i → space not found →
+    // unchanged.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* body = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* expr = make_explicit_sum(ctx, i, body);
+
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+// ---- expand_eps: edge cases ------------------------------------------------
+
+TEST(ExpandEps, TwoDimSpaceUnchanged)
+{
+    // ε over a 2D space produces rank-2 (2 slots) — expand_eps only handles
+    // rank-3, so this must be left unchanged.
+    Context ctx;
+    auto const* sp = space_2d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+
+    auto const* eps = make_levi_civita(
+        ctx,
+        Realm::Oblique,
+        sp,
+        {Level::Lower, Level::Lower},
+        {IndexAssoc{i}, IndexAssoc{j}});
+
+    auto const* after = steps::expand_eps(ctx, eps);
+    EXPECT_EQ(after, eps);
+}
+
+// ---- fold_sums: edge cases -------------------------------------------------
+
+TEST(FoldSums, NoConcreteSlotInFirstAddend)
+{
+    // If the first addend has no ConcreteIndex at all, no space can be found
+    // and the expression must be left unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+
+    // Three fully-symbolic deltas — no concrete slot anywhere.
+    auto mk = [&](CountableIndex a, CountableIndex b)
+    {
+        return make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{a},
+            IndexAssoc{b});
+    };
+    auto* sum = make_sum(ctx, make_sum(ctx, mk(i, j), mk(i, j)), mk(i, j));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_EQ(after, sum);
+}
+
+TEST(FoldSums, AddendCountMismatchUnchanged)
+{
+    // Only 2 addends for a 3-value space → size mismatch → unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+
+    auto delta = [&](int v)
+    {
+        return make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+    };
+
+    auto* sum = make_sum(ctx, delta(1), delta(2)); // only 2 of 3
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_EQ(after, sum);
+}
+
+// ---- contract_delta: more edge cases ---------------------------------------
+
+TEST(ContractDelta, BoundedExplicitSumUnchanged)
+{
+    // ExplicitSum with a symbolic bound → unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+
+    auto* d1 = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{m},
+        IndexAssoc{k});
+    auto* d2 = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{m},
+        IndexAssoc{k});
+    auto* bound = make_scalar(ctx, Rational{3});
+    auto* expr =
+        make_explicit_sum(ctx, m, make_tensor_product(ctx, d1, d2), bound);
+
+    auto const* after = steps::contract_delta(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+TEST(ContractDelta, NonProductBodyUnchanged)
+{
+    // ExplicitSum{m, δ^m_k} — body is a single delta, not a product →
+    // unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{m},
+        IndexAssoc{k});
+    auto* expr = make_explicit_sum(ctx, m, d);
+
+    auto const* after = steps::contract_delta(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+TEST(ContractDelta, NonDeltaInProductUnchanged)
+{
+    // ExplicitSum{m, A · δ^m_k} — left side is not a delta → unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+
+    auto* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{m},
+        IndexAssoc{k});
+    auto* expr = make_explicit_sum(ctx, m, make_tensor_product(ctx, a, d));
+
+    auto const* after = steps::contract_delta(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+TEST(ContractDelta, SumIndexNotInEitherDeltaUnchanged)
+{
+    // ExplicitSum{m, δ^k_l · δ^k_l} — neither delta uses m → unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{k},
+        IndexAssoc{l});
+    auto* expr = make_explicit_sum(ctx, m, make_tensor_product(ctx, d, d));
+
+    auto const* after = steps::contract_delta(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+TEST(ContractDelta, MismatchedRealmUnchanged)
+{
+    // Σ_m δ^m_k(Oblique) · δ^m_l(Covariant) — different realms → unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+
+    auto* d1 = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{m},
+        IndexAssoc{k});
+    auto* d2 = make_delta(
+        ctx,
+        Realm::Orthonormal,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{m},
+        IndexAssoc{l});
+    auto* expr = make_explicit_sum(ctx, m, make_tensor_product(ctx, d1, d2));
+
+    auto const* after = steps::contract_delta(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+// ---- fold_sums: Negate and Difference addend types -------------------------
+// These tests exercise the Negate / Difference walker branches inside
+// find_space_from_concrete, collect_concrete_values, and structural_eq.
+
+TEST(FoldSums, NegatedTermCycle)
+{
+    // -δ^1_k + -δ^2_k + -δ^3_k  →  ExplicitSum{m, -δ^m_k}
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+
+    auto neg_delta = [&](int v)
+    {
+        auto* d = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+        return make_negate(ctx, d);
+    };
+
+    auto* sum =
+        make_sum(ctx, make_sum(ctx, neg_delta(1), neg_delta(2)), neg_delta(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(FoldSums, DifferenceTermCycle)
+{
+    // (δ^1_k - δ^1_l) + (δ^2_k - δ^2_l) + (δ^3_k - δ^3_l)
+    //   →  ExplicitSum{m, δ^m_k - δ^m_l}
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+
+    auto diff_delta = [&](int v)
+    {
+        auto* dk = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+        auto* dl = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{l});
+        return make_difference(ctx, dk, dl);
+    };
+
+    auto* sum = make_sum(
+        ctx, make_sum(ctx, diff_delta(1), diff_delta(2)), diff_delta(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+// ---- unroll_sums: Difference body exercises find_index_space ---------------
+
+TEST(UnrollSums, DifferenceBody)
+{
+    // ExplicitSum{i, δ^i_j - δ^i_k}  →  unrolled Sum of differences.
+    // Exercises the Difference walker branch inside find_index_space.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+
+    auto* dj = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* dk = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{k});
+    auto* expr = make_explicit_sum(ctx, i, make_difference(ctx, dj, dk));
+
+    auto const* after = steps::unroll_sums(ctx, expr);
+    // Result must be a Sum tree (no more ExplicitSum for i).
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+    EXPECT_NE(std::get_if<Sum>(&after->node), nullptr);
+}
+
+// ---- fold_arithmetic: non-scalar TensorProduct guard -----------------------
+
+TEST(FoldArithmetic, NonScalarTensorProductUnchanged)
+{
+    // TensorProduct(A, 1) → unchanged (left is not a scalar literal).
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* one = make_scalar(ctx, Rational{1});
+    auto const* expr = make_tensor_product(ctx, a, one);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+// ---- unroll_sums: more body types ------------------------------------------
+
+TEST(UnrollSums, NegateBody)
+{
+    // ExplicitSum{i, -δ^i_j}  →  sum of Negate terms.
+    // Exercises the Negate walker branch inside find_index_space.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* expr = make_explicit_sum(ctx, i, make_negate(ctx, d));
+
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+    EXPECT_NE(std::get_if<Sum>(&after->node), nullptr);
+}
+
+TEST(UnrollSums, BodyContainsAbstractTensor)
+{
+    // ExplicitSum{i, δ^i_j * A} where A has no slots.
+    // substitute() visits A and finds no matching slot → !changed → return e
+    // (exercises the !changed early-return in substitute).
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* expr = make_explicit_sum(ctx, i, make_tensor_product(ctx, d, a));
+
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+// ---- fold_sums: ExplicitSum and NoSum wrapped addends ----------------------
+
+TEST(FoldSums, ExplicitSumWrappedCycle)
+{
+    // ExplicitSum{j,δ^1_j} + ExplicitSum{j,δ^2_j} + ExplicitSum{j,δ^3_j}
+    //   →  ExplicitSum{m, ExplicitSum{j, δ^m_j}}
+    // Exercises ExplicitSum in find_space_from_concrete,
+    // collect_concrete_values, rewrite_tree (ExplicitSum), and structural_eq.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex j{ctx.alloc_index_id()};
+
+    auto mk = [&](int v)
+    {
+        auto* d = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{j});
+        return make_explicit_sum(ctx, j, d);
+    };
+
+    auto* sum = make_sum(ctx, make_sum(ctx, mk(1), mk(2)), mk(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(FoldSums, NoSumWrappedCycle)
+{
+    // NoSum(k,δ^1_k) + NoSum(k,δ^2_k) + NoSum(k,δ^3_k)
+    //   →  ExplicitSum{m, NoSum(k, δ^m_k)}
+    // Exercises NoSum in find_space_from_concrete, collect_concrete_values,
+    // rewrite_tree (NoSum), and structural_eq.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+
+    auto mk = [&](int v)
+    {
+        auto* d = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+        return make_no_sum(ctx, k, d);
+    };
+
+    auto* sum = make_sum(ctx, make_sum(ctx, mk(1), mk(2)), mk(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+// ---- eval_delta_concrete: non-delta tensor leaves unchanged ----------------
+
+TEST(EvalDeltaConcrete, LeviCivitaUnchanged)
+{
+    // A LeviCivita is not a delta — eval_delta_concrete must leave it alone.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+
+    auto const* eps = make_levi_civita(
+        ctx,
+        Realm::Oblique,
+        sp,
+        {Level::Lower, Level::Lower, Level::Lower},
+        {IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k}});
+
+    auto const* after = steps::eval_delta_concrete(ctx, eps);
+    EXPECT_EQ(after, eps);
+}
+
+// ---- fold_arithmetic: ScalarDiv guard (non-scalar operands) ----------------
+
+TEST(FoldArithmetic, ScalarDivNonScalarUnchanged)
+{
+    // A / 1 → unchanged (left is not a scalar literal).
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* one = make_scalar(ctx, Rational{1});
+    auto const* expr = make_scalar_div(ctx, a, one);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
 // ---- Derivation history ---------------------------------------------------
 
 TEST(Derivation, HistoryLengthMatchesSteps)
