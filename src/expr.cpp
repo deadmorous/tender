@@ -16,7 +16,7 @@ auto make_tensor_object(
     return ctx.make<Expr>(TensorObject{
         .name = std::move(name),
         .rank = rank,
-        .label = std::nullopt,
+        .traits = std::nullopt,
         .slots = std::move(slots)});
 }
 
@@ -102,7 +102,7 @@ auto make_identity(Context& ctx) -> Expr const*
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("I"),
         .rank = 2,
-        .label = TensorLabel::Identity,
+        .traits = TensorTraits{.well_known = WellKnownKind::Identity},
         .slots = {}});
 }
 
@@ -118,7 +118,10 @@ auto make_delta(
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("\\delta"),
         .rank = 0,
-        .label = TensorLabel::Delta,
+        .traits =
+            TensorTraits{
+                .well_known = WellKnownKind::Delta,
+                .render_hints = RenderHint::OmitVoidIndexPlaceholders},
         .slots = {
             SlotBinding{IndexSlot{level0, realm, space}, std::move(index0)},
             SlotBinding{IndexSlot{level1, realm, space}, std::move(index1)}}});
@@ -148,7 +151,7 @@ auto make_levi_civita(
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("\\varepsilon"),
         .rank = 0,
-        .label = TensorLabel::LeviCivita,
+        .traits = TensorTraits{.well_known = WellKnownKind::LeviCivita},
         .slots = std::move(slots)});
 }
 

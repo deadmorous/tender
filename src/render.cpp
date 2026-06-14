@@ -1,5 +1,6 @@
 #include <tender/render.hpp>
 
+#include <mpk/mix/enum_flags.hpp>
 #include <mpk/mix/util/overloads.hpp>
 
 #include <stdexcept>
@@ -155,13 +156,18 @@ struct Renderer
 
     // Render index slots.
     //
-    // Pure-level tensors (all upper or all lower): flat grouping, e.g. ^{ijk}.
+    // Pure-level (all upper or all lower): flat grouping, e.g. ^{ijk}.
     //
-    // Mixed-level tensors: positional interleaving — each slot position
-    // contributes its index to its own band and \cdot to the other band,
-    // making the index position explicit.  E.g. two slots [upper-i, lower-j]
-    // render as ^{i\cdot}_{\cdot j}.
-    auto slots_str(std::vector<SlotBinding> const& slots) -> std::string
+    // Mixed-level, OmitVoidIndexPlaceholders set: separate ^{...} and _{...}
+    // bands with no \cdot markers — appropriate for objects whose symmetry
+    // makes slot order unimportant (e.g. Kronecker delta).
+    //
+    // Mixed-level, default: positional interleaving — each slot contributes
+    // its index to its own band and \cdot to the other, making position
+    // explicit.  E.g. [upper-i, lower-j] → ^{i\cdot}_{\cdot j}.
+    auto slots_str(
+        std::vector<SlotBinding> const& slots,
+        mpk::mix::EnumFlags<RenderHint> hints) -> std::string
     {
         if (slots.empty())
             return {};
@@ -175,18 +181,30 @@ struct Renderer
                 has_lower = true;
         }
 
-        if (!has_upper || !has_lower)
+        if (!has_upper || !has_lower
+            || hints.contains(RenderHint::OmitVoidIndexPlaceholders))
         {
-            std::string s;
+            // Flat grouping: collect upper indices then lower indices.
+            std::string upper, lower;
             for (auto const& sb: slots)
-                s += index_str(sb.index, sb.slot.space);
-            return has_upper ? "^{" + s + "}" : "_{" + s + "}";
+            {
+                auto s = index_str(sb.index, sb.slot.space);
+                if (sb.slot.level == Level::Upper)
+                    upper += s;
+                else
+                    lower += s;
+            }
+            std::string result;
+            if (has_upper)
+                result += "^{" + upper + "}";
+            if (has_lower)
+                result += "_{" + lower + "}";
+            return result;
         }
 
-        // Mixed: build both bands positionally.
-        // "\\cdot " (with trailing space) safely terminates the LaTeX
-        // command before any following letter or command.  The trailing
-        // space is trimmed from the end of each band to keep output clean.
+        // Mixed positional: build both bands with \cdot placeholders.
+        // "\\cdot " (with trailing space) safely terminates the LaTeX command
+        // before any following letter; trimmed from band ends for clean output.
         std::string upper, lower;
         for (auto const& sb: slots)
         {
@@ -238,7 +256,12 @@ struct Renderer
         return visit(
             mpk::mix::Overloads{
                 [&](TensorObject const& t) -> std::string
-                { return name_str(t.name, t.rank) + slots_str(t.slots); },
+                {
+                    mpk::mix::EnumFlags<RenderHint> hints;
+                    if (t.traits)
+                        hints = t.traits->render_hints;
+                    return name_str(t.name, t.rank) + slots_str(t.slots, hints);
+                },
                 [&](ScalarLiteral const& s) -> std::string
                 { return rational_str(s.value); },
                 [&](Negate const& n) -> std::string

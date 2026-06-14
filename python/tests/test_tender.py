@@ -222,10 +222,10 @@ class TestDelta:
         # rank=0 → plain (no bold)
         assert r"\delta" in latex
         assert r"\boldsymbol" not in latex
-        # positional interleaving: upper band has \cdot placeholder, lower band has \cdot placeholder
+        # OmitVoidIndexPlaceholders: separate ^{i} _{j} bands, no \cdot
         assert r"^{" in latex
         assert r"_{" in latex
-        assert r"\cdot" in latex
+        assert r"\cdot" not in latex
 
     def test_orthonormal_2d(self):
         sp = tender.space_2d

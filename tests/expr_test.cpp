@@ -25,7 +25,7 @@ TEST(MakeTensorObject, AbstractNoSlots)
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "f");
     EXPECT_FALSE(t.rank.has_value());
-    EXPECT_FALSE(t.label.has_value());
+    EXPECT_FALSE(t.traits.has_value());
     EXPECT_TRUE(t.slots.empty());
 }
 
@@ -219,7 +219,11 @@ TEST(MakeIdentity, AbstractForm)
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "I");
     EXPECT_EQ(t.rank, std::optional<int>{2});
-    EXPECT_EQ(t.label, std::optional<TensorLabel>{TensorLabel::Identity});
+    ASSERT_TRUE(t.traits.has_value());
+    EXPECT_EQ(
+        t.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Identity});
+    EXPECT_FALSE(t.traits->render_hints.any());
     EXPECT_TRUE(t.slots.empty());
 }
 
@@ -236,7 +240,12 @@ TEST(MakeDelta, SlotLayout)
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "\\delta");
     EXPECT_EQ(t.rank, std::optional<int>{0});
-    EXPECT_EQ(t.label, std::optional<TensorLabel>{TensorLabel::Delta});
+    ASSERT_TRUE(t.traits.has_value());
+    EXPECT_EQ(
+        t.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Delta});
+    EXPECT_TRUE(
+        t.traits->render_hints.contains(RenderHint::OmitVoidIndexPlaceholders));
     ASSERT_EQ(t.slots.size(), 2u);
     EXPECT_EQ(t.slots[0].slot.level, Level::Upper);
     EXPECT_EQ(t.slots[0].slot.realm, Realm::Oblique);
@@ -278,7 +287,10 @@ TEST(MakeLeviCivita, Rank3)
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.name.v.view(), "\\varepsilon");
     EXPECT_EQ(t.rank, std::optional<int>{0});
-    EXPECT_EQ(t.label, std::optional<TensorLabel>{TensorLabel::LeviCivita});
+    ASSERT_TRUE(t.traits.has_value());
+    EXPECT_EQ(
+        t.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::LeviCivita});
     ASSERT_EQ(t.slots.size(), 3u);
     for (auto const& sb: t.slots)
     {

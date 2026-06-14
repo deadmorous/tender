@@ -1,10 +1,13 @@
 #pragma once
 
+#include <mpk/mix/enum_flags.hpp>
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/index.hpp>
 #include <tender/rational.hpp>
 
+#include <array>
 #include <concepts>
+#include <cstdint>
 #include <optional>
 #include <type_traits>
 #include <variant>
@@ -16,15 +19,50 @@ namespace tender
 // Forward declaration — node types hold Expr const* for child nodes.
 struct Expr;
 
-// ---- TensorLabel -------------------------------------------------------
+// ---- TensorTraits -------------------------------------------------------
 
-// Tags for well-known tensor objects. Derivation rules use this field
-// to identify tensors by role rather than by name string comparison.
-enum class TensorLabel
+// Well-known tensor roles, recognised by derivation rules.
+enum class WellKnownKind : uint8_t
 {
     Identity,   // identity tensor I
     Delta,      // Kronecker delta δ
     LeviCivita, // Levi-Civita symbol ε
+};
+
+// Renderer display flags.  Use mpk::mix::EnumFlags<RenderHint> to build sets.
+enum class RenderHint : uint8_t
+{
+    OmitVoidIndexPlaceholders = 1, // suppress \cdot in mixed upper/lower slots
+};
+
+// Permutation generators stored as image arrays, bit-packed per the scheme in
+// vibes/000031.  Each generator occupies ceil(log2(rank)) × rank bits rounded
+// to a byte boundary; generators are concatenated in data[].  rank is read
+// from the enclosing TensorObject.
+// SymmetrySpec:     value-preserving permutations (even for fully antisymm.
+// tensors). AntisymmetrySpec: representative sign-flipping permutations (not a
+// group).
+struct PermutationSpec
+{
+    uint8_t num_gens = 0;
+    bool same_level_only = true;
+    static constexpr std::size_t MaxBytes = 16;
+    std::array<uint8_t, MaxBytes> data = {};
+};
+
+struct SymmetrySpec : PermutationSpec
+{
+};
+struct AntisymmetrySpec : PermutationSpec
+{
+};
+
+struct TensorTraits
+{
+    std::optional<WellKnownKind> well_known = {};
+    std::optional<SymmetrySpec> symmetry = {};
+    std::optional<AntisymmetrySpec> antisymmetry = {};
+    mpk::mix::EnumFlags<RenderHint> render_hints = {};
 };
 
 // ---- SlotBinding -------------------------------------------------------
@@ -52,7 +90,7 @@ struct TensorObject final
 {
     TensorName name;
     std::optional<int> rank;
-    std::optional<TensorLabel> label;
+    std::optional<TensorTraits> traits;
     std::vector<SlotBinding> slots;
 };
 

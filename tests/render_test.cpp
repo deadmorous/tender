@@ -264,7 +264,7 @@ TEST(RenderTensorObject, DeltaWithIndices)
     IndexNameMap map;
     map.assign(i, make_index_name("i"));
     map.assign(j, make_index_name("j"));
-    EXPECT_EQ(render_latex(*e, map), "\\delta^{i\\cdot}_{\\cdot j}");
+    EXPECT_EQ(render_latex(*e, map), "\\delta^{i}_{j}");
 }
 
 TEST(RenderTensorObject, LeviCivitaRank3)
