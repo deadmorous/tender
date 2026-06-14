@@ -4,6 +4,7 @@
 #include <nanobind/stl/vector.h>
 
 #include <tender/context.hpp>
+#include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/index.hpp>
 #include <tender/index_space.hpp>
@@ -486,4 +487,33 @@ NB_MODULE(_core, m)
         &tender::space_4d,
         nb::rv_policy::reference,
         "4D spacetime index space: values {0,1,2,3}.");
+
+    // ------------------------------------------------------------------ //
+    // derivation submodule
+    // ------------------------------------------------------------------ //
+    // Steps are exposed as _name(PyExpr) -> PyExpr so that the Python
+    // tender.derivation module can wrap them with clean public names.
+    nb::module_ md =
+        m.def_submodule("derivation", "Derivation step functions.");
+
+    md.def(
+        "_unroll_sums",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::unroll_sums(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Expand each ExplicitSum with a concrete index space into a Sum tree.");
+
+    md.def(
+        "_eval_delta_concrete",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::eval_delta_concrete(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Evaluate delta(a,b) with concrete indices to 1 or 0.");
+
+    md.def(
+        "_fold_arithmetic",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::fold_arithmetic(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Constant-fold arithmetic operations on scalar literals.");
 }
