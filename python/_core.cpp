@@ -516,4 +516,25 @@ NB_MODULE(_core, m)
         { return derive(e, steps::fold_arithmetic(*e.ctx, e.expr)); },
         "expr"_a,
         "Constant-fold arithmetic operations on scalar literals.");
+
+    md.def(
+        "_expand_eps",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::expand_eps(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Expand rank-3 Levi-Civita symbol to 6-term Kronecker-delta expansion.");
+
+    md.def(
+        "_fold_sums",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::fold_sums(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Fold a concrete N-term Sum cycle into an ExplicitSum over a fresh index.");
+
+    md.def(
+        "_contract_delta",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::contract_delta(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Contract ExplicitSum{m, δ^m_a · δ^m_b} into δ_{ab}.");
 }

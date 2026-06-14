@@ -26,6 +26,9 @@ __all__ = [
     "unroll_sums",
     "eval_delta_concrete",
     "fold_arithmetic",
+    "expand_eps",
+    "fold_sums",
+    "contract_delta",
 ]
 
 
@@ -73,3 +76,18 @@ def eval_delta_concrete(expr):
 def fold_arithmetic(expr):
     """Constant-fold arithmetic: reduce ``Sum``/``Difference``/``TensorProduct``/``ScalarDiv``/``Negate`` of scalar literals."""
     return _d._fold_arithmetic(expr)
+
+
+def expand_eps(expr):
+    """Expand every rank-3 Levi-Civita symbol to its 6-term Kronecker-delta cofactor expansion."""
+    return _d._expand_eps(expr)
+
+
+def fold_sums(expr):
+    """Detect concrete N-addend Sum cycles and fold them into ``ExplicitSum`` over a fresh index."""
+    return _d._fold_sums(expr)
+
+
+def contract_delta(expr):
+    """Contract ``ExplicitSum{m, δ^m_a · δ^m_b}`` into ``δ_{ab}``."""
+    return _d._contract_delta(expr)

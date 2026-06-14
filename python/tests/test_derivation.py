@@ -148,3 +148,87 @@ def test_delta_squared_is_3():
     drv.step(td.unroll_sums).step(td.eval_delta_concrete).step(td.fold_arithmetic)
 
     assert drv.current.latex() == "3"
+
+
+# ---- expand_eps ------------------------------------------------------------
+
+def test_expand_eps_rank3_no_longer_levi_civita():
+    """After expand_eps a LeviCivita object becomes a sum tree."""
+    ctx = tender.Context()
+    i, j, k = ctx.alloc_index(), ctx.alloc_index(), ctx.alloc_index()
+    eps = tender.levi_civita(
+        tender.Realm.Oblique, _sp3(),
+        [tender.Level.Lower, tender.Level.Lower, tender.Level.Lower],
+        [i, j, k])
+    after = td.expand_eps(eps)
+    # The outer node is a Sum, not LeviCivita any more.
+    assert after.latex() != eps.latex()
+
+
+def test_expand_eps_even_perm_is_plus_one():
+    """ε(1,2,3) = +1."""
+    sp = _sp3()
+    eps = tender.levi_civita(
+        tender.Realm.Oblique, sp,
+        [tender.Level.Lower, tender.Level.Lower, tender.Level.Lower],
+        [1, 2, 3])
+    after = td.fold_arithmetic(td.eval_delta_concrete(td.expand_eps(eps)))
+    assert after.latex() == "1"
+
+
+def test_expand_eps_odd_perm_is_minus_one():
+    """ε(1,3,2) = -1."""
+    sp = _sp3()
+    eps = tender.levi_civita(
+        tender.Realm.Oblique, sp,
+        [tender.Level.Lower, tender.Level.Lower, tender.Level.Lower],
+        [1, 3, 2])
+    after = td.fold_arithmetic(td.eval_delta_concrete(td.expand_eps(eps)))
+    assert after.latex() == "-1"
+
+
+def test_expand_eps_repeated_index_is_zero():
+    """ε(1,1,2) = 0."""
+    sp = _sp3()
+    eps = tender.levi_civita(
+        tender.Realm.Oblique, sp,
+        [tender.Level.Lower, tender.Level.Lower, tender.Level.Lower],
+        [1, 1, 2])
+    after = td.fold_arithmetic(td.eval_delta_concrete(td.expand_eps(eps)))
+    assert after.latex() == "0"
+
+
+# ---- fold_sums + contract_delta --------------------------------------------
+
+def test_fold_sums_three_term_cycle():
+    """δ^1_k δ^1_l + δ^2_k δ^2_l + δ^3_k δ^3_l folds to an ExplicitSum."""
+    ctx = tender.Context()
+    k, l = ctx.alloc_index(), ctx.alloc_index()
+    sp = _sp3()
+
+    def d(v, idx):
+        return tender.delta(tender.Realm.Oblique, sp,
+                            tender.Level.Upper, tender.Level.Lower, v, idx, ctx=ctx)
+
+    total = d(1, k) * d(1, l) + d(2, k) * d(2, l) + d(3, k) * d(3, l)
+    after = td.fold_sums(total)
+    # After folding, it should be an ExplicitSum; latex contains \sum.
+    assert r"\sum" in after.latex()
+
+
+def test_fold_then_contract_delta():
+    """fold_sums then contract_delta reduces δ^1_k δ^1_l + ... to δ_{kl}."""
+    ctx = tender.Context()
+    k, l = ctx.alloc_index(), ctx.alloc_index()
+    sp = _sp3()
+
+    def d(v, idx):
+        return tender.delta(tender.Realm.Oblique, sp,
+                            tender.Level.Upper, tender.Level.Lower, v, idx, ctx=ctx)
+
+    total = d(1, k) * d(1, l) + d(2, k) * d(2, l) + d(3, k) * d(3, l)
+    contracted = td.contract_delta(td.fold_sums(total))
+    # Must be a single delta (no sum) with both original symbolic indices.
+    latex = contracted.latex()
+    assert r"\sum" not in latex
+    assert r"\delta" in latex
