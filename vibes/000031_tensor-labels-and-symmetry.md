@@ -34,9 +34,7 @@ sufficient for a pattern-matching engine.
 
 ---
 
-## Design issues to resolve before implementing
-
-### 1. `TensorLabel` → `TensorTraits`
+## Design: `TensorLabel` → `TensorTraits`
 
 "Label" implies a single tag; the struct is a collection of independent properties.
 `TensorTraits` names it correctly.  It holds four orthogonal fields:
@@ -46,117 +44,136 @@ sufficient for a pattern-matching engine.
 - **Antisymmetry spec** — a representative set of slot permutations that flip the sign (see below).
 - **Render hints** — display preferences (encoded as `mpk::mix::EnumFlags`, see below).
 
-`SymmetrySpec` and `AntisymmetrySpec` have the **same internal structure** — packed
-permutation images in a fixed-length byte array — but carry different semantics to the
-simplification engine.  Keeping them as separate fields (rather than a single spec with
-a sign flag) lets the engine dispatch on them independently and makes the intent explicit
-at call sites.
+`SymmetrySpec` and `AntisymmetrySpec` share the same internal structure but carry different
+semantics.  They are distinct types so the engine can dispatch without inspecting a flag.
+They use **aggregation** of `PermutationSpec` (not inheritance) to keep the class hierarchy flat.
 
-Proposed struct:
-
-All enums in the codebase use `uint8_t` as their underlying type — this is required by
-`magic_enum` (used inside `mpk::mix::EnumFlags`) and keeps values small and predictable.
-We will never need more than 256 values in any tender enum.
+All enums use `uint8_t` as their underlying type — required by `magic_enum` (used inside
+`mpk::mix::EnumFlags`) and keeps values small and predictable.
 
 ```cpp
 enum class WellKnownKind : uint8_t { Identity, Delta, LeviCivita };
 
-// Render-time display preferences.  Use mpk::mix::EnumFlags<RenderHint> at
-// call sites so the set is type-safe and composable with | and &.
 enum class RenderHint : uint8_t {
-    SuppressMixedDots = 1 << 0, // omit \cdot placeholders for mixed-level slots
-    // (add more flags here as needed)
+    OmitVoidIndexPlaceholders = 1, // suppress \cdot in mixed upper/lower slots
 };
 
-// Symmetry (or antisymmetry) generators stored as permutation images.
-// 'same_level_only' controls whether the rule fires for mixed-level slots:
-//   true  → only applies when all permuted slot positions share the same Level
-//             (correct for user-defined symmetric tensors: A^{ij}=A^{ji}
-//              but A^i_j ≠ A^j_i in an oblique basis)
-//   false → applies regardless of Level
-//             (correct for delta: δ^i_j = δ^j_i)
-struct PermutationSpec {
-    uint8_t  num_gens        = 0;
-    bool     same_level_only = true;
-    // Packed permutation images.  Each generator occupies
-    // ceil(log2(rank)) × rank bits, rounded to a byte boundary.
-    // rank is read from the enclosing TensorObject.
-    // N = 16: fits 7 gens for rank ≤ 4 (1 byte/gen) or 5 gens for rank ≤ 8 (3 bytes/gen).
-    static constexpr std::size_t MaxBytes = 16;
-    std::array<uint8_t, MaxBytes> data{};
-};
-
-// SymmetrySpec and AntisymmetrySpec share the same layout but are distinct types
-// so the simplification engine can dispatch on them without inspecting a flag.
-struct SymmetrySpec     : PermutationSpec {};
-struct AntisymmetrySpec : PermutationSpec {};
+struct SymmetrySpec     final { PermutationSpec generators; };
+struct AntisymmetrySpec final { PermutationSpec generators; };
 
 struct TensorTraits {
-    std::optional<WellKnownKind>    well_known;
-    std::optional<SymmetrySpec>     symmetry;
-    std::optional<AntisymmetrySpec> antisymmetry;
-    mpk::mix::EnumFlags<RenderHint> render_hints{};
+    std::optional<WellKnownKind>      well_known   = {};
+    SymmetrySpec                      symmetry     = {};  // empty → no symmetry generators
+    AntisymmetrySpec                  antisymmetry = {};  // empty → no antisymmetry generators
+    mpk::mix::EnumFlags<RenderHint>   render_hints = {};
 };
 ```
 
-**Encoding example — rank 4, 2 bits per position:**
+---
 
-| Object | Generator (image) | Bytes | Notes |
-|---|---|---|---|
-| Swap slots 0↔1 | `[1,0,2,3]` | `0b01_00_11_10` = 1 byte | transposition |
-| Swap slots 2↔3 | `[0,1,3,2]` | `0b10_11_01_00` = 1 byte | transposition |
-| Swap pairs (01)↔(23) | `[2,3,0,1]` | `0b00_01_10_11` = 1 byte | pair swap |
-| 3-cycle 0→1→2→0 | `[1,2,0,3]` | `0b11_00_10_01` = 1 byte | arbitrary perm |
+## `PermutationSpec` — class interface and encoding
 
-For rank 6 (3 bits/position): 6 × 3 = 18 bits → 3 bytes per generator.  
-For rank 8 (3 bits/position): 8 × 3 = 24 bits → 3 bytes per generator.  
-`MaxBytes = 16` handles that comfortably.
+`PermutationSpec` is a class with private storage and a public interface.  It stores
+generators as bit-packed permutation images in an inline `std::array<uint8_t, MaxBytes>`.
 
-**Factory assignments:**
+### Bit packing
 
-```
-make_identity:
-  TensorTraits{
-    .well_known   = Identity,
-    .symmetry     = {num_gens=1, same_level_only=false, [image: 1,0]},
-    .render_hints = {}
-  }
+Each slot position is stored in `ceil(log2(rank))` bits — the minimum needed to represent
+values 0..rank-1.  A full permutation of rank N occupies `ceil(N × bpp / 8)` bytes, where
+`bpp = std::bit_width(rank - 1)` (minimum 1 for rank ≤ 1).
 
-make_delta:
-  TensorTraits{
-    .well_known   = Delta,
-    .symmetry     = {num_gens=1, same_level_only=false, [image: 1,0]},
-    .render_hints = RenderHint::SuppressMixedDots
-  }
+| Rank | bits/pos | bytes/perm | generators in MaxBytes=16 |
+|------|----------|------------|--------------------------|
+| 2–4  | 2        | 1          | 16                       |
+| 5–8  | 3        | 3          | 5                        |
+| 9–16 | 4        | 8          | 2                        |
 
-make_levi_civita (rank 3):
-  TensorTraits{
-    .well_known   = LeviCivita,
-    .symmetry     = {num_gens=1, same_level_only=true, [image: 1,2,0]},  // cyclic 0→1→2→0 preserves sign
-    .antisymmetry = {num_gens=1, same_level_only=true, [image: 1,0,2]},  // swap 0↔1 flips sign
-    .render_hints = {}
-  }
-  // The symmetry group of ε is the alternating group A_n (even permutations, generated
-  // by the n-cycle).  The antisymmetry spec stores one representative odd permutation;
-  // the engine derives all sign-flipping permutations by composing it with the symmetry
-  // group.  Note: odd permutations do NOT themselves form a group — composing two
-  // sign-flipping permutations yields an even permutation (sign preserved).
+`MaxBytes = 16` supports up to `MaxRank = 25` positions with at least one generator.
 
-User symmetric tensor A (rank 2):
-  TensorTraits{
-    .symmetry = {num_gens=1, same_level_only=true, [image: 1,0]}
-  }
+### Why `PermutationView` owns its data
 
-Stiffness C (rank 4), minor + major symmetry:
-  TensorTraits{
-    .symmetry = {num_gens=3, same_level_only=true,
-                 [image: 1,0,2,3],   // swap slots 0↔1
-                 [image: 0,1,3,2],   // swap slots 2↔3
-                 [image: 2,3,0,1]}   // swap pairs (01)↔(23)
-  }
+With bit packing, a position spans 2-3 bits inside a byte — there is no byte boundary
+aligned to each position.  The iterator therefore must **unpack** positions into a
+temporary buffer before returning them.  If `PermutationView` were a `std::span` into
+the spec's storage, it would reference bit-packed bytes that cannot be directly indexed
+(e.g. `image[1]` at bits 2–3 of byte 0 for rank-4 cannot be read as a plain byte).
+
+Furthermore, `operator[]` on the iterator creates a temporary iterator, calls `operator*()`,
+and returns a copy.  If the view held a span into the temporary iterator's buffer, the
+copy would contain a dangling pointer.
+
+Solution: `PermutationView` owns a fixed-size `std::array<uint8_t, Capacity>` (Capacity =
+MaxRank = 25) plus an active-size field `sz`.  The iterator unpacks into its `cached_`
+field (a `PermutationView`) on each `operator*()`.  Returning `cached_` by reference is
+safe for the caller's lifetime; returning it by value (from `operator[]`) is safe because
+the copy owns its bytes.
+
+```cpp
+struct PermutationView final {
+    static constexpr std::size_t Capacity = 25;
+    std::array<uint8_t, Capacity> image = {};
+    uint8_t sz = 0;
+
+    auto operator[](std::size_t i) const -> uint8_t;
+    auto size()  const -> std::size_t;
+    auto rank()  const -> std::size_t;
+};
 ```
 
-### 2. The three distinct kinds of "rank-2 symmetry"
+### `PermutationSpec` interface
+
+```cpp
+class PermutationSpec final {
+public:
+    static constexpr std::size_t MaxBytes = 16;
+    static constexpr std::size_t MaxRank  = 25;
+
+    static constexpr auto bits_per_pos_for(uint8_t rank) -> uint8_t;
+    static constexpr auto bytes_per_perm_for(uint8_t rank) -> uint8_t;
+
+    class const_iterator final { /* random-access; yields const PermutationView& */ };
+
+    PermutationSpec() = default;  // empty spec
+
+    // Variadic constructor: all arguments after same_level_only must be
+    // Permutation<N> for the same N, deduced from the first permutation.
+    template <std::size_t N, std::same_as<Permutation<N>>... Rest>
+    explicit PermutationSpec(bool same_level_only, Permutation<N> p0, Rest... ps);
+
+    auto begin()          const -> const_iterator;
+    auto end()            const -> const_iterator;
+    auto size()           const -> std::size_t;
+    auto empty()          const -> bool;
+    auto rank()           const -> uint8_t;
+    auto same_level_only() const -> bool;
+    auto operator==(PermutationSpec const&) const -> bool = default;
+};
+```
+
+Construction uses `Permutation<N>` — a value type wrapping `std::array<uint8_t, N>`:
+
+```cpp
+template <std::size_t N>
+struct Permutation final {
+    std::array<uint8_t, N> image;
+    auto operator==(Permutation const&) const -> bool = default;
+};
+```
+
+The rank is stored inside `PermutationSpec` (deduced from N at construction), so callers
+do not need to pass it again and the spec is self-contained.
+
+### `same_level_only` flag
+
+Controls whether permutation rules fire for mixed-level slot pairs:
+- `true` → rule fires only when all permuted slots share the same `Level`
+  (correct for user-defined symmetric tensors; A^i_j ≠ A^j_i in oblique basis)
+- `false` → rule fires regardless of Level
+  (correct for delta: δ^i_j = δ^j_i by definition)
+
+---
+
+## The three distinct kinds of "rank-2 symmetry"
 
 These should NOT all share one label:
 
@@ -167,43 +184,63 @@ These should NOT all share one label:
 | δ^i_j = δ^j_i (mixed-level delta) | Follows from **I** = **I**^T | Derivable from `WellKnownKind::Delta`, not a "symmetric tensor" rule |
 
 In particular: a *general* symmetric tensor **A** in an oblique basis does **not** have
-symmetric mixed-level coordinates — A^i_j ≠ A^j_i in general.  The engine must not
-apply the same-level rule to mixed-level slots.  The `same_level_only` flag on
-`PermutationSpec` handles this: `true` for user-defined symmetric tensors, `false`
-for delta (whose slot-swap symmetry holds regardless of level).
+symmetric mixed-level coordinates — A^i_j ≠ A^j_i in general.  The `same_level_only`
+flag handles this.
 
-### 3. Rendering hint vs. semantic label — keep them separate
+---
 
-The proposal to omit void-placeholder dots for symmetric mixed-level objects is
-appealing (δ^i_j instead of δ^{i·}_{·j}), but coupling rendering to symmetry labels
-creates a layering problem: the renderer would need to inspect semantic metadata to
-decide layout.
+## Rendering hint vs. semantic label — keep them separate
 
-Preferred approach:
-- **Rendering stays purely positional** — always interleave dots for mixed-level slots.
-- **A `render_hints` field** (separate, optional) can carry display preferences like
-  `suppress_mixed_dots = true`.  This is set explicitly by factory functions that know
-  the object warrants it (e.g. `make_delta`), not derived automatically from symmetry.
-- The simplification engine uses `symmetry` for rewrites; the renderer uses `render_hints`
-  for display.  Each layer has one job.
+The `render_hints` field in `TensorTraits` carries display preferences like
+`OmitVoidIndexPlaceholders`.  This is set explicitly by factory functions that know
+the object warrants it (e.g. `make_delta`), not derived automatically from symmetry.
 
-### 4. Permutation encoding: image array, fixed-length storage
+The simplification engine uses `symmetry`/`antisymmetry` for rewrites.  The renderer
+uses `render_hints` for display.  Each layer has one job.
 
-Each generator is stored as its **image array** — where each slot position maps to.
-This naturally encodes any permutation, including arbitrary cycles:
+Effect of `OmitVoidIndexPlaceholders`:
+- With hint: `\delta^{i}_{j}` (flat band grouping, no `\cdot`)
+- Without hint: `\delta^{i\cdot}_{\cdot j}` (positional interleaving)
 
-- swap 0↔1: image `[1,0,2,3]`
-- 3-cycle 0→1→2→0: image `[1,2,0,3]`
-- pair-swap (01)↔(23): image `[2,3,0,1]`
+---
 
-Bit width per position: `ceil(log2(rank))` — 2 bits for rank ≤ 4, 3 bits for rank 5–8.
-This is tight but exact; no sentinel values are needed (valid images never have
-out-of-range values and the number of generators is stored separately).
+## Factory assignments
 
-The `std::array<uint8_t, MaxBytes>` in `SymmetrySpec` provides fixed-size, heap-free
-storage that fits inline in `TensorObject`.  `MaxBytes = 16` is the starting point;
-it is increased (with a recompile) if ranks beyond 8 or more than ~5 generators
-are ever needed.  No API change required when N grows.
+```
+make_identity:
+  TensorTraits{.well_known = Identity}
+  (symmetry/antisymmetry to be populated when simplification engine is built)
+
+make_delta:
+  TensorTraits{
+    .well_known   = Delta,
+    .render_hints = OmitVoidIndexPlaceholders
+  }
+
+make_levi_civita (rank 3):
+  TensorTraits{.well_known = LeviCivita}
+  // Cyclic generator (0→1→2→0) → symmetry (preserves sign)
+  // Transposition (0↔1)       → antisymmetry (flips sign)
+  // To be populated when simplification engine is built.
+  //
+  // Note: odd permutations do NOT form a group — composing two sign-flipping
+  // permutations yields an even permutation (sign preserved).  The antisymmetry
+  // spec stores a representative set; the engine derives all sign-flipping
+  // permutations by composing them with the symmetry group.
+
+User symmetric tensor A (rank 2):
+  TensorTraits{
+    .symmetry = {.generators = PermutationSpec(true, Permutation<2>{{1,0}})}
+  }
+
+Stiffness C (rank 4), minor + major symmetry:
+  TensorTraits{
+    .symmetry = {.generators = PermutationSpec(true,
+        Permutation<4>{{1,0,2,3}},  // swap slots 0↔1
+        Permutation<4>{{0,1,3,2}},  // swap slots 2↔3
+        Permutation<4>{{2,3,0,1}})} // swap pairs (01)↔(23)
+  }
+```
 
 ---
 
@@ -212,24 +249,8 @@ are ever needed.  No API change required when N grows.
 ### AST / `TensorObject`
 
 `std::optional<TensorTraits>` replaces `std::optional<TensorLabel>` (which was `optional<enum>`).
-All existing code that pattern-matches on the old enum (`Identity`, `Delta`, `LeviCivita`)
-needs updating to check `.well_known`; factory functions need updating.
-This is a contained, mechanical change.
-
-### Factory functions
-
-`make_identity`, `make_delta`, `make_levi_civita` fill in the appropriate `TensorTraits`
-fields (`well_known`, `symmetry` or `antisymmetry`, `render_hints`).
-`make_tensor_object` (generic) accepts an optional `TensorTraits` from the caller.
-Python bindings expose `SymmetrySpec`, `AntisymmetrySpec`, and `RenderHint` so users
-can label their own tensors.
-
-### Renderer
-
-Minimal impact.  The renderer checks `rank` for bold/plain.  It will additionally check
-`traits.render_hints` — e.g., `SuppressMixedDots` skips dot-interleaving for mixed-level
-slots even when both levels are present.  `symmetry` and `antisymmetry` are invisible
-to the renderer.
+All existing code that pattern-matches on the old enum needs updating to check `.well_known`;
+factory functions need updating.  This is a contained, mechanical change — done.
 
 ### Future simplification engine
 
@@ -243,15 +264,3 @@ The symmetry spec is the primary input for:
 The `well_known` field handles object-specific rules (delta contraction, identity absorption).
 The `symmetry` field handles generic permutation rules.  Keeping them separate lets the
 engine apply generic rules without special-casing every well-known tensor.
-
----
-
-## Proposed next steps
-
-1. Replace `enum class TensorLabel` with `struct TensorTraits` in `expr.hpp`:
-   fields `well_known`, `symmetry`, `antisymmetry`, `render_hints`.
-2. Add `enum class RenderHint` and wire `mpk::mix::EnumFlags<RenderHint>` into `TensorTraits`.
-3. Update `make_identity`, `make_delta`, `make_levi_civita` with correct `TensorTraits`.
-4. Update renderer to check `render_hints` (e.g. `SuppressMixedDots` for delta).
-5. Update C++ tests (expr_test, render_test) and Python bindings.
-6. Leave the simplification engine for a later session once `TensorTraits` is stable.
