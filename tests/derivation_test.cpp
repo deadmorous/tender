@@ -1184,3 +1184,477 @@ TEST(Derivation, HistoryLengthMatchesSteps)
     EXPECT_EQ(drv.initial(), e);
     EXPECT_EQ(drv.current(), drv.history().back());
 }
+
+// ---- expand_products -------------------------------------------------------
+
+TEST(ExpandProducts, LeftSumDistributes)
+{
+    // (A + B) * C  →  A*C + B*C
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* expr = make_tensor_product(ctx, make_sum(ctx, A, B), C);
+    auto const* after = steps::expand_products(ctx, expr);
+    auto const* s = std::get_if<Sum>(&after->node);
+    ASSERT_NE(s, nullptr);
+    EXPECT_NE(std::get_if<TensorProduct>(&s->left->node), nullptr);
+    EXPECT_NE(std::get_if<TensorProduct>(&s->right->node), nullptr);
+}
+
+TEST(ExpandProducts, LeftDifferenceDistributes)
+{
+    // (A - B) * C  →  A*C - B*C
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* expr = make_tensor_product(ctx, make_difference(ctx, A, B), C);
+    auto const* after = steps::expand_products(ctx, expr);
+    EXPECT_NE(std::get_if<Difference>(&after->node), nullptr);
+}
+
+TEST(ExpandProducts, RightSumDistributes)
+{
+    // A * (B + C)  →  A*B + A*C
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* expr = make_tensor_product(ctx, A, make_sum(ctx, B, C));
+    auto const* after = steps::expand_products(ctx, expr);
+    EXPECT_NE(std::get_if<Sum>(&after->node), nullptr);
+}
+
+TEST(ExpandProducts, RightDifferenceDistributes)
+{
+    // A * (B - C)  →  A*B - A*C
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* expr = make_tensor_product(ctx, A, make_difference(ctx, B, C));
+    auto const* after = steps::expand_products(ctx, expr);
+    EXPECT_NE(std::get_if<Difference>(&after->node), nullptr);
+}
+
+TEST(ExpandProducts, PlainProductUnchanged)
+{
+    // A * B  —  no Sum/Difference to distribute over; result is still a
+    // TensorProduct with the same children.
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* expr = make_tensor_product(ctx, A, B);
+    auto const* after = steps::expand_products(ctx, expr);
+    auto const* tp = std::get_if<TensorProduct>(&after->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(tp->left, A);
+    EXPECT_EQ(tp->right, B);
+}
+
+TEST(ExpandProducts, BothSumsFullyDistributed)
+{
+    // (A + B) * (C + D)  →  four TensorProduct leaves under two Sum nodes.
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* C = make_tensor_object(ctx, make_tensor_name("C"));
+    auto* D = make_tensor_object(ctx, make_tensor_name("D"));
+    auto* expr =
+        make_tensor_product(ctx, make_sum(ctx, A, B), make_sum(ctx, C, D));
+    auto const* after = steps::expand_products(ctx, expr);
+    EXPECT_NE(after, expr);
+    // Result must NOT be a TensorProduct at the top level.
+    EXPECT_EQ(std::get_if<TensorProduct>(&after->node), nullptr);
+}
+
+// ---- fold_arithmetic: missing identity branches ----------------------------
+
+TEST(FoldArithmetic, SumRightZeroSimplifies)
+{
+    // Sum(A, 0) → A
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* zero = make_scalar(ctx, Rational{0});
+    auto const* expr = make_sum(ctx, a, zero);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, a);
+}
+
+TEST(FoldArithmetic, DifferenceRightZeroSimplifies)
+{
+    // Difference(A, 0) → A
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* zero = make_scalar(ctx, Rational{0});
+    auto const* expr = make_difference(ctx, a, zero);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, a);
+}
+
+TEST(FoldArithmetic, ProductLeftIsZero)
+{
+    // TensorProduct(0, A) → 0
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* zero = make_scalar(ctx, Rational{0});
+    auto const* expr = make_tensor_product(ctx, zero, a);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(scalar_value(after), Rational{0});
+}
+
+TEST(FoldArithmetic, ProductLeftIsOne)
+{
+    // TensorProduct(1, A) → A
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* one = make_scalar(ctx, Rational{1});
+    auto const* expr = make_tensor_product(ctx, one, a);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    EXPECT_EQ(after, a);
+}
+
+// ---- unroll_sums: unusual body node types (covers find_index_space) --------
+
+TEST(UnrollSums, ScalarLiteralBodyUnchanged)
+{
+    // ExplicitSum{i, 1}  —  index i absent from body → space not found →
+    // unchanged. Exercises the ScalarLiteral arm of find_index_space.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* expr = make_explicit_sum(ctx, i, make_scalar(ctx, Rational{1}));
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(after, expr);
+}
+
+TEST(UnrollSums, DotBody)
+{
+    // ExplicitSum{i, Dot(δ^i_j, A)}  —  exercises Dot arm of find_index_space.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* expr = make_explicit_sum(ctx, i, make_dot(ctx, d, A));
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(UnrollSums, DDotBody)
+{
+    // ExplicitSum{i, DDot(δ^i_j, A)}  —  exercises DDot arm of
+    // find_index_space.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* expr = make_explicit_sum(ctx, i, make_ddot(ctx, d, A));
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(UnrollSums, DDotAltBody)
+{
+    // ExplicitSum{i, DDotAlt(δ^i_j, A)}  —  exercises DDotAlt arm.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* expr = make_explicit_sum(ctx, i, make_ddot_alt(ctx, d, A));
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(UnrollSums, CrossBody)
+{
+    // ExplicitSum{i, Cross(δ^i_j, A)}  —  exercises Cross arm.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* expr = make_explicit_sum(ctx, i, make_cross(ctx, d, A));
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(UnrollSums, ScalarDivBody)
+{
+    // ExplicitSum{i, δ^i_j / A}  —  exercises ScalarDiv arm of
+    // find_index_space.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* expr = make_explicit_sum(ctx, i, make_scalar_div(ctx, d, A));
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(UnrollSums, NoSumBody)
+{
+    // ExplicitSum{i, NoSum{k, δ^i_k}}  —  exercises NoSum arm of
+    // find_index_space.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{k});
+    auto* expr = make_explicit_sum(ctx, i, make_no_sum(ctx, k, d));
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(UnrollSums, NestedBoundedExplicitSumBody)
+{
+    // ExplicitSum{i, ExplicitSum{j, δ^i_j, N}}
+    // The inner ExplicitSum has a bound; find_index_space must search both
+    // body and bound to locate index i.  Exercises the 'if (s.bound)' branch.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto* bound = make_scalar(ctx, Rational{3});
+    auto* inner = make_explicit_sum(ctx, j, d, bound);
+    auto* expr = make_explicit_sum(ctx, i, inner);
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+// ---- fold_sums: unusual addend types (covers find_space_from_concrete,
+//      collect_concrete_values, and structural_eq Dot/DDot/DDotAlt/Cross) ----
+
+TEST(FoldSums, DotWrappedCycle)
+{
+    // Dot(δ^1_k, A) + Dot(δ^2_k, A) + Dot(δ^3_k, A)
+    //   →  ExplicitSum{m, Dot(δ^m_k, A)}
+    // Exercises Dot branches in find_space_from_concrete,
+    // collect_concrete_values, and structural_eq.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+
+    auto mk = [&](int v)
+    {
+        auto* d = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+        return make_dot(ctx, d, A);
+    };
+
+    auto* sum = make_sum(ctx, make_sum(ctx, mk(1), mk(2)), mk(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(FoldSums, DDotWrappedCycle)
+{
+    // DDot(δ^1_k, A) + DDot(δ^2_k, A) + DDot(δ^3_k, A)
+    //   →  ExplicitSum{m, DDot(δ^m_k, A)}
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+
+    auto mk = [&](int v)
+    {
+        auto* d = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+        return make_ddot(ctx, d, A);
+    };
+
+    auto* sum = make_sum(ctx, make_sum(ctx, mk(1), mk(2)), mk(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(FoldSums, DDotAltWrappedCycle)
+{
+    // DDotAlt(δ^1_k, A) + DDotAlt(δ^2_k, A) + DDotAlt(δ^3_k, A)
+    //   →  ExplicitSum{m, DDotAlt(δ^m_k, A)}
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+
+    auto mk = [&](int v)
+    {
+        auto* d = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+        return make_ddot_alt(ctx, d, A);
+    };
+
+    auto* sum = make_sum(ctx, make_sum(ctx, mk(1), mk(2)), mk(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(FoldSums, CrossWrappedCycle)
+{
+    // Cross(δ^1_k, A) + Cross(δ^2_k, A) + Cross(δ^3_k, A)
+    //   →  ExplicitSum{m, Cross(δ^m_k, A)}
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+
+    auto mk = [&](int v)
+    {
+        auto* d = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+        return make_cross(ctx, d, A);
+    };
+
+    auto* sum = make_sum(ctx, make_sum(ctx, mk(1), mk(2)), mk(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+TEST(FoldSums, ScalarDivWrappedCycle)
+{
+    // (δ^1_k / A) + (δ^2_k / A) + (δ^3_k / A)
+    //   →  ExplicitSum{m, δ^m_k / A}
+    // Exercises ScalarDiv branches in find_space_from_concrete,
+    // collect_concrete_values, and structural_eq.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex k{ctx.alloc_index_id()};
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+
+    auto mk = [&](int v)
+    {
+        auto* d = make_delta(
+            ctx,
+            Realm::Oblique,
+            sp,
+            Level::Upper,
+            Level::Lower,
+            IndexAssoc{ConcreteIndex{v}},
+            IndexAssoc{k});
+        return make_scalar_div(ctx, d, A);
+    };
+
+    auto* sum = make_sum(ctx, make_sum(ctx, mk(1), mk(2)), mk(3));
+    auto const* after = steps::fold_sums(ctx, sum);
+    EXPECT_NE(after, sum);
+    EXPECT_NE(std::get_if<ExplicitSum>(&after->node), nullptr);
+}
+
+// ---- expand_eps: non-LeviCivita early exits --------------------------------
+
+TEST(ExpandEps, PlainTensorUnchanged)
+{
+    // A tensor with no traits is not a LeviCivita; expand_eps must leave it
+    // unchanged.  Exercises the '!t->traits' guard.
+    Context ctx;
+    auto const* t = make_tensor_object(ctx, make_tensor_name("T"));
+    auto const* after = steps::expand_eps(ctx, t);
+    EXPECT_EQ(after, t);
+}
+
+TEST(ExpandEps, DeltaUnchanged)
+{
+    // A Kronecker delta has traits but well_known != LeviCivita; must be
+    // unchanged.  Exercises the 'well_known != LeviCivita' guard.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto const* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto const* after = steps::expand_eps(ctx, d);
+    EXPECT_EQ(after, d);
+}
