@@ -3,9 +3,9 @@
 #include <mpk/mix/enum_flags.hpp>
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/index.hpp>
+#include <tender/permutation_spec.hpp>
 #include <tender/rational.hpp>
 
-#include <array>
 #include <concepts>
 #include <cstdint>
 #include <optional>
@@ -35,33 +35,26 @@ enum class RenderHint : uint8_t
     OmitVoidIndexPlaceholders = 1, // suppress \cdot in mixed upper/lower slots
 };
 
-// Permutation generators stored as image arrays, bit-packed per the scheme in
-// vibes/000031.  Each generator occupies ceil(log2(rank)) × rank bits rounded
-// to a byte boundary; generators are concatenated in data[].  rank is read
-// from the enclosing TensorObject.
-// SymmetrySpec:     value-preserving permutations (even for fully antisymm.
-// tensors). AntisymmetrySpec: representative sign-flipping permutations (not a
-// group).
-struct PermutationSpec
+// Value-preserving permutation generators for a tensor object (e.g. even
+// permutations of Levi-Civita, any slot swap of a symmetric tensor).
+struct SymmetrySpec final
 {
-    uint8_t num_gens = 0;
-    bool same_level_only = true;
-    static constexpr std::size_t MaxBytes = 16;
-    std::array<uint8_t, MaxBytes> data = {};
+    PermutationSpec generators;
 };
 
-struct SymmetrySpec : PermutationSpec
+// Representative sign-flipping permutations (odd permutations, not a group).
+// The full set of sign-flipping permutations is derived by composing these
+// with the symmetry group.
+struct AntisymmetrySpec final
 {
-};
-struct AntisymmetrySpec : PermutationSpec
-{
+    PermutationSpec generators;
 };
 
 struct TensorTraits
 {
     std::optional<WellKnownKind> well_known = {};
-    std::optional<SymmetrySpec> symmetry = {};
-    std::optional<AntisymmetrySpec> antisymmetry = {};
+    SymmetrySpec symmetry = {};
+    AntisymmetrySpec antisymmetry = {};
     mpk::mix::EnumFlags<RenderHint> render_hints = {};
 };
 
@@ -80,9 +73,9 @@ struct SlotBinding final
 
 // A named tensor object.
 //
-// rank:  abstract mathematical rank (nullopt = unknown / not yet declared).
-// label: non-null for well-known tensors recognised by derivation rules.
-// slots: positional layout with optional index fillings. The slot count
+// rank:   abstract mathematical rank (nullopt = unknown / not yet declared).
+// traits: non-null for well-known tensors; carries symmetry and render hints.
+// slots:  positional layout with optional index fillings. The slot count
 //        has no enforced relationship to rank; abstract tensors carry an
 //        empty slots vector, while the same tensor in an indexed expression
 //        carries the relevant SlotBindings.

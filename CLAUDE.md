@@ -11,6 +11,7 @@ Tensor algebra library for computational mechanics, using direct (coordinate-fre
 5. **Maintain feasibility examples.** A small set of end-to-end examples prove the system works as a whole. They evolve with the system and are never deleted.
 6. **Keep code DRY.** Don't repeat yourself — shared logic lives in one place.
 7. **Minimise dependencies.** Reinventing a small wheel is fine; it keeps the codebase stable and predictable. Large dependencies are taken on only when the alternative is unreasonable.
+8. **Prefer aggregation over inheritance.** When struct A needs the behaviour of struct B, give A a field of type B rather than inheriting from B, unless there is a genuine is-a relationship and virtual dispatch is intended. Aggregation avoids slicing, makes data layout explicit, and keeps types independently testable.
 
 ## Before committing
 
