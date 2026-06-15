@@ -790,11 +790,18 @@ auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
                             return s.right;
                         if (r && r->value == Rational{0})
                             return s.left;
-                        // X + (-Y) → X - Y  (cleaner rendering, no "(-(Y))")
+                        // X + (-Y) → X - Y
                         if (std::holds_alternative<Negate>(s.right->node))
                         {
                             auto const& neg = std::get<Negate>(s.right->node);
                             return make_difference(ctx, s.left, neg.operand);
+                        }
+                        // (-X) + Y → Y - X  (Negate on left: move to right as
+                        // Difference)
+                        if (std::holds_alternative<Negate>(s.left->node))
+                        {
+                            auto const& neg = std::get<Negate>(s.left->node);
+                            return make_difference(ctx, s.right, neg.operand);
                         }
                         return e;
                     },

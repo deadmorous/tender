@@ -310,9 +310,10 @@ TEST(RenderUnary, NegateSum)
 
 TEST(RenderUnary, NegateTensorProduct)
 {
+    // No parens needed: mul binds tighter than unary minus.
     Context ctx;
     auto* p = make_tensor_product(ctx, T(ctx, "a", 1), T(ctx, "b", 1));
-    EXPECT_EQ(latex(*make_negate(ctx, p)), "-(\\mathbf{a} \\, \\mathbf{b})");
+    EXPECT_EQ(latex(*make_negate(ctx, p)), "-\\mathbf{a} \\, \\mathbf{b}");
 }
 
 // ---- Binary operations -------------------------------------------------
@@ -323,6 +324,27 @@ TEST(RenderBinary, Sum)
     EXPECT_EQ(
         latex(*make_sum(ctx, T(ctx, "a", 1), T(ctx, "b", 1))),
         "\\mathbf{a} + \\mathbf{b}");
+}
+
+TEST(RenderBinary, SumWithNegatedRight)
+{
+    // Sum(A, Negate(B)) should render as subtraction, not "A + (-B)".
+    Context ctx;
+    auto* neg = make_negate(ctx, T(ctx, "b", 1));
+    EXPECT_EQ(
+        latex(*make_sum(ctx, T(ctx, "a", 1), neg)),
+        "\\mathbf{a} - \\mathbf{b}");
+}
+
+TEST(RenderBinary, SumWithNegatedProductRight)
+{
+    // Sum(A, Negate(B*C)) → "A - B \, C", no double parens.
+    Context ctx;
+    auto* p = make_tensor_product(ctx, T(ctx, "b", 1), T(ctx, "c", 1));
+    auto* neg = make_negate(ctx, p);
+    EXPECT_EQ(
+        latex(*make_sum(ctx, T(ctx, "a", 1), neg)),
+        "\\mathbf{a} - \\mathbf{b} \\, \\mathbf{c}");
 }
 
 TEST(RenderBinary, Difference)
@@ -339,6 +361,18 @@ TEST(RenderBinary, TensorProduct)
     EXPECT_EQ(
         latex(*make_tensor_product(ctx, T(ctx, "a", 1), T(ctx, "b", 1))),
         "\\mathbf{a} \\, \\mathbf{b}");
+}
+
+TEST(RenderBinary, TensorProductAllScalarsUsesCdot)
+{
+    // 2 * 3 * 4 — left-associative tree with scalar chain — all \cdot.
+    Context ctx;
+    auto* s1 = make_scalar(ctx, Rational{2});
+    auto* s2 = make_scalar(ctx, Rational{3});
+    auto* s3 = make_scalar(ctx, Rational{4});
+    auto* inner = make_tensor_product(ctx, s1, s2);
+    EXPECT_EQ(
+        latex(*make_tensor_product(ctx, inner, s3)), "2 \\cdot 3 \\cdot 4");
 }
 
 TEST(RenderBinary, Dot)

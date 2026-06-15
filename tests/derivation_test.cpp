@@ -478,6 +478,55 @@ TEST(FoldArithmetic, NegateNonScalarUnchanged)
     EXPECT_EQ(after, expr);
 }
 
+TEST(FoldArithmetic, SumNegateRightToDifference)
+{
+    // A + (-B) → A - B
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* b = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr = make_sum(ctx, a, make_negate(ctx, b));
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* d = std::get_if<Difference>(&after->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->left, a);
+    EXPECT_EQ(d->right, b);
+}
+
+TEST(FoldArithmetic, SumNegateLeftToDifference)
+{
+    // (-A) + B → B - A
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* b = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr = make_sum(ctx, make_negate(ctx, a), b);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    auto const* d = std::get_if<Difference>(&after->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->left, b);
+    EXPECT_EQ(d->right, a);
+}
+
+TEST(FoldArithmetic, NestedSumWithNegateLeftChild)
+{
+    // Sum(A, Sum(Negate(B), C)) → Sum(A, Difference(C, B)) — inner converts
+    // bottom-up, preventing "A + -B + C" rendering.
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* b = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* c = make_tensor_object(ctx, make_tensor_name("C"));
+    auto const* inner = make_sum(ctx, make_negate(ctx, b), c);
+    auto const* expr = make_sum(ctx, a, inner);
+    auto const* after = steps::fold_arithmetic(ctx, expr);
+    // Outer Sum(A, Difference(C, B))
+    auto const* s = std::get_if<Sum>(&after->node);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->left, a);
+    auto const* d = std::get_if<Difference>(&s->right->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->left, c);
+    EXPECT_EQ(d->right, b);
+}
+
 // ---- rewrite_tree traversal: Dot, DDot, DDotAlt, Cross, NoSum ------------
 // These exercises ensure every structural node type is traversed when a step
 // recurses into a tree.  The inner scalars get folded; the wrapper node is

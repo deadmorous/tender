@@ -79,6 +79,32 @@ constexpr int MUL_PREC = 2;   // TensorProduct, Dot, DDot, DDotAlt, Cross,
 constexpr int UNARY_PREC = 3; // Negate
 constexpr int ATOM_PREC = 4;  // TensorObject, ScalarLiteral, ExplicitSum, NoSum
 
+// True iff every leaf in the expression tree is a ScalarLiteral (no tensors).
+static bool is_scalar_expr(Expr const& e)
+{
+    return visit(
+        mpk::mix::Overloads{
+            [](ScalarLiteral const&) { return true; },
+            [](TensorObject const&) { return false; },
+            [](Negate const& n) { return is_scalar_expr(*n.operand); },
+            [](Sum const& s)
+            { return is_scalar_expr(*s.left) && is_scalar_expr(*s.right); },
+            [](Difference const& d)
+            { return is_scalar_expr(*d.left) && is_scalar_expr(*d.right); },
+            [](TensorProduct const& p)
+            { return is_scalar_expr(*p.left) && is_scalar_expr(*p.right); },
+            [](ScalarDiv const& d)
+            { return is_scalar_expr(*d.left) && is_scalar_expr(*d.right); },
+            [](Dot const&) { return false; },
+            [](DDot const&) { return false; },
+            [](DDotAlt const&) { return false; },
+            [](Cross const&) { return false; },
+            [](ExplicitSum const& s) { return is_scalar_expr(*s.body); },
+            [](NoSum const& s) { return is_scalar_expr(*s.body); },
+        },
+        e);
+}
+
 struct Renderer
 {
     IndexNameMap& map;
@@ -114,14 +140,12 @@ struct Renderer
         return prec(e) < min_prec ? "(" + s + ")" : s;
     }
 
-    // Child of a Sum: wrap lower-precedence nodes, and also Negate nodes
-    // so that "A + -B" becomes "A + (-B)" instead of "A + -(B)".
+    // Child of a Sum: no wrapping needed — Sum rendering converts a Negate
+    // right child to subtraction; a Negate left child renders cleanly as "-…".
     auto sub_sum_child(Expr const& e) -> std::string
     {
         auto s = render(e);
-        bool wrap =
-            prec(e) < ADD_PREC || std::holds_alternative<Negate>(e.node);
-        return wrap ? "(" + s + ")" : s;
+        return prec(e) < ADD_PREC ? "(" + s + ")" : s;
     }
 
     // Right child of Difference: also wrap same-precedence nodes
@@ -277,8 +301,20 @@ struct Renderer
                 [&](ScalarLiteral const& s) -> std::string
                 { return rational_str(s.value); },
                 [&](Negate const& n) -> std::string
-                { return "-" + sub(*n.operand, UNARY_PREC); },
-                [&](Sum const& s) -> std::string {
+                {
+                    // Wrap only if the operand is a sum/difference — those
+                    // have lower precedence than multiplication, so "-a + b"
+                    // would be misread without parens. Products and atoms
+                    // don't need parens: "-a \, b" is unambiguous.
+                    return "-" + sub(*n.operand, MUL_PREC);
+                },
+                [&](Sum const& s) -> std::string
+                {
+                    // A sum whose right addend is negated renders as
+                    // subtraction: "A + (-B)" → "A - B".
+                    if (auto* neg = std::get_if<Negate>(&s.right->node))
+                        return sub_sum_child(*s.left) + " - "
+                               + sub_diff_right(*neg->operand);
                     return sub_sum_child(*s.left) + " + "
                            + sub_sum_child(*s.right);
                 },
@@ -289,8 +325,7 @@ struct Renderer
                 [&](TensorProduct const& p) -> std::string
                 {
                     bool both_scalar =
-                        std::holds_alternative<ScalarLiteral>(p.left->node)
-                        && std::holds_alternative<ScalarLiteral>(p.right->node);
+                        is_scalar_expr(*p.left) && is_scalar_expr(*p.right);
                     std::string sep = both_scalar ? " \\cdot " : " \\, ";
                     return sub(*p.left, MUL_PREC) + sep
                            + sub(*p.right, MUL_PREC);
