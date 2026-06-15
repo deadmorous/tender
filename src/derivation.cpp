@@ -623,6 +623,96 @@ auto extract_coeff(Expr const* e) -> std::pair<int64_t, Expr const*>
     return {1, e};
 }
 
+// Return true if any of `indices` appears free in `e` — i.e., in a tensor
+// slot that is not bound by an enclosing ExplicitSum or suppressed by NoSum.
+auto has_free_index_for(
+    Expr const* e,
+    std::vector<CountableIndex> const& indices,
+    std::set<int> const& bound) -> bool
+{
+    return visit(
+        Overloads{
+            [&](TensorObject const& t) -> bool
+            {
+                for (auto const& sb: t.slots)
+                {
+                    if (!sb.index)
+                        continue;
+                    if (auto const* ci =
+                            std::get_if<CountableIndex>(&*sb.index))
+                    {
+                        if (bound.count(ci->id))
+                            continue;
+                        for (auto const& idx: indices)
+                            if (idx.id == ci->id)
+                                return true;
+                    }
+                }
+                return false;
+            },
+            [&](ScalarLiteral const&) -> bool { return false; },
+            [&](Negate const& n) -> bool
+            { return has_free_index_for(n.operand, indices, bound); },
+            [&](Sum const& s) -> bool
+            {
+                return has_free_index_for(s.left, indices, bound)
+                       || has_free_index_for(s.right, indices, bound);
+            },
+            [&](Difference const& s) -> bool
+            {
+                return has_free_index_for(s.left, indices, bound)
+                       || has_free_index_for(s.right, indices, bound);
+            },
+            [&](TensorProduct const& s) -> bool
+            {
+                return has_free_index_for(s.left, indices, bound)
+                       || has_free_index_for(s.right, indices, bound);
+            },
+            [&](ScalarDiv const& s) -> bool
+            {
+                return has_free_index_for(s.left, indices, bound)
+                       || has_free_index_for(s.right, indices, bound);
+            },
+            [&](Dot const& s) -> bool
+            {
+                return has_free_index_for(s.left, indices, bound)
+                       || has_free_index_for(s.right, indices, bound);
+            },
+            [&](DDot const& s) -> bool
+            {
+                return has_free_index_for(s.left, indices, bound)
+                       || has_free_index_for(s.right, indices, bound);
+            },
+            [&](DDotAlt const& s) -> bool
+            {
+                return has_free_index_for(s.left, indices, bound)
+                       || has_free_index_for(s.right, indices, bound);
+            },
+            [&](Cross const& s) -> bool
+            {
+                return has_free_index_for(s.left, indices, bound)
+                       || has_free_index_for(s.right, indices, bound);
+            },
+            [&](ExplicitSum const& s) -> bool
+            {
+                auto b2 = bound;
+                b2.insert(s.index.id);
+                // The bound expression lives in the outer scope.
+                if (s.bound && has_free_index_for(s.bound, indices, bound))
+                    return true;
+                return has_free_index_for(s.body, indices, b2);
+            },
+            [&](NoSum const& s) -> bool
+            {
+                // NoSum suppresses summation — treat as bound for our purposes.
+                auto b2 = bound;
+                b2.insert(s.index.id);
+                return has_free_index_for(s.body, indices, b2);
+            },
+        },
+        *e);
+}
+
 } // namespace
 
 namespace steps
@@ -1086,7 +1176,8 @@ auto unroll_sums_for(
     Expr const* e,
     std::vector<CountableIndex> const& indices) -> Expr const*
 {
-    return rewrite_tree(
+    // Pass 1: unroll ExplicitSum nodes whose index is in `indices`.
+    Expr const* result = rewrite_tree(
         ctx,
         e,
         [&indices](Context& ctx, Expr const* e) -> Expr const*
@@ -1110,20 +1201,45 @@ auto unroll_sums_for(
                 return e;
 
             auto const vals = space->values();
-            Expr const* result = nullptr;
+            Expr const* r = nullptr;
             for (int v: vals)
             {
                 Expr const* term =
                     substitute(ctx, s->body, s->index.id, ConcreteIndex{v});
-                result = result ? make_sum(ctx, result, term) : term;
+                r = r ? make_sum(ctx, r, term) : term;
             }
-            return result ? result : make_scalar(ctx, Rational{0});
+            return r ? r : make_scalar(ctx, Rational{0});
         });
+
+    // Pass 2: for any requested index that appears free (implicit Einstein
+    // sum) in the result, substitute concrete values and form a sum.
+    for (auto const& idx: indices)
+    {
+        if (!has_free_index_for(result, {idx}, {}))
+            continue;
+        IndexSpace const* space = find_index_space(result, idx.id);
+        if (!space)
+            continue;
+        Expr const* summed = nullptr;
+        for (int v: space->values())
+        {
+            Expr const* term =
+                substitute(ctx, result, idx.id, ConcreteIndex{v});
+            summed = summed ? make_sum(ctx, summed, term) : term;
+        }
+        if (summed)
+            result = summed;
+    }
+    return result;
 }
 
 auto has_explicit_sum_for(
     Expr const* e, std::vector<CountableIndex> const& indices) -> bool
 {
+    // Also accept implicit (Einstein-convention) free indices.
+    if (has_free_index_for(e, indices, {}))
+        return true;
+
     bool found = false;
     std::function<void(Expr const*)> go = [&](Expr const* node)
     {

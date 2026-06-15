@@ -1898,6 +1898,69 @@ TEST(HasExplicitSumFor, NestedInsideBinaryNodes)
     EXPECT_TRUE(steps::has_explicit_sum_for(bound_es, {CountableIndex{i}}));
 }
 
+TEST(UnrollSumsFor, ImplicitIndexUnrolled)
+{
+    // δ^i_i (no ExplicitSum wrapper) — asking to unroll i should substitute
+    // concrete values and produce a Sum tree.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+
+    auto const* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{i});
+
+    auto const* after = steps::unroll_sums_for(ctx, d, {CountableIndex{i}});
+
+    // Must no longer be a TensorObject — should be a Sum tree.
+    EXPECT_EQ(std::get_if<TensorObject>(&after->node), nullptr);
+    EXPECT_NE(std::get_if<Sum>(&after->node), nullptr);
+}
+
+TEST(HasExplicitSumFor, FreeIndexDetected)
+{
+    // δ^i_i has no ExplicitSum but i is free — should return true.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+
+    auto const* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{i});
+
+    EXPECT_TRUE(steps::has_explicit_sum_for(d, {CountableIndex{i}}));
+}
+
+TEST(HasExplicitSumFor, FreeIndexSuppressedByNoSum)
+{
+    // NoSum{i, δ^i_i} — i is suppressed, should return false.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+
+    auto const* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{i});
+    auto const* ns = make_no_sum(ctx, i, d);
+
+    EXPECT_FALSE(steps::has_explicit_sum_for(ns, {CountableIndex{i}}));
+}
+
 TEST(ExpandProducts, DDotDistributes)
 {
     // DDot(A + B, C)  →  DDot(A, C) + DDot(B, C)
