@@ -550,6 +550,14 @@ NB_MODULE(_core, m)
         "Contract ExplicitSum{m, δ^m_a · δ^m_b} into δ_{ab}.");
 
     md.def(
+        "_contract_eps_pair",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::contract_eps_pair(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Contract Σ ε ε of two Levi-Civita symbols into the generalized "
+        "Kronecker delta (e.g. Σ_i ε^{ijk} ε_{iml} → δ^j_m δ^k_l − δ^j_l δ^k_m).");
+
+    md.def(
         "_unroll_sums_for",
         [](PyExpr const& e,
            std::vector<CountableIndex> const& indices) -> PyExpr

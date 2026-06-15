@@ -30,6 +30,7 @@ __all__ = [
     "expand_eps",
     "fold_sums",
     "contract_delta",
+    "contract_eps_pair",
     "fold_equal_addends",
 ]
 
@@ -124,6 +125,21 @@ def fold_sums(expr):
 def contract_delta(expr):
     """Contract ``ExplicitSum{m, δ^m_a · δ^m_b}`` into ``δ_{ab}``."""
     return _d._contract_delta(expr)
+
+
+def contract_eps_pair(expr):
+    """Contract a pair of Levi-Civita symbols sharing summed indices.
+
+    Maps ``Σ_{i…} ( ε^{… i…} ⊗ ε_{… i…} )`` directly to the generalized
+    Kronecker delta, with no concrete-WCS unrolling::
+
+        Σ_i  ε^{ijk} ε_{iml}  → δ^j_m δ^k_l − δ^j_l δ^k_m
+        Σ_ij ε^{ijk} ε_{ijl}  → 2 δ^k_l
+
+    Only 3D, and a body that is exactly the product of two rank-3 ε symbols,
+    are supported; anything else is returned unchanged.
+    """
+    return _d._contract_eps_pair(expr)
 
 
 def fold_equal_addends(expr):

@@ -1178,6 +1178,300 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
         });
 }
 
+namespace
+{
+
+// A non-contracted slot of a Levi-Civita symbol: its level and index, used to
+// build the surviving Kronecker deltas of the generalized-Kronecker result.
+struct FreeSlot
+{
+    Level level;
+    IndexAssoc index;
+};
+
+// Sign of the permutation that re-orders `orig` (a list of index ids) into
+// `target` (the same ids, permuted): +1 if even, -1 if odd.  Computed as the
+// parity of the inversion count of the rank sequence.
+auto reorder_sign(std::vector<int> const& orig, std::vector<int> const& target)
+    -> int
+{
+    std::vector<int> seq;
+    seq.reserve(orig.size());
+    for (int id: orig)
+    {
+        auto it = std::find(target.begin(), target.end(), id);
+        seq.push_back(static_cast<int>(it - target.begin()));
+    }
+    int inversions = 0;
+    for (std::size_t a = 0; a < seq.size(); ++a)
+        for (std::size_t b = a + 1; b < seq.size(); ++b)
+            if (seq[a] > seq[b])
+                ++inversions;
+    return (inversions % 2 == 0) ? +1 : -1;
+}
+
+// Expand the q×q Kronecker determinant det(D), where
+// D[r][c] = δ connecting free_a[r] (upper-side) and free_b[c] (lower-side).
+// Returns a Sum/Negate tree of signed δ-products (scalar 1 when q == 0),
+// mirroring the construction style of expand_eps.
+auto build_kronecker_det(
+    Context& ctx,
+    Realm realm,
+    IndexSpace const* space,
+    std::vector<FreeSlot> const& free_a,
+    std::vector<FreeSlot> const& free_b) -> Expr const*
+{
+    int const q = static_cast<int>(free_a.size());
+    if (q == 0)
+        return make_scalar(ctx, Rational{1});
+
+    std::vector<int> perm(q);
+    for (int i = 0; i < q; ++i)
+        perm[i] = i;
+
+    Expr const* result = nullptr;
+    do
+    {
+        int inversions = 0;
+        for (int a = 0; a < q; ++a)
+            for (int b = a + 1; b < q; ++b)
+                if (perm[a] > perm[b])
+                    ++inversions;
+
+        Expr const* term = nullptr;
+        for (int r = 0; r < q; ++r)
+        {
+            auto const& fa = free_a[r];
+            auto const& fb = free_b[perm[r]];
+            Expr const* d = make_delta(
+                ctx, realm, space, fa.level, fb.level, fa.index, fb.index);
+            term = term ? make_tensor_product(ctx, term, d) : d;
+        }
+        if (inversions % 2 != 0)
+            term = make_negate(ctx, term);
+        result = result ? make_sum(ctx, result, term) : term;
+    } while (std::next_permutation(perm.begin(), perm.end()));
+
+    return result;
+}
+
+// Rebuild a node by recursing into its children with `rec` (an
+// Expr const*(Expr const*) callable).  Pointer-preserving: returns e unchanged
+// when no child changed.  Used to drive a top-down rewrite.
+template <typename Rec>
+auto map_children(Context& ctx, Expr const* e, Rec const& rec) -> Expr const*
+{
+    return visit(
+        Overloads{
+            [&](TensorObject const&) -> Expr const* { return e; },
+            [&](ScalarLiteral const&) -> Expr const* { return e; },
+            [&](Negate const& n) -> Expr const*
+            {
+                auto* o = rec(n.operand);
+                return o == n.operand ? e : make_negate(ctx, o);
+            },
+            [&](Sum const& s) -> Expr const*
+            {
+                auto* l = rec(s.left);
+                auto* r = rec(s.right);
+                return (l == s.left && r == s.right) ? e : make_sum(ctx, l, r);
+            },
+            [&](Difference const& s) -> Expr const*
+            {
+                auto* l = rec(s.left);
+                auto* r = rec(s.right);
+                return (l == s.left && r == s.right) ?
+                           e :
+                           make_difference(ctx, l, r);
+            },
+            [&](TensorProduct const& s) -> Expr const*
+            {
+                auto* l = rec(s.left);
+                auto* r = rec(s.right);
+                return (l == s.left && r == s.right) ?
+                           e :
+                           make_tensor_product(ctx, l, r);
+            },
+            [&](ScalarDiv const& s) -> Expr const*
+            {
+                auto* l = rec(s.left);
+                auto* r = rec(s.right);
+                return (l == s.left && r == s.right) ?
+                           e :
+                           make_scalar_div(ctx, l, r);
+            },
+            [&](Dot const& s) -> Expr const*
+            {
+                auto* l = rec(s.left);
+                auto* r = rec(s.right);
+                return (l == s.left && r == s.right) ? e : make_dot(ctx, l, r);
+            },
+            [&](DDot const& s) -> Expr const*
+            {
+                auto* l = rec(s.left);
+                auto* r = rec(s.right);
+                return (l == s.left && r == s.right) ? e : make_ddot(ctx, l, r);
+            },
+            [&](DDotAlt const& s) -> Expr const*
+            {
+                auto* l = rec(s.left);
+                auto* r = rec(s.right);
+                return (l == s.left && r == s.right) ? e :
+                                                       make_ddot_alt(ctx, l, r);
+            },
+            [&](Cross const& s) -> Expr const*
+            {
+                auto* l = rec(s.left);
+                auto* r = rec(s.right);
+                return (l == s.left && r == s.right) ? e :
+                                                       make_cross(ctx, l, r);
+            },
+            [&](ExplicitSum const& s) -> Expr const*
+            {
+                auto* body = rec(s.body);
+                auto* bound = s.bound ? rec(s.bound) : nullptr;
+                return (body == s.body && bound == s.bound) ?
+                           e :
+                           make_explicit_sum(ctx, s.index, body, bound);
+            },
+            [&](NoSum const& s) -> Expr const*
+            {
+                auto* body = rec(s.body);
+                return body == s.body ? e : make_no_sum(ctx, s.index, body);
+            },
+        },
+        *e);
+}
+
+// Attempt the ε-pair contraction anchored at node `e`: peel every nested
+// concrete-bound ExplicitSum, and if the result is Σ ε ε of two rank-3
+// Levi-Civita symbols whose shared dummies are exactly the peeled indices,
+// return the generalized-Kronecker result.  Returns nullptr on no match.
+auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
+{
+    // Peel nested concrete-bound ExplicitSum nodes; collect dummy ids.
+    std::vector<int> summed;
+    Expr const* body = e;
+    while (auto const* s = std::get_if<ExplicitSum>(&body->node))
+    {
+        if (s->bound)
+            return nullptr; // symbolic bound — not handled
+        summed.push_back(s->index.id);
+        body = s->body;
+    }
+    if (summed.empty())
+        return nullptr;
+
+    // Body must be a product of exactly two Levi-Civita symbols.
+    auto const* prod = std::get_if<TensorProduct>(&body->node);
+    if (!prod)
+        return nullptr;
+    auto const* ea = std::get_if<TensorObject>(&prod->left->node);
+    auto const* eb = std::get_if<TensorObject>(&prod->right->node);
+    auto is_eps = [](TensorObject const* t)
+    {
+        return t && t->traits
+               && t->traits->well_known == WellKnownKind::LeviCivita
+               && t->slots.size() == 3;
+    };
+    if (!is_eps(ea) || !is_eps(eb))
+        return nullptr;
+
+    auto in_summed = [&summed](int id)
+    { return std::find(summed.begin(), summed.end(), id) != summed.end(); };
+
+    // Split an ε's slots into contracted-id list and free slots, preserving
+    // order.  Fails (returns false) if any slot is not a CountableIndex.
+    auto split = [&](TensorObject const& eps,
+                     std::vector<int>& contracted_ids,
+                     std::vector<FreeSlot>& free) -> bool
+    {
+        for (auto const& sb: eps.slots)
+        {
+            if (!sb.index)
+                return false;
+            auto const* ci = std::get_if<CountableIndex>(&*sb.index);
+            if (!ci)
+                return false;
+            if (in_summed(ci->id))
+                contracted_ids.push_back(ci->id);
+            else
+                free.push_back(FreeSlot{sb.slot.level, *sb.index});
+        }
+        return true;
+    };
+
+    std::vector<int> ca, cb;
+    std::vector<FreeSlot> fa, fb;
+    if (!split(*ea, ca, fa) || !split(*eb, cb, fb))
+        return nullptr;
+
+    // Every summed dummy must be a genuine contraction: present exactly once
+    // in each ε.
+    int const p = static_cast<int>(summed.size());
+    if (static_cast<int>(ca.size()) != p || static_cast<int>(cb.size()) != p)
+        return nullptr;
+    {
+        std::set<int> sa(ca.begin(), ca.end()), sb(cb.begin(), cb.end());
+        std::set<int> ss(summed.begin(), summed.end());
+        if (sa != ss || sb != ss)
+            return nullptr;
+    }
+    if (fa.size() != fb.size())
+        return nullptr;
+
+    // Sign of re-ordering each ε to [contracted-in-ca-order, free].  Use ca as
+    // the shared contracted-index order for both ε's.
+    std::vector<int> ids_a, ids_b, target_a, target_b;
+    for (auto const& sb: ea->slots)
+        ids_a.push_back(std::get<CountableIndex>(*sb.index).id);
+    for (auto const& sb: eb->slots)
+        ids_b.push_back(std::get<CountableIndex>(*sb.index).id);
+    target_a = ca;
+    for (auto const& f: fa)
+        target_a.push_back(std::get<CountableIndex>(f.index).id);
+    target_b = ca; // same contracted order for the second ε
+    for (auto const& f: fb)
+        target_b.push_back(std::get<CountableIndex>(f.index).id);
+    int sign = reorder_sign(ids_a, target_a) * reorder_sign(ids_b, target_b);
+
+    Realm realm = ea->slots[0].slot.realm;
+    IndexSpace const* space = ea->slots[0].slot.space;
+
+    Expr const* det = build_kronecker_det(ctx, realm, space, fa, fb);
+
+    // Scalar weight: sign · p!  (factorial small: p ∈ {1,2,3}).
+    int fact = 1;
+    for (int k = 2; k <= p; ++k)
+        fact *= k;
+
+    Expr const* core =
+        (fact == 1) ?
+            det :
+            make_tensor_product(ctx, make_scalar(ctx, Rational{fact}), det);
+    return sign < 0 ? make_negate(ctx, core) : core;
+}
+
+// Top-down walk: try the contraction at each node; on a match the whole
+// nested-sum subtree is consumed (no recursion into the replacement), so a
+// multi-index contraction is performed in one shot at the outermost sum.
+auto contract_eps_pair_walk(Context& ctx, Expr const* e) -> Expr const*
+{
+    if (auto const* r = try_contract_eps_pair(ctx, e))
+        return r;
+    return map_children(
+        ctx,
+        e,
+        [&ctx](Expr const* x) { return contract_eps_pair_walk(ctx, x); });
+}
+
+} // namespace
+
+auto contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
+{
+    return contract_eps_pair_walk(ctx, e);
+}
+
 auto unroll_sums_for(
     Context& ctx,
     Expr const* e,

@@ -2,6 +2,11 @@
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/index_space.hpp>
+#include <tender/render.hpp>
+
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace tender;
 
@@ -422,6 +427,140 @@ TEST(ContractDelta, NoContractWithMismatchedLevels)
 
     auto const* after = steps::contract_delta(ctx, expr);
     EXPECT_EQ(after, expr); // unchanged — levels don't match
+}
+
+// ---- contract_eps_pair -----------------------------------------------------
+
+namespace
+{
+auto render_with_names(
+    Expr const* e,
+    std::vector<std::pair<CountableIndex, char const*>> names) -> std::string
+{
+    IndexNameMap map;
+    for (auto const& [ci, nm]: names)
+        map.assign(ci, make_index_name(nm));
+    return render_latex(*e, map);
+}
+} // namespace
+
+TEST(ContractEpsPair, OneSharedIndex)
+{
+    // Σ_i ε^{ijk} ε_{iml}  →  δ^j_m δ^k_l − δ^j_l δ^k_m
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+
+    auto const* ea = make_levi_civita(
+        ctx,
+        Realm::Oblique,
+        sp,
+        {Level::Upper, Level::Upper, Level::Upper},
+        {IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k}});
+    auto const* eb = make_levi_civita(
+        ctx,
+        Realm::Oblique,
+        sp,
+        {Level::Lower, Level::Lower, Level::Lower},
+        {IndexAssoc{i}, IndexAssoc{m}, IndexAssoc{l}});
+    auto const* expr =
+        make_explicit_sum(ctx, i, make_tensor_product(ctx, ea, eb));
+
+    auto const* after = steps::contract_eps_pair(ctx, expr);
+    EXPECT_NE(after, expr);
+    EXPECT_EQ(
+        render_with_names(after, {{j, "j"}, {k, "k"}, {m, "m"}, {l, "l"}}),
+        "\\delta^{j}_{m} \\, \\delta^{k}_{l} - \\delta^{j}_{l} \\, "
+        "\\delta^{k}_{m}");
+}
+
+TEST(ContractEpsPair, TwoSharedIndices)
+{
+    // Σ_{ij} ε^{ijk} ε_{ijl}  →  2 δ^k_l
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+
+    auto const* ea = make_levi_civita(
+        ctx,
+        Realm::Oblique,
+        sp,
+        {Level::Upper, Level::Upper, Level::Upper},
+        {IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k}});
+    auto const* eb = make_levi_civita(
+        ctx,
+        Realm::Oblique,
+        sp,
+        {Level::Lower, Level::Lower, Level::Lower},
+        {IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{l}});
+    auto const* expr = make_explicit_sum(
+        ctx, j, make_explicit_sum(ctx, i, make_tensor_product(ctx, ea, eb)));
+
+    auto const* after = steps::contract_eps_pair(ctx, expr);
+    EXPECT_NE(after, expr);
+    EXPECT_EQ(
+        render_with_names(after, {{k, "k"}, {l, "l"}}),
+        "2 \\, \\delta^{k}_{l}");
+}
+
+TEST(ContractEpsPair, SwappedFreeIndicesFlipSign)
+{
+    // Σ_i ε^{ijk} ε_{ilm}  →  δ^j_l δ^k_m − δ^j_m δ^k_l
+    // (free lowers are l,m here instead of m,l: the determinant columns swap.)
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+
+    auto const* ea = make_levi_civita(
+        ctx,
+        Realm::Oblique,
+        sp,
+        {Level::Upper, Level::Upper, Level::Upper},
+        {IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k}});
+    auto const* eb = make_levi_civita(
+        ctx,
+        Realm::Oblique,
+        sp,
+        {Level::Lower, Level::Lower, Level::Lower},
+        {IndexAssoc{i}, IndexAssoc{l}, IndexAssoc{m}});
+    auto const* expr =
+        make_explicit_sum(ctx, i, make_tensor_product(ctx, ea, eb));
+
+    auto const* after = steps::contract_eps_pair(ctx, expr);
+    EXPECT_EQ(
+        render_with_names(after, {{j, "j"}, {k, "k"}, {l, "l"}, {m, "m"}}),
+        "\\delta^{j}_{l} \\, \\delta^{k}_{m} - \\delta^{j}_{m} \\, "
+        "\\delta^{k}_{l}");
+}
+
+TEST(ContractEpsPair, NonEpsProductUnchanged)
+{
+    // Σ_i δ^i_k δ^i_l is not a pair of ε's → left unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+
+    auto* d1 =
+        make_delta(ctx, Realm::Oblique, sp, Level::Upper, Level::Lower, i, k);
+    auto* d2 =
+        make_delta(ctx, Realm::Oblique, sp, Level::Upper, Level::Lower, i, l);
+    auto* expr = make_explicit_sum(ctx, i, make_tensor_product(ctx, d1, d2));
+
+    auto const* after = steps::contract_eps_pair(ctx, expr);
+    EXPECT_EQ(after, expr); // unchanged
 }
 
 // ---- fold_arithmetic: Difference, ScalarDiv, Negate -----------------------

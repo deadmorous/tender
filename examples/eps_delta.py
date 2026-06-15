@@ -7,13 +7,17 @@ Demonstrates the derivation steps:
   fold_sums          — fold a concrete N-addend cycle back into an ExplicitSum
   contract_delta     — contract Σ_m δ^m_k δ^m_l into δ_kl
   fold_equal_addends — collect equal addends: X + X → 2X
+  contract_eps_pair  — contract Σ ε ε directly to the generalized Kronecker delta
 
 Four derivations are shown:
 
 1. ε(1,2,3) = +1         — concrete evaluation via expand_eps
 2. Σ_m δ^m_k δ^m_l = δ_kl — fold_sums + contract_delta
 3. Σ_{ij} ε^{ijk} ε_{ijl} = 2δ^k_l   — full two-index automated derivation
-4. Σ_i ε^{ijk} ε_{iml}               — one-index: expands to 12 delta terms
+4. Σ_i ε^{ijk} ε_{iml} = δ^j_m δ^k_l − δ^j_l δ^k_m  — one-index, closed
+   symbolically by contract_eps_pair (no concrete-WCS unrolling).  See
+   vibe 000035 for why the older 12-term concrete route needed a "creative
+   step" and this one does not.
 """
 
 import pathlib
@@ -198,9 +202,10 @@ block3 = derivation_to_latex(drv3, labels3, steps=[0, 6, 7, 9, 10])
 
 # ---------------------------------------------------------------------------
 # 4. One-index contraction: Σ_i ε^{ijk} ε_{iml} = δ^j_m δ^k_l - δ^j_l δ^k_m
-#    Automated steps expand to 12 concrete delta products.
-#    Folding into two abstract delta pairs requires a theorem step
-#    of the form Σ_p δ^p_A δ^p_B = δ_AB (future work).
+#    Closed symbolically in a single step by contract_eps_pair (the generalized
+#    Kronecker delta).  No concrete-WCS unrolling, no "creative step" — see
+#    vibe 000035.  The older concrete route (expand_eps + unroll + ...) instead
+#    stalls at 12 delta-pair terms; it is shown below for contrast.
 # ---------------------------------------------------------------------------
 
 ctx4 = tender.Context()
@@ -226,33 +231,52 @@ eps4b = tender.levi_civita(
 
 ei4 = tender.explicit_sum(i4, eps4a * eps4b, ctx=ctx4)
 
+# --- symbolic closure: one step ---
 drv4 = td.Derivation(ei4, index_map=imap4)
-
 labels4 = [
+    r"contract $\varepsilon\varepsilon$ "
+    r"(generalized Kronecker $\delta$)",
+]
+drv4.step(td.contract_eps_pair)
+
+expected4 = (
+    r"\delta^{j}_{m} \, \delta^{k}_{l} - \delta^{j}_{l} \, \delta^{k}_{m}"
+)
+assert drv4.latex(-1) == expected4, f"got {drv4.latex(-1)}"
+
+print("Derivation 4: Σ_i ε^{ijk} ε_{iml} = δ^j_m δ^k_l - δ^j_l δ^k_m")
+for k, e in enumerate(drv4.history):
+    tag = f"  [{labels4[k-1]}]" if k > 0 else "  [initial]"
+    print(f"  step {k}: {drv4.latex(k)}{tag}")
+print()
+
+block4 = derivation_to_latex(drv4, labels4)
+
+# --- contrast: the concrete route stalls at 12 delta-pair terms ---
+drv4_long = td.Derivation(ei4, index_map=imap4)
+labels4_long = [
     "expand both $\\varepsilon$ symbols",
     "unroll $\\sum_i$ (concrete values $i=1,2,3$)",
     "distribute products over sums",
     "evaluate $\\delta$ on concrete $i$",
     "fold arithmetic (12 concrete delta-pair terms remain)",
 ]
-
-(drv4
+(drv4_long
  .step(td.expand_eps)
  .step(td.unroll_sums)
  .step(td.expand_products)
  .step(td.eval_delta_concrete)
  .step(td.fold_arithmetic))
 
-print("Derivation 4: Σ_i ε^{ijk} ε_{iml} (expands to 12 delta-pair terms)")
-for k, e in enumerate(drv4.history):
-    tag = f"  [{labels4[k-1]}]" if k > 0 else "  [initial]"
-    print(f"  step {k}: {drv4.latex(k)[:100]}{tag}")
-print("  (= δ^j_m δ^k_l - δ^j_l δ^k_m; final folding needs theorem Σ_p δ^p_A δ^p_B = δ_AB)")
+print("Derivation 4 (concrete route, for contrast): stalls at 12 delta terms")
+for k, e in enumerate(drv4_long.history):
+    tag = f"  [{labels4_long[k-1]}]" if k > 0 else "  [initial]"
+    print(f"  step {k}: {drv4_long.latex(k)[:100]}{tag}")
 print()
 
 # Show only the initial expression and the final 12-term delta expansion;
 # the intermediate unrolled/distributed forms are too large for the page.
-block4 = derivation_to_latex(drv4, labels4, steps=[0, 5])
+block4_long = derivation_to_latex(drv4_long, labels4_long, steps=[0, 5])
 
 
 # ---------------------------------------------------------------------------
@@ -305,18 +329,21 @@ omitted; we resume after arithmetic folding:
 \subsection*{4.\quad One-index contraction:
   $\displaystyle\sum_i \varepsilon^{ijk} \varepsilon_{iml}$}
 
-Expanding $\varepsilon$, unrolling $\sum_i$ concretely, distributing
-products, evaluating concrete $\delta$s, and folding arithmetic yields
-12 Kronecker-delta terms representing
-$\delta^j_m\delta^k_l - \delta^j_l\delta^k_m$.
-Closing this to two abstract delta pairs requires a theorem
-$\displaystyle\sum_p \delta^p_A \delta^p_B = \delta_{AB}$ (future work):
+The product of two Levi-Civita symbols is a generalized Kronecker delta, so
+the contraction closes in a \emph{single} symbolic step
+(\texttt{contract\_eps\_pair}), with no concrete-WCS unrolling and no
+``creative'' add/subtract:
 
 """ + block4 + r"""
 
-\noindent\textbf{Expected result:}\quad
-$\displaystyle\sum_i\varepsilon^{ijk}\varepsilon_{iml}
-  = \delta^j_m\delta^k_l - \delta^j_l\delta^k_m$.
+\medskip\noindent
+\textbf{For contrast}, the older concrete route --- expand $\varepsilon$,
+unroll $\sum_i$ over $i=1,2,3$, distribute, evaluate concrete $\delta$s, fold
+arithmetic --- stalls at 12 Kronecker-delta terms.  These cannot be folded
+back into $\delta^j_m\delta^k_l - \delta^j_l\delta^k_m$ without re-introducing
+terms that arithmetic folding cancelled (see vibe 000035):
+
+""" + block4_long + r"""
 
 \end{document}
 """

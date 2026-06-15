@@ -232,3 +232,64 @@ def test_fold_then_contract_delta():
     latex = contracted.latex()
     assert r"\sum" not in latex
     assert r"\delta" in latex
+
+
+# ---- contract_eps_pair -----------------------------------------------------
+
+def _eps(ctx, sp, levels, indices):
+    return tender.levi_civita(tender.Realm.Oblique, sp, levels, indices, ctx=ctx)
+
+
+def test_contract_eps_pair_one_index():
+    """Σ_i ε^{ijk} ε_{iml} → δ^j_m δ^k_l − δ^j_l δ^k_m."""
+    ctx = tender.Context()
+    i, j, k, m, l = (ctx.alloc_index() for _ in range(5))
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+
+    ea = _eps(ctx, sp, [U, U, U], [i, j, k])
+    eb = _eps(ctx, sp, [L, L, L], [i, m, l])
+    expr = tender.explicit_sum(i, ea * eb, ctx=ctx)
+
+    imap = tender.IndexNameMap()
+    for idx, nm in [(j, "j"), (k, "k"), (m, "m"), (l, "l")]:
+        imap.assign(idx, nm)
+
+    out = td.contract_eps_pair(expr).latex(imap)
+    assert out == (
+        r"\delta^{j}_{m} \, \delta^{k}_{l} - \delta^{j}_{l} \, \delta^{k}_{m}"
+    )
+
+
+def test_contract_eps_pair_two_indices():
+    """Σ_{ij} ε^{ijk} ε_{ijl} → 2 δ^k_l."""
+    ctx = tender.Context()
+    i, j, k, l = (ctx.alloc_index() for _ in range(4))
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+
+    ea = _eps(ctx, sp, [U, U, U], [i, j, k])
+    eb = _eps(ctx, sp, [L, L, L], [i, j, l])
+    expr = tender.explicit_sum(j, tender.explicit_sum(i, ea * eb, ctx=ctx), ctx=ctx)
+
+    imap = tender.IndexNameMap()
+    imap.assign(k, "k")
+    imap.assign(l, "l")
+
+    out = td.contract_eps_pair(expr).latex(imap)
+    assert out == r"2 \, \delta^{k}_{l}"
+
+
+def test_contract_eps_pair_non_eps_unchanged():
+    """A product that is not a pair of ε's is returned unchanged."""
+    ctx = tender.Context()
+    i, k, l = (ctx.alloc_index() for _ in range(3))
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+
+    def d(a, b):
+        return tender.delta(tender.Realm.Oblique, sp, U, L, a, b, ctx=ctx)
+
+    expr = tender.explicit_sum(i, d(i, k) * d(i, l), ctx=ctx)
+    # No ε pair to contract: the expression is left as-is (still a Σ of δ's).
+    assert td.contract_eps_pair(expr).latex() == expr.latex()

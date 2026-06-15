@@ -89,6 +89,25 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*;
 // indices.
 auto contract_delta(Context& ctx, Expr const* e) -> Expr const*;
 
+// Contract a pair of Levi-Civita symbols sharing p summed indices, directly to
+// the generalized Kronecker delta (no concrete WCS unrolling):
+//
+//   Σ_{i1…ip} ( ε^{… i1…ip} ⊗ ε_{… i1…ip} )
+//     →  s · p! · det[ δ^{free_upper_r}_{free_lower_c} ]
+//
+// where the Σ are nested concrete-bound ExplicitSum nodes (one per shared
+// dummy), free_upper / free_lower are the non-contracted slots of the first /
+// second ε, the determinant is the (3−p)×(3−p) Kronecker determinant, and
+// s = ±1 is the sign of re-ordering each ε to put its contracted slots first.
+//
+// Examples (3D):
+//   Σ_i  ε^{ijk} ε_{iml}  → δ^j_m δ^k_l − δ^j_l δ^k_m   (p=1)
+//   Σ_ij ε^{ijk} ε_{ijl}  → 2 δ^k_l                      (p=2)
+//
+// Only 3D (|space| == 3) and a body that is exactly TensorProduct(ε, ε) are
+// supported; anything else is left unchanged.
+auto contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*;
+
 // Like unroll_sums but restricted to ExplicitSum nodes whose summation index
 // appears in `indices`.  Sums over other indices are left untouched.
 auto unroll_sums_for(
