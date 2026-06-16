@@ -293,3 +293,37 @@ def test_contract_eps_pair_non_eps_unchanged():
     expr = tender.explicit_sum(i, d(i, k) * d(i, l), ctx=ctx)
     # No ε pair to contract: the expression is left as-is (still a Σ of δ's).
     assert td.contract_eps_pair(expr).latex() == expr.latex()
+
+
+# ---- fold_equal_addends: subtraction and right/rational coefficients --------
+
+def _delta_ij(ctx):
+    i, j = ctx.alloc_index(), ctx.alloc_index()
+    imap = tender.IndexNameMap()
+    imap.assign(i, "i"); imap.assign(j, "j")
+    d = tender.delta(tender.Realm.Oblique, _sp3(),
+                     tender.Level.Upper, tender.Level.Lower, i, j, ctx=ctx)
+    return d, imap
+
+
+def test_fold_equal_addends_difference_cancels():
+    """X - X folds to 0; collection sees through Difference."""
+    ctx = tender.Context()
+    d, imap = _delta_ij(ctx)
+    assert td.fold_equal_addends(d - d).latex(imap) == "0"
+
+
+def test_fold_equal_addends_difference_accumulates():
+    """2X - X folds to X."""
+    ctx = tender.Context()
+    d, imap = _delta_ij(ctx)
+    two = tender.scalar(2, ctx=ctx)
+    assert td.fold_equal_addends(two * d - d).latex(imap) == r"\delta^{i}_{j}"
+
+
+def test_fold_equal_addends_right_scalar_coefficient():
+    """X*2 + X folds to 3X (scalar on the right of the product)."""
+    ctx = tender.Context()
+    d, imap = _delta_ij(ctx)
+    two = tender.scalar(2, ctx=ctx)
+    assert td.fold_equal_addends(d * two + d).latex(imap) == r"3 \, \delta^{i}_{j}"

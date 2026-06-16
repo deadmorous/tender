@@ -1967,6 +1967,71 @@ TEST(FoldEqualAddends, NegatedCoefficientMerges)
     EXPECT_EQ(sl->value, Rational{0});
 }
 
+TEST(FoldEqualAddends, DifferenceOfEqualIsZero)
+{
+    // A - A  →  0  (collection sees through Difference)
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* expr = make_difference(ctx, A, A);
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* sl = std::get_if<ScalarLiteral>(&after->node);
+    ASSERT_NE(sl, nullptr);
+    EXPECT_EQ(sl->value, Rational{0});
+}
+
+TEST(FoldEqualAddends, DifferenceAccumulates)
+{
+    // 2A - A  →  A
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* two = make_scalar(ctx, Rational{2});
+    auto const* expr =
+        make_difference(ctx, make_tensor_product(ctx, two, A), A);
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    EXPECT_EQ(after, A);
+}
+
+TEST(FoldEqualAddends, SubtractionInSumMerges)
+{
+    // A + B - A  →  B
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto const* expr = make_difference(ctx, make_sum(ctx, A, B), A);
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    EXPECT_EQ(after, B);
+}
+
+TEST(FoldEqualAddends, RightScalarCoefficient)
+{
+    // A*2 + A  →  3A  (scalar on the right of the product)
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* two = make_scalar(ctx, Rational{2});
+    auto const* expr = make_sum(ctx, make_tensor_product(ctx, A, two), A);
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* tp = std::get_if<TensorProduct>(&after->node);
+    ASSERT_NE(tp, nullptr);
+    auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node);
+    ASSERT_NE(sl, nullptr);
+    EXPECT_EQ(sl->value, Rational{3});
+    EXPECT_EQ(tp->right, A);
+}
+
+TEST(FoldEqualAddends, RationalCoefficientsCollect)
+{
+    // ½A + ½A  →  A  (coefficients accumulate as exact rationals)
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* half = make_scalar(ctx, Rational{1, 2});
+    auto const* expr = make_sum(
+        ctx,
+        make_tensor_product(ctx, half, A),
+        make_tensor_product(ctx, half, A));
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    EXPECT_EQ(after, A);
+}
+
 // ---- expand_products: Dot / Cross distribution ----------------------------
 
 TEST(ExpandProducts, DotLeftSumDistributes)

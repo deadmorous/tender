@@ -239,6 +239,34 @@ void collect_addends(Expr const* e, std::vector<Expr const*>& out)
     }
 }
 
+// Flatten an additive expression into signed leaf addends: Sum keeps the sign,
+// Difference flips it on the right operand, Negate flips it.  Non-additive
+// nodes are leaves.  This lets like-term collection see through subtraction and
+// negation uniformly (X - X, 2X - X, X + Y - X), independently of whether a
+// sign is encoded as Sum+Negate or as Difference.
+void collect_signed_addends(
+    Expr const* e, int sign, std::vector<std::pair<int, Expr const*>>& out)
+{
+    if (auto const* s = std::get_if<Sum>(&e->node))
+    {
+        collect_signed_addends(s->left, sign, out);
+        collect_signed_addends(s->right, sign, out);
+    }
+    else if (auto const* d = std::get_if<Difference>(&e->node))
+    {
+        collect_signed_addends(d->left, sign, out);
+        collect_signed_addends(d->right, -sign, out);
+    }
+    else if (auto const* n = std::get_if<Negate>(&e->node))
+    {
+        collect_signed_addends(n->operand, -sign, out);
+    }
+    else
+    {
+        out.push_back({sign, e});
+    }
+}
+
 // Find an IndexSpace from any ConcreteIndex-bearing TensorObject slot.
 auto find_space_from_concrete(Expr const* e) -> IndexSpace const*
 {
@@ -608,19 +636,24 @@ auto distribute_any(
     return make_prod(l, r);
 }
 
-// Extract (integer coefficient, core expression) from an addend.
+// Extract (rational coefficient, core expression) from an addend.
 // Returns {1, e}       for a plain expression.
-// Returns {n, core}    for TensorProduct(ScalarLiteral(n), core).
+// Returns {c, core}    for TensorProduct(ScalarLiteral(c), core) — scalar on
+//                      either side (so X·2 reads the same as 2·X).
 // Returns {-1, core}   for Negate(core).
-auto extract_coeff(Expr const* e) -> std::pair<int64_t, Expr const*>
+// The coefficient is an exact Rational, so e.g. ½X + ½X collects to X.
+auto extract_coeff(Expr const* e) -> std::pair<Rational, Expr const*>
 {
     if (auto const* tp = std::get_if<TensorProduct>(&e->node))
+    {
         if (auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node))
-            if (sl->value.is_integer())
-                return {sl->value.num(), tp->right};
+            return {sl->value, tp->right};
+        if (auto const* sr = std::get_if<ScalarLiteral>(&tp->right->node))
+            return {sr->value, tp->left};
+    }
     if (auto const* neg = std::get_if<Negate>(&e->node))
-        return {-1, neg->operand};
-    return {1, e};
+        return {Rational{-1}, neg->operand};
+    return {Rational{1}, e};
 }
 
 // Return true if any of `indices` appears free in `e` — i.e., in a tensor
@@ -1619,35 +1652,38 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*
         e,
         [](Context& ctx, Expr const* e) -> Expr const*
         {
-            std::vector<Expr const*> addends;
-            collect_addends(e, addends);
+            std::vector<std::pair<int, Expr const*>> addends;
+            collect_signed_addends(e, +1, addends);
             if (addends.size() < 2)
                 return e;
 
-            // Group addends by structural equality of core expression.
-            // Each group accumulates the integer coefficient total.
+            // Group signed addends by structural equality of core expression.
+            // Each group accumulates the rational coefficient total.
             std::vector<bool> used(addends.size(), false);
-            std::vector<std::pair<int64_t, Expr const*>> groups;
+            std::vector<std::pair<Rational, Expr const*>> groups;
 
             for (std::size_t i = 0; i < addends.size(); ++i)
             {
                 if (used[i])
                     continue;
-                auto [ci, corei] = extract_coeff(addends[i]);
+                auto [si, ei] = addends[i];
+                auto [ci, corei] = extract_coeff(ei);
+                Rational total = ci * Rational{si};
                 used[i] = true;
 
                 for (std::size_t j = i + 1; j < addends.size(); ++j)
                 {
                     if (used[j])
                         continue;
-                    auto [cj, corej] = extract_coeff(addends[j]);
+                    auto [sj, ej] = addends[j];
+                    auto [cj, corej] = extract_coeff(ej);
                     if (structural_eq(corei, corej))
                     {
-                        ci += cj;
+                        total += cj * Rational{sj};
                         used[j] = true;
                     }
                 }
-                groups.emplace_back(ci, corei);
+                groups.emplace_back(total, corei);
             }
 
             if (groups.size() == addends.size())
@@ -1655,18 +1691,18 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*
 
             // Rebuild sum from groups.
             Expr const* result = nullptr;
-            for (auto const& [cnt, core]: groups)
+            for (auto const& [coeff, core]: groups)
             {
-                if (cnt == 0)
+                if (coeff == 0)
                     continue;
                 Expr const* term;
-                if (cnt == 1)
+                if (coeff == 1)
                     term = core;
-                else if (cnt == -1)
+                else if (coeff == -1)
                     term = make_negate(ctx, core);
                 else
-                    term = make_tensor_product(
-                        ctx, make_scalar(ctx, Rational{cnt}), core);
+                    term =
+                        make_tensor_product(ctx, make_scalar(ctx, coeff), core);
                 result = result ? make_sum(ctx, result, term) : term;
             }
             return result ? result : make_scalar(ctx, Rational{0});
