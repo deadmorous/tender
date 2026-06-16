@@ -368,3 +368,20 @@ def test_canonicalize_collects_and_cancels():
     d = tender.delta(tender.Realm.Oblique, _sp3(), U, L, i, j, ctx=ctx)
     assert td.canonicalize(d + d).latex(imap) == r"2 \, \delta^{i}_{j}"
     assert td.canonicalize(d - d).latex(imap) == "0"
+
+
+def test_canonicalize_alpha_equivalent_dummies():
+    """Σ_i δ^i_a δ^i_b and Σ_p δ^p_a δ^p_b canonicalize identically."""
+    ctx = tender.Context()
+    a, b, i, p = (ctx.alloc_index() for _ in range(4))
+    U, L = tender.Level.Upper, tender.Level.Lower
+
+    def d(x, y):
+        return tender.delta(tender.Realm.Oblique, _sp3(), U, L, x, y, ctx=ctx)
+
+    e1 = tender.explicit_sum(i, d(i, a) * d(i, b), ctx=ctx)
+    e2 = tender.explicit_sum(p, d(p, a) * d(p, b), ctx=ctx)
+    # Fresh maps assign names deterministically by id, so equal canonical forms
+    # render identically.
+    assert td.canonicalize(e1).latex(tender.IndexNameMap()) == \
+        td.canonicalize(e2).latex(tender.IndexNameMap())

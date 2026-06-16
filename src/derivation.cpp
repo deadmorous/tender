@@ -970,7 +970,48 @@ auto is_component_valued(Expr const* e) -> bool
 
 // ---- the canonicalizer --------------------------------------------------
 
-auto canon(Context& ctx, Expr const* e) -> Expr const*;
+// Replace every CountableIndex{old_id} in TensorObject slots with
+// CountableIndex{new_id} — used to α-normalize a binder's dummy index.
+auto substitute_index_id(Context& ctx, Expr const* e, int old_id, int new_id)
+    -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [old_id, new_id](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&e->node);
+            if (!t)
+                return e;
+            auto slots = t->slots;
+            bool changed = false;
+            for (auto& sb: slots)
+            {
+                if (!sb.index)
+                    continue;
+                if (auto const* ci = std::get_if<CountableIndex>(&*sb.index))
+                    if (ci->id == old_id)
+                    {
+                        sb.index = CountableIndex{new_id};
+                        changed = true;
+                    }
+            }
+            if (!changed)
+                return e;
+            return ctx.make<Expr>(
+                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+        });
+}
+
+// Canonical (reserved, negative) id for a bound index at binder nesting depth
+// d.  Free ids are non-negative, so this namespace never collides with them,
+// and distinct depths get distinct ids (so Σ_i Σ_j keeps i and j apart).
+auto bound_canon_id(int depth) -> int
+{
+    return -(depth + 1);
+}
+
+auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*;
 
 // Flatten a left/right TensorProduct tree into its factor leaves.
 void flatten_factors(Expr const* e, std::vector<Expr const*>& out)
@@ -1004,7 +1045,7 @@ auto build_term(
     return make_tensor_product(ctx, make_scalar(ctx, coeff), prod);
 }
 
-auto canon_product(Context& ctx, Expr const* e) -> Expr const*
+auto canon_product(Context& ctx, Expr const* e, int depth) -> Expr const*
 {
     std::vector<Expr const*> flat;
     flatten_factors(e, flat);
@@ -1014,7 +1055,7 @@ auto canon_product(Context& ctx, Expr const* e) -> Expr const*
     std::vector<Expr const*> inv;  // invariant factors (order preserved)
     for (auto const* f: flat)
     {
-        auto const* cf = canon(ctx, f);
+        auto const* cf = canon(ctx, f, depth);
         // Pull out a leading numeric coefficient / sign, then re-flatten the
         // core (a collapsed sub-sum may have become a scaled monomial).
         auto [c, core] = extract_coeff(cf);
@@ -1046,7 +1087,7 @@ auto canon_product(Context& ctx, Expr const* e) -> Expr const*
     return build_term(ctx, coeff, ordered);
 }
 
-auto canon_additive(Context& ctx, Expr const* e) -> Expr const*
+auto canon_additive(Context& ctx, Expr const* e, int depth) -> Expr const*
 {
     std::vector<std::pair<int, Expr const*>> addends;
     collect_signed_addends(e, +1, addends);
@@ -1054,7 +1095,7 @@ auto canon_additive(Context& ctx, Expr const* e) -> Expr const*
     std::vector<std::pair<Rational, Expr const*>> terms; // (coeff, core)
     for (auto const& [sign, sub]: addends)
     {
-        auto const* cs = canon(ctx, sub);
+        auto const* cs = canon(ctx, sub, depth);
         auto [c, core] = extract_coeff(cs);
         Rational coeff = c * Rational{sign};
         bool merged = false;
@@ -1100,23 +1141,24 @@ auto is_rank1_vector(Expr const* e) -> bool
     return t && t->rank && *t->rank == 1 && t->slots.empty();
 }
 
-auto canon(Context& ctx, Expr const* e) -> Expr const*
+auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*
 {
     return visit(
         Overloads{
             [&](ScalarLiteral const&) -> Expr const* { return e; },
             [&](TensorObject const&) -> Expr const* { return e; },
             [&](Negate const&) -> Expr const*
-            { return canon_additive(ctx, e); },
-            [&](Sum const&) -> Expr const* { return canon_additive(ctx, e); },
+            { return canon_additive(ctx, e, depth); },
+            [&](Sum const&) -> Expr const*
+            { return canon_additive(ctx, e, depth); },
             [&](Difference const&) -> Expr const*
-            { return canon_additive(ctx, e); },
+            { return canon_additive(ctx, e, depth); },
             [&](TensorProduct const&) -> Expr const*
-            { return canon_product(ctx, e); },
+            { return canon_product(ctx, e, depth); },
             [&](ScalarDiv const& d) -> Expr const*
             {
-                auto const* l = canon(ctx, d.left);
-                auto const* r = canon(ctx, d.right);
+                auto const* l = canon(ctx, d.left, depth);
+                auto const* r = canon(ctx, d.right, depth);
                 auto const* sl = std::get_if<ScalarLiteral>(&l->node);
                 auto const* sr = std::get_if<ScalarLiteral>(&r->node);
                 if (sl && sr)
@@ -1125,8 +1167,8 @@ auto canon(Context& ctx, Expr const* e) -> Expr const*
             },
             [&](Dot const& d) -> Expr const*
             {
-                auto const* l = canon(ctx, d.left);
-                auto const* r = canon(ctx, d.right);
+                auto const* l = canon(ctx, d.left, depth);
+                auto const* r = canon(ctx, d.right, depth);
                 if (is_rank1_vector(l) && is_rank1_vector(r)
                     && expr_cmp(l, r) > 0)
                     return make_dot(ctx, r, l); // a·b = b·a
@@ -1134,8 +1176,8 @@ auto canon(Context& ctx, Expr const* e) -> Expr const*
             },
             [&](Cross const& c) -> Expr const*
             {
-                auto const* l = canon(ctx, c.left);
-                auto const* r = canon(ctx, c.right);
+                auto const* l = canon(ctx, c.left, depth);
+                auto const* r = canon(ctx, c.right, depth);
                 if (is_rank1_vector(l) && is_rank1_vector(r)
                     && expr_cmp(l, r) > 0)
                     return make_negate(ctx, make_cross(ctx, r, l)); // a×b =
@@ -1143,19 +1185,32 @@ auto canon(Context& ctx, Expr const* e) -> Expr const*
                 return make_cross(ctx, l, r);
             },
             [&](DDot const& d) -> Expr const*
-            { return make_ddot(ctx, canon(ctx, d.left), canon(ctx, d.right)); },
-            [&](DDotAlt const& d) -> Expr const* {
+            {
+                return make_ddot(
+                    ctx, canon(ctx, d.left, depth), canon(ctx, d.right, depth));
+            },
+            [&](DDotAlt const& d) -> Expr const*
+            {
                 return make_ddot_alt(
-                    ctx, canon(ctx, d.left), canon(ctx, d.right));
+                    ctx, canon(ctx, d.left, depth), canon(ctx, d.right, depth));
             },
             [&](ExplicitSum const& s) -> Expr const*
             {
-                auto const* body = canon(ctx, s.body);
-                auto const* bound = s.bound ? canon(ctx, s.bound) : nullptr;
-                return make_explicit_sum(ctx, s.index, body, bound);
+                // α-normalize: relabel the dummy to a canonical id *before*
+                // canonicalizing the body, so the body's sort order does not
+                // depend on the original dummy id.
+                int cid = bound_canon_id(depth);
+                auto const* relabeled =
+                    substitute_index_id(ctx, s.body, s.index.id, cid);
+                auto const* body = canon(ctx, relabeled, depth + 1);
+                auto const* bound =
+                    s.bound ? canon(ctx, s.bound, depth) : nullptr;
+                return make_explicit_sum(ctx, CountableIndex{cid}, body, bound);
             },
+            // NoSum suppresses summation, so its index stays a free reference
+            // (not α-renamed); only its body is canonicalized.
             [&](NoSum const& s) -> Expr const*
-            { return make_no_sum(ctx, s.index, canon(ctx, s.body)); },
+            { return make_no_sum(ctx, s.index, canon(ctx, s.body, depth)); },
         },
         *e);
 }
@@ -1167,7 +1222,7 @@ namespace steps
 
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
 {
-    return canon(ctx, e);
+    return canon(ctx, e, 0);
 }
 
 auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*

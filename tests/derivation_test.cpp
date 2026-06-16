@@ -2146,6 +2146,49 @@ TEST(Canonicalize, CrossAnticommutesForVectors)
         render_with_names(neg->operand, {}), render_with_names(ordered, {}));
 }
 
+TEST(Canonicalize, AlphaEquivalentDummies)
+{
+    // Σ_i δ^i_a δ^i_b  ≡  Σ_p δ^p_a δ^p_b   (bound index renamed)
+    Context ctx;
+    CountableIndex a{ctx.alloc_index_id()}, b{ctx.alloc_index_id()};
+    CountableIndex i{ctx.alloc_index_id()}, p{ctx.alloc_index_id()};
+    auto const* e1 = make_explicit_sum(
+        ctx,
+        i,
+        make_tensor_product(ctx, delta_ul(ctx, i, a), delta_ul(ctx, i, b)));
+    auto const* e2 = make_explicit_sum(
+        ctx,
+        p,
+        make_tensor_product(ctx, delta_ul(ctx, p, a), delta_ul(ctx, p, b)));
+    auto names = {std::pair{a, "a"}, std::pair{b, "b"}};
+    EXPECT_EQ(canon_str(ctx, e1, names), canon_str(ctx, e2, names));
+}
+
+TEST(Canonicalize, AlphaNestedDummies)
+{
+    // Σ_i Σ_j δ^i_j  ≡  Σ_p Σ_q δ^p_q   (nested binders α-renamed)
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    CountableIndex p{ctx.alloc_index_id()}, q{ctx.alloc_index_id()};
+    auto const* e1 = make_explicit_sum(
+        ctx, i, make_explicit_sum(ctx, j, delta_ul(ctx, i, j)));
+    auto const* e2 = make_explicit_sum(
+        ctx, p, make_explicit_sum(ctx, q, delta_ul(ctx, p, q)));
+    EXPECT_EQ(canon_str(ctx, e1), canon_str(ctx, e2));
+}
+
+TEST(Canonicalize, DistinctFreeIndexStillDiffers)
+{
+    // α-normalization must not over-identify: a free index is not a dummy.
+    Context ctx;
+    CountableIndex a{ctx.alloc_index_id()}, b{ctx.alloc_index_id()};
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* e1 = make_explicit_sum(ctx, i, delta_ul(ctx, i, a));
+    auto const* e2 = make_explicit_sum(ctx, i, delta_ul(ctx, i, b));
+    auto names = {std::pair{a, "a"}, std::pair{b, "b"}};
+    EXPECT_NE(canon_str(ctx, e1, names), canon_str(ctx, e2, names));
+}
+
 // ---- expand_products: Dot / Cross distribution ----------------------------
 
 TEST(ExpandProducts, DotLeftSumDistributes)
