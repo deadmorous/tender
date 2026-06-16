@@ -1092,12 +1092,18 @@ auto canon_additive(Context& ctx, Expr const* e, int depth) -> Expr const*
     std::vector<std::pair<int, Expr const*>> addends;
     collect_signed_addends(e, +1, addends);
 
+    Rational constant{0};                                // numeric terms folded
     std::vector<std::pair<Rational, Expr const*>> terms; // (coeff, core)
     for (auto const& [sign, sub]: addends)
     {
         auto const* cs = canon(ctx, sub, depth);
         auto [c, core] = extract_coeff(cs);
         Rational coeff = c * Rational{sign};
+        if (auto const* sl = std::get_if<ScalarLiteral>(&core->node))
+        {
+            constant += coeff * sl->value;
+            continue;
+        }
         bool merged = false;
         for (auto& [tc, tcore]: terms)
             if (structural_eq(core, tcore))
@@ -1116,7 +1122,7 @@ auto canon_additive(Context& ctx, Expr const* e, int depth) -> Expr const*
         if (!(t.first == 0))
             kept.push_back(t);
     if (kept.empty())
-        return make_scalar(ctx, Rational{0});
+        return make_scalar(ctx, constant);
 
     std::sort(
         kept.begin(),
@@ -1130,6 +1136,9 @@ auto canon_additive(Context& ctx, Expr const* e, int depth) -> Expr const*
         Expr const* term = build_term(ctx, coeff, {core});
         result = result ? make_sum(ctx, result, term) : term;
     }
+    // A non-zero numeric constant is appended last (deterministic position).
+    if (!(constant == 0))
+        result = make_sum(ctx, result, make_scalar(ctx, constant));
     return result;
 }
 

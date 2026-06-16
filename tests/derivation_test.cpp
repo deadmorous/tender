@@ -563,6 +563,46 @@ TEST(ContractEpsPair, NonEpsProductUnchanged)
     EXPECT_EQ(after, expr); // unchanged
 }
 
+TEST(ContractEpsPair, WalksEveryNodeKindWithoutMatch)
+{
+    // No ε-pair anywhere: the top-down walker must recurse through every
+    // composite node kind and return the expression unchanged.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* d =
+        make_delta(ctx, Realm::Oblique, sp, Level::Upper, Level::Lower, i, j);
+
+    auto const* e = make_negate(
+        ctx,
+        make_sum(
+            ctx,
+            make_difference(ctx, make_ddot(ctx, A, B), make_ddot_alt(ctx, A, B)),
+            make_sum(
+                ctx,
+                make_dot(ctx, a, b),
+                make_sum(
+                    ctx,
+                    make_cross(ctx, a, b),
+                    make_sum(
+                        ctx,
+                        make_scalar_div(ctx, A, B),
+                        make_sum(
+                            ctx,
+                            make_tensor_product(ctx, d, d),
+                            make_sum(
+                                ctx,
+                                make_explicit_sum(ctx, i, d),
+                                make_no_sum(ctx, i, d))))))));
+
+    auto const* after = steps::contract_eps_pair(ctx, e);
+    EXPECT_EQ(after, e); // no ε-pair → pointer preserved
+}
+
 // ---- fold_arithmetic: Difference, ScalarDiv, Negate -----------------------
 
 TEST(FoldArithmetic, DifferenceOfScalars)
@@ -2187,6 +2227,125 @@ TEST(Canonicalize, DistinctFreeIndexStillDiffers)
     auto const* e2 = make_explicit_sum(ctx, i, delta_ul(ctx, i, b));
     auto names = {std::pair{a, "a"}, std::pair{b, "b"}};
     EXPECT_NE(canon_str(ctx, e1, names), canon_str(ctx, e2, names));
+}
+
+namespace
+{
+auto canon_idempotent(Context& ctx, Expr const* e) -> bool
+{
+    auto const* c1 = steps::canonicalize(ctx, e);
+    auto const* c2 = steps::canonicalize(ctx, c1);
+    return render_with_names(c1, {}) == render_with_names(c2, {});
+}
+auto vec(Context& ctx, char const* n) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(n), {}, 1);
+}
+auto mat(Context& ctx, char const* n) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(n), {}, 2);
+}
+} // namespace
+
+TEST(Canonicalize, IdempotentAcrossNodeKinds)
+{
+    Context ctx;
+    auto const* a = vec(ctx, "a");
+    auto const* b = vec(ctx, "b");
+    auto const* c = vec(ctx, "c");
+    auto const* d = vec(ctx, "d");
+    auto const* A = mat(ctx, "A");
+    auto const* B = mat(ctx, "B");
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    CountableIndex p{ctx.alloc_index_id()}, q{ctx.alloc_index_id()};
+    auto const* N = make_tensor_object(ctx, make_tensor_name("N"), {}, 0);
+
+    std::vector<Expr const*> cases = {
+        // invariant binary ops (canon arms + is_component_valued false arms)
+        make_ddot(ctx, A, B),
+        make_ddot_alt(ctx, A, B),
+        make_dot(ctx, A, b),        // rank-2 · rank-1: no reorder
+        make_cross(ctx, A, B),      // rank-2 ×: no reorder
+        make_scalar_div(ctx, A, B), // symbolic division (no fold)
+        make_scalar_div(
+            ctx,
+            make_scalar(ctx, Rational{6}),
+            make_scalar(ctx, Rational{2})), // folds to 3
+        make_no_sum(ctx, i, delta_ul(ctx, i, j)),
+        make_explicit_sum(ctx, i, delta_ul(ctx, i, j), N), // symbolic bound
+        // sorting two same-kind cores → exercises expr_cmp arms
+        make_sum(ctx, make_dot(ctx, a, b), make_dot(ctx, c, d)),
+        make_sum(ctx, make_ddot(ctx, A, B), make_ddot(ctx, B, A)),
+        make_sum(ctx, make_ddot_alt(ctx, A, B), make_ddot_alt(ctx, B, A)),
+        make_sum(ctx, make_cross(ctx, a, b), make_cross(ctx, c, d)),
+        make_sum(
+            ctx,
+            make_explicit_sum(ctx, i, delta_ul(ctx, i, j)),
+            make_explicit_sum(ctx, p, delta_ul(ctx, p, q))),
+        // invariant factors inside a product (is_component_valued false arms)
+        make_tensor_product(ctx, delta_ul(ctx, i, j), make_dot(ctx, a, b)),
+        make_tensor_product(
+            ctx, delta_ul(ctx, i, j), make_scalar_div(ctx, A, B)),
+        // a product of two sum atoms (no distribution; expr_cmp Sum arm)
+        make_tensor_product(
+            ctx,
+            make_sum(ctx, delta_ul(ctx, i, j), delta_ul(ctx, p, q)),
+            make_sum(ctx, delta_ul(ctx, j, i), delta_ul(ctx, q, p))),
+    };
+    for (auto const* e: cases)
+        EXPECT_TRUE(canon_idempotent(ctx, e));
+}
+
+TEST(Canonicalize, FoldsNumericConstants)
+{
+    Context ctx;
+    auto two = []() { return Rational{2}; };
+    EXPECT_EQ(
+        canon_str(
+            ctx,
+            make_sum(
+                ctx,
+                make_scalar(ctx, Rational{2}),
+                make_scalar(ctx, Rational{3}))),
+        "5");
+    EXPECT_EQ(
+        canon_str(
+            ctx,
+            make_difference(
+                ctx, make_scalar(ctx, two()), make_scalar(ctx, two()))),
+        "0");
+    // δ + 2 + 3 → δ + 5 (constant appended last)
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    auto const* expr = make_sum(
+        ctx,
+        make_sum(ctx, delta_ul(ctx, i, j), make_scalar(ctx, Rational{2})),
+        make_scalar(ctx, Rational{3}));
+    EXPECT_EQ(canon_str(ctx, expr, {{i, "i"}, {j, "j"}}), "\\delta^{i}_{j} + 5");
+}
+
+TEST(Canonicalize, ProductReducesToScalarOrZero)
+{
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    auto const* d = delta_ul(ctx, i, j);
+    // 2 · 3 → 6 (build_term with no non-scalar factors)
+    EXPECT_EQ(
+        canon_str(
+            ctx,
+            make_tensor_product(
+                ctx,
+                make_scalar(ctx, Rational{2}),
+                make_scalar(ctx, Rational{3}))),
+        "6");
+    // 0 · δ → 0 (build_term coeff 0)
+    EXPECT_EQ(
+        canon_str(
+            ctx, make_tensor_product(ctx, make_scalar(ctx, Rational{0}), d)),
+        "0");
+    // -δ → -δ (build_term coeff -1)
+    EXPECT_EQ(
+        canon_str(ctx, make_negate(ctx, d), {{i, "i"}, {j, "j"}}),
+        "-\\delta^{i}_{j}");
 }
 
 // ---- expand_products: Dot / Cross distribution ----------------------------
