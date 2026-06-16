@@ -580,4 +580,12 @@ NB_MODULE(_core, m)
         { return derive(e, steps::fold_equal_addends(*e.ctx, e.expr)); },
         "expr"_a,
         "Group identical addends: X + X → 2X, n*X + X → (n+1)*X.");
+
+    md.def(
+        "_canonicalize",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::canonicalize(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Rewrite into algebraic normal form (sorted, signed-coefficient, "
+        "like terms combined; no distribution).");
 }

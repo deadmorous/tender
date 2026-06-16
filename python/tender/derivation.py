@@ -32,6 +32,7 @@ __all__ = [
     "contract_delta",
     "contract_eps_pair",
     "fold_equal_addends",
+    "canonicalize",
 ]
 
 
@@ -145,3 +146,14 @@ def contract_eps_pair(expr):
 def fold_equal_addends(expr):
     """Group identical addends: ``X + X → 2X``, ``n·X + X → (n+1)·X``, etc."""
     return _d._fold_equal_addends(expr)
+
+
+def canonicalize(expr):
+    """Rewrite into algebraic normal form (vibe 000037).
+
+    Sorts commutative operands, carries signs in a single rational coefficient
+    per term, combines like terms, and α-leaves dummies as-is for now.  Does NOT
+    distribute products over sums.  Two expressions equal under the normal-form
+    theory T0 produce structurally identical results.
+    """
+    return _d._canonicalize(expr)

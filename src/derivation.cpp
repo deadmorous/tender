@@ -746,10 +746,429 @@ auto has_free_index_for(
         *e);
 }
 
+// ===== Algebraic normal form (vibe 000037) ===============================
+
+// ---- total order over expressions (for sorting commutative operands) ----
+
+auto name_view_cmp(std::string_view a, std::string_view b) -> int
+{
+    return a.compare(b);
+}
+
+auto space_cmp(IndexSpace const* a, IndexSpace const* b) -> int
+{
+    if (a == b)
+        return 0;
+    auto va = a->values(), vb = b->values();
+    if (va.size() != vb.size())
+        return va.size() < vb.size() ? -1 : 1;
+    for (std::size_t i = 0; i < va.size(); ++i)
+        if (va[i] != vb[i])
+            return va[i] < vb[i] ? -1 : 1;
+    // Same value set but distinct instances: fall back to pointer for a stable
+    // within-run order.
+    return a < b ? -1 : 1;
+}
+
+auto index_assoc_cmp(
+    std::optional<IndexAssoc> const& a,
+    std::optional<IndexAssoc> const& b) -> int
+{
+    if (!a && !b)
+        return 0;
+    if (!a)
+        return -1;
+    if (!b)
+        return 1;
+    if (a->index() != b->index())
+        return a->index() < b->index() ? -1 : 1;
+    return std::visit(
+        Overloads{
+            [&](CountableIndex const& ca) -> int
+            {
+                auto id = std::get<CountableIndex>(*b).id;
+                return ca.id == id ? 0 : (ca.id < id ? -1 : 1);
+            },
+            [&](ConcreteIndex const& ca) -> int
+            {
+                auto v = std::get<ConcreteIndex>(*b).value;
+                return ca.value == v ? 0 : (ca.value < v ? -1 : 1);
+            },
+            [&](LabelIndex const& la) -> int
+            {
+                return name_view_cmp(
+                    la.name.v.view(), std::get<LabelIndex>(*b).name.v.view());
+            }},
+        *a);
+}
+
+auto expr_cmp(Expr const* a, Expr const* b) -> int;
+
+auto binop_cmp(Expr const* al, Expr const* ar, Expr const* bl, Expr const* br)
+    -> int
+{
+    if (int c = expr_cmp(al, bl))
+        return c;
+    return expr_cmp(ar, br);
+}
+
+// Total order: first by node kind (variant index), then structurally.  Children
+// are assumed already canonical, so this is a well-defined order on canonical
+// forms.
+auto expr_cmp(Expr const* a, Expr const* b) -> int
+{
+    if (a == b)
+        return 0;
+    auto ka = a->node.index(), kb = b->node.index();
+    if (ka != kb)
+        return ka < kb ? -1 : 1;
+    return visit(
+        Overloads{
+            [&](TensorObject const& ta) -> int
+            {
+                auto const& tb = std::get<TensorObject>(b->node);
+                if (int c = name_view_cmp(ta.name.v.view(), tb.name.v.view()))
+                    return c;
+                if (ta.rank != tb.rank)
+                    return ta.rank < tb.rank ? -1 : 1;
+                if (ta.slots.size() != tb.slots.size())
+                    return ta.slots.size() < tb.slots.size() ? -1 : 1;
+                for (std::size_t i = 0; i < ta.slots.size(); ++i)
+                {
+                    auto const& sa = ta.slots[i];
+                    auto const& sb = tb.slots[i];
+                    if (sa.slot.level != sb.slot.level)
+                        return sa.slot.level < sb.slot.level ? -1 : 1;
+                    if (sa.slot.realm != sb.slot.realm)
+                        return sa.slot.realm < sb.slot.realm ? -1 : 1;
+                    if (int c = space_cmp(sa.slot.space, sb.slot.space))
+                        return c;
+                    if (int c = index_assoc_cmp(sa.index, sb.index))
+                        return c;
+                }
+                return 0;
+            },
+            [&](ScalarLiteral const& la) -> int
+            {
+                auto const& lb = std::get<ScalarLiteral>(b->node);
+                auto o = la.value <=> lb.value;
+                return o < 0 ? -1 : (o > 0 ? 1 : 0);
+            },
+            [&](Negate const& na) -> int
+            { return expr_cmp(na.operand, std::get<Negate>(b->node).operand); },
+            [&](Sum const& sa) -> int
+            {
+                auto const& sb = std::get<Sum>(b->node);
+                return binop_cmp(sa.left, sa.right, sb.left, sb.right);
+            },
+            [&](Difference const& da) -> int
+            {
+                auto const& db = std::get<Difference>(b->node);
+                return binop_cmp(da.left, da.right, db.left, db.right);
+            },
+            [&](TensorProduct const& pa) -> int
+            {
+                auto const& pb = std::get<TensorProduct>(b->node);
+                return binop_cmp(pa.left, pa.right, pb.left, pb.right);
+            },
+            [&](ScalarDiv const& da) -> int
+            {
+                auto const& db = std::get<ScalarDiv>(b->node);
+                return binop_cmp(da.left, da.right, db.left, db.right);
+            },
+            [&](Dot const& da) -> int
+            {
+                auto const& db = std::get<Dot>(b->node);
+                return binop_cmp(da.left, da.right, db.left, db.right);
+            },
+            [&](DDot const& da) -> int
+            {
+                auto const& db = std::get<DDot>(b->node);
+                return binop_cmp(da.left, da.right, db.left, db.right);
+            },
+            [&](DDotAlt const& da) -> int
+            {
+                auto const& db = std::get<DDotAlt>(b->node);
+                return binop_cmp(da.left, da.right, db.left, db.right);
+            },
+            [&](Cross const& da) -> int
+            {
+                auto const& db = std::get<Cross>(b->node);
+                return binop_cmp(da.left, da.right, db.left, db.right);
+            },
+            [&](ExplicitSum const& sa) -> int
+            {
+                auto const& sb = std::get<ExplicitSum>(b->node);
+                if (sa.index.id != sb.index.id)
+                    return sa.index.id < sb.index.id ? -1 : 1;
+                if (int c = expr_cmp(sa.body, sb.body))
+                    return c;
+                if ((sa.bound == nullptr) != (sb.bound == nullptr))
+                    return sa.bound == nullptr ? -1 : 1;
+                return sa.bound ? expr_cmp(sa.bound, sb.bound) : 0;
+            },
+            [&](NoSum const& sa) -> int
+            {
+                auto const& sb = std::get<NoSum>(b->node);
+                if (sa.index.id != sb.index.id)
+                    return sa.index.id < sb.index.id ? -1 : 1;
+                return expr_cmp(sa.body, sb.body);
+            },
+        },
+        *a);
+}
+
+// ---- component-valued predicate (vibe 000036 coordinate/invariant line) --
+
+// True iff e denotes a scalar/coordinate value: a scalar, a fully-indexed
+// coordinate tensor, or a combination thereof.  A slot-less rank >= 1 object is
+// an invariant (false).  Component-valued factors commute with everything;
+// invariant factors do not commute among themselves.
+auto is_component_valued(Expr const* e) -> bool
+{
+    return visit(
+        Overloads{
+            [](ScalarLiteral const&) { return true; },
+            [](TensorObject const& t)
+            {
+                if (t.rank && *t.rank == 0)
+                    return true;
+                if (t.slots.empty())
+                    return false; // slot-less rank >= 1: invariant
+                for (auto const& sb: t.slots)
+                    if (!sb.index)
+                        return false; // partially indexed: be conservative
+                return true;          // fully indexed coordinate
+            },
+            [](Negate const& n) { return is_component_valued(n.operand); },
+            [](Sum const& s) {
+                return is_component_valued(s.left)
+                       && is_component_valued(s.right);
+            },
+            [](Difference const& d) {
+                return is_component_valued(d.left)
+                       && is_component_valued(d.right);
+            },
+            [](TensorProduct const& p) {
+                return is_component_valued(p.left)
+                       && is_component_valued(p.right);
+            },
+            [](ScalarDiv const& d) {
+                return is_component_valued(d.left)
+                       && is_component_valued(d.right);
+            },
+            [](ExplicitSum const& s) { return is_component_valued(s.body); },
+            [](NoSum const& s) { return is_component_valued(s.body); },
+            // Invariant operations: conservatively non-component.
+            [](Dot const&) { return false; },
+            [](DDot const&) { return false; },
+            [](DDotAlt const&) { return false; },
+            [](Cross const&) { return false; },
+        },
+        *e);
+}
+
+// ---- the canonicalizer --------------------------------------------------
+
+auto canon(Context& ctx, Expr const* e) -> Expr const*;
+
+// Flatten a left/right TensorProduct tree into its factor leaves.
+void flatten_factors(Expr const* e, std::vector<Expr const*>& out)
+{
+    if (auto const* p = std::get_if<TensorProduct>(&e->node))
+    {
+        flatten_factors(p->left, out);
+        flatten_factors(p->right, out);
+    }
+    else
+        out.push_back(e);
+}
+
+// Build coeff * (factors folded left-associatively), with identity/zero rules.
+auto build_term(
+    Context& ctx,
+    Rational coeff,
+    std::vector<Expr const*> const& factors) -> Expr const*
+{
+    if (coeff == 0)
+        return make_scalar(ctx, Rational{0});
+    Expr const* prod = nullptr;
+    for (auto const* f: factors)
+        prod = prod ? make_tensor_product(ctx, prod, f) : f;
+    if (!prod)
+        return make_scalar(ctx, coeff);
+    if (coeff == 1)
+        return prod;
+    if (coeff == -1)
+        return make_negate(ctx, prod);
+    return make_tensor_product(ctx, make_scalar(ctx, coeff), prod);
+}
+
+auto canon_product(Context& ctx, Expr const* e) -> Expr const*
+{
+    std::vector<Expr const*> flat;
+    flatten_factors(e, flat);
+
+    Rational coeff{1};
+    std::vector<Expr const*> comp; // component-valued factors (sortable)
+    std::vector<Expr const*> inv;  // invariant factors (order preserved)
+    for (auto const* f: flat)
+    {
+        auto const* cf = canon(ctx, f);
+        // Pull out a leading numeric coefficient / sign, then re-flatten the
+        // core (a collapsed sub-sum may have become a scaled monomial).
+        auto [c, core] = extract_coeff(cf);
+        coeff *= c;
+        std::vector<Expr const*> sub;
+        flatten_factors(core, sub);
+        for (auto const* g: sub)
+        {
+            if (auto const* sl = std::get_if<ScalarLiteral>(&g->node))
+            {
+                coeff *= sl->value;
+                continue;
+            }
+            if (is_component_valued(g))
+                comp.push_back(g);
+            else
+                inv.push_back(g);
+        }
+    }
+    std::sort(
+        comp.begin(),
+        comp.end(),
+        [](Expr const* x, Expr const* y) { return expr_cmp(x, y) < 0; });
+
+    std::vector<Expr const*> ordered;
+    ordered.reserve(comp.size() + inv.size());
+    ordered.insert(ordered.end(), comp.begin(), comp.end());
+    ordered.insert(ordered.end(), inv.begin(), inv.end());
+    return build_term(ctx, coeff, ordered);
+}
+
+auto canon_additive(Context& ctx, Expr const* e) -> Expr const*
+{
+    std::vector<std::pair<int, Expr const*>> addends;
+    collect_signed_addends(e, +1, addends);
+
+    std::vector<std::pair<Rational, Expr const*>> terms; // (coeff, core)
+    for (auto const& [sign, sub]: addends)
+    {
+        auto const* cs = canon(ctx, sub);
+        auto [c, core] = extract_coeff(cs);
+        Rational coeff = c * Rational{sign};
+        bool merged = false;
+        for (auto& [tc, tcore]: terms)
+            if (structural_eq(core, tcore))
+            {
+                tc += coeff;
+                merged = true;
+                break;
+            }
+        if (!merged)
+            terms.emplace_back(coeff, core);
+    }
+
+    // Drop zero terms.
+    std::vector<std::pair<Rational, Expr const*>> kept;
+    for (auto const& t: terms)
+        if (!(t.first == 0))
+            kept.push_back(t);
+    if (kept.empty())
+        return make_scalar(ctx, Rational{0});
+
+    std::sort(
+        kept.begin(),
+        kept.end(),
+        [](auto const& x, auto const& y)
+        { return expr_cmp(x.second, y.second) < 0; });
+
+    Expr const* result = nullptr;
+    for (auto const& [coeff, core]: kept)
+    {
+        Expr const* term = build_term(ctx, coeff, {core});
+        result = result ? make_sum(ctx, result, term) : term;
+    }
+    return result;
+}
+
+// Canonicalize a rank-aware invariant binary op (Dot commutes, Cross
+// anticommutes) when both operands are rank-1 invariant vectors.
+auto is_rank1_vector(Expr const* e) -> bool
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    return t && t->rank && *t->rank == 1 && t->slots.empty();
+}
+
+auto canon(Context& ctx, Expr const* e) -> Expr const*
+{
+    return visit(
+        Overloads{
+            [&](ScalarLiteral const&) -> Expr const* { return e; },
+            [&](TensorObject const&) -> Expr const* { return e; },
+            [&](Negate const&) -> Expr const*
+            { return canon_additive(ctx, e); },
+            [&](Sum const&) -> Expr const* { return canon_additive(ctx, e); },
+            [&](Difference const&) -> Expr const*
+            { return canon_additive(ctx, e); },
+            [&](TensorProduct const&) -> Expr const*
+            { return canon_product(ctx, e); },
+            [&](ScalarDiv const& d) -> Expr const*
+            {
+                auto const* l = canon(ctx, d.left);
+                auto const* r = canon(ctx, d.right);
+                auto const* sl = std::get_if<ScalarLiteral>(&l->node);
+                auto const* sr = std::get_if<ScalarLiteral>(&r->node);
+                if (sl && sr)
+                    return make_scalar(ctx, sl->value / sr->value);
+                return make_scalar_div(ctx, l, r);
+            },
+            [&](Dot const& d) -> Expr const*
+            {
+                auto const* l = canon(ctx, d.left);
+                auto const* r = canon(ctx, d.right);
+                if (is_rank1_vector(l) && is_rank1_vector(r)
+                    && expr_cmp(l, r) > 0)
+                    return make_dot(ctx, r, l); // a·b = b·a
+                return make_dot(ctx, l, r);
+            },
+            [&](Cross const& c) -> Expr const*
+            {
+                auto const* l = canon(ctx, c.left);
+                auto const* r = canon(ctx, c.right);
+                if (is_rank1_vector(l) && is_rank1_vector(r)
+                    && expr_cmp(l, r) > 0)
+                    return make_negate(ctx, make_cross(ctx, r, l)); // a×b =
+                                                                    // -(b×a)
+                return make_cross(ctx, l, r);
+            },
+            [&](DDot const& d) -> Expr const*
+            { return make_ddot(ctx, canon(ctx, d.left), canon(ctx, d.right)); },
+            [&](DDotAlt const& d) -> Expr const* {
+                return make_ddot_alt(
+                    ctx, canon(ctx, d.left), canon(ctx, d.right));
+            },
+            [&](ExplicitSum const& s) -> Expr const*
+            {
+                auto const* body = canon(ctx, s.body);
+                auto const* bound = s.bound ? canon(ctx, s.bound) : nullptr;
+                return make_explicit_sum(ctx, s.index, body, bound);
+            },
+            [&](NoSum const& s) -> Expr const*
+            { return make_no_sum(ctx, s.index, canon(ctx, s.body)); },
+        },
+        *e);
+}
+
 } // namespace
 
 namespace steps
 {
+
+auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
+{
+    return canon(ctx, e);
+}
 
 auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
 {

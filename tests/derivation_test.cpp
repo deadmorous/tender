@@ -2032,6 +2032,120 @@ TEST(FoldEqualAddends, RationalCoefficientsCollect)
     EXPECT_EQ(after, A);
 }
 
+// ---- canonicalize (algebraic normal form, vibe 000037) --------------------
+
+namespace
+{
+// Render the canonical form of an expression, naming the given indices.
+auto canon_str(
+    Context& ctx,
+    Expr const* e,
+    std::vector<std::pair<CountableIndex, char const*>> names = {})
+    -> std::string
+{
+    return render_with_names(steps::canonicalize(ctx, e), std::move(names));
+}
+
+auto delta_ul(Context& ctx, CountableIndex a, CountableIndex b) -> Expr const*
+{
+    return make_delta(
+        ctx, Realm::Oblique, space_3d(), Level::Upper, Level::Lower, a, b);
+}
+} // namespace
+
+TEST(Canonicalize, SumCommutes)
+{
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
+    EXPECT_EQ(
+        canon_str(ctx, make_sum(ctx, A, B)),
+        canon_str(ctx, make_sum(ctx, B, A)));
+}
+
+TEST(Canonicalize, ComponentProductCommutes)
+{
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()}, l{ctx.alloc_index_id()};
+    auto names = {
+        std::pair{i, "i"},
+        std::pair{j, "j"},
+        std::pair{k, "k"},
+        std::pair{l, "l"}};
+    auto const* p1 =
+        make_tensor_product(ctx, delta_ul(ctx, i, j), delta_ul(ctx, k, l));
+    auto const* p2 =
+        make_tensor_product(ctx, delta_ul(ctx, k, l), delta_ul(ctx, i, j));
+    EXPECT_EQ(canon_str(ctx, p1, names), canon_str(ctx, p2, names));
+}
+
+TEST(Canonicalize, LikeTermsCombine)
+{
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    auto const* d = delta_ul(ctx, i, j);
+    EXPECT_EQ(
+        canon_str(ctx, make_sum(ctx, d, d), {{i, "i"}, {j, "j"}}),
+        "2 \\, \\delta^{i}_{j}");
+}
+
+TEST(Canonicalize, Cancellation)
+{
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    auto const* d = delta_ul(ctx, i, j);
+    EXPECT_EQ(canon_str(ctx, make_difference(ctx, d, d)), "0");
+}
+
+TEST(Canonicalize, NumericFoldThroughProduct)
+{
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()}, j{ctx.alloc_index_id()};
+    auto const* d = delta_ul(ctx, i, j);
+    auto const* expr = make_tensor_product(
+        ctx,
+        make_scalar(ctx, Rational{2}),
+        make_tensor_product(ctx, make_scalar(ctx, Rational{3}), d));
+    EXPECT_EQ(
+        canon_str(ctx, expr, {{i, "i"}, {j, "j"}}), "6 \\, \\delta^{i}_{j}");
+}
+
+TEST(Canonicalize, InvariantDyadDoesNotCommute)
+{
+    // a⊗b is a non-commutative dyad of slot-less rank-1 invariants.
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    EXPECT_NE(
+        canon_str(ctx, make_tensor_product(ctx, a, b)),
+        canon_str(ctx, make_tensor_product(ctx, b, a)));
+}
+
+TEST(Canonicalize, DotCommutesForVectors)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    EXPECT_EQ(
+        canon_str(ctx, make_dot(ctx, a, b)),
+        canon_str(ctx, make_dot(ctx, b, a)));
+}
+
+TEST(Canonicalize, CrossAnticommutesForVectors)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    // The swapped form canonicalizes to the negation of the ordered form.
+    auto const* ordered = steps::canonicalize(ctx, make_cross(ctx, a, b));
+    auto const* swapped = steps::canonicalize(ctx, make_cross(ctx, b, a));
+    auto const* neg = std::get_if<Negate>(&swapped->node);
+    ASSERT_NE(neg, nullptr);
+    EXPECT_EQ(
+        render_with_names(neg->operand, {}), render_with_names(ordered, {}));
+}
+
 // ---- expand_products: Dot / Cross distribution ----------------------------
 
 TEST(ExpandProducts, DotLeftSumDistributes)

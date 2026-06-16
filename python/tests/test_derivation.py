@@ -327,3 +327,44 @@ def test_fold_equal_addends_right_scalar_coefficient():
     d, imap = _delta_ij(ctx)
     two = tender.scalar(2, ctx=ctx)
     assert td.fold_equal_addends(d * two + d).latex(imap) == r"3 \, \delta^{i}_{j}"
+
+
+# ---- canonicalize (algebraic normal form) ----------------------------------
+
+def test_canonicalize_sum_and_product_commute():
+    """Sums and component products canonicalize regardless of operand order."""
+    ctx = tender.Context()
+    i, j, k, l = (ctx.alloc_index() for _ in range(4))
+    imap = tender.IndexNameMap()
+    for x, n in [(i, "i"), (j, "j"), (k, "k"), (l, "l")]:
+        imap.assign(x, n)
+    U, L = tender.Level.Upper, tender.Level.Lower
+
+    def d(a, b):
+        return tender.delta(tender.Realm.Oblique, _sp3(), U, L, a, b, ctx=ctx)
+
+    assert td.canonicalize(d(i, j) + d(k, l)).latex(imap) == \
+        td.canonicalize(d(k, l) + d(i, j)).latex(imap)
+    assert td.canonicalize(d(i, j) * d(k, l)).latex(imap) == \
+        td.canonicalize(d(k, l) * d(i, j)).latex(imap)
+
+
+def test_canonicalize_invariant_dyad_keeps_order():
+    """a⊗b is a non-commutative dyad; canonical forms must differ from b⊗a."""
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    assert td.canonicalize(a * b).latex() != td.canonicalize(b * a).latex()
+    # but the dot product commutes:
+    assert td.canonicalize(a @ b).latex() == td.canonicalize(b @ a).latex()
+
+
+def test_canonicalize_collects_and_cancels():
+    ctx = tender.Context()
+    i, j = ctx.alloc_index(), ctx.alloc_index()
+    imap = tender.IndexNameMap()
+    imap.assign(i, "i"); imap.assign(j, "j")
+    U, L = tender.Level.Upper, tender.Level.Lower
+    d = tender.delta(tender.Realm.Oblique, _sp3(), U, L, i, j, ctx=ctx)
+    assert td.canonicalize(d + d).latex(imap) == r"2 \, \delta^{i}_{j}"
+    assert td.canonicalize(d - d).latex(imap) == "0"

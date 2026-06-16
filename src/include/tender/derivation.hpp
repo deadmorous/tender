@@ -126,5 +126,23 @@ auto has_explicit_sum_for(
 // n == 0 is dropped.  No-op if no merging occurs.
 auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*;
 
+// Rewrite an expression into algebraic normal form (vibe 000037): the local
+// AC/α-canonical form for which structural_eq decides theory T0.
+//
+//   - numerics folded to a single exact Rational coefficient per term;
+//   - subtraction/negation carried in the sign of the coefficient (no
+//     Difference in the result; Negate only as the -1 term wrapper);
+//   - sums flattened, like terms combined, terms sorted by a canonical key;
+//   - commutative *component* products (factors that are scalars or
+//     fully-indexed coordinates) sorted; invariant (slot-less rank >= 1)
+//     factors keep their relative order;
+//   - distribution is NOT performed (a*(b+c) stays a product atom).
+//
+// Two canonical forms compare equal under structural_eq iff the expressions are
+// equal in T0.  This is sound but intentionally incomplete for full ring
+// equality (distribution, contraction, tensor symmetries are rewrite rules, not
+// normalization).
+auto canonicalize(Context& ctx, Expr const* e) -> Expr const*;
+
 } // namespace steps
 } // namespace tender
