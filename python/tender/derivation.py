@@ -19,6 +19,7 @@ Steps are plain callables ``(Expr) -> Expr``, so users can define custom steps
 and pass them to :meth:`Derivation.step` alongside the built-in ones.
 """
 
+from tender import _core
 from tender._core import derivation as _d
 
 __all__ = [
@@ -33,6 +34,10 @@ __all__ = [
     "contract_eps_pair",
     "fold_equal_addends",
     "canonicalize",
+    "Identity",
+    "apply_identity",
+    "structural_eq",
+    "algebraic_eq",
 ]
 
 
@@ -157,3 +162,49 @@ def canonicalize(expr):
     theory T0 produce structurally identical results.
     """
     return _d._canonicalize(expr)
+
+
+class Identity:
+    """A directed rewrite rule ``lhs = rhs`` over expressions (vibe 000033).
+
+    The *free indices* of ``lhs`` are pattern variables: each matches whatever
+    index sits in the corresponding target slot, consistently across a match.
+    Indices bound by an ``explicit_sum``/``no_sum`` inside ``lhs`` are local
+    (alpha) variables, matched to the target's binder.
+
+    An Identity is *not* a theorem: a theorem is a derivation that proves a
+    result and carries its history; an identity is the bare equality such a
+    theorem yields.
+    """
+
+    def __init__(self, name, lhs, rhs):
+        self.name = name
+        self.lhs = lhs
+        self.rhs = rhs
+
+    def __call__(self, expr):
+        """Use the identity as a derivation step: ``drv.step(identity)``."""
+        return _d._apply_identity(expr, self.lhs, self.rhs, self.name)
+
+    def __repr__(self):
+        return f"Identity({self.name!r})"
+
+
+def apply_identity(identity):
+    """Return a derivation step that applies *identity* to its argument.
+
+    The step rewrites the first (deepest-first) subtree matching ``identity.lhs``
+    into the instantiated ``identity.rhs``; the result is canonical.  If nothing
+    matches, the result equals :func:`canonicalize` of the input.
+    """
+    return lambda expr: identity(expr)
+
+
+def structural_eq(a, b):
+    """Deep structural equality of two expression trees."""
+    return _core._structural_eq(a, b)
+
+
+def algebraic_eq(a, b):
+    """Algebraic equality in theory T0: ``structural_eq`` of the canonical forms."""
+    return _core._algebraic_eq(a, b)

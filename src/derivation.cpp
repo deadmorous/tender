@@ -1,6 +1,7 @@
 #include <tender/derivation.hpp>
 
 #include <mpk/mix/util/overloads.hpp>
+#include <tender/rewrite.hpp>
 
 #include <algorithm>
 #include <functional>
@@ -12,103 +13,6 @@ namespace tender
 {
 namespace
 {
-
-// Rebuild an expression bottom-up: first recurse into each child, then
-// apply f(ctx, rebuilt_node).  If f returns e unchanged, the pointer is
-// reused without extra allocation.
-template <typename F>
-auto rewrite_tree(Context& ctx, Expr const* e, F const& f) -> Expr const*
-{
-    Expr const* rebuilt = visit(
-        Overloads{
-            // Leaf nodes — no children.
-            [&](TensorObject const&) -> Expr const* { return e; },
-            [&](ScalarLiteral const&) -> Expr const* { return e; },
-
-            // Unary.
-            [&](Negate const& n) -> Expr const*
-            {
-                auto* op = rewrite_tree(ctx, n.operand, f);
-                return op == n.operand ? e : make_negate(ctx, op);
-            },
-
-            // Binary.
-            [&](Sum const& s) -> Expr const*
-            {
-                auto* l = rewrite_tree(ctx, s.left, f);
-                auto* r = rewrite_tree(ctx, s.right, f);
-                return (l == s.left && r == s.right) ? e : make_sum(ctx, l, r);
-            },
-            [&](Difference const& s) -> Expr const*
-            {
-                auto* l = rewrite_tree(ctx, s.left, f);
-                auto* r = rewrite_tree(ctx, s.right, f);
-                return (l == s.left && r == s.right) ?
-                           e :
-                           make_difference(ctx, l, r);
-            },
-            [&](TensorProduct const& s) -> Expr const*
-            {
-                auto* l = rewrite_tree(ctx, s.left, f);
-                auto* r = rewrite_tree(ctx, s.right, f);
-                return (l == s.left && r == s.right) ?
-                           e :
-                           make_tensor_product(ctx, l, r);
-            },
-            [&](ScalarDiv const& s) -> Expr const*
-            {
-                auto* l = rewrite_tree(ctx, s.left, f);
-                auto* r = rewrite_tree(ctx, s.right, f);
-                return (l == s.left && r == s.right) ?
-                           e :
-                           make_scalar_div(ctx, l, r);
-            },
-            [&](Dot const& s) -> Expr const*
-            {
-                auto* l = rewrite_tree(ctx, s.left, f);
-                auto* r = rewrite_tree(ctx, s.right, f);
-                return (l == s.left && r == s.right) ? e : make_dot(ctx, l, r);
-            },
-            [&](DDot const& s) -> Expr const*
-            {
-                auto* l = rewrite_tree(ctx, s.left, f);
-                auto* r = rewrite_tree(ctx, s.right, f);
-                return (l == s.left && r == s.right) ? e : make_ddot(ctx, l, r);
-            },
-            [&](DDotAlt const& s) -> Expr const*
-            {
-                auto* l = rewrite_tree(ctx, s.left, f);
-                auto* r = rewrite_tree(ctx, s.right, f);
-                return (l == s.left && r == s.right) ? e :
-                                                       make_ddot_alt(ctx, l, r);
-            },
-            [&](Cross const& s) -> Expr const*
-            {
-                auto* l = rewrite_tree(ctx, s.left, f);
-                auto* r = rewrite_tree(ctx, s.right, f);
-                return (l == s.left && r == s.right) ? e :
-                                                       make_cross(ctx, l, r);
-            },
-
-            // Annotation nodes.
-            [&](ExplicitSum const& s) -> Expr const*
-            {
-                auto* body = rewrite_tree(ctx, s.body, f);
-                auto* bound = s.bound ? rewrite_tree(ctx, s.bound, f) : nullptr;
-                return (body == s.body && bound == s.bound) ?
-                           e :
-                           make_explicit_sum(ctx, s.index, body, bound);
-            },
-            [&](NoSum const& s) -> Expr const*
-            {
-                auto* body = rewrite_tree(ctx, s.body, f);
-                return body == s.body ? e : make_no_sum(ctx, s.index, body);
-            },
-        },
-        *e);
-
-    return f(ctx, rebuilt);
-}
 
 // Walk e looking for the IndexSpace of the CountableIndex with the given id.
 // Returns nullptr if not found (e.g. the index appears in no concrete slot).
@@ -423,11 +327,17 @@ void collect_concrete_values(Expr const* e, std::vector<int>& out)
     go(e);
 }
 
-// Deep structural equality of two expression trees.
-// CountableIndex ids must match exactly (free variables are not alpha-renamed).
-auto structural_eq(Expr const* a, Expr const* b) -> bool;
+} // namespace
 
-auto index_assoc_eq(
+// structural_eq and its index helper live at namespace scope (not in the
+// anonymous namespace above) so the public API and the identity matcher can
+// reuse them.  structural_eq is declared in derivation.hpp; index_assoc_eq is
+// kept file-local via `static`.
+//
+// Deep structural equality of two expression trees.  CountableIndex ids must
+// match exactly (free variables are not alpha-renamed; ExplicitSum binders are
+// compared by id).
+static auto index_assoc_eq(
     std::optional<IndexAssoc> const& a,
     std::optional<IndexAssoc> const& b) -> bool
 {
@@ -568,6 +478,16 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
         },
         a->node);
 }
+
+// Algebraic equality in theory T0: structural_eq of the two canonical forms.
+auto algebraic_eq(Context& ctx, Expr const* a, Expr const* b) -> bool
+{
+    return structural_eq(
+        steps::canonicalize(ctx, a), steps::canonicalize(ctx, b));
+}
+
+namespace
+{
 
 // Replace all ConcreteIndex{old_val} occurrences in TensorObject slots with
 // CountableIndex{new_idx}.
@@ -918,12 +838,18 @@ auto expr_cmp(Expr const* a, Expr const* b) -> int
         *a);
 }
 
+} // namespace
+
 // ---- component-valued predicate (vibe 000036 coordinate/invariant line) --
 
 // True iff e denotes a scalar/coordinate value: a scalar, a fully-indexed
 // coordinate tensor, or a combination thereof.  A slot-less rank >= 1 object is
 // an invariant (false).  Component-valued factors commute with everything;
 // invariant factors do not commute among themselves.
+//
+// Declared in derivation.hpp; lives at namespace scope (not anonymous) so the
+// identity matcher can reuse the coordinate/invariant distinction when deciding
+// which products match modulo factor order.
 auto is_component_valued(Expr const* e) -> bool
 {
     return visit(
@@ -967,6 +893,9 @@ auto is_component_valued(Expr const* e) -> bool
         },
         *e);
 }
+
+namespace
+{
 
 // ---- the canonicalizer --------------------------------------------------
 

@@ -6,6 +6,7 @@
 #include <tender/context.hpp>
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
+#include <tender/identity.hpp>
 #include <tender/index.hpp>
 #include <tender/index_space.hpp>
 #include <tender/name.hpp>
@@ -588,4 +589,38 @@ NB_MODULE(_core, m)
         "expr"_a,
         "Rewrite into algebraic normal form (sorted, signed-coefficient, "
         "like terms combined; no distribution).");
+
+    md.def(
+        "_apply_identity",
+        [](PyExpr const& target,
+           PyExpr const& lhs,
+           PyExpr const& rhs,
+           std::string name) -> PyExpr
+        {
+            Identity id{std::move(name), lhs.expr, rhs.expr};
+            return derive(target, apply_identity(*target.ctx, target.expr, id));
+        },
+        "expr"_a,
+        "lhs"_a,
+        "rhs"_a,
+        "name"_a,
+        "Apply identity lhs=rhs to the first matching subtree of expr; the "
+        "result is canonical (== canonicalize(expr) if nothing matched).");
+
+    // Equality predicates (not steps).
+    m.def(
+        "_structural_eq",
+        [](PyExpr const& a, PyExpr const& b) -> bool
+        { return structural_eq(a.expr, b.expr); },
+        "a"_a,
+        "b"_a,
+        "Deep structural equality of two expression trees.");
+
+    m.def(
+        "_algebraic_eq",
+        [](PyExpr const& a, PyExpr const& b) -> bool
+        { return algebraic_eq(*a.ctx, a.expr, b.expr); },
+        "a"_a,
+        "b"_a,
+        "Algebraic equality in theory T0: structural_eq of the canonical forms.");
 }

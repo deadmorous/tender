@@ -385,3 +385,114 @@ def test_canonicalize_alpha_equivalent_dummies():
     # render identically.
     assert td.canonicalize(e1).latex(tender.IndexNameMap()) == \
         td.canonicalize(e2).latex(tender.IndexNameMap())
+
+
+# ---- identities (apply_identity) -------------------------------------------
+
+def _delta_contraction(ctx, sp):
+    """The identity  Σ_p δ^p_A δ^p_B = δ_{AB}  as a tender.derivation.Identity."""
+    U, L = tender.Level.Upper, tender.Level.Lower
+    p, a, b = (ctx.alloc_index() for _ in range(3))
+    lhs = tender.explicit_sum(
+        p,
+        tender.delta(tender.Realm.Oblique, sp, U, L, p, a, ctx=ctx)
+        * tender.delta(tender.Realm.Oblique, sp, U, L, p, b, ctx=ctx),
+        ctx=ctx,
+    )
+    rhs = tender.delta(tender.Realm.Oblique, sp, L, L, a, b, ctx=ctx)
+    return td.Identity("delta-contraction", lhs, rhs)
+
+
+def test_apply_identity_delta_contraction():
+    ctx = tender.Context()
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+    ident = _delta_contraction(ctx, sp)
+
+    q, m, n = (ctx.alloc_index() for _ in range(3))
+    target = tender.explicit_sum(
+        q,
+        tender.delta(tender.Realm.Oblique, sp, U, L, q, m, ctx=ctx)
+        * tender.delta(tender.Realm.Oblique, sp, U, L, q, n, ctx=ctx),
+        ctx=ctx,
+    )
+    expected = tender.delta(tender.Realm.Oblique, sp, L, L, m, n, ctx=ctx)
+
+    result = ident(target)
+    assert td.algebraic_eq(result, expected)
+
+
+def test_apply_identity_no_match_returns_canonical():
+    ctx = tender.Context()
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+    ident = _delta_contraction(ctx, sp)
+
+    m, n = (ctx.alloc_index() for _ in range(2))
+    target = tender.delta(tender.Realm.Oblique, sp, U, L, m, n, ctx=ctx)
+    result = ident(target)
+    assert td.algebraic_eq(result, target)
+
+
+def test_apply_identity_as_derivation_step():
+    ctx = tender.Context()
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+    ident = _delta_contraction(ctx, sp)
+
+    q, m, n = (ctx.alloc_index() for _ in range(3))
+    target = tender.explicit_sum(
+        q,
+        tender.delta(tender.Realm.Oblique, sp, U, L, q, m, ctx=ctx)
+        * tender.delta(tender.Realm.Oblique, sp, U, L, q, n, ctx=ctx),
+        ctx=ctx,
+    )
+    expected = tender.delta(tender.Realm.Oblique, sp, L, L, m, n, ctx=ctx)
+
+    drv = td.Derivation(target)
+    drv.step(td.apply_identity(ident))
+    assert td.algebraic_eq(drv.current, expected)
+    assert len(drv.history) == 2
+
+
+def test_apply_identity_eps_delta_two_index():
+    """Σ_i Σ_j ε^{ijk} ε_{ijl} = 2 δ^k_l, applied as a generic identity."""
+    ctx = tender.Context()
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+
+    i, j, k, l = (ctx.alloc_index() for _ in range(4))
+    lhs = tender.explicit_sum(
+        i,
+        tender.explicit_sum(
+            j, _eps(ctx, sp, [U, U, U], [i, j, k]) * _eps(ctx, sp, [L, L, L], [i, j, l]),
+            ctx=ctx),
+        ctx=ctx,
+    )
+    rhs = tender.scalar(2) * tender.delta(tender.Realm.Oblique, sp, U, L, k, l, ctx=ctx)
+    ident = td.Identity("eps-delta-2", lhs, rhs)
+
+    a, b, c, d = (ctx.alloc_index() for _ in range(4))
+    target = tender.explicit_sum(
+        a,
+        tender.explicit_sum(
+            b, _eps(ctx, sp, [U, U, U], [a, b, c]) * _eps(ctx, sp, [L, L, L], [a, b, d]),
+            ctx=ctx),
+        ctx=ctx,
+    )
+    expected = tender.scalar(2) * tender.delta(tender.Realm.Oblique, sp, U, L, c, d, ctx=ctx)
+
+    result = ident(target)
+    assert td.algebraic_eq(result, expected)
+
+
+def test_structural_vs_algebraic_eq():
+    ctx = tender.Context()
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+    i, j = (ctx.alloc_index() for _ in range(2))
+    d = tender.delta(tender.Realm.Oblique, sp, U, L, i, j, ctx=ctx)
+
+    # d + d and 2d are algebraically equal but not structurally equal.
+    assert not td.structural_eq(d + d, tender.scalar(2) * d)
+    assert td.algebraic_eq(d + d, tender.scalar(2) * d)

@@ -145,4 +145,24 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*;
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*;
 
 } // namespace steps
+
+// ---- Equality -----------------------------------------------------------
+
+// Deep structural equality of two expression trees: same node shape, same
+// names/values, CountableIndex ids matched exactly (free indices are not
+// alpha-renamed; ExplicitSum binders compared by id).  This is the equality
+// that `canonicalize` turns into a decision procedure for theory T0.
+[[nodiscard]] auto structural_eq(Expr const* a, Expr const* b) -> bool;
+
+// Algebraic equality in theory T0: structural_eq of the two canonical forms,
+// i.e. structural_eq(canonicalize(a), canonicalize(b)).  Sound and complete for
+// T0 (see vibe 000037); intentionally not full ring equality.
+[[nodiscard]] auto algebraic_eq(Context&, Expr const* a, Expr const* b) -> bool;
+
+// True iff e denotes a scalar/coordinate (component) value rather than an
+// invariant: a scalar, a fully-indexed coordinate tensor, or a combination
+// thereof (vibe 000036 coordinate/invariant line).  Component factors commute;
+// invariant factors do not.  Used to decide which products are commutative.
+[[nodiscard]] auto is_component_valued(Expr const* e) -> bool;
+
 } // namespace tender
