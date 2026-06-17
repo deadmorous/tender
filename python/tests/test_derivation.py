@@ -496,3 +496,52 @@ def test_structural_vs_algebraic_eq():
     # d + d and 2d are algebraically equal but not structurally equal.
     assert not td.structural_eq(d + d, tender.scalar(2) * d)
     assert td.algebraic_eq(d + d, tender.scalar(2) * d)
+
+
+# ---- implicit Einstein summation (vibe 000028) -----------------------------
+
+def test_implicit_summation_equals_explicit():
+    """An implicitly-contracted index canonicalizes like an explicit sum."""
+    import pytest
+
+    ctx = tender.Context()
+    sp = _sp3()
+    O, N = tender.Realm.Oblique, tender.Realm.Orthonormal
+    U, L = tender.Level.Upper, tender.Level.Lower
+    r, m, n = (ctx.alloc_index() for _ in range(3))
+
+    # Orthonormal: a doubled index contracts whether or not a sum is written.
+    implicit = (
+        tender.delta(N, sp, U, L, r, m, ctx=ctx)
+        * tender.delta(N, sp, U, L, r, n, ctx=ctx)
+    )
+    explicit = tender.explicit_sum(r, implicit, ctx=ctx)
+    assert td.algebraic_eq(implicit, explicit)
+
+    # The contraction identity fires on the implicit (sum-less) form.
+    p, a, b = (ctx.alloc_index() for _ in range(3))
+    ident = td.Identity(
+        "delta-contraction",
+        tender.explicit_sum(
+            p,
+            tender.delta(N, sp, U, L, p, a, ctx=ctx)
+            * tender.delta(N, sp, U, L, p, b, ctx=ctx),
+            ctx=ctx,
+        ),
+        tender.delta(N, sp, L, L, a, b, ctx=ctx),
+    )
+    assert td.algebraic_eq(ident(implicit), tender.delta(N, sp, L, L, m, n, ctx=ctx))
+
+    # Oblique trace δ^i_i contracts to a sum.
+    i = ctx.alloc_index()
+    trace = tender.delta(O, sp, U, L, i, i, ctx=ctx)
+    assert td.algebraic_eq(trace, tender.explicit_sum(i, trace, ctx=ctx))
+
+    # An ill-formed Oblique same-level pair throws — unless overridden.
+    bad = (
+        tender.delta(O, sp, U, L, r, m, ctx=ctx)
+        * tender.delta(O, sp, U, L, r, n, ctx=ctx)
+    )
+    with pytest.raises(ValueError):
+        td.canonicalize(bad)
+    td.canonicalize(tender.explicit_sum(r, bad, ctx=ctx))  # override: no throw

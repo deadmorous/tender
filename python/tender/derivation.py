@@ -157,9 +157,12 @@ def canonicalize(expr):
     """Rewrite into algebraic normal form (vibe 000037).
 
     Sorts commutative operands, carries signs in a single rational coefficient
-    per term, combines like terms, and α-leaves dummies as-is for now.  Does NOT
-    distribute products over sums.  Two expressions equal under the normal-form
-    theory T0 produce structurally identical results.
+    per term, combines like terms, and α-normalises dummies.  Materialises
+    implicit Einstein contractions into ``explicit_sum`` first (vibe 000028), so
+    a repeated index means the same with or without an explicit sum; an
+    ill-formed term (e.g. an Oblique same-level pair with no override) raises
+    ``ValueError``.  Does NOT distribute products over sums.  Two expressions
+    equal under the normal-form theory T0 produce structurally identical results.
     """
     return _d._canonicalize(expr)
 

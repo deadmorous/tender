@@ -75,12 +75,14 @@ A small, explicit set of named theorems covering index algebra:
 | `eps-delta-2` | `Σ_{ij} ε^{ijk} ε_{ijl}` | `2 δ^k_l` |
 | `eps-delta-1` | `Σ_i ε^{ijk} ε_{iml}` | `δ^j_m δ^k_l - δ^j_l δ^k_m` |
 
-Note: `delta-trace` (`δ_ii = 3` in 3D) involves an *unbound slot* (both indices the
-same concrete value).  This cannot be expressed as a pattern with the current
-"named tensor as variable" approach, because there is no way to force two slots of
-the same delta to match the same bound index.  **This remains an open limitation.**
-`delta-trace` will need either a dedicated hard-coded step or an extended pattern
-language with explicit variable constraints.
+Note: `delta-trace` (`δ_ii = 3` in 3D) needs both slots of one delta to share the
+same bound index.  With the "named tensor as variable" approach sketched here there
+is no way to force that, so it *looks* like an open limitation.  **Superseded — see
+vibe 000040:** the shipped matcher (vibe 000039) binds the *binder itself* as a
+pattern variable and reuses its id in both slots, so consistency checking forces the
+two slots to agree for free.  `delta-trace` works through the generic engine.  The
+real residual limit is being *dimension-polymorphic* (a parametric slot + computed
+RHS), not the same-index constraint.
 
 ---
 
@@ -140,8 +142,10 @@ records the theorem name at each step, making proofs human-readable.
 
 ## 6. Open questions
 
-- **`delta-trace` (`δ_ii = n`)**: requires a pattern language extended with
-  "same-index" constraints.  Either a dedicated step or a future extension.
+- **`delta-trace` (`δ_ii = n`)**: ~~requires a pattern language extended with
+  "same-index" constraints~~ — resolved by binder-as-variable matching; see vibe
+  000040.  Residual: a single dimension-polymorphic form needs a parametric slot
+  + computed RHS, deferred to the e-graph rule type.
 - **Commutativity / associativity**: naïve structural matching misses `A + B` when
   the theorem is written as `B + A`.  Short-term: canonical ordering before matching.
   Long-term: match modulo AC (or e-graph saturation; see vibe 000034).

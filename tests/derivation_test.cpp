@@ -2348,6 +2348,140 @@ TEST(Canonicalize, ProductReducesToScalarOrZero)
         "-\\delta^{i}_{j}");
 }
 
+// ---- implicit Einstein summation (vibe 000028) ----------------------------
+
+namespace
+{
+// delta with explicit realm/levels, for implicit-summation tests.
+auto idelta(
+    Context& ctx,
+    Realm realm,
+    Level l0,
+    Level l1,
+    CountableIndex a,
+    CountableIndex b) -> Expr const*
+{
+    return make_delta(ctx, realm, space_3d(), l0, l1, a, b);
+}
+} // namespace
+
+TEST(ImplicitSum, OrthonormalPairContracts)
+{
+    // δ^r_m δ^r_n  (orthonormal, r twice)  ==  Σ_r δ^r_m δ^r_n
+    Context ctx;
+    CountableIndex r{ctx.alloc_index_id()}, m{ctx.alloc_index_id()},
+        n{ctx.alloc_index_id()};
+    auto const* implicit = make_tensor_product(
+        ctx,
+        idelta(ctx, Realm::Orthonormal, Level::Upper, Level::Lower, r, m),
+        idelta(ctx, Realm::Orthonormal, Level::Upper, Level::Lower, r, n));
+    auto const* explicit_ = make_explicit_sum(ctx, r, implicit);
+    EXPECT_TRUE(algebraic_eq(ctx, implicit, explicit_));
+}
+
+TEST(ImplicitSum, ObliqueMixedLevelContracts)
+{
+    // δ^r_m δ_r^n  (oblique, one upper one lower)  ==  Σ_r …
+    Context ctx;
+    CountableIndex r{ctx.alloc_index_id()}, m{ctx.alloc_index_id()},
+        n{ctx.alloc_index_id()};
+    auto const* implicit = make_tensor_product(
+        ctx,
+        idelta(ctx, Realm::Oblique, Level::Upper, Level::Lower, r, m),
+        idelta(ctx, Realm::Oblique, Level::Lower, Level::Upper, r, n));
+    auto const* explicit_ = make_explicit_sum(ctx, r, implicit);
+    EXPECT_TRUE(algebraic_eq(ctx, implicit, explicit_));
+}
+
+TEST(ImplicitSum, ObliqueTraceContracts)
+{
+    // A lone δ^i_i is a trace: contracts to Σ_i δ^i_i.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* implicit =
+        idelta(ctx, Realm::Oblique, Level::Upper, Level::Lower, i, i);
+    auto const* explicit_ = make_explicit_sum(ctx, i, implicit);
+    EXPECT_TRUE(algebraic_eq(ctx, implicit, explicit_));
+}
+
+TEST(ImplicitSum, ObliqueSameLevelThrows)
+{
+    // δ^r_m δ^r_n with r upper in both is ill-formed in Oblique (no override).
+    Context ctx;
+    CountableIndex r{ctx.alloc_index_id()}, m{ctx.alloc_index_id()},
+        n{ctx.alloc_index_id()};
+    auto const* bad = make_tensor_product(
+        ctx,
+        idelta(ctx, Realm::Oblique, Level::Upper, Level::Lower, r, m),
+        idelta(ctx, Realm::Oblique, Level::Upper, Level::Lower, r, n));
+    EXPECT_THROW(steps::canonicalize(ctx, bad), std::invalid_argument);
+}
+
+TEST(ImplicitSum, ThreeOccurrencesThrows)
+{
+    // r appearing three times (orthonormal) needs an explicit annotation.
+    Context ctx;
+    CountableIndex r{ctx.alloc_index_id()}, m{ctx.alloc_index_id()},
+        n{ctx.alloc_index_id()}, p{ctx.alloc_index_id()};
+    auto const* bad = make_tensor_product(
+        ctx,
+        make_tensor_product(
+            ctx,
+            idelta(ctx, Realm::Orthonormal, Level::Upper, Level::Lower, r, m),
+            idelta(ctx, Realm::Orthonormal, Level::Upper, Level::Lower, r, n)),
+        idelta(ctx, Realm::Orthonormal, Level::Upper, Level::Lower, r, p));
+    EXPECT_THROW(steps::canonicalize(ctx, bad), std::invalid_argument);
+}
+
+TEST(ImplicitSum, ExplicitSumOverrideSilencesError)
+{
+    // The same same-level Oblique pair is valid once wrapped: the binder is the
+    // override, so no implicit rule (and no error) applies to r.
+    Context ctx;
+    CountableIndex r{ctx.alloc_index_id()}, m{ctx.alloc_index_id()},
+        n{ctx.alloc_index_id()};
+    auto const* wrapped = make_explicit_sum(
+        ctx,
+        r,
+        make_tensor_product(
+            ctx,
+            idelta(ctx, Realm::Oblique, Level::Upper, Level::Lower, r, m),
+            idelta(ctx, Realm::Oblique, Level::Upper, Level::Lower, r, n)));
+    EXPECT_NO_THROW(steps::canonicalize(ctx, wrapped));
+}
+
+TEST(ImplicitSum, NoSumOverrideKeepsIndexFree)
+{
+    // NoSum suppresses contraction: a repeated orthonormal index stays free and
+    // does not error — so it is NOT equal to the summed form.
+    Context ctx;
+    CountableIndex r{ctx.alloc_index_id()}, m{ctx.alloc_index_id()},
+        n{ctx.alloc_index_id()};
+    auto const* body = make_tensor_product(
+        ctx,
+        idelta(ctx, Realm::Orthonormal, Level::Upper, Level::Lower, r, m),
+        idelta(ctx, Realm::Orthonormal, Level::Upper, Level::Lower, r, n));
+    auto const* kept = make_no_sum(ctx, r, body);
+    EXPECT_NO_THROW(steps::canonicalize(ctx, kept));
+    EXPECT_FALSE(algebraic_eq(ctx, kept, make_explicit_sum(ctx, r, body)));
+}
+
+TEST(ImplicitSum, CollectionDoesNotAutoContract)
+{
+    // Collection realm never auto-sums: a doubled index stays a free product,
+    // distinct from the explicit-sum form, and does not error.
+    Context ctx;
+    CountableIndex r{ctx.alloc_index_id()}, m{ctx.alloc_index_id()},
+        n{ctx.alloc_index_id()};
+    auto const* implicit = make_tensor_product(
+        ctx,
+        idelta(ctx, Realm::Collection, Level::Upper, Level::Lower, r, m),
+        idelta(ctx, Realm::Collection, Level::Upper, Level::Lower, r, n));
+    EXPECT_NO_THROW(steps::canonicalize(ctx, implicit));
+    EXPECT_FALSE(
+        algebraic_eq(ctx, implicit, make_explicit_sum(ctx, r, implicit)));
+}
+
 // ---- expand_products: Dot / Cross distribution ----------------------------
 
 TEST(ExpandProducts, DotLeftSumDistributes)

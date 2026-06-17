@@ -36,10 +36,12 @@ matching**, not subtree matching. So:
 
 Because binders are matched as pattern variables, the absolute α-normalized id a
 binder carries after `canonicalize` is irrelevant — the pattern's binder binds to
-the target's binder, and the bodies stay consistent. `delta-trace` (`δ^p_p = n`,
-both slots the same binder) still cannot be expressed and remains the open
-limitation noted in vibe 000033 §6, alongside `delta-substitution` (`f(p,…)` is
-higher-order).
+the target's binder, and the bodies stay consistent. This same mechanism also
+handles `delta-trace` (`δ^p_p = n`): reusing the bound id in both slots forces them
+to agree via `try_bind` consistency, so — contrary to what this section originally
+claimed — it is **not** an open limitation. **See vibe 000040** for the correction
+and the real residual limit (a dimension-polymorphic / computed RHS, shared with the
+general `delta-substitution`).
 
 ## Matching modulo AC
 

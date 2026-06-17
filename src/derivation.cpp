@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <set>
+#include <stdexcept>
 
 using namespace mpk::mix;
 
@@ -1153,6 +1155,205 @@ auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*
         *e);
 }
 
+// ---- implicit Einstein summation (vibe 000028) --------------------------
+//
+// An index is either contracted or free — never unspecified.  The realm rule
+// decides; ExplicitSum/NoSum are overrides.  This pass materializes every
+// implicit contraction as an ExplicitSum, so the canonical form is uniform and
+// the matcher need only understand explicit binders.  It runs before `canon`.
+//
+// Scope: contraction is detected among the direct TensorObject factors of a
+// product (and the slots of a lone tensor — a trace).  Indices that are free
+// only inside a composite factor (e.g. an un-distributed Sum) are not counted
+// at the enclosing term; that interacts with distribution and is deferred.
+
+// One free occurrence of a CountableIndex within a product term.
+struct IndexUse final
+{
+    Level level;
+    Realm realm;
+};
+
+// Decide which free ids among `factors` are implicitly contracted, per each
+// id's realm rule.  Ids already bound by an enclosing ExplicitSum/NoSum are in
+// `bound` and excluded — so an explicit override both suppresses contraction
+// and silences the error checks.  Throws for ill-formed terms with no such
+// override.  Returns the contracted ids ascending (std::map key order).
+auto contracted_ids(
+    std::vector<Expr const*> const& factors,
+    std::set<int> const& bound) -> std::vector<int>
+{
+    std::map<int, std::vector<IndexUse>> uses;
+    for (auto const* f: factors)
+    {
+        auto const* t = std::get_if<TensorObject>(&f->node);
+        if (!t || !is_component_valued(f))
+            continue;
+        for (auto const& sb: t->slots)
+        {
+            if (!sb.index)
+                continue;
+            auto const* ci = std::get_if<CountableIndex>(&*sb.index);
+            if (!ci || bound.count(ci->id))
+                continue;
+            uses[ci->id].push_back({sb.slot.level, sb.slot.realm});
+        }
+    }
+
+    std::vector<int> result;
+    for (auto const& [id, us]: uses)
+    {
+        std::size_t const n = us.size();
+        switch (us.front().realm)
+        {
+            case Realm::Oblique:
+                if (n == 1)
+                    break;
+                if (n == 2 && us[0].level != us[1].level)
+                {
+                    result.push_back(id);
+                    break;
+                }
+                throw std::invalid_argument(
+                    "implicit summation: an Oblique index must contract exactly "
+                    "one upper with one lower slot; a same-level pair or three or "
+                    "more occurrences requires an explicit ExplicitSum/NoSum");
+            case Realm::Orthonormal:
+                if (n == 1)
+                    break;
+                if (n == 2)
+                {
+                    result.push_back(id);
+                    break;
+                }
+                throw std::invalid_argument(
+                    "implicit summation: an Orthonormal index occurs three or more "
+                    "times; this requires an explicit ExplicitSum/NoSum");
+            case Realm::Collection:
+            case Realm::Label: break; // never auto-contract
+        }
+    }
+    return result;
+}
+
+auto materialize(Context& ctx, Expr const* e, std::set<int> bound)
+    -> Expr const*;
+
+// Wrap `body` in an ExplicitSum per id (ids already ascending).
+auto wrap_sums(Context& ctx, Expr const* body, std::vector<int> const& ids)
+    -> Expr const*
+{
+    for (int id: ids)
+        body = make_explicit_sum(ctx, CountableIndex{id}, body, nullptr);
+    return body;
+}
+
+auto materialize_product(
+    Context& ctx, Expr const* e, std::set<int> const& bound) -> Expr const*
+{
+    std::vector<Expr const*> flat;
+    flatten_factors(e, flat);
+    auto const ids = contracted_ids(flat, bound);
+    // Composite (non-tensor) factors are independent scopes; tensor factors
+    // carry only index slots, already accounted for above.
+    Expr const* prod = nullptr;
+    for (auto const* f: flat)
+    {
+        auto const* nf = std::get_if<TensorObject>(&f->node) ?
+                             f :
+                             materialize(ctx, f, bound);
+        prod = prod ? make_tensor_product(ctx, prod, nf) : nf;
+    }
+    return wrap_sums(ctx, prod, ids);
+}
+
+auto materialize(Context& ctx, Expr const* e, std::set<int> bound) -> Expr const*
+{
+    return visit(
+        Overloads{
+            [&](ScalarLiteral const&) -> Expr const* { return e; },
+            [&](TensorObject const&) -> Expr const*
+            {
+                // A lone tensor can carry an implicit contraction (a trace).
+                return wrap_sums(ctx, e, contracted_ids({e}, bound));
+            },
+            [&](Negate const& n) -> Expr const*
+            { return make_negate(ctx, materialize(ctx, n.operand, bound)); },
+            [&](Sum const& s) -> Expr const*
+            {
+                return make_sum(
+                    ctx,
+                    materialize(ctx, s.left, bound),
+                    materialize(ctx, s.right, bound));
+            },
+            [&](Difference const& d) -> Expr const*
+            {
+                return make_difference(
+                    ctx,
+                    materialize(ctx, d.left, bound),
+                    materialize(ctx, d.right, bound));
+            },
+            [&](TensorProduct const& p) -> Expr const*
+            {
+                if (is_component_valued(e))
+                    return materialize_product(ctx, e, bound);
+                // Invariant product: each operand is its own scope.
+                return make_tensor_product(
+                    ctx,
+                    materialize(ctx, p.left, bound),
+                    materialize(ctx, p.right, bound));
+            },
+            [&](ScalarDiv const& d) -> Expr const*
+            {
+                return make_scalar_div(
+                    ctx,
+                    materialize(ctx, d.left, bound),
+                    materialize(ctx, d.right, bound));
+            },
+            [&](Dot const& d) -> Expr const*
+            {
+                return make_dot(
+                    ctx,
+                    materialize(ctx, d.left, bound),
+                    materialize(ctx, d.right, bound));
+            },
+            [&](DDot const& d) -> Expr const*
+            {
+                return make_ddot(
+                    ctx,
+                    materialize(ctx, d.left, bound),
+                    materialize(ctx, d.right, bound));
+            },
+            [&](DDotAlt const& d) -> Expr const*
+            {
+                return make_ddot_alt(
+                    ctx,
+                    materialize(ctx, d.left, bound),
+                    materialize(ctx, d.right, bound));
+            },
+            [&](Cross const& c) -> Expr const*
+            {
+                return make_cross(
+                    ctx,
+                    materialize(ctx, c.left, bound),
+                    materialize(ctx, c.right, bound));
+            },
+            [&](ExplicitSum const& s) -> Expr const*
+            {
+                bound.insert(s.index.id);
+                return make_explicit_sum(
+                    ctx, s.index, materialize(ctx, s.body, bound), s.bound);
+            },
+            [&](NoSum const& s) -> Expr const*
+            {
+                bound.insert(s.index.id);
+                return make_no_sum(
+                    ctx, s.index, materialize(ctx, s.body, bound));
+            },
+        },
+        *e);
+}
+
 } // namespace
 
 namespace steps
@@ -1160,7 +1361,7 @@ namespace steps
 
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
 {
-    return canon(ctx, e, 0);
+    return canon(ctx, materialize(ctx, e, {}), 0);
 }
 
 auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
