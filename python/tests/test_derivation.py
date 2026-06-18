@@ -545,3 +545,56 @@ def test_implicit_summation_equals_explicit():
     with pytest.raises(ValueError):
         td.canonicalize(bad)
     td.canonicalize(tender.explicit_sum(r, bad, ctx=ctx))  # override: no throw
+
+
+# ---- saturate (e-graph) ----------------------------------------------------
+
+def test_saturate_contracts_delta():
+    ctx = tender.Context()
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+    rule = _delta_contraction(ctx, sp)
+
+    q, m, n = (ctx.alloc_index() for _ in range(3))
+    target = tender.explicit_sum(
+        q,
+        tender.delta(tender.Realm.Oblique, sp, U, L, q, m, ctx=ctx)
+        * tender.delta(tender.Realm.Oblique, sp, U, L, q, n, ctx=ctx),
+        ctx=ctx,
+    )
+    result = td.saturate(target, [rule])
+    expected = tender.delta(tender.Realm.Oblique, sp, L, L, m, n, ctx=ctx)
+    assert td.algebraic_eq(result, expected)
+
+
+def test_saturate_rewrites_nested_subexpression():
+    # δ_{rs} + Σ_q δ^q_m δ^q_n  →  δ_{rs} + δ_{mn}, no manual step ordering.
+    ctx = tender.Context()
+    sp = _sp3()
+    U, L = tender.Level.Upper, tender.Level.Lower
+    rule = _delta_contraction(ctx, sp)
+
+    q, m, n, r, s = (ctx.alloc_index() for _ in range(5))
+    contraction = tender.explicit_sum(
+        q,
+        tender.delta(tender.Realm.Oblique, sp, U, L, q, m, ctx=ctx)
+        * tender.delta(tender.Realm.Oblique, sp, U, L, q, n, ctx=ctx),
+        ctx=ctx,
+    )
+    drs = tender.delta(tender.Realm.Oblique, sp, L, L, r, s, ctx=ctx)
+    result = td.saturate(drs + contraction, [rule])
+
+    expected = drs + tender.delta(tender.Realm.Oblique, sp, L, L, m, n, ctx=ctx)
+    assert td.algebraic_eq(result, expected)
+
+
+def test_saturate_no_match_returns_canonical():
+    ctx = tender.Context()
+    sp = _sp3()
+    L = tender.Level.Lower
+    rule = _delta_contraction(ctx, sp)
+
+    m, n = (ctx.alloc_index() for _ in range(2))
+    target = tender.delta(tender.Realm.Oblique, sp, L, L, m, n, ctx=ctx)
+    result = td.saturate(target, [rule])
+    assert td.algebraic_eq(result, target)

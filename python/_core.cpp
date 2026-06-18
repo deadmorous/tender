@@ -5,6 +5,7 @@
 
 #include <tender/context.hpp>
 #include <tender/derivation.hpp>
+#include <tender/egraph.hpp>
 #include <tender/expr.hpp>
 #include <tender/identity.hpp>
 #include <tender/index.hpp>
@@ -606,6 +607,29 @@ NB_MODULE(_core, m)
         "name"_a,
         "Apply identity lhs=rhs to the first matching subtree of expr; the "
         "result is canonical (== canonicalize(expr) if nothing matched).");
+
+    md.def(
+        "_saturate",
+        [](PyExpr const& expr,
+           std::vector<PyExpr> const& lhss,
+           std::vector<PyExpr> const& rhss,
+           int max_iterations) -> PyExpr
+        {
+            EGraph eg{*expr.ctx};
+            EClassId const root = eg.add(expr.expr);
+            std::vector<Identity> rules;
+            rules.reserve(lhss.size());
+            for (std::size_t i = 0; i < lhss.size(); ++i)
+                rules.push_back(Identity{"", lhss[i].expr, rhss[i].expr});
+            eg.saturate(rules, max_iterations);
+            return derive(expr, eg.extract(eg.find(root)));
+        },
+        "expr"_a,
+        "lhss"_a,
+        "rhss"_a,
+        "max_iterations"_a,
+        "Equality-saturate expr under the rules (lhs=rhs pairs) and return the "
+        "cheapest extracted expression. All exprs must share one Context.");
 
     // Equality predicates (not steps).
     m.def(

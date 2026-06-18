@@ -36,6 +36,7 @@ __all__ = [
     "canonicalize",
     "Identity",
     "apply_identity",
+    "saturate",
     "structural_eq",
     "algebraic_eq",
 ]
@@ -201,6 +202,23 @@ def apply_identity(identity):
     matches, the result equals :func:`canonicalize` of the input.
     """
     return lambda expr: identity(expr)
+
+
+def saturate(expr, rules, max_iterations=30):
+    """Equality-saturate *expr* under *rules*, returning the simplest result.
+
+    *rules* is an iterable of :class:`Identity`.  Each rule's ``lhs = rhs`` is
+    applied everywhere it matches, to a fixed point (or until *max_iterations*
+    passes), inside an e-graph; the cheapest extracted expression is returned.
+    Unlike a linear :class:`Derivation`, no manual step ordering is needed — a
+    rewrite nested inside a larger expression is found and applied automatically.
+
+    All of *expr* and the rules' expressions must share one :class:`tender.Context`.
+    """
+    rules = list(rules)
+    lhss = [r.lhs for r in rules]
+    rhss = [r.rhs for r in rules]
+    return _d._saturate(expr, lhss, rhss, max_iterations)
 
 
 def structural_eq(a, b):
