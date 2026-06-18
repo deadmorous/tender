@@ -2,10 +2,13 @@
 #include <tender/derivation.hpp>
 #include <tender/egraph.hpp>
 #include <tender/expr.hpp>
+#include <tender/identity.hpp>
 #include <tender/index_space.hpp>
 #include <tender/name.hpp>
 
 #include <optional>
+#include <utility>
+#include <vector>
 
 using namespace tender;
 
@@ -20,6 +23,43 @@ auto delta_ul(Context& ctx, CountableIndex a, CountableIndex b) -> Expr const*
 {
     return make_delta(
         ctx, Realm::Oblique, space_3d(), Level::Upper, Level::Lower, a, b);
+}
+
+auto delta_ll(Context& ctx, CountableIndex a, CountableIndex b) -> Expr const*
+{
+    return make_delta(
+        ctx, Realm::Oblique, space_3d(), Level::Lower, Level::Lower, a, b);
+}
+
+// Σ_p δ^p_a δ^p_b
+auto contraction(
+    Context& ctx,
+    CountableIndex p,
+    CountableIndex a,
+    CountableIndex b) -> Expr const*
+{
+    return make_explicit_sum(
+        ctx,
+        p,
+        make_tensor_product(ctx, delta_ul(ctx, p, a), delta_ul(ctx, p, b)));
+}
+
+// Is δ_{m n} the instantiation of the contraction RHS under some returned
+// match?
+auto binds_to_delta_mn(
+    Context& ctx,
+    std::vector<std::pair<EClassId, MatchBinding>> const& ms,
+    CountableIndex a,
+    CountableIndex b,
+    CountableIndex m,
+    CountableIndex n) -> bool
+{
+    auto const* rhs = delta_ll(ctx, a, b);
+    auto const* expected = delta_ll(ctx, m, n);
+    for (auto const& [cls, bnd]: ms)
+        if (algebraic_eq(ctx, instantiate(ctx, rhs, bnd), expected))
+            return true;
+    return false;
 }
 } // namespace
 
@@ -250,4 +290,253 @@ TEST(EGraph, ConcreteAndLabelLeaves)
             IndexSlot{Level::Upper, Realm::Orthonormal, sp}, ConcreteIndex{3}}},
         1);
     EXPECT_NE(eg.find(eg.add(tc)), eg.find(eg.add(tc3)));
+}
+
+// ---- e-matching ------------------------------------------------------------
+
+TEST(EMatch, FindsContractionAndBindsFreeIndices)
+{
+    Context ctx;
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    auto root = eg.add(contraction(ctx, q, m, n));
+
+    auto ms = eg.ematch(contraction(ctx, p, a, b));
+    ASSERT_FALSE(ms.empty());
+    // The match lands on the contraction's class and binds a→m, b→n.
+    bool at_root = false;
+    for (auto const& [cls, bnd]: ms)
+        if (cls == eg.find(root))
+            at_root = true;
+    EXPECT_TRUE(at_root);
+    EXPECT_TRUE(binds_to_delta_mn(ctx, ms, a, b, m, n));
+}
+
+TEST(EMatch, MatchesModuloFactorOrder)
+{
+    // The target writes the two delta factors in the opposite order; the
+    // component product is AC, so the pattern still matches.
+    Context ctx;
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    (void)eg.add(make_explicit_sum(
+        ctx,
+        q,
+        make_tensor_product(ctx, delta_ul(ctx, q, n), delta_ul(ctx, q, m))));
+
+    auto ms = eg.ematch(contraction(ctx, p, a, b));
+    EXPECT_TRUE(binds_to_delta_mn(ctx, ms, a, b, m, n));
+}
+
+TEST(EMatch, FindsPatternInSubexpression)
+{
+    Context ctx;
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    CountableIndex r{ctx.alloc_index_id()};
+    CountableIndex s{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    // δ_{rs} + Σ_q δ^q_m δ^q_n  — the contraction is a sub-term.
+    (void)eg.add(make_sum(ctx, delta_ll(ctx, r, s), contraction(ctx, q, m, n)));
+
+    auto ms = eg.ematch(contraction(ctx, p, a, b));
+    EXPECT_TRUE(binds_to_delta_mn(ctx, ms, a, b, m, n));
+}
+
+TEST(EMatch, NoMatchYieldsNoBindings)
+{
+    Context ctx;
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    (void)eg.add(delta_ll(ctx, m, n)); // a bare delta, not a contraction
+
+    EXPECT_TRUE(eg.ematch(contraction(ctx, p, a, b)).empty());
+}
+
+TEST(EMatch, SearchesNonRepresentativeNodes)
+{
+    // Prove the contraction equals the bare δ_{mn}, then extraction prefers the
+    // smaller δ.  The pattern must still match via the contraction e-node that
+    // is no longer the representative — the core e-graph payoff.
+    Context ctx;
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    auto cx = eg.add(contraction(ctx, q, m, n));
+    auto cy = eg.add(delta_ll(ctx, m, n));
+    eg.merge(cx, cy);
+    eg.rebuild();
+
+    // Extraction picks the cheaper bare delta.
+    EXPECT_TRUE(
+        algebraic_eq(ctx, eg.extract(eg.find(cx)), delta_ll(ctx, m, n)));
+    // But the pattern is still found in the class via the contraction e-node.
+    auto ms = eg.ematch(contraction(ctx, p, a, b));
+    bool at_class = false;
+    for (auto const& [cls, bnd]: ms)
+        if (cls == eg.find(cx))
+            at_class = true;
+    EXPECT_TRUE(at_class);
+    EXPECT_TRUE(binds_to_delta_mn(ctx, ms, a, b, m, n));
+}
+
+TEST(EMatch, EpsDeltaTwoIndexThroughTheEGraph)
+{
+    // Σ_i Σ_j ε^{ijk} ε_{ijl}: nested binders + component-product AC + rank-3
+    // Levi-Civita leaves, all through the generic e-matcher.
+    Context ctx;
+    auto const* sp = space_3d();
+    auto eps =
+        [&](Level lvl, CountableIndex x, CountableIndex y, CountableIndex z)
+    {
+        return make_levi_civita(
+            ctx,
+            Realm::Oblique,
+            sp,
+            {lvl, lvl, lvl},
+            {IndexAssoc{x}, IndexAssoc{y}, IndexAssoc{z}});
+    };
+    auto eps_pair = [&](CountableIndex i,
+                        CountableIndex j,
+                        CountableIndex k,
+                        CountableIndex l)
+    {
+        return make_explicit_sum(
+            ctx,
+            i,
+            make_explicit_sum(
+                ctx,
+                j,
+                make_tensor_product(
+                    ctx,
+                    eps(Level::Upper, i, j, k),
+                    eps(Level::Lower, i, j, l))));
+    };
+
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+    auto const* lhs = eps_pair(i, j, k, l);
+
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex bb{ctx.alloc_index_id()};
+    CountableIndex c{ctx.alloc_index_id()};
+    CountableIndex d{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    (void)eg.add(eps_pair(a, bb, c, d));
+
+    auto ms = eg.ematch(lhs);
+    ASSERT_FALSE(ms.empty());
+    // RHS 2 δ^k_l instantiates to 2 δ^c_d under some match.
+    auto const* rhs = make_tensor_product(
+        ctx, make_scalar(ctx, Rational{2}), delta_ul(ctx, k, l));
+    auto const* expected = make_tensor_product(
+        ctx, make_scalar(ctx, Rational{2}), delta_ul(ctx, c, d));
+    bool ok = false;
+    for (auto const& [cls, bnd]: ms)
+        if (algebraic_eq(ctx, instantiate(ctx, rhs, bnd), expected))
+            ok = true;
+    EXPECT_TRUE(ok);
+}
+
+TEST(EMatch, MatchesAcrossNodeKinds)
+{
+    Context ctx;
+    auto const* A = obj(ctx, "A");
+    auto const* B = obj(ctx, "B");
+
+    EGraph eg{ctx};
+    (void)eg.add(make_negate(ctx, A));
+    (void)eg.add(make_dot(ctx, A, B));
+    (void)eg.add(make_ddot(ctx, A, B));
+    (void)eg.add(make_ddot_alt(ctx, A, B));
+    (void)eg.add(make_cross(ctx, A, B));
+    (void)eg.add(make_scalar_div(ctx, A, B));
+    (void)eg.add(make_sum(ctx, A, B));
+    (void)eg.add(make_tensor_product(ctx, A, B)); // invariant → positional
+
+    EXPECT_FALSE(eg.ematch(make_negate(ctx, A)).empty());
+    EXPECT_FALSE(eg.ematch(make_dot(ctx, A, B)).empty());
+    EXPECT_FALSE(eg.ematch(make_ddot(ctx, A, B)).empty());
+    EXPECT_FALSE(eg.ematch(make_ddot_alt(ctx, A, B)).empty());
+    EXPECT_FALSE(eg.ematch(make_cross(ctx, A, B)).empty());
+    EXPECT_FALSE(eg.ematch(make_scalar_div(ctx, A, B)).empty());
+    EXPECT_FALSE(eg.ematch(make_sum(ctx, A, B)).empty());
+    EXPECT_FALSE(eg.ematch(make_tensor_product(ctx, A, B)).empty());
+
+    // A leaf pattern is tried against every class, including non-leaf ones.
+    EXPECT_FALSE(eg.ematch(A).empty());
+
+    // A Sum pattern of the wrong cardinality does not match (size guard).
+    auto const* C = obj(ctx, "C");
+    EXPECT_TRUE(eg.ematch(make_sum(ctx, A, make_sum(ctx, B, C))).empty());
+}
+
+TEST(EMatch, MatchesSumFlattenedAcrossENodes)
+{
+    // A 3-addend sum canonicalizes to a nested binary Sum; the target is
+    // flattened across e-nodes so the 3-term pattern lines up.
+    Context ctx;
+    auto const* A = obj(ctx, "A");
+    auto const* B = obj(ctx, "B");
+    auto const* C = obj(ctx, "C");
+
+    EGraph eg{ctx};
+    (void)eg.add(make_sum(ctx, A, make_sum(ctx, B, C)));
+    EXPECT_FALSE(eg.ematch(make_sum(ctx, A, make_sum(ctx, B, C))).empty());
+}
+
+TEST(EMatch, MatchesNoSumAndBoundExplicitSum)
+{
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex a{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    (void)eg.add(make_no_sum(ctx, i, delta_ul(ctx, i, j)));
+    (void)eg.add(make_explicit_sum(
+        ctx, i, delta_ul(ctx, i, j), make_scalar(ctx, Rational{3})));
+
+    // NoSum pattern binds its index and matches the body.
+    EXPECT_FALSE(eg.ematch(make_no_sum(ctx, p, delta_ul(ctx, p, a))).empty());
+    // ExplicitSum with a symbolic bound: the bound child is matched too.
+    EXPECT_FALSE(
+        eg
+            .ematch(make_explicit_sum(
+                ctx, p, delta_ul(ctx, p, a), make_scalar(ctx, Rational{3})))
+            .empty());
+    // A bound-presence mismatch does not match.
+    EXPECT_TRUE(
+        eg.ematch(make_explicit_sum(ctx, p, delta_ul(ctx, p, a))).empty());
 }

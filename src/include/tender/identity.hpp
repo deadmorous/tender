@@ -53,6 +53,18 @@ struct MatchBinding final
 [[nodiscard]] auto match(Expr const* pattern, Expr const* target)
     -> std::optional<MatchBinding>;
 
+// Lower-level matching primitives, exposed for the e-graph matcher (vibe
+// 000034).  match() is the fresh-binding wrapper around match_into.
+//
+// match_into threads an existing binding (extending it in place) and returns
+// whether `pattern` matches `target`.  bind_pattern_index binds a pattern index
+// id to a target index, or requires consistency with an existing binding — used
+// when matching an ExplicitSum/NoSum binder against an e-node's binder id.
+[[nodiscard]] auto match_into(
+    Expr const* pattern, Expr const* target, MatchBinding& bnd) -> bool;
+[[nodiscard]] auto bind_pattern_index(
+    MatchBinding& bnd, int pattern_id, IndexAssoc const& target) -> bool;
+
 // Instantiate `rhs` under `binding`: replace each pattern index by the target
 // index it was bound to.  Pattern indices absent from the binding are left as
 // they are.

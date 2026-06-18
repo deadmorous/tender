@@ -266,6 +266,18 @@ auto match(Expr const* pattern, Expr const* target)
     return std::nullopt;
 }
 
+auto match_into(Expr const* pattern, Expr const* target, MatchBinding& bnd)
+    -> bool
+{
+    return match_node(pattern, target, bnd);
+}
+
+auto bind_pattern_index(
+    MatchBinding& bnd, int pattern_id, IndexAssoc const& target) -> bool
+{
+    return try_bind(bnd, pattern_id, target);
+}
+
 auto instantiate(Context& ctx, Expr const* rhs, MatchBinding const& bnd)
     -> Expr const*
 {

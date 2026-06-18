@@ -2,11 +2,13 @@
 
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/context.hpp>
-#include <tender/derivation.hpp> // steps::canonicalize, structural_eq
+#include <tender/derivation.hpp> // steps::canonicalize, structural_eq, is_component_valued
+#include <tender/identity.hpp> // match_into, bind_pattern_index
 
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 using namespace mpk::mix;
@@ -54,6 +56,21 @@ struct ENode final
 void hash_combine(std::size_t& seed, std::size_t v)
 {
     seed ^= v + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+}
+
+// Flatten a left/right pattern tree of node kind NodeT into its leaf operands
+// (mirrors the canonicalizer's flatten; used to AC-match a commutative
+// pattern).
+template <typename NodeT>
+void flatten_pat(Expr const* e, std::vector<Expr const*>& out)
+{
+    if (auto const* n = std::get_if<NodeT>(&e->node))
+    {
+        flatten_pat<NodeT>(n->left, out);
+        flatten_pat<NodeT>(n->right, out);
+    }
+    else
+        out.push_back(e);
 }
 
 // Structural hash of a leaf Expr, consistent with structural_eq (which compares
@@ -402,7 +419,223 @@ struct EGraph::Impl final
         std::unordered_map<EClassId, Expr const*> memo;
         return reconstruct(root, best, memo);
     }
+
+    // ---- e-matching ------------------------------------------------------
+    //
+    // A canonical pattern is matched against the e-graph by descending through
+    // e-classes: each pattern node is matched against every e-node of the
+    // candidate class, recursing into child classes.  Leaves and binder indices
+    // reuse the Expr-level matcher (match_into / bind_pattern_index), so the
+    // index-binding semantics live in one place.  Commutative nodes (Sum, and
+    // component TensorProduct) flatten the pattern and the target and
+    // AC-backtrack.
+    //
+    // The target flattening follows one same-kind e-node per class (single
+    // flattening); enumerating alternative flattenings of multi-form classes is
+    // a follow-up.  All other matching is complete over the class's e-nodes.
+
+    using Bindings = std::vector<MatchBinding>;
+
+    // Collect addend/factor classes of a commutative `k`-node tree rooted at
+    // cls.
+    void flatten_target(EKind k, EClassId cls, std::vector<EClassId>& out)
+    {
+        cls = find(cls);
+        for (ENode const& n: classes_[cls].nodes)
+            if (n.kind == k)
+            {
+                flatten_target(k, n.children[0], out);
+                flatten_target(k, n.children[1], out);
+                return;
+            }
+        out.push_back(cls);
+    }
+
+    auto match_class(Expr const* pat, EClassId cls, MatchBinding const& bnd)
+        -> Bindings;
+
+    auto match_binary(
+        Expr const* pl,
+        Expr const* pr,
+        ENode const& n,
+        MatchBinding const& bnd) -> Bindings
+    {
+        Bindings out;
+        for (auto const& bl: match_class(pl, n.children[0], bnd))
+        {
+            auto br = match_class(pr, n.children[1], bl);
+            out.insert(out.end(), br.begin(), br.end());
+        }
+        return out;
+    } // GCOV_EXCL_LINE  (-O0 exception-cleanup landing pad)
+
+    auto match_commutative(
+        Expr const* pat,
+        ENode const& n,
+        EKind k,
+        MatchBinding const& bnd) -> Bindings
+    {
+        std::vector<Expr const*> pats;
+        if (k == EKind::Sum)
+            flatten_pat<Sum>(pat, pats);
+        else
+            flatten_pat<TensorProduct>(pat, pats);
+
+        std::vector<EClassId> tgts;
+        flatten_target(k, n.children[0], tgts);
+        flatten_target(k, n.children[1], tgts);
+        if (pats.size() != tgts.size())
+            return {};
+
+        Bindings out;
+        std::vector<bool> used(tgts.size(), false);
+        auto rec = [&](auto&& self, std::size_t i, MatchBinding cur) -> void
+        {
+            if (i == pats.size())
+            {
+                out.push_back(std::move(cur));
+                return;
+            }
+            for (std::size_t j = 0; j < tgts.size(); ++j)
+            {
+                if (used[j])
+                    continue;
+                used[j] = true;
+                for (auto& b: match_class(pats[i], tgts[j], cur))
+                    self(self, i + 1, b);
+                used[j] = false;
+            }
+        };
+        rec(rec, 0, bnd);
+        return out;
+    }
+
+    auto match_node(Expr const* pat, ENode const& n, MatchBinding const& bnd)
+        -> Bindings
+    {
+        auto leaf = [&](EKind k) -> Bindings
+        {
+            if (n.kind != k || !n.leaf)
+                return {};
+            MatchBinding b = bnd;
+            if (match_into(pat, n.leaf, b))
+                return {std::move(b)};
+            return {};
+        };
+        auto bin = [&](EKind k, Expr const* l, Expr const* r) -> Bindings
+        { return n.kind == k ? match_binary(l, r, n, bnd) : Bindings{}; };
+
+        return visit(
+            Overloads{
+                [&](TensorObject const&) { return leaf(EKind::TensorObject); },
+                [&](ScalarLiteral const&)
+                { return leaf(EKind::ScalarLiteral); },
+                [&](Negate const& p) -> Bindings
+                {
+                    return n.kind == EKind::Negate ?
+                               match_class(p.operand, n.children[0], bnd) :
+                               Bindings{};
+                },
+                [&](Sum const&) -> Bindings
+                {
+                    return n.kind == EKind::Sum ?
+                               match_commutative(pat, n, EKind::Sum, bnd) :
+                               Bindings{};
+                },
+                // GCOV_EXCL_START  the pattern is canonicalized before
+                // matching, and canonical forms hold no Difference node (see
+                // add_canon).
+                [&](Difference const& p)
+                { return bin(EKind::Difference, p.left, p.right); },
+                // GCOV_EXCL_STOP
+                [&](TensorProduct const& p) -> Bindings
+                {
+                    if (n.kind != EKind::TensorProduct)
+                        return {};
+                    if (is_component_valued(pat))
+                        return match_commutative(
+                            pat, n, EKind::TensorProduct, bnd);
+                    return match_binary(p.left, p.right, n, bnd);
+                },
+                [&](ScalarDiv const& p)
+                { return bin(EKind::ScalarDiv, p.left, p.right); },
+                [&](Dot const& p) { return bin(EKind::Dot, p.left, p.right); },
+                [&](DDot const& p)
+                { return bin(EKind::DDot, p.left, p.right); },
+                [&](DDotAlt const& p)
+                { return bin(EKind::DDotAlt, p.left, p.right); },
+                [&](Cross const& p)
+                { return bin(EKind::Cross, p.left, p.right); },
+                [&](ExplicitSum const& p) -> Bindings
+                {
+                    if (n.kind != EKind::ExplicitSum)
+                        return {};
+                    MatchBinding b = bnd;
+                    // GCOV_EXCL_START  canonicalize gives every binder a
+                    // distinct (depth-based) id, so this consistency check
+                    // never fails on a canonical pattern; kept for robustness.
+                    if (!bind_pattern_index(
+                            b, p.index.id, CountableIndex{n.binder}))
+                        return {};
+                    // GCOV_EXCL_STOP
+                    bool const pbound = p.bound != nullptr;
+                    if (pbound != (n.children.size() > 1))
+                        return {};
+                    auto bodies = match_class(p.body, n.children[0], b);
+                    if (!pbound)
+                        return bodies;
+                    Bindings out;
+                    for (auto const& bb: bodies)
+                    {
+                        auto r = match_class(p.bound, n.children[1], bb);
+                        out.insert(out.end(), r.begin(), r.end());
+                    }
+                    return out;
+                },
+                [&](NoSum const& p) -> Bindings
+                {
+                    if (n.kind != EKind::NoSum)
+                        return {};
+                    MatchBinding b = bnd;
+                    // GCOV_EXCL_START  (distinct canonical binder ids; see
+                    // above)
+                    if (!bind_pattern_index(
+                            b, p.index.id, CountableIndex{n.binder}))
+                        return {};
+                    // GCOV_EXCL_STOP
+                    return match_class(p.body, n.children[0], b);
+                },
+            },
+            *pat);
+    }
+
+    auto ematch(Expr const* pat)
+        -> std::vector<std::pair<EClassId, MatchBinding>>
+    {
+        std::vector<std::pair<EClassId, MatchBinding>> out;
+        for (auto const& [id, ec]: classes_)
+            for (auto& b: match_class(pat, id, MatchBinding{}))
+                out.emplace_back(id, std::move(b));
+        return out;
+    } // GCOV_EXCL_LINE  (-O0 exception-cleanup landing pad)
 };
+
+auto EGraph::Impl::match_class(
+    Expr const* pat, EClassId cls, MatchBinding const& bnd) -> Bindings
+{
+    cls = find(cls);
+    Bindings out;
+    // Copy the node list: match_class is re-entrant but does not mutate
+    // classes_; the copy guards against iterator surprises if that ever
+    // changes.
+    auto nodes = classes_[cls].nodes;
+    for (ENode const& n: nodes)
+    {
+        auto r = match_node(pat, n, bnd);
+        out.insert(out.end(), r.begin(), r.end());
+    }
+    return out;
+}
 
 EGraph::EGraph(Context& ctx) : impl_{std::make_unique<Impl>(ctx)}
 {
@@ -430,6 +663,11 @@ auto EGraph::find(EClassId id) -> EClassId
 auto EGraph::extract(EClassId id) -> Expr const*
 {
     return impl_->extract(id);
+}
+auto EGraph::ematch(Expr const* pattern)
+    -> std::vector<std::pair<EClassId, MatchBinding>>
+{
+    return impl_->ematch(steps::canonicalize(*impl_->ctx_, pattern));
 }
 auto EGraph::class_count() -> std::size_t
 {
