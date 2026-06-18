@@ -127,6 +127,22 @@ auto leaf_hash(Expr const* e) -> std::size_t
     return seed;
 }
 
+// Per-node extraction weight.  Cost is lexicographic: minimize the number of
+// Levi-Civita symbols first (the object the index identities exist to contract
+// away — its δ-expansion is often *larger*, so a plain node count would keep
+// the ε form), then total node count.  The weight dominates any realistic node
+// count, giving the (eps-count, node-count) ordering.
+constexpr std::size_t kLeviCivitaWeight = 1'000'000;
+
+auto node_cost(ENode const& n) -> std::size_t
+{
+    if (n.leaf)
+        if (auto const* t = std::get_if<TensorObject>(&n.leaf->node))
+            if (t->traits && t->traits->well_known == WellKnownKind::LeviCivita)
+                return kLeviCivitaWeight;
+    return 1;
+}
+
 struct ENodeHash final
 {
     auto operator()(ENode const& n) const -> std::size_t
@@ -391,7 +407,7 @@ struct EGraph::Impl final
             {
                 for (ENode const& n: ec.nodes)
                 {
-                    std::size_t c = 1;
+                    std::size_t c = node_cost(n);
                     bool ok = true;
                     for (EClassId ch: n.children)
                     {
