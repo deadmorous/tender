@@ -618,6 +618,58 @@ struct EGraph::Impl final
                 out.emplace_back(id, std::move(b));
         return out;
     } // GCOV_EXCL_LINE  (-O0 exception-cleanup landing pad)
+
+    // ---- saturation ------------------------------------------------------
+    //
+    // Equality saturation: apply every rule everywhere, to a fixed point.  Each
+    // pass has a read phase (collect every (matched class, instantiated RHS) on
+    // a stable graph) and a write phase (add each RHS and merge it into its
+    // matched class), then one rebuild.  Splitting the phases keeps matching
+    // off a half-mutated graph.
+    //
+    // A pass that merges nothing new is the fixed point.  An iteration cap
+    // bounds size-increasing rule sets that never converge (vibe 000034); for
+    // tender's size-reducing identities the loop settles in a few passes well
+    // under the cap.
+
+    auto saturate(std::vector<Identity> const& rules, int max_iterations) -> int
+    {
+        // Compile once: rules' LHS canonicalized for matching, RHS kept raw for
+        // instantiation under each binding.
+        std::vector<std::pair<Expr const*, Expr const*>> compiled;
+        compiled.reserve(rules.size());
+        for (auto const& r: rules)
+            compiled.emplace_back(steps::canonicalize(*ctx_, r.lhs), r.rhs);
+
+        int passes = 0;
+        while (passes < max_iterations)
+        {
+            ++passes;
+
+            // Read phase: gather rewrites without mutating the graph.
+            std::vector<std::pair<EClassId, Expr const*>> rewrites;
+            for (auto const& [lhs, rhs]: compiled)
+                for (auto& [cls, bnd]: ematch(lhs))
+                    rewrites.emplace_back(cls, instantiate(*ctx_, rhs, bnd));
+
+            // Write phase: insert each RHS and merge it into its matched class.
+            bool changed = false;
+            for (auto const& [cls, rhs]: rewrites)
+            {
+                EClassId const rcls =
+                    add_canon(steps::canonicalize(*ctx_, rhs));
+                if (find(cls) != find(rcls))
+                {
+                    merge(cls, rcls);
+                    changed = true;
+                }
+            }
+            rebuild();
+            if (!changed)
+                break;
+        }
+        return passes;
+    }
 };
 
 auto EGraph::Impl::match_class(
@@ -668,6 +720,11 @@ auto EGraph::ematch(Expr const* pattern)
     -> std::vector<std::pair<EClassId, MatchBinding>>
 {
     return impl_->ematch(steps::canonicalize(*impl_->ctx_, pattern));
+}
+auto EGraph::saturate(std::vector<Identity> const& rules, int max_iterations)
+    -> int
+{
+    return impl_->saturate(rules, max_iterations);
 }
 auto EGraph::class_count() -> std::size_t
 {

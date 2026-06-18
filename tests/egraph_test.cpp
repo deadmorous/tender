@@ -540,3 +540,161 @@ TEST(EMatch, MatchesNoSumAndBoundExplicitSum)
     EXPECT_TRUE(
         eg.ematch(make_explicit_sum(ctx, p, delta_ul(ctx, p, a))).empty());
 }
+
+// ---- saturation ------------------------------------------------------------
+
+namespace
+{
+// The delta-contraction identity  Σ_p δ^p_a δ^p_b = δ_{ab}, with fresh ids.
+auto contraction_rule(Context& ctx) -> Identity
+{
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    return Identity{
+        "delta-contraction", contraction(ctx, p, a, b), delta_ll(ctx, a, b)};
+}
+
+// The two-index eps-delta identity  Σ_i Σ_j ε^{ijk} ε_{ijl} = 2 δ^k_l.
+auto eps_delta_rule(Context& ctx) -> Identity
+{
+    auto eps =
+        [&](Level lvl, CountableIndex x, CountableIndex y, CountableIndex z)
+    {
+        return make_levi_civita(
+            ctx,
+            Realm::Oblique,
+            space_3d(),
+            {lvl, lvl, lvl},
+            {IndexAssoc{x}, IndexAssoc{y}, IndexAssoc{z}});
+    };
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    CountableIndex l{ctx.alloc_index_id()};
+    auto const* lhs = make_explicit_sum(
+        ctx,
+        i,
+        make_explicit_sum(
+            ctx,
+            j,
+            make_tensor_product(
+                ctx, eps(Level::Upper, i, j, k), eps(Level::Lower, i, j, l))));
+    auto const* rhs = make_tensor_product(
+        ctx, make_scalar(ctx, Rational{2}), delta_ul(ctx, k, l));
+    return Identity{"eps-delta-2", lhs, rhs};
+}
+} // namespace
+
+TEST(Saturate, ContractsDelta)
+{
+    Context ctx;
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    auto root = eg.add(contraction(ctx, q, m, n));
+    int passes = eg.saturate({contraction_rule(ctx)});
+
+    EXPECT_TRUE(
+        algebraic_eq(ctx, eg.extract(eg.find(root)), delta_ll(ctx, m, n)));
+    EXPECT_LT(passes, 30); // converged below the cap
+}
+
+TEST(Saturate, ContractsEpsDelta)
+{
+    Context ctx;
+    auto eps =
+        [&](Level lvl, CountableIndex x, CountableIndex y, CountableIndex z)
+    {
+        return make_levi_civita(
+            ctx,
+            Realm::Oblique,
+            space_3d(),
+            {lvl, lvl, lvl},
+            {IndexAssoc{x}, IndexAssoc{y}, IndexAssoc{z}});
+    };
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex c{ctx.alloc_index_id()};
+    CountableIndex d{ctx.alloc_index_id()};
+    auto const* target = make_explicit_sum(
+        ctx,
+        a,
+        make_explicit_sum(
+            ctx,
+            b,
+            make_tensor_product(
+                ctx, eps(Level::Upper, a, b, c), eps(Level::Lower, a, b, d))));
+
+    EGraph eg{ctx};
+    auto root = eg.add(target);
+    (void)eg.saturate({eps_delta_rule(ctx)});
+
+    auto const* expected = make_tensor_product(
+        ctx, make_scalar(ctx, Rational{2}), delta_ul(ctx, c, d));
+    EXPECT_TRUE(algebraic_eq(ctx, eg.extract(eg.find(root)), expected));
+}
+
+TEST(Saturate, RewritesNestedSubexpression)
+{
+    // δ_{rs} + Σ_q δ^q_m δ^q_n  saturates to  δ_{rs} + δ_{mn} via congruence.
+    Context ctx;
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    CountableIndex r{ctx.alloc_index_id()};
+    CountableIndex s{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    auto root =
+        eg.add(make_sum(ctx, delta_ll(ctx, r, s), contraction(ctx, q, m, n)));
+    (void)eg.saturate({contraction_rule(ctx)});
+
+    auto const* expected =
+        make_sum(ctx, delta_ll(ctx, r, s), delta_ll(ctx, m, n));
+    EXPECT_TRUE(algebraic_eq(ctx, eg.extract(eg.find(root)), expected));
+}
+
+TEST(Saturate, ReachesFixedPointAndIsIdempotent)
+{
+    Context ctx;
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    (void)eg.add(contraction(ctx, q, m, n));
+    (void)eg.saturate({contraction_rule(ctx)});
+    // A second saturation changes nothing: one pass, then convergence.
+    EXPECT_EQ(eg.saturate({contraction_rule(ctx)}), 1);
+}
+
+TEST(Saturate, NoMatchLeavesGraphUnchanged)
+{
+    Context ctx;
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    auto root = eg.add(delta_ll(ctx, m, n)); // a bare delta, no contraction
+    auto before = eg.class_count();
+
+    EXPECT_EQ(eg.saturate({contraction_rule(ctx)}), 1); // one no-op pass
+    EXPECT_EQ(eg.class_count(), before);
+    EXPECT_TRUE(
+        algebraic_eq(ctx, eg.extract(eg.find(root)), delta_ll(ctx, m, n)));
+}
+
+TEST(Saturate, RespectsIterationCap)
+{
+    Context ctx;
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    EGraph eg{ctx};
+    (void)eg.add(contraction(ctx, q, m, n));
+    EXPECT_EQ(eg.saturate({contraction_rule(ctx)}, 1), 1); // hard stop after 1
+}

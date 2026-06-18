@@ -65,6 +65,15 @@ public:
     [[nodiscard]] auto ematch(Expr const* pattern)
         -> std::vector<std::pair<EClassId, MatchBinding>>;
 
+    // Equality saturation (vibe 000034): apply `rules` everywhere to a fixed
+    // point, merging each instantiated rewrite into the e-graph.  Each pass
+    // matches on a stable graph, then inserts and merges every rewrite, then
+    // rebuilds.  Stops when a pass changes nothing, or after `max_iterations`
+    // passes (the cap bounds size-increasing rule sets).  Returns the number of
+    // passes run.  Afterwards, extract(find(root)) yields the simplified form.
+    auto saturate(std::vector<Identity> const& rules, int max_iterations = 30)
+        -> int;
+
     // Number of distinct e-classes (diagnostics / benchmarks).
     [[nodiscard]] auto class_count() -> std::size_t;
 
