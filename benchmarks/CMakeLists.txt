@@ -9,3 +9,4 @@ function(tender_add_benchmark name)
 endfunction()
 
 tender_add_benchmark(egraph_saturate_bench)
+tender_add_benchmark(rational_bench)
