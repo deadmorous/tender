@@ -115,12 +115,17 @@ auto make_delta(
     IndexAssoc index0,
     IndexAssoc index1) -> Expr const*
 {
+    // δ is symmetric in its two slots (δ^a_b = δ^b_a in value), so the swap is
+    // a value-preserving generator (vibe 000047).  same_level_only is false:
+    // the symmetry holds across the upper/lower level difference.
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("\\delta"),
         .rank = 0,
         .traits =
             TensorTraits{
                 .well_known = WellKnownKind::Delta,
+                .symmetry =
+                    SymmetrySpec{PermutationSpec{false, Permutation<2>{{1, 0}}}},
                 .render_hints = RenderHint::OmitVoidIndexPlaceholders},
         .slots = {
             SlotBinding{IndexSlot{level0, realm, space}, std::move(index0)},
@@ -148,10 +153,21 @@ auto make_levi_civita(
         slots.push_back(SlotBinding{
             IndexSlot{levels[k], realm, space}, std::move(indices[k])});
 
+    // ε is totally antisymmetric: the adjacent transpositions are sign-flipping
+    // generators of the full S_n permutation symmetry (vibe 000047).  The
+    // generated even permutations (sign +1) fall out of the closure, so no
+    // separate symmetry generators are needed.  Only n == 3 (the dimension the
+    // identity library exercises) declares them today; other ranks carry no
+    // symmetry until a use arises.
+    TensorTraits traits{.well_known = WellKnownKind::LeviCivita};
+    if (n == 3)
+        traits.antisymmetry = AntisymmetrySpec{PermutationSpec{
+            false, Permutation<3>{{1, 0, 2}}, Permutation<3>{{0, 2, 1}}}};
+
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("\\varepsilon"),
         .rank = 0,
-        .traits = TensorTraits{.well_known = WellKnownKind::LeviCivita},
+        .traits = traits,
         .slots = std::move(slots)});
 }
 

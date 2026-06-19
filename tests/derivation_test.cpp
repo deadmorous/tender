@@ -2689,3 +2689,84 @@ TEST(ExpandProducts, DDotAltDistributes)
     auto const* after = steps::expand_products(ctx, expr);
     EXPECT_NE(std::get_if<Sum>(&after->node), nullptr);
 }
+
+// ---- symmetry orbit canonicalization (vibe 000047) -------------------------
+
+namespace
+{
+auto eps3(Context& ctx, Level lvl, IndexAssoc x, IndexAssoc y, IndexAssoc z)
+    -> Expr const*
+{
+    return make_levi_civita(
+        ctx, Realm::Oblique, space_3d(), {lvl, lvl, lvl}, {x, y, z});
+}
+} // namespace
+
+TEST(SymmetryCanon, GeneratorlessTensorUnchanged)
+{
+    // A well-known tensor that carries traits but no symmetry generators (the
+    // identity tensor I) passes through canon_symmetry untouched.
+    Context ctx;
+    auto const* I = make_identity(ctx);
+    EXPECT_TRUE(structural_eq(steps::canonicalize(ctx, I), I));
+}
+
+TEST(SymmetryCanon, DeltaSlotSwapIsEqual)
+{
+    // δ is symmetric: δ^a_b == δ_b^a (the slots swapped, levels travelling with
+    // their index).  Both must canonicalize to the same orbit-minimal form.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    auto const* d_ab =
+        make_delta(ctx, Realm::Oblique, sp, Level::Upper, Level::Lower, a, b);
+    auto const* d_ba =
+        make_delta(ctx, Realm::Oblique, sp, Level::Lower, Level::Upper, b, a);
+    EXPECT_TRUE(algebraic_eq(ctx, d_ab, d_ba));
+}
+
+TEST(SymmetryCanon, EpsCyclicShiftIsEqual)
+{
+    // Even (cyclic) permutation preserves value: ε^{ijk} == ε^{jki}.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    auto const* ijk =
+        eps3(ctx, Level::Upper, IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k});
+    auto const* jki =
+        eps3(ctx, Level::Upper, IndexAssoc{j}, IndexAssoc{k}, IndexAssoc{i});
+    EXPECT_TRUE(algebraic_eq(ctx, ijk, jki));
+}
+
+TEST(SymmetryCanon, EpsTranspositionFlipsSign)
+{
+    // Odd permutation flips sign: ε^{ijk} + ε^{jik} == 0.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    auto const* ijk =
+        eps3(ctx, Level::Upper, IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k});
+    auto const* jik =
+        eps3(ctx, Level::Upper, IndexAssoc{j}, IndexAssoc{i}, IndexAssoc{k});
+    EXPECT_TRUE(algebraic_eq(
+        ctx, make_sum(ctx, ijk, jik), make_scalar(ctx, Rational{0})));
+}
+
+TEST(SymmetryCanon, EpsRepeatedIndexIsZero)
+{
+    // An arrangement reachable with both signs is identically zero: ε^{11k} =
+    // 0. (Repeated *countable* indices would be rejected earlier as an
+    // ill-formed Oblique same-level contraction; concrete repeats are the path
+    // that reaches the sign-conflict branch in canon.)
+    Context ctx;
+    auto const* z = eps3(
+        ctx,
+        Level::Upper,
+        IndexAssoc{ConcreteIndex{1}},
+        IndexAssoc{ConcreteIndex{1}},
+        IndexAssoc{ConcreteIndex{2}});
+    EXPECT_TRUE(algebraic_eq(ctx, z, make_scalar(ctx, Rational{0})));
+}

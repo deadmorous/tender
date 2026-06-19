@@ -57,7 +57,9 @@ TEST(Identities, DeltaContraction)
         make_tensor_product(ctx, d(ctx, U, L, q, m), d(ctx, U, L, q, n)));
 
     auto const* result =
-        run(ctx, target, identities::delta_contraction(ctx, sp));
+        run(ctx,
+            target,
+            identities::delta_contraction(ctx, sp, Realm::Oblique));
     EXPECT_TRUE(algebraic_eq(ctx, result, d(ctx, L, L, m, n)));
 }
 
@@ -69,7 +71,8 @@ TEST(Identities, DeltaTrace)
     auto const* target = make_explicit_sum(ctx, q, d(ctx, U, L, q, q)); // Σ_q
                                                                         // δ^q_q
 
-    auto const* result = run(ctx, target, identities::delta_trace(ctx, sp));
+    auto const* result =
+        run(ctx, target, identities::delta_trace(ctx, sp, Realm::Oblique));
     EXPECT_TRUE(algebraic_eq(ctx, result, make_scalar(ctx, Rational{3})));
 }
 
@@ -89,8 +92,77 @@ TEST(Identities, EpsDelta1MatchesOracle)
         make_tensor_product(ctx, eps(ctx, U, a, b, c), eps(ctx, L, a, dd, e)));
 
     auto const* oracle = steps::contract_eps_pair(ctx, target);
-    auto const* result = run(ctx, target, identities::eps_delta_1(ctx));
+    auto const* result =
+        run(ctx, target, identities::eps_delta_1(ctx, Realm::Oblique));
     EXPECT_TRUE(algebraic_eq(ctx, result, oracle));
+}
+
+TEST(Identities, RealmOrthonormalContraction)
+{
+    // The builder is realm-parameterized (vibe 000047 (a)): an Orthonormal rule
+    // contracts an Orthonormal target.
+    Context ctx;
+    auto const* sp = space_3d();
+    auto const q = CountableIndex{ctx.alloc_index_id()};
+    auto const m = CountableIndex{ctx.alloc_index_id()};
+    auto const n = CountableIndex{ctx.alloc_index_id()};
+    // Orthonormal indices are spelled lower by convention (vibe 000047), and
+    // the rule produces lower-lower deltas to match.
+    auto dn = [&](Level la, Level lb, CountableIndex a, CountableIndex b)
+    { return make_delta(ctx, Realm::Orthonormal, sp, la, lb, a, b); };
+    auto const* target = make_explicit_sum(
+        ctx, q, make_tensor_product(ctx, dn(L, L, q, m), dn(L, L, q, n)));
+
+    auto const* result =
+        run(ctx,
+            target,
+            identities::delta_contraction(ctx, sp, Realm::Orthonormal));
+    EXPECT_TRUE(algebraic_eq(ctx, result, dn(L, L, m, n)));
+}
+
+TEST(Identities, OrthonormalRuleIsLowerSpelled)
+{
+    // The Orthonormal rule is lower-lower, so it does NOT fire on an
+    // upper-spelled Orthonormal target — pinning the lower-index convention.
+    Context ctx;
+    auto const* sp = space_3d();
+    auto const q = CountableIndex{ctx.alloc_index_id()};
+    auto const m = CountableIndex{ctx.alloc_index_id()};
+    auto const n = CountableIndex{ctx.alloc_index_id()};
+    auto dn = [&](Level la, Level lb, CountableIndex a, CountableIndex b)
+    { return make_delta(ctx, Realm::Orthonormal, sp, la, lb, a, b); };
+    auto const* upper_target = make_explicit_sum(
+        ctx, q, make_tensor_product(ctx, dn(U, L, q, m), dn(U, L, q, n)));
+
+    auto const* result =
+        run(ctx,
+            upper_target,
+            identities::delta_contraction(ctx, sp, Realm::Orthonormal));
+    EXPECT_TRUE(algebraic_eq(ctx, result, upper_target)); // unchanged
+    EXPECT_FALSE(algebraic_eq(ctx, result, dn(L, L, m, n)));
+}
+
+TEST(Identities, RealmMismatchDoesNotFire)
+{
+    // A rule built in the wrong realm must not match (match_slot is
+    // realm-exact) — the target comes back unchanged, not contracted.
+    Context ctx;
+    auto const* sp = space_3d();
+    auto const q = CountableIndex{ctx.alloc_index_id()};
+    auto const m = CountableIndex{ctx.alloc_index_id()};
+    auto const n = CountableIndex{ctx.alloc_index_id()};
+    auto dn = [&](Level la, Level lb, CountableIndex a, CountableIndex b)
+    { return make_delta(ctx, Realm::Orthonormal, sp, la, lb, a, b); };
+    auto const* target = make_explicit_sum(
+        ctx, q, make_tensor_product(ctx, dn(L, L, q, m), dn(L, L, q, n)));
+
+    // Oblique rule against an Orthonormal target.
+    auto const* result =
+        run(ctx,
+            target,
+            identities::delta_contraction(ctx, sp, Realm::Oblique));
+    EXPECT_FALSE(algebraic_eq(ctx, result, dn(L, L, m, n)));
+    EXPECT_TRUE(algebraic_eq(ctx, result, target));
 }
 
 TEST(Identities, EpsDelta2MatchesOracle)
@@ -110,6 +182,7 @@ TEST(Identities, EpsDelta2MatchesOracle)
                 ctx, eps(ctx, U, a, b, c), eps(ctx, L, a, b, dd))));
 
     auto const* oracle = steps::contract_eps_pair(ctx, target);
-    auto const* result = run(ctx, target, identities::eps_delta_2(ctx));
+    auto const* result =
+        run(ctx, target, identities::eps_delta_2(ctx, Realm::Oblique));
     EXPECT_TRUE(algebraic_eq(ctx, result, oracle));
 }
