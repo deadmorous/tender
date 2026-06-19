@@ -394,7 +394,8 @@ struct EGraph::Impl final
         return r;
     }
 
-    auto extract(EClassId root) -> Expr const*
+    // The cheapest e-node per class, by the lexicographic cost in node_cost.
+    auto compute_best() -> std::unordered_map<EClassId, ENode>
     {
         std::unordered_map<EClassId, std::size_t> cost;
         std::unordered_map<EClassId, ENode> best;
@@ -431,7 +432,12 @@ struct EGraph::Impl final
                 }
             }
         }
+        return best;
+    }
 
+    auto extract(EClassId root) -> Expr const*
+    {
+        auto best = compute_best();
         std::unordered_map<EClassId, Expr const*> memo;
         return reconstruct(root, best, memo);
     }
@@ -648,6 +654,80 @@ struct EGraph::Impl final
     // tender's size-reducing identities the loop settles in a few passes well
     // under the cap.
 
+    // ---- built-in distributivity (vibe 000048) ---------------------------
+    //
+    // op(L, S) with S a Sum becomes op(L, S1) + op(L, S2) (and symmetrically
+    // op(S, R)), for the multiplicative ops that distribute over +.  This is a
+    // structural rule, like AC and congruence — not a data Identity — because
+    // the engine has no subtree pattern variables yet to write `?a·(?b+?c)`.
+    //
+    // Each distributable form is rebuilt as a canonical Expr (the matched
+    // subtrees are reconstructed at their cheapest form), so the graph stays
+    // all-canonical; the new sum is merged into the product's class.  Canonical
+    // forms carry no Difference (signs are coefficients), so only a Sum child
+    // is ever distributed.
+
+    static auto is_distributive(EKind k) -> bool
+    {
+        return k == EKind::TensorProduct || k == EKind::Dot || k == EKind::DDot
+               || k == EKind::DDotAlt || k == EKind::Cross;
+    }
+
+    auto make_binop(EKind k, Expr const* l, Expr const* r) -> Expr const*
+    {
+        Context& ctx = *ctx_;
+        switch (k)
+        {
+            case EKind::TensorProduct: return make_tensor_product(ctx, l, r);
+            case EKind::Dot: return make_dot(ctx, l, r);
+            case EKind::DDot: return make_ddot(ctx, l, r);
+            case EKind::DDotAlt: return make_ddot_alt(ctx, l, r);
+            case EKind::Cross: return make_cross(ctx, l, r);
+            // GCOV_EXCL_START  (callers guard with is_distributive)
+            default:
+                return nullptr;
+                // GCOV_EXCL_STOP
+        }
+    }
+
+    // Collect (product class, distributed Expr) pairs over a stable graph; the
+    // caller applies them in the shared write phase.
+    auto collect_distribution_rewrites()
+        -> std::vector<std::pair<EClassId, Expr const*>>
+    {
+        auto best = compute_best();
+        std::unordered_map<EClassId, Expr const*> memo;
+        std::vector<std::pair<EClassId, Expr const*>> out;
+
+        for (auto const& [id, ec]: classes_)
+            for (ENode const& n: ec.nodes)
+            {
+                if (!is_distributive(n.kind))
+                    continue;
+                for (int i = 0; i < 2; ++i)
+                {
+                    EClassId const sum_cls = find(n.children[i]);
+                    Expr const* other =
+                        reconstruct(n.children[1 - i], best, memo);
+                    for (ENode const& m: classes_[sum_cls].nodes)
+                    {
+                        if (m.kind != EKind::Sum)
+                            continue;
+                        Expr const* s1 = reconstruct(m.children[0], best, memo);
+                        Expr const* s2 = reconstruct(m.children[1], best, memo);
+                        Expr const* t1 = i == 0 ?
+                                             make_binop(n.kind, s1, other) :
+                                             make_binop(n.kind, other, s1);
+                        Expr const* t2 = i == 0 ?
+                                             make_binop(n.kind, s2, other) :
+                                             make_binop(n.kind, other, s2);
+                        out.emplace_back(id, make_sum(*ctx_, t1, t2));
+                    }
+                }
+            }
+        return out;
+    }
+
     auto saturate(std::vector<Identity> const& rules, int max_iterations) -> int
     {
         // Compile once: rules' LHS canonicalized for matching, RHS kept raw for
@@ -662,11 +742,14 @@ struct EGraph::Impl final
         {
             ++passes;
 
-            // Read phase: gather rewrites without mutating the graph.
+            // Read phase: gather rewrites without mutating the graph.  Data
+            // rules via ematch, plus the built-in distributivity rule.
             std::vector<std::pair<EClassId, Expr const*>> rewrites;
             for (auto const& [lhs, rhs]: compiled)
                 for (auto& [cls, bnd]: ematch(lhs))
                     rewrites.emplace_back(cls, instantiate(*ctx_, rhs, bnd));
+            for (auto& r: collect_distribution_rewrites())
+                rewrites.push_back(std::move(r));
 
             // Write phase: insert each RHS and merge it into its matched class.
             bool changed = false;

@@ -698,3 +698,155 @@ TEST(Saturate, RespectsIterationCap)
     (void)eg.add(contraction(ctx, q, m, n));
     EXPECT_EQ(eg.saturate({contraction_rule(ctx)}, 1), 1); // hard stop after 1
 }
+
+// ---- built-in distributivity (vibe 000048) ---------------------------------
+
+TEST(Distribute, RightSum)
+{
+    // X·(A+B) ≡ X·A + X·B
+    Context ctx;
+    auto* X = obj(ctx, "X");
+    auto* A = obj(ctx, "A");
+    auto* B = obj(ctx, "B");
+
+    EGraph eg{ctx};
+    auto root = eg.add(make_tensor_product(ctx, X, make_sum(ctx, A, B)));
+    (void)eg.saturate({}); // distribution is built-in, no data rules needed
+
+    auto expected = eg.add(make_sum(
+        ctx, make_tensor_product(ctx, X, A), make_tensor_product(ctx, X, B)));
+    EXPECT_EQ(eg.find(root), eg.find(expected));
+}
+
+TEST(Distribute, LeftSum)
+{
+    // (A+B)·X ≡ A·X + B·X
+    Context ctx;
+    auto* X = obj(ctx, "X");
+    auto* A = obj(ctx, "A");
+    auto* B = obj(ctx, "B");
+
+    EGraph eg{ctx};
+    auto root = eg.add(make_tensor_product(ctx, make_sum(ctx, A, B), X));
+    (void)eg.saturate({});
+
+    auto expected = eg.add(make_sum(
+        ctx, make_tensor_product(ctx, A, X), make_tensor_product(ctx, B, X)));
+    EXPECT_EQ(eg.find(root), eg.find(expected));
+}
+
+TEST(Distribute, OverDifference)
+{
+    // X·(A−B) ≡ X·A − X·B.  Canonical forms carry the sign as a coefficient
+    // (A−B is A + (−1)·B), so the engine distributes the Sum and the −1 rides
+    // along.
+    Context ctx;
+    auto* X = obj(ctx, "X");
+    auto* A = obj(ctx, "A");
+    auto* B = obj(ctx, "B");
+
+    EGraph eg{ctx};
+    auto root = eg.add(make_tensor_product(ctx, X, make_difference(ctx, A, B)));
+    (void)eg.saturate({});
+
+    auto expected = eg.add(make_difference(
+        ctx, make_tensor_product(ctx, X, A), make_tensor_product(ctx, X, B)));
+    EXPECT_EQ(eg.find(root), eg.find(expected));
+}
+
+TEST(Distribute, MultiFactor)
+{
+    // X·Y·(A+B) ≡ X·Y·A + X·Y·B — the binary rule plus iteration handles the
+    // extra factor (the "rest of the product" is just the other binary child).
+    Context ctx;
+    auto* X = obj(ctx, "X");
+    auto* Y = obj(ctx, "Y");
+    auto* A = obj(ctx, "A");
+    auto* B = obj(ctx, "B");
+
+    auto xy = [&](Expr const* t)
+    { return make_tensor_product(ctx, make_tensor_product(ctx, X, Y), t); };
+
+    EGraph eg{ctx};
+    auto root = eg.add(xy(make_sum(ctx, A, B)));
+    (void)eg.saturate({});
+
+    auto expected = eg.add(make_sum(ctx, xy(A), xy(B)));
+    EXPECT_EQ(eg.find(root), eg.find(expected));
+}
+
+TEST(Distribute, DotDistributes)
+{
+    // (A+B)·C ≡ A·C + B·C for the Dot product too.
+    Context ctx;
+    auto* A = obj(ctx, "A");
+    auto* B = obj(ctx, "B");
+    auto* C = obj(ctx, "C");
+
+    EGraph eg{ctx};
+    auto root = eg.add(make_dot(ctx, make_sum(ctx, A, B), C));
+    (void)eg.saturate({});
+
+    auto expected =
+        eg.add(make_sum(ctx, make_dot(ctx, A, C), make_dot(ctx, B, C)));
+    EXPECT_EQ(eg.find(root), eg.find(expected));
+}
+
+TEST(Distribute, AllMultiplicativeOps)
+{
+    // The remaining distributive ops — DDot, DDotAlt, Cross — each distribute:
+    // (A+B) ∘ C ≡ A∘C + B∘C.
+    Context ctx;
+    auto* A = obj(ctx, "A");
+    auto* B = obj(ctx, "B");
+    auto* C = obj(ctx, "C");
+
+    auto check = [&](auto make_op)
+    {
+        EGraph eg{ctx};
+        auto root = eg.add(make_op(make_sum(ctx, A, B), C));
+        (void)eg.saturate({});
+        auto expected = eg.add(make_sum(ctx, make_op(A, C), make_op(B, C)));
+        EXPECT_EQ(eg.find(root), eg.find(expected));
+    };
+
+    check([&](Expr const* l, Expr const* r) { return make_ddot(ctx, l, r); });
+    check([&](Expr const* l, Expr const* r)
+          { return make_ddot_alt(ctx, l, r); });
+    check([&](Expr const* l, Expr const* r) { return make_cross(ctx, l, r); });
+}
+
+TEST(Distribute, UnlocksAMatch)
+{
+    // Distribution exposes a product the rule could not see before: with
+    // A·B → C, the target A·(B+D) distributes to A·B + A·D, then A·B rewrites
+    // to C, giving C + A·D.
+    Context ctx;
+    auto* A = obj(ctx, "A");
+    auto* B = obj(ctx, "B");
+    auto* C = obj(ctx, "C");
+    auto* D = obj(ctx, "D");
+    Identity rule{"ab->c", make_tensor_product(ctx, A, B), C};
+
+    EGraph eg{ctx};
+    auto root = eg.add(make_tensor_product(ctx, A, make_sum(ctx, B, D)));
+    (void)eg.saturate({rule});
+
+    auto expected = eg.add(make_sum(ctx, C, make_tensor_product(ctx, A, D)));
+    EXPECT_EQ(eg.find(root), eg.find(expected));
+}
+
+TEST(Distribute, NoSumFactorIsNoOp)
+{
+    // A plain product has nothing to distribute: saturation settles immediately
+    // and adds no classes.
+    Context ctx;
+    auto* A = obj(ctx, "A");
+    auto* B = obj(ctx, "B");
+
+    EGraph eg{ctx};
+    (void)eg.add(make_tensor_product(ctx, A, B));
+    auto before = eg.class_count();
+    EXPECT_EQ(eg.saturate({}), 1); // one no-op pass
+    EXPECT_EQ(eg.class_count(), before);
+}
