@@ -513,3 +513,41 @@ TEST(RenderParens, SumNestedInSum)
     auto* e = make_sum(ctx, inner, T(ctx, "c", 1));
     EXPECT_EQ(latex(*e), "\\mathbf{a} + \\mathbf{b} + \\mathbf{c}");
 }
+
+TEST(RenderParens, CrossRightNeedsParens)
+{
+    // a × (b × c): the right operand of a non-associative cross is wrapped,
+    // since a × b × c reads as (a × b) × c.
+    Context ctx;
+    auto* bc = make_cross(ctx, T(ctx, "b", 1), T(ctx, "c", 1));
+    auto* e = make_cross(ctx, T(ctx, "a", 1), bc);
+    EXPECT_EQ(
+        latex(*e), "\\mathbf{a} \\times (\\mathbf{b} \\times \\mathbf{c})");
+}
+
+TEST(RenderParens, CrossLeftNoParens)
+{
+    // (a × b) × c renders as a × b × c (left-associative reading).
+    Context ctx;
+    auto* ab = make_cross(ctx, T(ctx, "a", 1), T(ctx, "b", 1));
+    auto* e = make_cross(ctx, ab, T(ctx, "c", 1));
+    EXPECT_EQ(latex(*e), "\\mathbf{a} \\times \\mathbf{b} \\times \\mathbf{c}");
+}
+
+TEST(RenderParens, DotOfCrossNeedsParens)
+{
+    // a · (b × c): the cross on the right is wrapped.
+    Context ctx;
+    auto* bc = make_cross(ctx, T(ctx, "b", 1), T(ctx, "c", 1));
+    auto* e = make_dot(ctx, T(ctx, "a", 1), bc);
+    EXPECT_EQ(latex(*e), "\\mathbf{a} \\cdot (\\mathbf{b} \\times \\mathbf{c})");
+}
+
+TEST(RenderParens, TensorProductRightNoParens)
+{
+    // a ⊗ (b ⊗ c): tensor product is associative — no parens.
+    Context ctx;
+    auto* bc = make_tensor_product(ctx, T(ctx, "b", 1), T(ctx, "c", 1));
+    auto* e = make_tensor_product(ctx, T(ctx, "a", 1), bc);
+    EXPECT_EQ(latex(*e), "\\mathbf{a} \\, \\mathbf{b} \\, \\mathbf{c}");
+}

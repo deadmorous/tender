@@ -1,10 +1,11 @@
 """Deriving the invariant identity  a × I = I × a  for any vector a.
 
 The identity tensor I resolves to the dyad I = Σ_m e_m ⊗ e^m, so a × I is a
-vector crossed with a dyad.  We expand in the World Cartesian System, distribute
-the cross over the identity dyad, turn each basis-vector cross into a Levi-Civita
-term, and canonicalize.  Both a × I and I × a reduce to the *same* coordinate
-expression, proving the identity.  Writes a standalone LaTeX derivation to out/.
+vector crossed with a dyad.  We expand in the World Cartesian System and apply
+`simplify_basis_cross`, which distributes the cross over the dyad and turns each
+basis-vector cross into a Levi-Civita term; `canonicalize` finishes.  Both a × I
+and I × a reduce to the *same* coordinate expression, proving the identity.
+Writes a standalone LaTeX derivation to out/.
 """
 
 import pathlib
@@ -30,10 +31,9 @@ I = tender.identity(ctx=ctx)
 
 
 def reduce(expr):
-    """expand → distribute the cross over the identity dyad → ε → canonicalize."""
+    """expand → simplify_basis_cross (distributes + ε) → canonicalize."""
     expr = tb.expand_in_basis(expr, frame, tb.Variance.Covariant)
-    expr = td.distribute_contraction(expr)  # a × (e_m ⊗ e^m) → (a × e_m) ⊗ e^m
-    expr = tb.simplify_basis_cross(expr, frame)  # e_i × e_m → ε_{imk} e^k
+    expr = tb.simplify_basis_cross(expr, frame)
     return td.canonicalize(expr)
 
 
@@ -43,10 +43,10 @@ imap = IndexNameMap()
 stages = [("a \\times I", a % I)]
 s1 = tb.expand_in_basis(a % I, frame, tb.Variance.Covariant)
 stages.append(("\\text{expand } I = \\textstyle\\sum_m e_m \\otimes e^m", s1))
-s2 = td.distribute_contraction(s1)
-stages.append(("\\text{distribute the cross over the dyad}", s2))
-s3 = td.canonicalize(tb.simplify_basis_cross(s2, frame))
-stages.append(("e_i \\times e_m \\to \\varepsilon\\, e^k,\\ \\text{canonicalize}", s3))
+s2 = td.canonicalize(tb.simplify_basis_cross(s1, frame))
+stages.append(
+    ("\\text{distribute over the dyad},\\ e_i \\times e_m \\to \\varepsilon e^k", s2)
+)
 
 lhs = reduce(a % I)
 rhs = reduce(I % a)

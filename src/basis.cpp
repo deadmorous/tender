@@ -332,6 +332,9 @@ auto as_vec_side(Expr const* e, Basis const& b) -> std::optional<VecSide>
 auto simplify_basis_dot(Context& ctx, Expr const* e, Basis const& basis)
     -> Expr const*
 {
+    // Distribute first, so a dot with a polyad (e.g. against the identity dyad)
+    // becomes dots of single basis vectors that the rule below can reduce.
+    e = steps::distribute_contraction(ctx, e);
     return rewrite_tree(
         ctx,
         e,
@@ -371,6 +374,10 @@ auto simplify_basis_dot(Context& ctx, Expr const* e, Basis const& basis)
 auto simplify_basis_cross(Context& ctx, Expr const* e, Basis const& basis)
     -> Expr const*
 {
+    // Distribute first, so a cross with a polyad (e.g. against the identity
+    // dyad) becomes crosses of single basis vectors that the rule below
+    // reduces.
+    e = steps::distribute_contraction(ctx, e);
     return rewrite_tree(
         ctx,
         e,

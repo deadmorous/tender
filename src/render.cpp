@@ -158,6 +158,16 @@ struct Renderer
         return wrap ? "(" + s + ")" : s;
     }
 
+    // Right child of a non-associative contraction (× · : ··): wrap a
+    // same-or-lower-precedence product child, since a × b × c reads as
+    // (a × b) × c — so a × (b × c) needs explicit parens.  (TensorProduct is
+    // associative and is rendered without these.)
+    auto sub_contraction_right(Expr const& e) -> std::string
+    {
+        auto s = render(e);
+        return prec(e) <= MUL_PREC ? "(" + s + ")" : s;
+    }
+
     // ---- leaves --------------------------------------------------------
 
     auto index_str(
@@ -334,22 +344,24 @@ struct Renderer
                     return "\\frac{" + render(*d.left) + "}{" + render(*d.right)
                            + "}";
                 },
-                [&](Dot const& d) -> std::string {
+                [&](Dot const& d) -> std::string
+                {
                     return sub(*d.left, MUL_PREC) + " \\cdot "
-                           + sub(*d.right, MUL_PREC);
+                           + sub_contraction_right(*d.right);
                 },
                 [&](DDot const& d) -> std::string {
                     return sub(*d.left, MUL_PREC) + " : "
-                           + sub(*d.right, MUL_PREC);
+                           + sub_contraction_right(*d.right);
                 },
                 [&](DDotAlt const& d) -> std::string
                 {
                     return sub(*d.left, MUL_PREC) + " \\cdot\\!\\cdot "
-                           + sub(*d.right, MUL_PREC);
+                           + sub_contraction_right(*d.right);
                 },
-                [&](Cross const& c) -> std::string {
+                [&](Cross const& c) -> std::string
+                {
                     return sub(*c.left, MUL_PREC) + " \\times "
-                           + sub(*c.right, MUL_PREC);
+                           + sub_contraction_right(*c.right);
                 },
                 [&](ExplicitSum const& s) -> std::string
                 { return sum_str(s.index, s.body, "\\sum"); },

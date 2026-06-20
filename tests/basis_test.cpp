@@ -465,26 +465,44 @@ TEST(SimplifyBasisDot, BasisVectorPairBecomesDelta)
 
 TEST(SimplifyBasisDot, PullsCoordinatesOutOfContraction)
 {
-    // The expansion of a·c, simplified: a_i ⊗ (c_j ⊗ δ_{ij}).
+    // a·c simplifies to a_i ⊗ c_j ⊗ δ_{ij} — the scalar coordinates pulled out
+    // of the contraction (factor order is up to canonicalization).
     Context ctx;
     auto b = wcs_basis(ctx);
     auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
     auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
-    auto const* expanded =
-        expand_in_basis(ctx, make_dot(ctx, a, c), b, Variance::Covariant);
+    auto const* res = simplify_basis_dot(
+        ctx,
+        expand_in_basis(ctx, make_dot(ctx, a, c), b, Variance::Covariant),
+        b);
 
-    auto const* res = simplify_basis_dot(ctx, expanded, b);
-    auto const* top = std::get_if<TensorProduct>(&res->node);
-    ASSERT_NE(top, nullptr);
-    EXPECT_EQ(std::get<TensorObject>(top->left->node).name.v.view(), "a");
-    auto const* inner = std::get_if<TensorProduct>(&top->right->node);
-    ASSERT_NE(inner, nullptr);
-    EXPECT_EQ(std::get<TensorObject>(inner->left->node).name.v.view(), "c");
-    auto const& delta = std::get<TensorObject>(inner->right->node);
-    ASSERT_TRUE(delta.traits.has_value());
-    EXPECT_EQ(
-        delta.traits->well_known,
-        std::optional<WellKnownKind>{WellKnownKind::Delta});
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto coord = [&](char const* nm, CountableIndex idx)
+    {
+        return make_tensor_object(
+            ctx,
+            make_tensor_name(nm),
+            {SlotBinding{
+                IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+                IndexAssoc{idx}}},
+            0);
+    };
+    auto const* expected = make_tensor_product(
+        ctx,
+        coord("a", i),
+        make_tensor_product(
+            ctx,
+            coord("c", j),
+            make_delta(
+                ctx,
+                Realm::Orthonormal,
+                space_3d(),
+                Level::Lower,
+                Level::Lower,
+                IndexAssoc{i},
+                IndexAssoc{j})));
+    EXPECT_TRUE(algebraic_eq(ctx, res, expected));
 }
 
 TEST(SimplifyBasisDot, NonBasisDotUnchanged)

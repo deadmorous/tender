@@ -227,8 +227,9 @@ TEST(BasisFeasibility, CrossWithIdentityCommutes)
     auto const* I = make_identity(ctx);
     auto reduce = [&](Expr const* e)
     {
+        // simplify_basis_cross distributes the cross over the identity dyad
+        // internally, so no explicit distribute_contraction is needed.
         e = expand_in_basis(ctx, e, b, Variance::Covariant);
-        e = steps::distribute_contraction(ctx, e);
         e = simplify_basis_cross(ctx, e, b);
         return steps::canonicalize(ctx, e);
     };

@@ -202,8 +202,8 @@ class TestBasisSteps:
         I = tender.identity(ctx=ctx)
 
         def reduce(e):
+            # simplify_basis_cross distributes over the identity dyad itself.
             e = tb.expand_in_basis(e, frame, tb.Variance.Covariant)
-            e = td.distribute_contraction(e)
             e = tb.simplify_basis_cross(e, frame)
             return td.canonicalize(e)
 
