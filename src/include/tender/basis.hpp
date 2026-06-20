@@ -3,7 +3,9 @@
 #include <tender/expr.hpp>
 #include <tender/index.hpp>
 #include <tender/index_space.hpp>
+#include <tender/name.hpp>
 
+#include <string_view>
 #include <vector>
 
 namespace tender
@@ -42,6 +44,14 @@ public:
         return realm_ == Realm::Orthonormal;
     }
 
+    // The symbol used for the generic (symbolic, indexed) basis vector.
+    auto vector_symbol() const noexcept -> TensorName
+    {
+        return symbol_;
+    }
+
+    // ---- concrete members (for unrolling) ------------------------------
+
     // i-th covariant basis vector e_i (0-based), rank 1.
     // Throws std::out_of_range if i is not a valid index.
     auto basis(int i) const -> Expr const*;
@@ -49,18 +59,35 @@ public:
     // Throws std::out_of_range if i is not a valid index.
     auto cobasis(int i) const -> Expr const*;
 
+    // ---- symbolic emission (for expansion) -----------------------------
+    //
+    // The symbolic basis vectors carry the generic symbol and a CountableIndex
+    // over this basis's space/realm, so they Einstein-sum against coordinates.
+    // They unroll to the concrete members above (a later step).
+
+    // Symbolic covariant basis vector e_i (rank 1, lower index).
+    auto covariant_vector(Context& ctx, CountableIndex index) const
+        -> Expr const*;
+    // Symbolic contravariant basis vector e^i (rank 1).  For an orthonormal
+    // basis the index is spelled lower (upper/lower coincide; the
+    // Orthonormal-lower convention of vibe 000047); oblique spells it upper.
+    auto contravariant_vector(Context& ctx, CountableIndex index) const
+        -> Expr const*;
+
 private:
     Basis(
         Realm realm,
         IndexSpace const* space,
+        TensorName symbol,
         std::vector<Expr const*> vectors,
         std::vector<Expr const*> covectors);
 
     friend auto make_orthonormal_basis(
-        IndexSpace const*, std::vector<Expr const*>) -> Basis;
+        IndexSpace const*, std::vector<Expr const*>, std::string_view) -> Basis;
 
     Realm realm_;
     IndexSpace const* space_;
+    TensorName symbol_;
     std::vector<Expr const*> vectors_;   // covariant   e_i
     std::vector<Expr const*> covectors_; // contravariant e^i
 };
@@ -68,10 +95,14 @@ private:
 // Build an orthonormal basis from rank-1 vectors.  The realm is Orthonormal and
 // the cobasis coincides with the basis.
 //
+// vector_symbol is the name of the generic symbolic basis vector (default "e").
+//
 // Preconditions (else std::invalid_argument): space is non-null; at least one
 // vector; vectors.size() == space->values().size(); every vector is non-null
 // and rank 1 (where its rank is known).
 [[nodiscard]] auto make_orthonormal_basis(
-    IndexSpace const* space, std::vector<Expr const*> vectors) -> Basis;
+    IndexSpace const* space,
+    std::vector<Expr const*> vectors,
+    std::string_view vector_symbol = "e") -> Basis;
 
 } // namespace tender

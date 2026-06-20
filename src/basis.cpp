@@ -10,10 +10,12 @@ namespace tender
 Basis::Basis(
     Realm realm,
     IndexSpace const* space,
+    TensorName symbol,
     std::vector<Expr const*> vectors,
     std::vector<Expr const*> covectors) :
   realm_(realm),
   space_(space),
+  symbol_(symbol),
   vectors_(std::move(vectors)),
   covectors_(std::move(covectors))
 {
@@ -27,6 +29,28 @@ auto Basis::basis(int i) const -> Expr const*
 auto Basis::cobasis(int i) const -> Expr const*
 {
     return covectors_.at(static_cast<std::size_t>(i));
+}
+
+auto Basis::covariant_vector(Context& ctx, CountableIndex index) const
+    -> Expr const*
+{
+    return make_tensor_object(
+        ctx,
+        symbol_,
+        {SlotBinding{
+            IndexSlot{Level::Lower, realm_, space_}, IndexAssoc{index}}},
+        1);
+}
+
+auto Basis::contravariant_vector(Context& ctx, CountableIndex index) const
+    -> Expr const*
+{
+    auto const level = is_orthonormal() ? Level::Lower : Level::Upper;
+    return make_tensor_object(
+        ctx,
+        symbol_,
+        {SlotBinding{IndexSlot{level, realm_, space_}, IndexAssoc{index}}},
+        1);
 }
 
 namespace
@@ -46,7 +70,9 @@ auto rank_ok(Expr const* v) -> bool
 } // namespace
 
 auto make_orthonormal_basis(
-    IndexSpace const* space, std::vector<Expr const*> vectors) -> Basis
+    IndexSpace const* space,
+    std::vector<Expr const*> vectors,
+    std::string_view vector_symbol) -> Basis
 {
     if (!space)
         throw std::invalid_argument("make_orthonormal_basis: null space");
@@ -70,7 +96,11 @@ auto make_orthonormal_basis(
     // Orthonormal: the cobasis coincides with the basis.
     auto covectors = vectors;
     return Basis{
-        Realm::Orthonormal, space, std::move(vectors), std::move(covectors)};
+        Realm::Orthonormal,
+        space,
+        make_tensor_name(vector_symbol),
+        std::move(vectors),
+        std::move(covectors)};
 }
 
 } // namespace tender
