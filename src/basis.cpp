@@ -151,7 +151,26 @@ auto expand_in_basis(
         [&](Context& c, Expr const* node) -> Expr const*
         {
             auto const* t = std::get_if<TensorObject>(&node->node);
-            if (!t || !is_expandable_invariant(*t))
+            if (!t)
+                return node;
+
+            // The identity is well-known (its coordinate is δ/g, not generic),
+            // so it gets the resolution of identity I = Σ_i e_i ⊗ e^i directly
+            // — the coordinate δ^i_j of I^i_j = e^i·I·e_j = e^i·e_j contracted
+            // away (vibe 000049).  Intrinsically mixed, so `variances` is not
+            // consulted; the pure-variance metric forms await the oblique
+            // flavor.
+            if (t->slots.empty() && t->traits
+                && t->traits->well_known == WellKnownKind::Identity)
+            {
+                CountableIndex const idx{c.alloc_index_id()};
+                return make_tensor_product(
+                    c,
+                    basis.covariant_vector(c, idx),
+                    basis.contravariant_vector(c, idx));
+            }
+
+            if (!is_expandable_invariant(*t))
                 return node;
 
             int const r = *t->rank;
@@ -359,7 +378,16 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
                 coord = t;
             }
             if (!coord)
+            {
+                // No coordinate factor: the resolution of identity
+                // Σ_i e_i ⊗ e^i (two basis vectors sharing the one summed
+                // index, nothing else) folds back to the identity tensor.
+                auto const s = sorted(summed);
+                if (vec_ids.size() == 2 && s.size() == 1 && vec_ids[0] == s[0]
+                    && vec_ids[1] == s[0])
+                    return make_identity(c);
                 return node;
+            }
             auto const coord_ids = countable_slot_ids(*coord);
             if (!coord_ids)
                 return node;

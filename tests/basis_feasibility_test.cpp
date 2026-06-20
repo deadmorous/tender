@@ -39,9 +39,6 @@ auto reduce_in_wcs(Context& ctx, Basis const& b, Expr const* e) -> Expr const*
 
 // A rank-2 invariant expands to Σ_i Σ_j A_{ij} e_i e_j and folds straight back
 // — the smallest proof that expand and reassemble are inverse beyond rank 1.
-// (The identity tensor's own diagonal expansion I = Σ_i e_i ⊗ e^i is a
-// well-known special case, deferred with the rest of the well-known
-// coordinates.)
 TEST(BasisFeasibility, Rank2RoundTrip)
 {
     Context ctx;
@@ -51,6 +48,19 @@ TEST(BasisFeasibility, Rank2RoundTrip)
     auto const* expanded = steps::canonicalize(
         ctx, expand_in_basis(ctx, A, b, Variance::Covariant));
     EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), A));
+}
+
+// The identity's own resolution I = Σ_i e_i ⊗ e^i, derived from its coordinate
+// I^i_j = e^i·I·e_j = e^i·e_j = δ^i_j, makes the round trip exactly.
+TEST(BasisFeasibility, IdentityRoundTrip)
+{
+    Context ctx;
+    auto b = wcs(ctx);
+    auto const* I = make_identity(ctx);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, I, b, Variance::Covariant));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), I));
 }
 
 // a · b reduces, through the basis, to the scalar coordinate contraction

@@ -267,13 +267,24 @@ TEST(ExpandInBasis, RecursesIntoDotWithDistinctIndices)
     EXPECT_NE(idx_of(acoord.slots[0]), idx_of(ccoord.slots[0]));
 }
 
-TEST(ExpandInBasis, LeavesWellKnownUnchanged)
+TEST(ExpandInBasis, LeavesWellKnownSymbolUnchanged)
 {
-    // The identity's coordinates are δ, not generic — it must be left alone.
+    // A bare δ symbol is well-known with non-generic coordinates and no
+    // resolution rule, so expand leaves it untouched (unlike the identity,
+    // which now resolves to Σ_i e_i ⊗ e^i).
     Context ctx;
     auto b = wcs_basis(ctx);
-    auto const* I = make_identity(ctx);
-    EXPECT_EQ(expand_in_basis(ctx, I, b, Variance::Covariant), I);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* d = make_delta(
+        ctx,
+        Realm::Orthonormal,
+        space_3d(),
+        Level::Lower,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    EXPECT_EQ(expand_in_basis(ctx, d, b, Variance::Covariant), d);
 }
 
 TEST(ExpandInBasis, LeavesIndexedCoordinateUnchanged)
@@ -362,6 +373,23 @@ TEST(ExpandInBasis, EmptyVarianceThrows)
     EXPECT_THROW(
         (void)expand_in_basis(ctx, a, b, std::vector<Variance>{}),
         std::invalid_argument);
+}
+
+TEST(ExpandInBasis, IdentityResolvesToBasisVectorSum)
+{
+    // I expands to the resolution of identity Σ_i e_i ⊗ e^i — orthonormal: a
+    // product of two e-vectors sharing one (implicitly summed) index.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* ex =
+        expand_in_basis(ctx, make_identity(ctx), b, Variance::Covariant);
+    auto const* tp = std::get_if<TensorProduct>(&ex->node);
+    ASSERT_NE(tp, nullptr);
+    auto const& l = std::get<TensorObject>(tp->left->node);
+    auto const& r = std::get<TensorObject>(tp->right->node);
+    EXPECT_EQ(l.name.v.view(), "e");
+    EXPECT_EQ(r.name.v.view(), "e");
+    EXPECT_EQ(idx_of(l.slots[0]), idx_of(r.slots[0]));
 }
 
 // ---- simplify_basis_dot ------------------------------------------------
@@ -520,4 +548,15 @@ TEST(Reassemble, ForeignBasisUnchanged)
     auto const* expanded = steps::canonicalize(
         ctx, expand_in_basis(ctx, a, e_basis, Variance::Covariant));
     EXPECT_EQ(reassemble(ctx, expanded, g_basis), expanded);
+}
+
+TEST(Reassemble, IdentityRoundTrip)
+{
+    // I  →  Σ_i e_i ⊗ e^i  →  I.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* I = make_identity(ctx);
+    auto const* ex = steps::canonicalize(
+        ctx, expand_in_basis(ctx, I, b, Variance::Covariant));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, ex, b), I));
 }

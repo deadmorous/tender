@@ -104,6 +104,16 @@ class TestBasisSteps:
         )
         assert td.structural_eq(tb.reassemble(expanded, b), A)
 
+    def test_identity_round_trip(self):
+        # I -> Σ_i e_i ⊗ e^i -> I.
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        I = tender.identity(ctx=ctx)
+        expanded = td.canonicalize(
+            tb.expand_in_basis(I, b, tb.Variance.Covariant)
+        )
+        assert td.structural_eq(tb.reassemble(expanded, b), I)
+
     def test_reassemble_no_op_on_foreign(self):
         ctx = tender.Context()
         b = tb.wcs(ctx)
