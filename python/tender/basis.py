@@ -34,6 +34,7 @@ from tender._core import basis as _b
 Basis = _b.Basis
 Variance = _b.Variance
 make_orthonormal_basis = _b.make_orthonormal_basis
+make_oblique_basis = _b.make_oblique_basis
 wcs = _b.wcs
 cylindrical = _b.cylindrical
 spherical = _b.spherical
@@ -46,6 +47,7 @@ __all__ = [
     "Basis",
     "Variance",
     "make_orthonormal_basis",
+    "make_oblique_basis",
     "wcs",
     "cylindrical",
     "spherical",

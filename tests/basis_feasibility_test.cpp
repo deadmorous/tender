@@ -63,6 +63,44 @@ TEST(BasisFeasibility, IdentityRoundTrip)
     EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), I));
 }
 
+// In an OBLIQUE basis the same I = Σ_i e_i ⊗ e^i round trip holds (covariant
+// and contravariant vectors are now distinct), and the identity's all-covariant
+// coordinate is the metric: I_ij = e_i·I·e_j = e_i·e_j = g_ij.
+TEST(BasisFeasibility, ObliqueIdentityRoundTripAndMetric)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* bb = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* cc = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    auto basis = make_oblique_basis(ctx, space_3d(), {a, bb, cc});
+    auto const* I = make_identity(ctx);
+
+    // Round trip.
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, I, basis, Variance::Covariant));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, basis), I));
+
+    // The all-covariant coordinate I_ij = e_i·I·e_j reduces to the metric g_ij.
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* coord = make_dot(
+        ctx,
+        make_dot(ctx, basis.covariant_vector(ctx, i), I),
+        basis.covariant_vector(ctx, j));
+    auto const* reduced =
+        simplify_basis_dot(ctx, steps::contract_identity(ctx, coord), basis);
+
+    auto const* expected = make_metric(
+        ctx,
+        Realm::Oblique,
+        space_3d(),
+        Level::Lower,
+        Level::Lower,
+        IndexAssoc{j},
+        IndexAssoc{i});
+    EXPECT_TRUE(algebraic_eq(ctx, reduced, expected));
+}
+
 // a · b reduces, through the basis, to the scalar coordinate contraction
 // Σ_i a_i b_i.
 TEST(BasisFeasibility, DotReducesToCoordinateContraction)

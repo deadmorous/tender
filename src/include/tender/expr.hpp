@@ -27,6 +27,7 @@ enum class WellKnownKind : uint8_t
     Identity,   // identity tensor I
     Delta,      // Kronecker delta δ
     LeviCivita, // Levi-Civita symbol ε
+    Metric,     // metric tensor g (g_ij = e_i·e_j)
 };
 
 // Renderer display flags.  Use mpk::mix::EnumFlags<RenderHint> to build sets.
@@ -283,5 +284,17 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
     IndexSpace const*,
     std::vector<Level>,
     std::vector<IndexAssoc>) -> Expr const*;
+
+// Metric tensor g: two independently chosen levels, one realm, one space.
+// g_ij = e_i·e_j (both lower), g^ij = e^i·e^j (both upper).  Symmetric in its
+// two slots.  Renders as "g".
+[[nodiscard]] auto make_metric(
+    Context&,
+    Realm,
+    IndexSpace const*,
+    Level level0,
+    Level level1,
+    IndexAssoc index0,
+    IndexAssoc index1) -> Expr const*;
 
 } // namespace tender

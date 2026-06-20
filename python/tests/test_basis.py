@@ -114,6 +114,28 @@ class TestBasisSteps:
         )
         assert td.structural_eq(tb.reassemble(expanded, b), I)
 
+    def test_oblique_identity_round_trip_and_metric(self):
+        ctx = tender.Context()
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        b = tender.tensor("b", rank=1, ctx=ctx)
+        c = tender.tensor("c", rank=1, ctx=ctx)
+        basis = tb.make_oblique_basis([a, b, c], tender.space_3d)
+        assert basis.realm == tender.Realm.Oblique
+        assert not basis.is_orthonormal
+
+        I = tender.identity(ctx=ctx)
+        expanded = td.canonicalize(
+            tb.expand_in_basis(I, basis, tb.Variance.Covariant)
+        )
+        assert td.structural_eq(tb.reassemble(expanded, basis), I)
+
+        # I_ij = e_i·I·e_j reduces to the metric g_ij.
+        i = ctx.alloc_index()
+        j = ctx.alloc_index()
+        coord = (basis.covariant_vector(i) @ I) @ basis.covariant_vector(j)
+        reduced = tb.simplify_basis_dot(td.contract_identity(coord), basis)
+        assert "g" in reduced.latex()
+
     def test_reassemble_no_op_on_foreign(self):
         ctx = tender.Context()
         b = tb.wcs(ctx)

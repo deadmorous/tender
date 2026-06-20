@@ -132,6 +132,31 @@ auto make_delta(
             SlotBinding{IndexSlot{level1, realm, space}, std::move(index1)}}});
 }
 
+auto make_metric(
+    Context& ctx,
+    Realm realm,
+    IndexSpace const* space,
+    Level level0,
+    Level level1,
+    IndexAssoc index0,
+    IndexAssoc index1) -> Expr const*
+{
+    // g is symmetric (g_ij = g_ji, g^ij = g^ji), so the slot swap is a
+    // value-preserving generator, like δ (vibe 000047).
+    return ctx.make<Expr>(TensorObject{
+        .name = make_tensor_name("g"),
+        .rank = 0,
+        .traits =
+            TensorTraits{
+                .well_known = WellKnownKind::Metric,
+                .symmetry =
+                    SymmetrySpec{PermutationSpec{false, Permutation<2>{{1, 0}}}},
+                .render_hints = RenderHint::OmitVoidIndexPlaceholders},
+        .slots = {
+            SlotBinding{IndexSlot{level0, realm, space}, std::move(index0)},
+            SlotBinding{IndexSlot{level1, realm, space}, std::move(index1)}}});
+}
+
 auto make_levi_civita(
     Context& ctx,
     Realm realm,

@@ -376,6 +376,34 @@ TEST(MakeLeviCivita, IndicesMismatchThrows)
         std::invalid_argument);
 }
 
+// ---- make_metric -------------------------------------------------------
+
+TEST(MakeMetric, NameKindAndSymmetry)
+{
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* g = make_metric(
+        ctx,
+        Realm::Oblique,
+        space_3d(),
+        Level::Lower,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto const& t = std::get<TensorObject>(g->node);
+    EXPECT_EQ(t.name.v.view(), "g");
+    ASSERT_TRUE(t.traits.has_value());
+    EXPECT_EQ(
+        t.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Metric});
+    // Symmetric: one value-preserving slot-swap generator, like δ.
+    EXPECT_EQ(t.traits->symmetry.generators.size(), 1u);
+    ASSERT_EQ(t.slots.size(), 2u);
+    EXPECT_EQ(t.slots[0].slot.level, Level::Lower);
+    EXPECT_EQ(t.slots[1].slot.level, Level::Lower);
+}
+
 // ---- tender::visit -----------------------------------------------------
 
 TEST(Visit, DispatchesCorrectAlternative)

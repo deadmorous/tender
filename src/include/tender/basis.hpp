@@ -19,9 +19,11 @@ namespace tender
 // tender does not model the space a vector lives in, so no dimension check is
 // made beyond cardinality == #vectors (vibe 000049 §1).
 //
-// This first slice supports the orthonormal flavor only: the cobasis e^i
-// coincides with the basis e_i.  The covariant / contravariant (oblique)
-// flavors, whose duals are derived through the metric, arrive with the metric.
+// Orthonormal bases have the cobasis e^i coincide with the basis e_i.  An
+// oblique basis (covariant/contravariant distinction) derives its contravariant
+// cobasis from the covariant vectors via the reciprocal (cross-product) formula
+// and distinguishes index level; dotting two same-variance basis vectors yields
+// the metric g (vibe 000049).
 class Basis final
 {
 public:
@@ -83,6 +85,11 @@ private:
 
     friend auto make_orthonormal_basis(
         IndexSpace const*, std::vector<Expr const*>, TensorName) -> Basis;
+    friend auto make_oblique_basis(
+        Context&,
+        IndexSpace const*,
+        std::vector<Expr const*>,
+        TensorName) -> Basis;
 
     Realm realm_;
     IndexSpace const* space_;
@@ -100,6 +107,18 @@ private:
 // vector; vectors.size() == space->values().size(); every vector is non-null
 // and rank 1 (where its rank is known).
 [[nodiscard]] auto make_orthonormal_basis(
+    IndexSpace const* space,
+    std::vector<Expr const*> vectors,
+    TensorName vector_symbol = make_tensor_name("e")) -> Basis;
+
+// Build an oblique basis from its covariant vectors.  The realm is Oblique and
+// the contravariant cobasis e^i is derived via the reciprocal (cross-product)
+// formula e^0 = (e_1×e_2)/V, e^1 = (e_2×e_0)/V, e^2 = (e_0×e_1)/V with
+// V = e_0·(e_1×e_2).  Only 3D bases are supported (the formula is 3D);
+// other cardinalities throw std::invalid_argument, as do the same preconditions
+// as make_orthonormal_basis.
+[[nodiscard]] auto make_oblique_basis(
+    Context& ctx,
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
     TensorName vector_symbol = make_tensor_name("e")) -> Basis;

@@ -26,6 +26,13 @@ auto wcs_basis(Context& ctx) -> Basis
         space_3d(), {vec(ctx, "i"), vec(ctx, "j"), vec(ctx, "k")});
 }
 
+// A 3D oblique basis with covariant vectors a, b, c.
+auto oblique_basis(Context& ctx) -> Basis
+{
+    return make_oblique_basis(
+        ctx, space_3d(), {vec(ctx, "a"), vec(ctx, "b"), vec(ctx, "c")});
+}
+
 auto idx_of(SlotBinding const& sb) -> int
 {
     return std::get<CountableIndex>(*sb.index).id;
@@ -180,6 +187,43 @@ TEST(Basis, CustomVectorSymbol)
     EXPECT_EQ(
         std::get<TensorObject>(b.covariant_vector(ctx, m)->node).name.v.view(),
         "g");
+}
+
+TEST(Basis, ObliqueRealmAndEmission)
+{
+    Context ctx;
+    auto b = oblique_basis(ctx);
+    EXPECT_EQ(b.realm(), Realm::Oblique);
+    EXPECT_FALSE(b.is_orthonormal());
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    // Covariant lower, contravariant upper — distinct for an oblique basis.
+    EXPECT_EQ(
+        std::get<TensorObject>(b.covariant_vector(ctx, m)->node)
+            .slots[0]
+            .slot.level,
+        Level::Lower);
+    EXPECT_EQ(
+        std::get<TensorObject>(b.contravariant_vector(ctx, m)->node)
+            .slots[0]
+            .slot.level,
+        Level::Upper);
+}
+
+TEST(Basis, ObliqueCobasisIsReciprocal)
+{
+    // cobasis(0) = (e_1 × e_2) / V — a scalar division of a cross product.
+    Context ctx;
+    auto b = oblique_basis(ctx);
+    EXPECT_TRUE(std::holds_alternative<ScalarDiv>(b.cobasis(0)->node));
+}
+
+TEST(Basis, ObliqueRequires3D)
+{
+    Context ctx;
+    EXPECT_THROW(
+        (void)
+            make_oblique_basis(ctx, space_2d(), {vec(ctx, "u"), vec(ctx, "v")}),
+        std::invalid_argument);
 }
 
 // ---- expand_in_basis ---------------------------------------------------
@@ -449,6 +493,77 @@ TEST(SimplifyBasisDot, NonBasisDotUnchanged)
     auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
     auto const* dot = make_dot(ctx, a, c);
     EXPECT_EQ(simplify_basis_dot(ctx, dot, b), dot);
+}
+
+TEST(SimplifyBasisDot, ObliqueSameLevelGivesMetric)
+{
+    // e_i · e_j (both covariant) → g_{ij} for an oblique basis.
+    Context ctx;
+    auto b = oblique_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* dot =
+        make_dot(ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j));
+    auto const& g =
+        std::get<TensorObject>(simplify_basis_dot(ctx, dot, b)->node);
+    ASSERT_TRUE(g.traits.has_value());
+    EXPECT_EQ(
+        g.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Metric});
+    EXPECT_EQ(g.slots[0].slot.level, Level::Lower);
+    EXPECT_EQ(g.slots[1].slot.level, Level::Lower);
+}
+
+TEST(SimplifyBasisDot, ObliqueUpperUpperGivesInverseMetric)
+{
+    // e^i · e^j → g^{ij}.
+    Context ctx;
+    auto b = oblique_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* dot = make_dot(
+        ctx, b.contravariant_vector(ctx, i), b.contravariant_vector(ctx, j));
+    auto const& g =
+        std::get<TensorObject>(simplify_basis_dot(ctx, dot, b)->node);
+    EXPECT_EQ(
+        g.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Metric});
+    EXPECT_EQ(g.slots[0].slot.level, Level::Upper);
+    EXPECT_EQ(g.slots[1].slot.level, Level::Upper);
+}
+
+TEST(SimplifyBasisDot, ObliqueMixedLevelGivesDelta)
+{
+    // e_i · e^j → δ_i^j (Kronecker) even for an oblique basis.
+    Context ctx;
+    auto b = oblique_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* dot = make_dot(
+        ctx, b.covariant_vector(ctx, i), b.contravariant_vector(ctx, j));
+    auto const& d =
+        std::get<TensorObject>(simplify_basis_dot(ctx, dot, b)->node);
+    EXPECT_EQ(
+        d.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Delta});
+    EXPECT_EQ(d.slots[0].slot.level, Level::Lower);
+    EXPECT_EQ(d.slots[1].slot.level, Level::Upper);
+}
+
+TEST(SimplifyBasisDot, OrthonormalSameLevelStaysDelta)
+{
+    // Orthonormal: two lower vectors still give δ (its metric is the identity).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* dot =
+        make_dot(ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j));
+    auto const& d =
+        std::get<TensorObject>(simplify_basis_dot(ctx, dot, b)->node);
+    EXPECT_EQ(
+        d.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Delta});
 }
 
 TEST(SimplifyBasisDot, DifferentVectorSymbolUnchanged)

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -73,6 +74,30 @@ auto rank_ok(Expr const* v) -> bool
     return *t->rank == 1;
 }
 
+// Shared precondition checks for the basis factories.  `who` names the caller
+// for the error message.
+void validate_basis_vectors(
+    char const* who,
+    IndexSpace const* space,
+    std::vector<Expr const*> const& vectors)
+{
+    auto fail = [who](char const* msg)
+    { throw std::invalid_argument(std::string{who} + ": " + msg); };
+    if (!space)
+        fail("null space");
+    if (vectors.empty())
+        fail("at least one vector is required");
+    if (vectors.size() != space->values().size())
+        fail("number of vectors must equal the index space cardinality");
+    for (auto const* v: vectors)
+    {
+        if (!v)
+            fail("null basis vector");
+        if (!rank_ok(v))
+            fail("basis vectors must be rank 1");
+    }
+}
+
 } // namespace
 
 auto make_orthonormal_basis(
@@ -80,29 +105,43 @@ auto make_orthonormal_basis(
     std::vector<Expr const*> vectors,
     TensorName vector_symbol) -> Basis
 {
-    if (!space)
-        throw std::invalid_argument("make_orthonormal_basis: null space");
-    if (vectors.empty())
-        throw std::invalid_argument(
-            "make_orthonormal_basis: at least one vector is required");
-    if (vectors.size() != space->values().size())
-        throw std::invalid_argument(
-            "make_orthonormal_basis: number of vectors must equal the index "
-            "space cardinality");
-    for (auto const* v: vectors)
-    {
-        if (!v)
-            throw std::invalid_argument(
-                "make_orthonormal_basis: null basis vector");
-        if (!rank_ok(v))
-            throw std::invalid_argument(
-                "make_orthonormal_basis: basis vectors must be rank 1");
-    }
+    validate_basis_vectors("make_orthonormal_basis", space, vectors);
 
     // Orthonormal: the cobasis coincides with the basis.
     auto covectors = vectors;
     return Basis{
         Realm::Orthonormal,
+        space,
+        vector_symbol,
+        std::move(vectors),
+        std::move(covectors)};
+}
+
+auto make_oblique_basis(
+    Context& ctx,
+    IndexSpace const* space,
+    std::vector<Expr const*> vectors,
+    TensorName vector_symbol) -> Basis
+{
+    validate_basis_vectors("make_oblique_basis", space, vectors);
+    if (vectors.size() != 3)
+        throw std::invalid_argument(
+            "make_oblique_basis: only 3D oblique bases are supported (cobasis "
+            "derived via the cross-product formula)");
+
+    // Reciprocal basis: e^0 = (e_1×e_2)/V, e^1 = (e_2×e_0)/V, e^2 = (e_0×e_1)/V
+    // with the cell volume V = e_0·(e_1×e_2).
+    Expr const* const vol =
+        make_dot(ctx, vectors[0], make_cross(ctx, vectors[1], vectors[2]));
+    auto cob = [&](Expr const* a, Expr const* b) -> Expr const*
+    { return make_scalar_div(ctx, make_cross(ctx, a, b), vol); };
+    std::vector<Expr const*> covectors{
+        cob(vectors[1], vectors[2]),
+        cob(vectors[2], vectors[0]),
+        cob(vectors[0], vectors[1])};
+
+    return Basis{
+        Realm::Oblique,
         space,
         vector_symbol,
         std::move(vectors),
@@ -282,7 +321,14 @@ auto simplify_basis_dot(Context& ctx, Expr const* e, Basis const& basis)
             if (!l || !r)
                 return node;
 
-            Expr const* result = make_delta(
+            // e_i·e^j (mixed level) is the Kronecker δ; two same-variance basis
+            // vectors give the metric — but for an orthonormal basis the metric
+            // is δ, so only an oblique same-level pair yields g (vibe 000049).
+            auto const make_dot_tensor =
+                (!basis.is_orthonormal() && l->level == r->level) ?
+                    &make_metric :
+                    &make_delta;
+            Expr const* result = make_dot_tensor(
                 c,
                 basis.realm(),
                 basis.space(),

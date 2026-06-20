@@ -765,6 +765,32 @@ NB_MODULE(_core, m)
         "symbol"_a = "e",
         "Build an orthonormal basis from rank-1 vectors (cobasis = basis).");
 
+    mb.def(
+        "make_oblique_basis",
+        [](std::vector<PyExpr> const& vectors,
+           IndexSpace const* space,
+           std::string const& symbol) -> PyBasis
+        {
+            Context* ctx =
+                vectors.empty() ? &g_default_ctx : vectors.front().ctx;
+            nb::object keep =
+                vectors.empty() ? nb::none() : vectors.front().ctx_keep;
+            std::vector<Expr const*> vs;
+            vs.reserve(vectors.size());
+            for (auto const& v: vectors)
+                vs.push_back(v.expr);
+            return PyBasis{
+                keep,
+                ctx,
+                make_oblique_basis(
+                    *ctx, space, std::move(vs), make_tensor_name(symbol))};
+        },
+        "vectors"_a,
+        "space"_a,
+        "symbol"_a = "e",
+        "Build a 3D oblique basis from its covariant vectors; the contravariant "
+        "cobasis is derived via the reciprocal (cross-product) formula.");
+
     auto bind_cs =
         [&mb](char const* name, Basis (*fn)(Context&), char const* doc)
     {
