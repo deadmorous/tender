@@ -260,7 +260,7 @@ path rather than a symbolic δ-substitution, which remains the parametric-RHS
 gap (vibes 000033/000040). ~30 C++ tests across `basis_test`,
 `coord_system_test`, `basis_feasibility_test`; full suite 443 green.
 
-Still deferred: oblique flavor + metric/√g + ε-tensor-vs-symbol; symbolic
+Still deferred: √g (volume weight) + the ε-tensor-vs-symbol split; symbolic
 δ-substitution; Stage 5 (position-dependent frames, Christoffel, covariant
 derivative).
 
@@ -288,4 +288,18 @@ derivative).
   the genuine `I → Σ_i e_i ⊗ e^i → I` round trip on orthonormal bases — done
   *without* a hardcoded δ coordinate, which would have needed the symbolic
   δ-substitution we still lack. Supporting pieces: a general `contract_identity`
-  step (`I·x → x`, `x·I → x`) and an `Expr.rank` accessor in Python.
+  step (`I·x → x`, `x·I → x`) and an `Expr.rank` accessor in Python (later
+  upgraded to infer rank through the operators via `infer_rank`).
+- **Oblique flavor + metric.** `make_oblique_basis(ctx, space, covariant_vectors)`
+  — realm Oblique, covariant vectors lower / contravariant upper (now distinct),
+  the contravariant cobasis derived via the reciprocal cross-product formula
+  `e^0 = (e_1×e_2)/V`, … with `V = e_0·(e_1×e_2)` (3D only). A new
+  `WellKnownKind::Metric` + `make_metric` (named `g`, symmetric like δ);
+  `simplify_basis_dot` is metric-aware — an oblique same-level pair gives the
+  metric (`e_i·e_j → g_ij`, `e^i·e^j → g^ij`), a mixed pair stays Kronecker
+  (`e_i·e^j → δ_i^j`), orthonormal stays δ. So the `I = Σ_i e_i ⊗ e^i` round trip
+  holds in an oblique basis too, and the identity's all-covariant coordinate
+  *computes* the metric: `I_ij = e_i·I·e_j → contract_identity → e_i·e_j →
+  simplify_basis_dot → g_ij`. This is the contraction-with-basis definition of a
+  coordinate (vibe §3) made real for a non-trivial metric. `make_oblique_basis`
+  is exposed to Python. (Still deferred: √g and the ε-tensor-vs-symbol split.)
