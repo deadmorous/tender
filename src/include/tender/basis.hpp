@@ -131,4 +131,15 @@ enum class Variance
     Basis const& basis,
     Variance variance) -> Expr const*;
 
+// Replace each dot product of two basis vectors of `basis` with the
+// corresponding Kronecker delta: (s e_i) · (t e_j) → s ⊗ t ⊗ δ_{ij}, pulling
+// any component-valued (rank-0 coordinate) factors out of the contraction
+// (vibe 000049 §3).  This is the bridge from the invariant dot to the index
+// algebra — the resulting δ then feeds the existing contraction machinery.
+//
+// A dot whose sides are not (optionally coordinate-scaled) basis vectors of
+// `basis` is left unchanged.  Walks the whole tree.
+[[nodiscard]] auto simplify_basis_dot(
+    Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
+
 } // namespace tender

@@ -291,3 +291,78 @@ TEST(ExpandInBasis, LeavesIndexedCoordinateUnchanged)
         0);
     EXPECT_EQ(expand_in_basis(ctx, a_i, b, Variance::Covariant), a_i);
 }
+
+// ---- simplify_basis_dot ------------------------------------------------
+
+TEST(SimplifyBasisDot, BasisVectorPairBecomesDelta)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* dot =
+        make_dot(ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j));
+
+    auto const* res = simplify_basis_dot(ctx, dot, b);
+    auto const& d = std::get<TensorObject>(res->node);
+    ASSERT_TRUE(d.traits.has_value());
+    EXPECT_EQ(
+        d.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Delta});
+    ASSERT_EQ(d.slots.size(), 2u);
+    EXPECT_EQ(d.slots[0].slot.level, Level::Lower);
+    EXPECT_EQ(d.slots[1].slot.level, Level::Lower);
+    EXPECT_EQ(idx_of(d.slots[0]), i.id);
+    EXPECT_EQ(idx_of(d.slots[1]), j.id);
+}
+
+TEST(SimplifyBasisDot, PullsCoordinatesOutOfContraction)
+{
+    // The expansion of a·c, simplified: a_i ⊗ (c_j ⊗ δ_{ij}).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    auto const* expanded =
+        expand_in_basis(ctx, make_dot(ctx, a, c), b, Variance::Covariant);
+
+    auto const* res = simplify_basis_dot(ctx, expanded, b);
+    auto const* top = std::get_if<TensorProduct>(&res->node);
+    ASSERT_NE(top, nullptr);
+    EXPECT_EQ(std::get<TensorObject>(top->left->node).name.v.view(), "a");
+    auto const* inner = std::get_if<TensorProduct>(&top->right->node);
+    ASSERT_NE(inner, nullptr);
+    EXPECT_EQ(std::get<TensorObject>(inner->left->node).name.v.view(), "c");
+    auto const& delta = std::get<TensorObject>(inner->right->node);
+    ASSERT_TRUE(delta.traits.has_value());
+    EXPECT_EQ(
+        delta.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::Delta});
+}
+
+TEST(SimplifyBasisDot, NonBasisDotUnchanged)
+{
+    // Invariant vectors that are not this basis's vectors: left alone.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    auto const* dot = make_dot(ctx, a, c);
+    EXPECT_EQ(simplify_basis_dot(ctx, dot, b), dot);
+}
+
+TEST(SimplifyBasisDot, DifferentVectorSymbolUnchanged)
+{
+    // e-symbol vectors are not recognized by a basis whose symbol is g.
+    Context ctx;
+    auto e_basis = wcs_basis(ctx); // symbol "e"
+    auto g_basis = make_orthonormal_basis(
+        space_3d(), {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")}, "g");
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* dot = make_dot(
+        ctx,
+        e_basis.covariant_vector(ctx, i),
+        e_basis.covariant_vector(ctx, j));
+    EXPECT_EQ(simplify_basis_dot(ctx, dot, g_basis), dot);
+}
