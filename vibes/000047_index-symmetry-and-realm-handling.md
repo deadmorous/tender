@@ -168,6 +168,21 @@ All three steps landed together.
 396 C++ / 98 Python pass; `identities.cpp`/`expr.cpp`/`derivation.cpp` coverage
 maintained.
 
+### Refinement: rank-2 ε and no silent gaps
+
+A review of `make_levi_civita` surfaced two points. (1) The rank-3 *cyclic
+shift* needs **no** separate `symmetry` generator: it is an even permutation
+already in the closure of the two antisymmetry transpositions (sign +1), and
+`canon_symmetry` walks that closure — declaring it would only re-derive orbit
+nodes it already reaches. (2) The original `if (n == 3)` left antisymmetry
+**silently empty** for every other rank, which is a latent bug for the
+practically-important rank 2 (a rank-2 ε *is* antisymmetric). Replaced with a
+`switch`: rank 2 carries its single transposition `(0 1)`, rank 3 unchanged, any
+other rank **throws** rather than building a symmetry-less ε. The resolution now
+runs before slot construction (fail fast). Tests: `MakeLeviCivita.Rank2` asserts
+one antisymmetry generator and empty symmetry; `MakeLeviCivita.UnsupportedRankThrows`
+covers rank 4. 407 C++ / 98 Python pass.
+
 ### Orthonormal level convention
 
 In the Orthonormal realm upper and lower are interchangeable, so the library

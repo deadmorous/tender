@@ -314,6 +314,32 @@ TEST(MakeLeviCivita, Rank2)
     auto const& t = std::get<TensorObject>(e->node);
     EXPECT_EQ(t.slots.size(), 2u);
     EXPECT_EQ(t.rank, std::optional<int>{0});
+    // Rank-2 ε is antisymmetric: it must carry the single transposition
+    // generator, not be left silently symmetry-less.
+    ASSERT_TRUE(t.traits.has_value());
+    EXPECT_TRUE(t.traits->symmetry.generators.empty());
+    EXPECT_EQ(t.traits->antisymmetry.generators.size(), 1u);
+}
+
+TEST(MakeLeviCivita, UnsupportedRankThrows)
+{
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto l = CountableIndex{ctx.alloc_index_id()};
+    // Rank 4 has no realised antisymmetry generators: reject rather than build
+    // an ε with a silently-empty (hence wrong) symmetry.
+    EXPECT_THROW(
+        {
+            (void)make_levi_civita(
+                ctx,
+                Realm::Oblique,
+                space_4d(),
+                {Level::Lower, Level::Lower, Level::Lower, Level::Lower},
+                {i, j, k, l});
+        },
+        std::invalid_argument);
 }
 
 TEST(MakeLeviCivita, LevelsMismatchThrows)

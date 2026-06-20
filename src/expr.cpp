@@ -147,22 +147,35 @@ auto make_levi_civita(
         throw std::invalid_argument(
             "make_levi_civita: indices.size() must equal space dimension");
 
+    // ε is totally antisymmetric: the adjacent transpositions are sign-flipping
+    // generators of the full S_n permutation symmetry (vibe 000047).  The
+    // generated even permutations (sign +1) — e.g. the rank-3 cyclic shift —
+    // fall out of the closure, so no separate symmetry generators are needed.
+    // Only ranks 2 and 3 (the practically relevant dimensions) are realised;
+    // any other rank is rejected rather than left with a silently-empty
+    // antisymmetry, which would be a latent bug.
+    TensorTraits traits{.well_known = WellKnownKind::LeviCivita};
+    switch (n)
+    {
+        case 2:
+            traits.antisymmetry = AntisymmetrySpec{
+                PermutationSpec{false, Permutation<2>{{1, 0}}}};
+            break;
+        case 3:
+            traits.antisymmetry = AntisymmetrySpec{PermutationSpec{
+                false, Permutation<3>{{1, 0, 2}}, Permutation<3>{{0, 2, 1}}}};
+            break;
+        default:
+            throw std::invalid_argument(
+                "make_levi_civita: only ranks 2 and 3 are supported (antisymmetry "
+                "generators are undefined for other ranks)");
+    }
+
     std::vector<SlotBinding> slots;
     slots.reserve(n);
     for (std::size_t k = 0; k < n; ++k)
         slots.push_back(SlotBinding{
             IndexSlot{levels[k], realm, space}, std::move(indices[k])});
-
-    // ε is totally antisymmetric: the adjacent transpositions are sign-flipping
-    // generators of the full S_n permutation symmetry (vibe 000047).  The
-    // generated even permutations (sign +1) fall out of the closure, so no
-    // separate symmetry generators are needed.  Only n == 3 (the dimension the
-    // identity library exercises) declares them today; other ranks carry no
-    // symmetry until a use arises.
-    TensorTraits traits{.well_known = WellKnownKind::LeviCivita};
-    if (n == 3)
-        traits.antisymmetry = AntisymmetrySpec{PermutationSpec{
-            false, Permutation<3>{{1, 0, 2}}, Permutation<3>{{0, 2, 1}}}};
 
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("\\varepsilon"),
