@@ -308,7 +308,12 @@ derivative).
   the k index Einstein-summed. Orthonormal gives `e_i × e_j = ε_{ijk} e_k`
   (`√g = 1`, `e^k = e_k`); oblique carries the cell volume `√g = e_0·(e_1×e_2)`,
   now exposed as `Basis::volume()` (the `√g` prerequisite — it is the ε-tensor's
-  weight relative to the symbol, `ε_ijk = √g·[ijk]`). Contravariant/mixed/non-3D
+  weight relative to the symbol, `ε_ijk = √g·[ijk]`). An orthonormal basis
+  carries an explicit **signed** `√g = ±1` set by a `Handedness` parameter on
+  `make_orthonormal_basis` (default right-handed `+1`; left-handed `-1`, so
+  `e_i × e_j = -ε_ijk e_k`) — `volume()` always returns a real scalar, never
+  null; `make_orthonormal_basis` now takes a `Context` (to build the ±1 scalar,
+  consistent with `make_oblique_basis`). Contravariant/mixed/non-3D
   inputs are left unchanged. Exposed to Python. Worked example (feasibility):
   `(e_i × e_j)·e_k = ε_ijk` for an orthonormal right-handed basis — `cross → ε e^l`,
   `dot → ε δ`, closed by the ε-δ substitution `Σ_l ε_{abl} δ_{lc} = ε_{abc}`
