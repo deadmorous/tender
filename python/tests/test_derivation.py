@@ -598,3 +598,22 @@ def test_saturate_no_match_returns_canonical():
     target = tender.delta(tender.Realm.Oblique, sp, L, L, m, n, ctx=ctx)
     result = td.saturate(target, [rule])
     assert td.algebraic_eq(result, target)
+
+
+# ---- contract_identity -----------------------------------------------------
+
+
+def test_contract_identity_left():
+    a = tender.tensor("a", rank=1)
+    assert td.structural_eq(td.contract_identity(tender.identity() @ a), a)
+
+
+def test_contract_identity_right():
+    a = tender.tensor("a", rank=1)
+    assert td.structural_eq(td.contract_identity(a @ tender.identity()), a)
+
+
+def test_contract_identity_no_op():
+    a = tender.tensor("a", rank=1)
+    b = tender.tensor("b", rank=1)
+    assert td.structural_eq(td.contract_identity(a @ b), a @ b)

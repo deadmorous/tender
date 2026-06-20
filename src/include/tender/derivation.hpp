@@ -89,6 +89,11 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*;
 // indices.
 auto contract_delta(Context& ctx, Expr const* e) -> Expr const*;
 
+// Contract the identity tensor against a dot product: I · x → x and x · I → x
+// (the identity tensor acts as the identity under ·).  Walks the whole tree;
+// dots not involving the identity are left unchanged.
+auto contract_identity(Context& ctx, Expr const* e) -> Expr const*;
+
 // Contract a pair of Levi-Civita symbols sharing p summed indices, directly to
 // the generalized Kronecker delta (no concrete WCS unrolling):
 //

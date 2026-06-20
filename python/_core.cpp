@@ -572,6 +572,13 @@ NB_MODULE(_core, m)
         "Contract ExplicitSum{m, δ^m_a · δ^m_b} into δ_{ab}.");
 
     md.def(
+        "_contract_identity",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::contract_identity(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Contract the identity tensor in a dot product: I·x -> x, x·I -> x.");
+
+    md.def(
         "_contract_eps_pair",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::contract_eps_pair(*e.ctx, e.expr)); },

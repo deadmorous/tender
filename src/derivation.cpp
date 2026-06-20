@@ -1480,6 +1480,31 @@ auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
     return canon(ctx, materialize(ctx, e, {}), 0);
 }
 
+auto contract_identity(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context&, Expr const* node) -> Expr const*
+        {
+            auto const* d = std::get_if<Dot>(&node->node);
+            if (!d)
+                return node;
+            auto is_identity = [](Expr const* x)
+            {
+                auto const* t = std::get_if<TensorObject>(&x->node);
+                return t && t->traits
+                       && t->traits->well_known == WellKnownKind::Identity;
+            };
+            // I · x → x  and  x · I → x  (the identity acts as identity).
+            if (is_identity(d->left))
+                return d->right;
+            if (is_identity(d->right))
+                return d->left;
+            return node;
+        });
+}
+
 auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
 {
     return rewrite_tree(

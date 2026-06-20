@@ -444,6 +444,46 @@ auto render_with_names(
 }
 } // namespace
 
+TEST(ContractIdentity, IdentityDotVectorIsVector)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* I = make_identity(ctx);
+    EXPECT_TRUE(
+        structural_eq(steps::contract_identity(ctx, make_dot(ctx, I, a)), a));
+    EXPECT_TRUE(
+        structural_eq(steps::contract_identity(ctx, make_dot(ctx, a, I)), a));
+}
+
+TEST(ContractIdentity, IdentityDotIdentityIsIdentity)
+{
+    Context ctx;
+    auto const* I = make_identity(ctx);
+    EXPECT_TRUE(
+        structural_eq(steps::contract_identity(ctx, make_dot(ctx, I, I)), I));
+}
+
+TEST(ContractIdentity, NonIdentityDotUnchanged)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* dot = make_dot(ctx, a, b);
+    EXPECT_EQ(steps::contract_identity(ctx, dot), dot);
+}
+
+TEST(ContractIdentity, WalksNestedDot)
+{
+    // (I · a) + b  →  a + b
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* I = make_identity(ctx);
+    auto const* expr = make_sum(ctx, make_dot(ctx, I, a), b);
+    EXPECT_TRUE(
+        structural_eq(steps::contract_identity(ctx, expr), make_sum(ctx, a, b)));
+}
+
 TEST(ContractEpsPair, OneSharedIndex)
 {
     // Σ_i ε^{ijk} ε_{iml}  →  δ^j_m δ^k_l − δ^j_l δ^k_m

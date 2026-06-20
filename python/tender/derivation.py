@@ -31,6 +31,7 @@ __all__ = [
     "expand_eps",
     "fold_sums",
     "contract_delta",
+    "contract_identity",
     "contract_eps_pair",
     "fold_equal_addends",
     "canonicalize",
@@ -132,6 +133,11 @@ def fold_sums(expr):
 def contract_delta(expr):
     """Contract ``ExplicitSum{m, δ^m_a · δ^m_b}`` into ``δ_{ab}``."""
     return _d._contract_delta(expr)
+
+
+def contract_identity(expr):
+    """Contract the identity tensor in a dot product: ``I·x → x``, ``x·I → x``."""
+    return _d._contract_identity(expr)
 
 
 def contract_eps_pair(expr):
