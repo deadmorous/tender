@@ -3,7 +3,9 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <tender/basis.hpp>
 #include <tender/context.hpp>
+#include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>
 #include <tender/egraph.hpp>
 #include <tender/expr.hpp>
@@ -48,6 +50,16 @@ static auto derive(PyExpr const& from, Expr const* e) -> PyExpr
 {
     return PyExpr{from.ctx_keep, from.ctx, e};
 }
+
+// Python wrapper for Basis. Like PyExpr, holds a keep-alive reference to the
+// owning Context: the Basis stores Expr const* pointers (its vectors) that
+// live in that context, and its emission/step methods allocate there too.
+struct PyBasis
+{
+    nb::object ctx_keep;
+    Context* ctx;
+    Basis basis;
+};
 
 // Convert a Python value to IndexAssoc: CountableIndex | int → Concrete | str →
 // Label
@@ -647,4 +659,150 @@ NB_MODULE(_core, m)
         "a"_a,
         "b"_a,
         "Algebraic equality in theory T0: structural_eq of the canonical forms.");
+
+    // ------------------------------------------------------------------ //
+    // basis submodule — the invariant/coordinate bridge (vibe 000049)
+    // ------------------------------------------------------------------ //
+    nb::module_ mb =
+        m.def_submodule("basis", "Vector bases and coordinate systems.");
+
+    nb::enum_<Variance>(mb, "Variance")
+        .value("Covariant", Variance::Covariant)
+        .value("Contravariant", Variance::Contravariant);
+
+    nb::class_<PyBasis>(mb, "Basis")
+        .def_prop_ro("realm", [](PyBasis const& b) { return b.basis.realm(); })
+        .def_prop_ro(
+            "space",
+            [](PyBasis const& b) { return b.basis.space(); },
+            nb::rv_policy::reference)
+        .def_prop_ro("dim", [](PyBasis const& b) { return b.basis.dim(); })
+        .def_prop_ro(
+            "is_orthonormal",
+            [](PyBasis const& b) { return b.basis.is_orthonormal(); })
+        .def_prop_ro(
+            "vector_symbol",
+            [](PyBasis const& b) -> std::string
+            { return std::string{b.basis.vector_symbol().v.view()}; })
+        .def(
+            "basis",
+            [](PyBasis const& b, int i) -> PyExpr
+            { return PyExpr{b.ctx_keep, b.ctx, b.basis.basis(i)}; },
+            "i"_a,
+            "The i-th covariant basis vector e_i (0-based).")
+        .def(
+            "cobasis",
+            [](PyBasis const& b, int i) -> PyExpr
+            { return PyExpr{b.ctx_keep, b.ctx, b.basis.cobasis(i)}; },
+            "i"_a,
+            "The i-th contravariant cobasis vector e^i (0-based).")
+        .def(
+            "covariant_vector",
+            [](PyBasis const& b, CountableIndex idx) -> PyExpr {
+                return PyExpr{
+                    b.ctx_keep, b.ctx, b.basis.covariant_vector(*b.ctx, idx)};
+            },
+            "index"_a,
+            "Symbolic covariant basis vector e_i carrying the given index.")
+        .def(
+            "contravariant_vector",
+            [](PyBasis const& b, CountableIndex idx) -> PyExpr
+            {
+                return PyExpr{
+                    b.ctx_keep,
+                    b.ctx,
+                    b.basis.contravariant_vector(*b.ctx, idx)};
+            },
+            "index"_a,
+            "Symbolic contravariant basis vector e^i carrying the given index.")
+        .def(
+            "__repr__",
+            [](PyBasis const& b) -> std::string
+            {
+                return "<Basis dim=" + std::to_string(b.basis.dim())
+                       + " symbol='"
+                       + std::string{b.basis.vector_symbol().v.view()} + "'>";
+            });
+
+    mb.def(
+        "make_orthonormal_basis",
+        [](std::vector<PyExpr> const& vectors,
+           IndexSpace const* space,
+           std::string const& symbol) -> PyBasis
+        {
+            // The basis vectors' Expr pointers live in their own context; that
+            // is the context the basis (and its emissions) must use.
+            Context* ctx =
+                vectors.empty() ? &g_default_ctx : vectors.front().ctx;
+            nb::object keep =
+                vectors.empty() ? nb::none() : vectors.front().ctx_keep;
+            std::vector<Expr const*> vs;
+            vs.reserve(vectors.size());
+            for (auto const& v: vectors)
+                vs.push_back(v.expr);
+            return PyBasis{
+                keep,
+                ctx,
+                make_orthonormal_basis(
+                    space, std::move(vs), make_tensor_name(symbol))};
+        },
+        "vectors"_a,
+        "space"_a,
+        "symbol"_a = "e",
+        "Build an orthonormal basis from rank-1 vectors (cobasis = basis).");
+
+    auto bind_cs =
+        [&mb](char const* name, Basis (*fn)(Context&), char const* doc)
+    {
+        mb.def(
+            name,
+            [fn](nb::object ctx_arg) -> PyBasis
+            {
+                auto [ctx, keep] = resolve_ctx(ctx_arg);
+                return PyBasis{keep, ctx, fn(*ctx)};
+            },
+            "ctx"_a = nb::none(),
+            doc);
+    };
+    bind_cs("wcs", &wcs, "World Cartesian System: orthonormal frame i, j, k.");
+    bind_cs(
+        "cylindrical",
+        &cylindrical,
+        "Cylindrical (r, theta, z): orthonormal frame r, \\theta, z.");
+    bind_cs(
+        "spherical",
+        &spherical,
+        "Spherical (r, theta, phi): orthonormal frame r, \\theta, \\phi.");
+    bind_cs(
+        "polar_2d",
+        &polar_2d,
+        "2D polar (r, theta): orthonormal frame r, \\theta.");
+
+    mb.def(
+        "expand_in_basis",
+        [](PyExpr const& e, PyBasis const& b, Variance v) -> PyExpr
+        { return derive(e, expand_in_basis(*e.ctx, e.expr, b.basis, v)); },
+        "expr"_a,
+        "basis"_a,
+        "variance"_a,
+        "Expand each generic invariant tensor into its coordinate form in the "
+        "basis (A -> A^{i...} (e_i ...)).");
+
+    mb.def(
+        "simplify_basis_dot",
+        [](PyExpr const& e, PyBasis const& b) -> PyExpr
+        { return derive(e, simplify_basis_dot(*e.ctx, e.expr, b.basis)); },
+        "expr"_a,
+        "basis"_a,
+        "Turn each dot of two basis vectors into a Kronecker delta "
+        "((s e_i)·(t e_j) -> s t δ_{ij}).");
+
+    mb.def(
+        "reassemble",
+        [](PyExpr const& e, PyBasis const& b) -> PyExpr
+        { return derive(e, reassemble(*e.ctx, e.expr, b.basis)); },
+        "expr"_a,
+        "basis"_a,
+        "Fold a coordinate expansion back to its invariant (inverse of "
+        "expand_in_basis); a no-op on anything that is not such an expansion.");
 }

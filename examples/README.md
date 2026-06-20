@@ -59,6 +59,7 @@ MathJax.
 | File | Description |
 |---|---|
 | `kronecker_delta.py` / `.ipynb` | Kronecker delta δ^i_j in 3D oblique space — renders to LaTeX |
+| `basis_dot_product.py` / `.ipynb` | Dot product through a basis: deriving a·b = b·a from first principles |
 
 ## Notebook hygiene — stripping outputs before committing
 
