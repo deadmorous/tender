@@ -2810,3 +2810,44 @@ TEST(SymmetryCanon, EpsRepeatedIndexIsZero)
         IndexAssoc{ConcreteIndex{2}});
     EXPECT_TRUE(algebraic_eq(ctx, z, make_scalar(ctx, Rational{0})));
 }
+
+// ---- infer_rank ------------------------------------------------------------
+
+TEST(InferRank, Leaves)
+{
+    Context ctx;
+    EXPECT_EQ(
+        infer_rank(make_tensor_object(ctx, make_tensor_name("a"), {}, 1)),
+        std::optional<int>{1});
+    EXPECT_EQ(infer_rank(make_identity(ctx)), std::optional<int>{2});
+    EXPECT_EQ(infer_rank(make_scalar(ctx, Rational{3})), std::optional<int>{0});
+    EXPECT_EQ(
+        infer_rank(make_tensor_object(ctx, make_tensor_name("B"))),
+        std::nullopt);
+}
+
+TEST(InferRank, ThroughOperators)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* I = make_identity(ctx);
+    EXPECT_EQ(infer_rank(make_tensor_product(ctx, a, b)), std::optional<int>{2});
+    EXPECT_EQ(infer_rank(make_dot(ctx, a, b)), std::optional<int>{0});
+    EXPECT_EQ(infer_rank(make_dot(ctx, a, I)), std::optional<int>{1});
+    EXPECT_EQ(infer_rank(make_cross(ctx, a, I)), std::optional<int>{2});
+    EXPECT_EQ(infer_rank(make_ddot(ctx, I, I)), std::optional<int>{0});
+    EXPECT_EQ(infer_rank(make_sum(ctx, a, b)), std::optional<int>{1});
+    EXPECT_EQ(infer_rank(make_negate(ctx, a)), std::optional<int>{1});
+}
+
+TEST(InferRank, UnknownLeafAndIllFormed)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B")); // no rank
+    EXPECT_EQ(infer_rank(make_tensor_product(ctx, B, a)), std::nullopt);
+    // A dot of two scalars would drive the rank to -2: ill-formed → nullopt.
+    auto const* s = make_scalar(ctx, Rational{2});
+    EXPECT_EQ(infer_rank(make_dot(ctx, s, s)), std::nullopt);
+}

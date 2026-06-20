@@ -488,8 +488,23 @@ class TestRank:
     def test_identity_is_rank_2(self):
         assert tender.identity().rank == 2
 
+    def test_scalar_is_rank_0(self):
+        assert tender.scalar(3).rank == 0
+
     def test_unranked_tensor_is_none(self):
         assert tender.tensor("B").rank is None
 
-    def test_non_tensor_is_none(self):
-        assert tender.scalar(3).rank is None
+    def test_inferred_through_operators(self):
+        a = tender.tensor("a", rank=1)
+        b = tender.tensor("b", rank=1)
+        I = tender.identity()
+        assert (a * b).rank == 2  # outer product: 1 + 1
+        assert (a @ b).rank == 0  # dot: 1 + 1 - 2
+        assert (a @ I).rank == 1  # dot: 1 + 2 - 2
+        assert (a % I).rank == 2  # cross: 1 + 2 - 1
+        assert (a + b).rank == 1  # sum keeps the shared rank
+        assert (-a).rank == 1
+
+    def test_none_when_operand_undeclared(self):
+        a = tender.tensor("a", rank=1)
+        assert (tender.tensor("B") * a).rank is None

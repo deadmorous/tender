@@ -328,11 +328,10 @@ NB_MODULE(_core, m)
         .def_prop_ro(
             "rank",
             [](PyExpr const& e) -> std::optional<int>
-            {
-                auto const* t = std::get_if<TensorObject>(&e.expr->node);
-                return t ? t->rank : std::nullopt;
-            },
-            "The declared tensor rank if this is a tensor object, else None.")
+            { return infer_rank(e.expr); },
+            "The invariant rank, inferred through the operators (TensorProduct "
+            "adds ranks, Dot removes 2, DDot 4, Cross 1, ...). None when a leaf "
+            "rank is undeclared or a contraction would be ill-formed.")
         .def(
             "__repr__",
             [](PyExpr const& e) -> std::string

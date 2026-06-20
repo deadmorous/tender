@@ -896,6 +896,58 @@ auto is_component_valued(Expr const* e) -> bool
         *e);
 }
 
+auto infer_rank(Expr const* e) -> std::optional<int>
+{
+    // Rank arithmetic for a contraction that removes `removed` indices from the
+    // outer-product rank of its two operands; nullopt if either is unknown or
+    // the result is negative (ill-formed).
+    auto contracted = [](std::optional<int> l,
+                         std::optional<int> r,
+                         int removed) -> std::optional<int>
+    {
+        if (!l || !r || *l + *r - removed < 0)
+            return std::nullopt;
+        return *l + *r - removed;
+    };
+    return visit(
+        Overloads{
+            [](TensorObject const& t) -> std::optional<int> { return t.rank; },
+            [](ScalarLiteral const&) -> std::optional<int> { return 0; },
+            [](Negate const& n) -> std::optional<int>
+            { return infer_rank(n.operand); },
+            // A sum keeps the shared rank of its operands; trust the known
+            // side.
+            [](Sum const& s) -> std::optional<int>
+            {
+                auto const l = infer_rank(s.left);
+                return l ? l : infer_rank(s.right);
+            },
+            [](Difference const& s) -> std::optional<int>
+            {
+                auto const l = infer_rank(s.left);
+                return l ? l : infer_rank(s.right);
+            },
+            // Outer product adds ranks; scalar division keeps the left rank.
+            [&](TensorProduct const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 0); },
+            [](ScalarDiv const& s) -> std::optional<int>
+            { return infer_rank(s.left); },
+            [&](Dot const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 2); },
+            [&](DDot const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 4); },
+            [&](DDotAlt const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 4); },
+            [&](Cross const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 1); },
+            [](ExplicitSum const& s) -> std::optional<int>
+            { return infer_rank(s.body); },
+            [](NoSum const& s) -> std::optional<int>
+            { return infer_rank(s.body); },
+        },
+        *e);
+}
+
 namespace
 {
 

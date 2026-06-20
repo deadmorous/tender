@@ -170,4 +170,14 @@ auto canonicalize(Context& ctx, Expr const* e) -> Expr const*;
 // invariant factors do not.  Used to decide which products are commutative.
 [[nodiscard]] auto is_component_valued(Expr const* e) -> bool;
 
+// The (invariant) rank of an expression, inferred from the ranks of its leaves
+// and the rank arithmetic of each operator:
+//   scalar = 0; Negate / ScalarDiv / ExplicitSum / NoSum keep their operand's
+//   rank; Sum / Difference take their operands' shared rank; TensorProduct adds
+//   ranks; Dot subtracts 2; DDot / DDotAlt subtract 4; Cross subtracts 1.
+// Returns nullopt when a needed leaf rank is unknown (an undeclared tensor) or
+// a contraction would drive the rank negative (ill-formed).  A leaf
+// TensorObject contributes its declared rank.
+[[nodiscard]] auto infer_rank(Expr const* e) -> std::optional<int>;
+
 } // namespace tender
