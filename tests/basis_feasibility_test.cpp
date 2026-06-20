@@ -37,9 +37,11 @@ auto reduce_in_wcs(Context& ctx, Basis const& b, Expr const* e) -> Expr const*
 
 } // namespace
 
-// I = Σ_i e_i ⊗ e^i, folded straight back to the invariant I — the smallest
-// proof that expand and reassemble are inverse for a rank-2 object.
-TEST(BasisFeasibility, IdentityRoundTrip)
+// A rank-2 invariant expands to Σ_i Σ_j A_{ij} e_i e_j and folds straight back
+// — the smallest proof that expand and reassemble are inverse beyond rank 1.
+// (The identity tensor's own diagonal expansion I = Σ_i e_i ⊗ e^i is a
+// well-known special case, deferred with the rest of the well-known coordinates.)
+TEST(BasisFeasibility, Rank2RoundTrip)
 {
     Context ctx;
     auto b = wcs(ctx);
