@@ -325,6 +325,14 @@ NB_MODULE(_core, m)
             },
             "map"_a = nb::none(),
             "Render to a LaTeX math string (no surrounding $).")
+        .def_prop_ro(
+            "rank",
+            [](PyExpr const& e) -> std::optional<int>
+            {
+                auto const* t = std::get_if<TensorObject>(&e.expr->node);
+                return t ? t->rank : std::nullopt;
+            },
+            "The declared tensor rank if this is a tensor object, else None.")
         .def(
             "__repr__",
             [](PyExpr const& e) -> std::string

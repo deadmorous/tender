@@ -474,3 +474,22 @@ class TestReprLatex:
         a = tender.tensor("a", rank=1)
         inner = a._repr_latex_()[1:-1]  # strip $...$
         assert r"\mathbf{a}" == inner
+
+
+# ---------------------------------------------------------------------------
+# .rank accessor
+# ---------------------------------------------------------------------------
+
+
+class TestRank:
+    def test_vector(self):
+        assert tender.tensor("a", rank=1).rank == 1
+
+    def test_identity_is_rank_2(self):
+        assert tender.identity().rank == 2
+
+    def test_unranked_tensor_is_none(self):
+        assert tender.tensor("B").rank is None
+
+    def test_non_tensor_is_none(self):
+        assert tender.scalar(3).rank is None
