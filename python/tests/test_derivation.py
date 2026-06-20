@@ -617,3 +617,23 @@ def test_contract_identity_no_op():
     a = tender.tensor("a", rank=1)
     b = tender.tensor("b", rank=1)
     assert td.structural_eq(td.contract_identity(a @ b), a @ b)
+
+
+# ---- distribute_contraction ------------------------------------------------
+
+
+def test_distribute_contraction_cross_over_dyad():
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    u = tender.tensor("u", rank=1, ctx=ctx)
+    v = tender.tensor("v", rank=1, ctx=ctx)
+    # a × (u ⊗ v) → (a × u) ⊗ v
+    res = td.distribute_contraction(a % (u * v))
+    assert td.structural_eq(res, (a % u) * v)
+
+
+def test_distribute_contraction_noop():
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    assert td.structural_eq(td.distribute_contraction(a @ b), a @ b)

@@ -32,6 +32,7 @@ __all__ = [
     "fold_sums",
     "contract_delta",
     "contract_identity",
+    "distribute_contraction",
     "contract_eps_pair",
     "fold_equal_addends",
     "canonicalize",
@@ -138,6 +139,16 @@ def contract_delta(expr):
 def contract_identity(expr):
     """Contract the identity tensor in a dot product: ``I·x → x``, ``x·I → x``."""
     return _d._contract_identity(expr)
+
+
+def distribute_contraction(expr):
+    """Distribute a contraction (``·`` or ``×``) over the adjacent leg of a tensor product.
+
+    ``op(L, A⊗B) → op(L,A) ⊗ B`` and ``op(A⊗B, R) → A ⊗ op(B,R)``, so e.g.
+    ``a × (u ⊗ v) → (a × u) ⊗ v``.  One pass (right operand first); apply again
+    for deeper nesting.
+    """
+    return _d._distribute_contraction(expr)
 
 
 def contract_eps_pair(expr):

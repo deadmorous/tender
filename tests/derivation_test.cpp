@@ -2851,3 +2851,87 @@ TEST(InferRank, UnknownLeafAndIllFormed)
     auto const* s = make_scalar(ctx, Rational{2});
     EXPECT_EQ(infer_rank(make_dot(ctx, s, s)), std::nullopt);
 }
+
+// ---- distribute_contraction ------------------------------------------------
+
+namespace
+{
+auto rank1(Context& ctx, char const* n) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(n), {}, 1);
+}
+} // namespace
+
+TEST(DistributeContraction, CrossOverRightDyad)
+{
+    // a × (u ⊗ v) → (a × u) ⊗ v
+    Context ctx;
+    auto const* a = rank1(ctx, "a");
+    auto const* u = rank1(ctx, "u");
+    auto const* v = rank1(ctx, "v");
+    auto const* res = steps::distribute_contraction(
+        ctx, make_cross(ctx, a, make_tensor_product(ctx, u, v)));
+    auto const* tp = std::get_if<TensorProduct>(&res->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_TRUE(std::holds_alternative<Cross>(tp->left->node));
+    EXPECT_EQ(tp->right, v); // v carried unchanged
+}
+
+TEST(DistributeContraction, DotOverLeftDyad)
+{
+    // (u ⊗ v) · a → u ⊗ (v · a)
+    Context ctx;
+    auto const* a = rank1(ctx, "a");
+    auto const* u = rank1(ctx, "u");
+    auto const* v = rank1(ctx, "v");
+    auto const* res = steps::distribute_contraction(
+        ctx, make_dot(ctx, make_tensor_product(ctx, u, v), a));
+    auto const* tp = std::get_if<TensorProduct>(&res->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(tp->left, u);
+    EXPECT_TRUE(std::holds_alternative<Dot>(tp->right->node));
+}
+
+TEST(DistributeContraction, FloatsScalarThrough)
+{
+    // a × (s ⊗ v) → s ⊗ (a × v): a scalar near leg floats out.
+    Context ctx;
+    auto const* a = rank1(ctx, "a");
+    auto const* v = rank1(ctx, "v");
+    auto const* s = make_scalar(ctx, Rational{3});
+    auto const* res = steps::distribute_contraction(
+        ctx, make_cross(ctx, a, make_tensor_product(ctx, s, v)));
+    auto const* tp = std::get_if<TensorProduct>(&res->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(tp->left, s);
+    EXPECT_TRUE(std::holds_alternative<Cross>(tp->right->node));
+}
+
+TEST(DistributeContraction, PlainContractionUnchanged)
+{
+    Context ctx;
+    auto const* dot = make_dot(ctx, rank1(ctx, "a"), rank1(ctx, "b"));
+    EXPECT_EQ(steps::distribute_contraction(ctx, dot), dot);
+}
+
+TEST(Canonicalize, DyadLegsDoNotCommute)
+{
+    // A dyad of two basis vectors is ordered: e_i ⊗ e_j ≠ e_j ⊗ e_i.  A basis
+    // vector is a rank-1 indexed tensor — invariant, not a commuting scalar.
+    Context ctx;
+    auto evec = [&](CountableIndex idx)
+    {
+        return make_tensor_object(
+            ctx,
+            make_tensor_name("e"),
+            {SlotBinding{
+                IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+                IndexAssoc{idx}}},
+            1);
+    };
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* ij = make_tensor_product(ctx, evec(i), evec(j));
+    auto const* ji = make_tensor_product(ctx, evec(j), evec(i));
+    EXPECT_FALSE(algebraic_eq(ctx, ij, ji));
+}

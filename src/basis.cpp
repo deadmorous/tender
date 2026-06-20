@@ -300,8 +300,17 @@ auto is_scalar_one(Expr const* e) -> bool
     return s && s->value == Rational{1};
 }
 
-// Split one dot operand into an optional component factor and a basis vector.
-// Accepts a bare basis vector or a product of a component value with one.
+// A true scalar coefficient: component-valued AND rank 0 — so a (fully-indexed)
+// basis vector, which is component-valued but rank 1, is NOT mistaken for one.
+auto is_scalar_coefficient(Expr const* e) -> bool
+{
+    return is_component_valued(e) && infer_rank(e) == std::optional<int>{0};
+}
+
+// Split one dot operand into an optional scalar factor and a basis vector.
+// Accepts a bare basis vector or a product of a scalar coefficient with one;
+// a product of two basis vectors (a dyad) is rejected — that needs the
+// contraction distributed over the ⊗ first (steps::distribute_contraction).
 auto as_vec_side(Expr const* e, Basis const& b) -> std::optional<VecSide>
 {
     if (auto bv = as_basis_vector(e, b))
@@ -310,10 +319,10 @@ auto as_vec_side(Expr const* e, Basis const& b) -> std::optional<VecSide>
     if (!tp)
         return std::nullopt;
     if (auto bv = as_basis_vector(tp->right, b);
-        bv && is_component_valued(tp->left))
+        bv && is_scalar_coefficient(tp->left))
         return VecSide{tp->left, bv->first, bv->second};
     if (auto bv = as_basis_vector(tp->left, b);
-        bv && is_component_valued(tp->right))
+        bv && is_scalar_coefficient(tp->right))
         return VecSide{tp->right, bv->first, bv->second};
     return std::nullopt;
 }

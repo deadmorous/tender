@@ -578,6 +578,14 @@ NB_MODULE(_core, m)
         "Contract the identity tensor in a dot product: I·x -> x, x·I -> x.");
 
     md.def(
+        "_distribute_contraction",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::distribute_contraction(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Distribute a contraction (· or ×) over the adjacent leg of a tensor "
+        "product: op(L, A⊗B) -> op(L,A)⊗B, op(A⊗B, R) -> A⊗op(B,R).");
+
+    md.def(
         "_contract_eps_pair",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::contract_eps_pair(*e.ctx, e.expr)); },

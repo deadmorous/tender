@@ -94,6 +94,15 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*;
 // dots not involving the identity are left unchanged.
 auto contract_identity(Context& ctx, Expr const* e) -> Expr const*;
 
+// Distribute a single contraction (· or ×) over the adjacent leg of a tensor
+// product (polyad):
+//   op(L, A ⊗ B)  →  op(L, A) ⊗ B      (contraction acts on the near leg A)
+//   op(A ⊗ B, R)  →  A ⊗ op(B, R)      (contraction acts on the near leg B)
+// so e.g. a × (u ⊗ v) → (a × u) ⊗ v and (u ⊗ v) · a → u ⊗ (v · a).  One pass
+// (right operand first); apply again for deeper nesting.  Double contractions
+// (: , ··) span two factors and are left unchanged.
+auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*;
+
 // Contract a pair of Levi-Civita symbols sharing p summed indices, directly to
 // the generalized Kronecker delta (no concrete WCS unrolling):
 //

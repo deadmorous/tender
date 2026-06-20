@@ -860,13 +860,16 @@ auto is_component_valued(Expr const* e) -> bool
             [](TensorObject const& t)
             {
                 if (t.rank && *t.rank == 0)
-                    return true;
+                    return true; // rank 0: a scalar coordinate
+                if (t.rank && *t.rank >= 1)
+                    return false; // rank >= 1: a basis vector / indexed tensor,
+                                  // not a commuting scalar (even fully indexed)
                 if (t.slots.empty())
-                    return false; // slot-less rank >= 1: invariant
+                    return false; // slot-less, rank unknown: invariant
                 for (auto const& sb: t.slots)
                     if (!sb.index)
                         return false; // partially indexed: be conservative
-                return true;          // fully indexed coordinate
+                return true;          // fully indexed, rank unknown: coordinate
             },
             [](Negate const& n) { return is_component_valued(n.operand); },
             [](Sum const& s) {
@@ -1354,8 +1357,10 @@ auto contracted_ids(
     std::map<int, std::vector<IndexUse>> uses;
     for (auto const* f: factors)
     {
+        // Every indexed tensor factor of the term participates — coordinates
+        // and basis vectors alike (their indices Einstein-sum together).
         auto const* t = std::get_if<TensorObject>(&f->node);
-        if (!t || !is_component_valued(f))
+        if (!t)
             continue;
         for (auto const& sb: t->slots)
         {
@@ -1406,6 +1411,17 @@ auto contracted_ids(
 
 auto materialize(Context& ctx, Expr const* e, std::set<int> bound)
     -> Expr const*;
+
+// A flat polyad: a product whose factors are all bare tensors (coordinates or
+// basis vectors), so the whole product is one Einstein-summation scope.
+auto is_polyad(Expr const* e) -> bool
+{
+    if (std::holds_alternative<TensorObject>(e->node))
+        return true;
+    if (auto const* p = std::get_if<TensorProduct>(&e->node))
+        return is_polyad(p->left) && is_polyad(p->right);
+    return false;
+}
 
 // Wrap `body` in an ExplicitSum per id (ids already ascending).
 auto wrap_sums(Context& ctx, Expr const* body, std::vector<int> const& ids)
@@ -1463,9 +1479,11 @@ auto materialize(Context& ctx, Expr const* e, std::set<int> bound) -> Expr const
             },
             [&](TensorProduct const& p) -> Expr const*
             {
-                if (is_component_valued(e))
+                // A flat polyad (coordinates and/or basis vectors) is one
+                // Einstein-summation scope; a product with a composite factor
+                // scopes each operand independently.
+                if (is_polyad(e))
                     return materialize_product(ctx, e, bound);
-                // Invariant product: each operand is its own scope.
                 return make_tensor_product(
                     ctx,
                     materialize(ctx, p.left, bound),
@@ -1555,6 +1573,60 @@ auto contract_identity(Context& ctx, Expr const* e) -> Expr const*
                 return d->left;
             return node;
         });
+}
+
+auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
+{
+    using Mk = Expr const* (*)(Context&, Expr const*, Expr const*);
+    auto is_scalar = [](Expr const* x)
+    { return infer_rank(x) == std::optional<int>{0}; };
+    auto distribute = [&](Context& c,
+                          Expr const* node,
+                          Expr const* l,
+                          Expr const* r,
+                          Mk mk) -> Expr const*
+    {
+        if (auto const* rp = std::get_if<TensorProduct>(&r->node))
+        {
+            // op(L, A⊗B): float a scalar near leg out, else contract with the
+            // near vector A.
+            if (is_scalar(rp->left))
+                return make_tensor_product(c, rp->left, mk(c, l, rp->right));
+            return make_tensor_product(c, mk(c, l, rp->left), rp->right);
+        }
+        if (auto const* lp = std::get_if<TensorProduct>(&l->node))
+        {
+            // op(A⊗B, R): float a scalar near leg (B) out, else contract with
+            // the near vector B.
+            if (is_scalar(lp->right))
+                return make_tensor_product(c, mk(c, lp->left, r), lp->right);
+            return make_tensor_product(c, lp->left, mk(c, lp->right, r));
+        }
+        return node;
+    };
+    auto one_pass = [&](Expr const* x)
+    {
+        return rewrite_tree(
+            ctx,
+            x,
+            [&](Context& c, Expr const* node) -> Expr const*
+            {
+                if (auto const* d = std::get_if<Dot>(&node->node))
+                    return distribute(c, node, d->left, d->right, &make_dot);
+                if (auto const* cr = std::get_if<Cross>(&node->node))
+                    return distribute(c, node, cr->left, cr->right, &make_cross);
+                return node;
+            });
+    };
+    // Distribute one level per pass; iterate to a fixpoint (rewrite_tree reuses
+    // the pointer when nothing changes).
+    for (Expr const* cur = e;;)
+    {
+        Expr const* next = one_pass(cur);
+        if (next == cur)
+            return cur;
+        cur = next;
+    }
 }
 
 auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
