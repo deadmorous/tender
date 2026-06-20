@@ -2935,3 +2935,36 @@ TEST(Canonicalize, DyadLegsDoNotCommute)
     auto const* ji = make_tensor_product(ctx, evec(j), evec(i));
     EXPECT_FALSE(algebraic_eq(ctx, ij, ji));
 }
+
+TEST(Canonicalize, NestedSumOrderIsNormalized)
+{
+    // Σ_i Σ_j body == Σ_j Σ_i body (Fubini), even when i and j play distinct
+    // roles in the body (asymmetric coordinate, ordered dyad).
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto slot = [&](CountableIndex x)
+    {
+        return SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexAssoc{x}};
+    };
+    auto const* coord =
+        make_tensor_object(ctx, make_tensor_name("A"), {slot(i), slot(j)}, 0);
+    auto const* ei =
+        make_tensor_object(ctx, make_tensor_name("e"), {slot(i)}, 1);
+    auto const* ej =
+        make_tensor_object(ctx, make_tensor_name("e"), {slot(j)}, 1);
+    // body = A_ij e_i e_j
+    auto const* body =
+        make_tensor_product(ctx, make_tensor_product(ctx, coord, ei), ej);
+    auto const* sij =
+        make_explicit_sum(ctx, i, make_explicit_sum(ctx, j, body));
+    auto const* sji =
+        make_explicit_sum(ctx, j, make_explicit_sum(ctx, i, body));
+
+    EXPECT_TRUE(algebraic_eq(ctx, sij, sji));
+    // Idempotent.
+    auto const* c = steps::canonicalize(ctx, sij);
+    EXPECT_TRUE(structural_eq(steps::canonicalize(ctx, c), c));
+}

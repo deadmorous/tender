@@ -194,6 +194,21 @@ class TestBasisSteps:
         )
         assert "-1" in res.latex()  # left-handed: √g = -1
 
+    def test_cross_with_identity_commutes(self):
+        # a × I = I × a, derived through the basis.
+        ctx = tender.Context()
+        frame = tb.wcs(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        I = tender.identity(ctx=ctx)
+
+        def reduce(e):
+            e = tb.expand_in_basis(e, frame, tb.Variance.Covariant)
+            e = td.distribute_contraction(e)
+            e = tb.simplify_basis_cross(e, frame)
+            return td.canonicalize(e)
+
+        assert td.algebraic_eq(reduce(a % I), reduce(I % a))
+
     def test_dot_product_commutes(self):
         ctx = tender.Context()
         b = tb.wcs(ctx)

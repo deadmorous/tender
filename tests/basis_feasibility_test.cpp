@@ -214,3 +214,24 @@ TEST(BasisFeasibility, CrossDotIsLeviCivita)
         {IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k}});
     EXPECT_TRUE(algebraic_eq(ctx, result, expected));
 }
+
+// a × I = I × a for any vector a, derived through the basis: expand, distribute
+// the cross over the identity dyad I = Σ_m e_m ⊗ e^m, reduce each e_i × e_m to
+// ε e^k, then canonicalize.  Exercises contraction-over-⊗ distribution, ε
+// cyclic symmetry, and nested-ExplicitSum ordering all at once.
+TEST(BasisFeasibility, CrossWithIdentityCommutes)
+{
+    Context ctx;
+    auto b = wcs(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* I = make_identity(ctx);
+    auto reduce = [&](Expr const* e)
+    {
+        e = expand_in_basis(ctx, e, b, Variance::Covariant);
+        e = steps::distribute_contraction(ctx, e);
+        e = simplify_basis_cross(ctx, e, b);
+        return steps::canonicalize(ctx, e);
+    };
+    EXPECT_TRUE(algebraic_eq(
+        ctx, reduce(make_cross(ctx, a, I)), reduce(make_cross(ctx, I, a))));
+}

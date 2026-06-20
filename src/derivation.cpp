@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <numeric>
 #include <set>
 #include <stdexcept>
 
@@ -989,6 +990,39 @@ auto substitute_index_id(Context& ctx, Expr const* e, int old_id, int new_id)
         });
 }
 
+// Like substitute_index_id but applies a whole id→id map atomically (each slot
+// id looked up once), so a remap that permutes ids (e.g. -1↔-2) is correct.
+auto substitute_index_ids(
+    Context& ctx, Expr const* e, std::map<int, int> const& remap) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [&remap](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&e->node);
+            if (!t)
+                return e;
+            auto slots = t->slots;
+            bool changed = false;
+            for (auto& sb: slots)
+            {
+                if (!sb.index)
+                    continue;
+                if (auto const* ci = std::get_if<CountableIndex>(&*sb.index))
+                    if (auto it = remap.find(ci->id); it != remap.end())
+                    {
+                        sb.index = CountableIndex{it->second};
+                        changed = true;
+                    }
+            }
+            if (!changed)
+                return e;
+            return ctx.make<Expr>(
+                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+        });
+}
+
 // Canonical (reserved, negative) id for a bound index at binder nesting depth
 // d.  Free ids are non-negative, so this namespace never collides with them,
 // and distinct depths get distinct ids (so Σ_i Σ_j keeps i and j apart).
@@ -998,6 +1032,49 @@ auto bound_canon_id(int depth) -> int
 }
 
 auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*;
+
+// Canonicalize a stack of consecutive null-bound ExplicitSums (Σ_a Σ_b … body).
+// The binders are interchangeable (Fubini), so this fixes a canonical order:
+// it tries every permutation of the binders onto the depth-numbered canonical
+// ids and keeps the one whose canonicalized body is smallest under expr_cmp.
+// Two Fubini-equivalent stacks therefore produce the identical canonical form.
+// The permutation search is bounded; very tall stacks keep their given order.
+auto canon_sum_stack(Context& ctx, Expr const* e, int depth) -> Expr const*
+{
+    std::vector<int> ids;
+    Expr const* body = e;
+    while (auto const* s = std::get_if<ExplicitSum>(&body->node))
+    {
+        if (s->bound)
+            break; // a symbolic bound is not part of the free stack
+        ids.push_back(s->index.id);
+        body = s->body;
+    }
+    int const n = static_cast<int>(ids.size());
+
+    std::vector<int> order(static_cast<std::size_t>(n));
+    std::iota(order.begin(), order.end(), 0);
+    bool const search = n <= 6; // n! permutations; tall stacks fall back to
+                                // order
+    Expr const* best = nullptr;
+    do
+    {
+        std::map<int, int> remap;
+        for (int pos = 0; pos < n; ++pos)
+            remap[ids[static_cast<std::size_t>(
+                order[static_cast<std::size_t>(pos)])]] =
+                bound_canon_id(depth + pos);
+        auto const* cbody =
+            canon(ctx, substitute_index_ids(ctx, body, remap), depth + n);
+        if (!best || expr_cmp(cbody, best) < 0)
+            best = cbody;
+    } while (search && std::next_permutation(order.begin(), order.end()));
+
+    for (int pos = n - 1; pos >= 0; --pos)
+        best = make_explicit_sum(
+            ctx, CountableIndex{bound_canon_id(depth + pos)}, best, nullptr);
+    return best;
+}
 
 // ---- symmetry orbit canonicalization (vibe 000047) ----------------------
 
@@ -1309,14 +1386,17 @@ auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*
             {
                 // α-normalize: relabel the dummy to a canonical id *before*
                 // canonicalizing the body, so the body's sort order does not
-                // depend on the original dummy id.
+                // depend on the original dummy id.  A null-bound stack of
+                // nested sums is order-normalized too (Fubini), via
+                // canon_sum_stack.
+                if (!s.bound)
+                    return canon_sum_stack(ctx, e, depth);
                 int cid = bound_canon_id(depth);
                 auto const* relabeled =
                     substitute_index_id(ctx, s.body, s.index.id, cid);
                 auto const* body = canon(ctx, relabeled, depth + 1);
-                auto const* bound =
-                    s.bound ? canon(ctx, s.bound, depth) : nullptr;
-                return make_explicit_sum(ctx, CountableIndex{cid}, body, bound);
+                return make_explicit_sum(
+                    ctx, CountableIndex{cid}, body, canon(ctx, s.bound, depth));
             },
             // NoSum suppresses summation, so its index stays a free reference
             // (not α-renamed); only its body is canonicalized.
