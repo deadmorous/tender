@@ -3,6 +3,7 @@
 #include <tender/derivation.hpp>
 #include <tender/rewrite.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -241,6 +242,104 @@ auto simplify_basis_dot(Context& ctx, Expr const* e, Basis const& basis)
             if (l->scalar)
                 result = make_tensor_product(c, l->scalar, result);
             return result;
+        });
+}
+
+namespace
+{
+
+// Flatten a TensorProduct tree into its leaf factors.
+void flatten_product(Expr const* e, std::vector<Expr const*>& out)
+{
+    if (auto const* tp = std::get_if<TensorProduct>(&e->node))
+    {
+        flatten_product(tp->left, out);
+        flatten_product(tp->right, out);
+    }
+    else
+        out.push_back(e);
+}
+
+// The slot indices of a tensor as CountableIndex ids; nullopt if any slot is
+// missing or not a CountableIndex.
+auto countable_slot_ids(TensorObject const& t) -> std::optional<std::vector<int>>
+{
+    std::vector<int> ids;
+    ids.reserve(t.slots.size());
+    for (auto const& sb: t.slots)
+    {
+        if (!sb.index)
+            return std::nullopt;
+        auto const* ci = std::get_if<CountableIndex>(&*sb.index);
+        if (!ci)
+            return std::nullopt;
+        ids.push_back(ci->id);
+    }
+    return ids;
+}
+
+auto sorted(std::vector<int> v) -> std::vector<int>
+{
+    std::sort(v.begin(), v.end());
+    return v;
+}
+
+} // namespace
+
+auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            // Peel nested ExplicitSums, collecting the summed indices.
+            std::vector<int> summed;
+            Expr const* body = node;
+            while (auto const* es = std::get_if<ExplicitSum>(&body->node))
+            {
+                if (es->bound)
+                    return node; // symbolic bound: not a basis expansion
+                summed.push_back(es->index.id);
+                body = es->body;
+            }
+            if (summed.empty())
+                return node;
+
+            // The body is one coordinate tensor times a polyad of basis
+            // vectors.  Partition the flattened factors accordingly.
+            std::vector<Expr const*> factors;
+            flatten_product(body, factors);
+            std::vector<int> vec_ids;
+            TensorObject const* coord = nullptr;
+            for (auto const* f: factors)
+            {
+                if (auto bv = as_basis_vector(f, basis))
+                {
+                    vec_ids.push_back(bv->first.id);
+                    continue;
+                }
+                auto const* t = std::get_if<TensorObject>(&f->node);
+                if (!t || coord)
+                    return node; // a non-coordinate factor, or a second one
+                coord = t;
+            }
+            if (!coord)
+                return node;
+            auto const coord_ids = countable_slot_ids(*coord);
+            if (!coord_ids)
+                return node;
+
+            // Each summed index must appear exactly once as a coordinate slot
+            // and once as a basis vector, with nothing left over.
+            auto const s = sorted(summed);
+            if (std::adjacent_find(s.begin(), s.end()) != s.end())
+                return node;
+            if (sorted(vec_ids) != s || sorted(*coord_ids) != s)
+                return node;
+
+            return make_tensor_object(
+                c, coord->name, {}, static_cast<int>(s.size()));
         });
 }
 

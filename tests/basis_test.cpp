@@ -366,3 +366,82 @@ TEST(SimplifyBasisDot, DifferentVectorSymbolUnchanged)
         e_basis.covariant_vector(ctx, j));
     EXPECT_EQ(simplify_basis_dot(ctx, dot, g_basis), dot);
 }
+
+// ---- reassemble (fold-back) --------------------------------------------
+
+TEST(Reassemble, VectorRoundTrip)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, a, b, Variance::Covariant));
+    auto const* back = reassemble(ctx, expanded, b);
+    EXPECT_TRUE(structural_eq(back, a));
+}
+
+TEST(Reassemble, Rank2RoundTrip)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, A, b, Variance::Covariant));
+    auto const* back = reassemble(ctx, expanded, b);
+    EXPECT_TRUE(structural_eq(back, A));
+}
+
+TEST(Reassemble, ContravariantRoundTrip)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, a, b, Variance::Contravariant));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), a));
+}
+
+TEST(Reassemble, NonExpansionUnchanged)
+{
+    // A lone Kronecker trace Σ_i δ_{ii} is not a basis expansion.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* trace = make_explicit_sum(
+        ctx,
+        i,
+        make_delta(
+            ctx,
+            Realm::Orthonormal,
+            space_3d(),
+            Level::Lower,
+            Level::Lower,
+            IndexAssoc{i},
+            IndexAssoc{i}));
+    EXPECT_EQ(reassemble(ctx, trace, b), trace);
+}
+
+TEST(Reassemble, NoSumUnchanged)
+{
+    // No surrounding sum: nothing to fold.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    EXPECT_EQ(reassemble(ctx, a, b), a);
+}
+
+TEST(Reassemble, ForeignBasisUnchanged)
+{
+    // An expansion in the e-basis is not recognized by the g-basis.
+    Context ctx;
+    auto e_basis = wcs_basis(ctx);
+    auto g_basis = make_orthonormal_basis(
+        space_3d(), {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")}, "g");
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, a, e_basis, Variance::Covariant));
+    EXPECT_EQ(reassemble(ctx, expanded, g_basis), expanded);
+}

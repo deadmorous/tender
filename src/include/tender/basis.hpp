@@ -142,4 +142,19 @@ enum class Variance
 [[nodiscard]] auto simplify_basis_dot(
     Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
 
+// Fold a coordinate expansion back to its invariant — the inverse of
+// expand_in_basis (vibe 000049 §3).  Recognizes a (possibly nested) Einstein
+// sum whose body is one coordinate tensor times a polyad of `basis`'s vectors,
+// with the summed indices pairing each coordinate slot to one basis vector,
+// and replaces it with the slot-less invariant of matching rank and name:
+//
+//   Σ_i a_i e_i           → a            (rank 1)
+//   Σ_i Σ_j A_{ij} e_i e_j → A           (rank 2)
+//
+// Operates on the canonical (materialized-sum) form.  Anything that is not a
+// clean expansion in `basis` is left unchanged (failure is a no-op).  Walks
+// the whole tree.
+[[nodiscard]] auto reassemble(Context& ctx, Expr const* e, Basis const& basis)
+    -> Expr const*;
+
 } // namespace tender
