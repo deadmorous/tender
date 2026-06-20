@@ -78,7 +78,7 @@ auto rank_ok(Expr const* v) -> bool
 auto make_orthonormal_basis(
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
-    std::string_view vector_symbol) -> Basis
+    TensorName vector_symbol) -> Basis
 {
     if (!space)
         throw std::invalid_argument("make_orthonormal_basis: null space");
@@ -104,7 +104,7 @@ auto make_orthonormal_basis(
     return Basis{
         Realm::Orthonormal,
         space,
-        make_tensor_name(vector_symbol),
+        vector_symbol,
         std::move(vectors),
         std::move(covectors)};
 }

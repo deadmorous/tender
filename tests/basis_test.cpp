@@ -174,7 +174,7 @@ TEST(Basis, CustomVectorSymbol)
     Context ctx;
     auto const* u = vec(ctx, "u");
     auto const* v = vec(ctx, "v");
-    auto b = make_orthonormal_basis(space_2d(), {u, v}, "g");
+    auto b = make_orthonormal_basis(space_2d(), {u, v}, make_tensor_name("g"));
     EXPECT_EQ(b.vector_symbol().v.view(), "g");
     auto m = CountableIndex{ctx.alloc_index_id()};
     EXPECT_EQ(
@@ -357,7 +357,9 @@ TEST(SimplifyBasisDot, DifferentVectorSymbolUnchanged)
     Context ctx;
     auto e_basis = wcs_basis(ctx); // symbol "e"
     auto g_basis = make_orthonormal_basis(
-        space_3d(), {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")}, "g");
+        space_3d(),
+        {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")},
+        make_tensor_name("g"));
     auto i = CountableIndex{ctx.alloc_index_id()};
     auto j = CountableIndex{ctx.alloc_index_id()};
     auto const* dot = make_dot(
@@ -439,7 +441,9 @@ TEST(Reassemble, ForeignBasisUnchanged)
     Context ctx;
     auto e_basis = wcs_basis(ctx);
     auto g_basis = make_orthonormal_basis(
-        space_3d(), {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")}, "g");
+        space_3d(),
+        {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")},
+        make_tensor_name("g"));
     auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
     auto const* expanded = steps::canonicalize(
         ctx, expand_in_basis(ctx, a, e_basis, Variance::Covariant));

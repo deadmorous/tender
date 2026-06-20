@@ -5,7 +5,6 @@
 #include <tender/index_space.hpp>
 #include <tender/name.hpp>
 
-#include <string_view>
 #include <vector>
 
 namespace tender
@@ -83,7 +82,7 @@ private:
         std::vector<Expr const*> covectors);
 
     friend auto make_orthonormal_basis(
-        IndexSpace const*, std::vector<Expr const*>, std::string_view) -> Basis;
+        IndexSpace const*, std::vector<Expr const*>, TensorName) -> Basis;
 
     Realm realm_;
     IndexSpace const* space_;
@@ -103,7 +102,7 @@ private:
 [[nodiscard]] auto make_orthonormal_basis(
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
-    std::string_view vector_symbol = "e") -> Basis;
+    TensorName vector_symbol = make_tensor_name("e")) -> Basis;
 
 // ---- basis-parameterized steps -----------------------------------------
 
