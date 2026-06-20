@@ -2,12 +2,20 @@
 # Included only when TENDER_BUILD_COVERAGE=ON.
 
 # Apply --coverage flags to a target.
+#
+# Instrumentation (compile options) stays PRIVATE: only this target's own
+# sources are instrumented, never a consumer's.  The link option is PUBLIC so
+# anything linking an instrumented static library (e.g. the benchmarks linking
+# libtender.a) inherits --coverage and thus libgcov — without it the consumer
+# fails to resolve __gcov_init / __gcov_merge_add at link time.  For an
+# executable target PUBLIC link options behave like PRIVATE (nothing links it),
+# so this is safe to apply uniformly.
 function(tender_enable_coverage target)
     target_compile_options(${target} PRIVATE
         --coverage
         -O0
         -fprofile-abs-path)
-    target_link_options(${target} PRIVATE --coverage)
+    target_link_options(${target} PUBLIC --coverage)
 endfunction()
 
 # Add a 'coverage' target that resets counters, runs all tests, and
