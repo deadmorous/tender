@@ -255,9 +255,7 @@ engine with **no new node types** and without the deferred subtree matcher.
   the concrete `unroll_sums → eval_delta_concrete → fold` path; the existing
   canonicalizer commutes the scalar coordinates).
 
-Two refinements vs. the plan: (1) the generic rank-r round trip stands in for
-the identity-tensor special case (I's coordinates are δ, so its expansion is a
-deferred well-known case); (2) the `a·b` contraction uses the concrete-unroll
+One refinement vs. the plan: the `a·b` contraction uses the concrete-unroll
 path rather than a symbolic δ-substitution, which remains the parametric-RHS
 gap (vibes 000033/000040). ~30 C++ tests across `basis_test`,
 `coord_system_test`, `basis_feasibility_test`; full suite 443 green.
@@ -280,3 +278,14 @@ derivative).
   once the oblique flavor lands — the API is now the right shape for it.
   `reassemble` matches polyad vectors by symbol (not variance/level), so mixed
   expansions still fold back.
+- **Identity expansion round trip.** The identity is no longer skipped: its
+  coordinate follows from the defining property `I·a = a`, since
+  `I^i_j = e^i·I·e_j = e^i·e_j = δ^i_j`, so `I` resolves to `Σ_i e_i ⊗ e^i`.
+  `expand_in_basis` emits that directly for the identity (an intrinsically mixed
+  resolution — the variance argument is not consulted; the pure-variance metric
+  forms `g_ij` await oblique), and `reassemble` gains the inverse branch (a sum
+  of two basis vectors sharing one summed index, no coordinate, → `I`). This is
+  the genuine `I → Σ_i e_i ⊗ e^i → I` round trip on orthonormal bases — done
+  *without* a hardcoded δ coordinate, which would have needed the symbolic
+  δ-substitution we still lack. Supporting pieces: a general `contract_identity`
+  step (`I·x → x`, `x·I → x`) and an `Expr.rank` accessor in Python.
