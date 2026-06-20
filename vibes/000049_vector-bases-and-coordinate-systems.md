@@ -302,4 +302,15 @@ derivative).
   *computes* the metric: `I_ij = e_i·I·e_j → contract_identity → e_i·e_j →
   simplify_basis_dot → g_ij`. This is the contraction-with-basis definition of a
   coordinate (vibe §3) made real for a non-trivial metric. `make_oblique_basis`
-  is exposed to Python. (Still deferred: √g and the ε-tensor-vs-symbol split.)
+  is exposed to Python.
+- **Basis cross product.** `simplify_basis_cross` — the cross sibling of
+  `simplify_basis_dot`: `e_i × e_j → √g ε_{ijk} e^k` (covariant input, 3D), with
+  the k index Einstein-summed. Orthonormal gives `e_i × e_j = ε_{ijk} e_k`
+  (`√g = 1`, `e^k = e_k`); oblique carries the cell volume `√g = e_0·(e_1×e_2)`,
+  now exposed as `Basis::volume()` (the `√g` prerequisite — it is the ε-tensor's
+  weight relative to the symbol, `ε_ijk = √g·[ijk]`). Contravariant/mixed/non-3D
+  inputs are left unchanged. Exposed to Python. Worked example (feasibility):
+  `(e_i × e_j)·e_k = ε_ijk` for an orthonormal right-handed basis — `cross → ε e^l`,
+  `dot → ε δ`, closed by the ε-δ substitution `Σ_l ε_{abl} δ_{lc} = ε_{abc}`
+  applied as a data identity (same shape as delta-contraction). (Still deferred:
+  the ε-tensor-vs-symbol *typing* split — we carry `√g` explicitly instead.)
