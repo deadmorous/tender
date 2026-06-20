@@ -221,3 +221,47 @@ its absence is the reason the manual-step design is the small, alive move.
    2-D polar (orthonormal frames).
 6. The `a·b = b·a` derivation (4b) as a maintained feasibility example
    (CLAUDE.md principle 5).
+
+## Implemented
+
+All slices landed (orthonormal flavor), each its own commit, on the existing
+engine with **no new node types** and without the deferred subtree matcher.
+
+- **`Basis`** (`basis.{hpp,cpp}`) — built from a rank-1 vector tuple via
+  `make_orthonormal_basis(space, vectors, symbol="e")`; owns realm + emitted
+  index space (cardinality == #vectors, subspace allowed, no ambient check).
+  Exposes `basis(i)`/`cobasis(i)` (cobasis = basis for orthonormal) and the
+  **symbolic emission** `covariant_vector`/`contravariant_vector` — rank-1
+  TensorObjects with the generic symbol and a CountableIndex (orthonormal spells
+  both lower).
+- **`expand_in_basis`** — a generic invariant (slot-less, rank r, not
+  well-known) → `A^{i…} ⊗ (e_i ⊗ …)` with the r indices left as an implicit
+  Einstein sum (canonicalize materializes it; coordinate level chosen so the
+  shared index contracts). Walks the tree; well-known and already-indexed
+  objects untouched.
+- **`simplify_basis_dot`** — `(s e_i)·(t e_j) → s ⊗ t ⊗ δ_{ij}`, pulling
+  coordinate factors out of the contraction; the δ then feeds the existing
+  contraction machinery.
+- **`reassemble`** — inverse recognition: peels nested ExplicitSums, splits the
+  body into one coordinate + a polyad of the basis's vectors, checks the summed
+  indices pair up, and folds to the slot-less invariant; **failure is a no-op**.
+  Proven inverse to expand for rank 1 and 2 (covariant + contravariant).
+- **Coordinate systems** (`coord_system.{hpp,cpp}`) — `wcs`, `cylindrical`,
+  `spherical`, `polar_2d`, each a free factory **producing** an orthonormal
+  `Basis` (no metric/coords yet, so no `CoordSystem` class). Frame vectors named
+  within the TensorName grammar (`i,j,k`; `r,\theta,\phi,z`).
+- **Feasibility** (`basis_feasibility_test.cpp`) — the rank-2 round trip and
+  `a·b = b·a` reduced through the basis to `Σ_i a_i b_i` (the δ contracts via
+  the concrete `unroll_sums → eval_delta_concrete → fold` path; the existing
+  canonicalizer commutes the scalar coordinates).
+
+Two refinements vs. the plan: (1) the generic rank-r round trip stands in for
+the identity-tensor special case (I's coordinates are δ, so its expansion is a
+deferred well-known case); (2) the `a·b` contraction uses the concrete-unroll
+path rather than a symbolic δ-substitution, which remains the parametric-RHS
+gap (vibes 000033/000040). ~30 C++ tests across `basis_test`,
+`coord_system_test`, `basis_feasibility_test`; full suite 443 green.
+
+Still deferred (unchanged): oblique flavor + metric/√g + ε-tensor-vs-symbol;
+mixed-variance polyads; symbolic δ-substitution; Python bindings for the basis
+layer; Stage 5 (position-dependent frames, Christoffel, covariant derivative).
