@@ -584,6 +584,83 @@ TEST(SimplifyBasisDot, DifferentVectorSymbolUnchanged)
     EXPECT_EQ(simplify_basis_dot(ctx, dot, g_basis), dot);
 }
 
+// ---- simplify_basis_cross ----------------------------------------------
+
+TEST(SimplifyBasisCross, OrthonormalGivesEpsilonTimesBasisVector)
+{
+    // e_i × e_j → ε_{ijk} e_k (orthonormal: no √g, e^k spelled lower).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* cr =
+        make_cross(ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j));
+
+    auto const* tp =
+        std::get_if<TensorProduct>(&simplify_basis_cross(ctx, cr, b)->node);
+    ASSERT_NE(tp, nullptr);
+    auto const& eps = std::get<TensorObject>(tp->left->node);
+    auto const& evec = std::get<TensorObject>(tp->right->node);
+    ASSERT_TRUE(eps.traits.has_value());
+    EXPECT_EQ(
+        eps.traits->well_known,
+        std::optional<WellKnownKind>{WellKnownKind::LeviCivita});
+    ASSERT_EQ(eps.slots.size(), 3u);
+    EXPECT_EQ(evec.name.v.view(), "e");
+    ASSERT_EQ(evec.slots.size(), 1u);
+    // ε's first two slots are i and j; its third is the summed index, shared
+    // with the basis vector e^k.
+    EXPECT_EQ(idx_of(eps.slots[0]), i.id);
+    EXPECT_EQ(idx_of(eps.slots[1]), j.id);
+    EXPECT_EQ(idx_of(eps.slots[2]), idx_of(evec.slots[0]));
+    EXPECT_EQ(evec.slots[0].slot.level, Level::Lower);
+}
+
+TEST(SimplifyBasisCross, ObliqueCarriesVolumeAndContravariantVector)
+{
+    // e_i × e_j → √g ε_{ijk} e^k: a √g (scalar triple product) factor, and the
+    // output basis vector is contravariant (upper).
+    Context ctx;
+    auto b = oblique_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* cr =
+        make_cross(ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j));
+
+    auto const* tp =
+        std::get_if<TensorProduct>(&simplify_basis_cross(ctx, cr, b)->node);
+    ASSERT_NE(tp, nullptr);
+    // result = √g ⊗ (ε ⊗ e^k); the √g factor is the volume e_0·(e_1×e_2).
+    EXPECT_TRUE(std::holds_alternative<Dot>(tp->left->node));
+    auto const* inner = std::get_if<TensorProduct>(&tp->right->node);
+    ASSERT_NE(inner, nullptr);
+    auto const& evec = std::get<TensorObject>(inner->right->node);
+    EXPECT_EQ(evec.name.v.view(), "e");
+    EXPECT_EQ(evec.slots[0].slot.level, Level::Upper);
+}
+
+TEST(SimplifyBasisCross, NonBasisCrossUnchanged)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    auto const* cr = make_cross(ctx, a, c);
+    EXPECT_EQ(simplify_basis_cross(ctx, cr, b), cr);
+}
+
+TEST(SimplifyBasisCross, ContravariantInputUnchanged)
+{
+    // e^i × e^j (both upper) is not handled yet → left unchanged.
+    Context ctx;
+    auto b = oblique_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* cr = make_cross(
+        ctx, b.contravariant_vector(ctx, i), b.contravariant_vector(ctx, j));
+    EXPECT_EQ(simplify_basis_cross(ctx, cr, b), cr);
+}
+
 // ---- reassemble (fold-back) --------------------------------------------
 
 TEST(Reassemble, VectorRoundTrip)

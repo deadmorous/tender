@@ -51,6 +51,14 @@ public:
         return symbol_;
     }
 
+    // The cell volume √g = e_0·(e_1×e_2) as an invariant scalar, or nullptr for
+    // an orthonormal basis (√g = 1).  It is the weight of the Levi-Civita
+    // tensor relative to the symbol (ε_ijk = √g·[ijk]).
+    auto volume() const noexcept -> Expr const*
+    {
+        return volume_;
+    }
+
     // ---- concrete members (for unrolling) ------------------------------
 
     // i-th covariant basis vector e_i (0-based), rank 1.
@@ -81,7 +89,8 @@ private:
         IndexSpace const* space,
         TensorName symbol,
         std::vector<Expr const*> vectors,
-        std::vector<Expr const*> covectors);
+        std::vector<Expr const*> covectors,
+        Expr const* volume);
 
     friend auto make_orthonormal_basis(
         IndexSpace const*, std::vector<Expr const*>, TensorName) -> Basis;
@@ -96,6 +105,7 @@ private:
     TensorName symbol_;
     std::vector<Expr const*> vectors_;   // covariant   e_i
     std::vector<Expr const*> covectors_; // contravariant e^i
+    Expr const* volume_;                 // √g, or nullptr (orthonormal: 1)
 };
 
 // Build an orthonormal basis from rank-1 vectors.  The realm is Orthonormal and
@@ -173,6 +183,17 @@ enum class Variance
 // A dot whose sides are not (optionally coordinate-scaled) basis vectors of
 // `basis` is left unchanged.  Walks the whole tree.
 [[nodiscard]] auto simplify_basis_dot(
+    Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
+
+// Replace the cross product of two covariant basis vectors with the
+// Levi-Civita expansion: (s e_i) × (t e_j) → s ⊗ t ⊗ √g ⊗ ε_{ijk} ⊗ e^k, the
+// k index Einstein-summed (vibe 000049).  ε is the rank-3 Levi-Civita symbol
+// and √g the basis volume (omitted for an orthonormal basis, where it is 1 and
+// e^k = e_k), so orthonormal gives e_i × e_j = ε_{ijk} e_k.
+//
+// Only the covariant (both-lower) case in a 3D basis is handled; other inputs
+// (contravariant or mixed, non-3D) are left unchanged.  Walks the whole tree.
+[[nodiscard]] auto simplify_basis_cross(
     Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
 
 // Fold a coordinate expansion back to its invariant — the inverse of

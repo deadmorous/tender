@@ -855,6 +855,15 @@ NB_MODULE(_core, m)
         "((s e_i)·(t e_j) -> s t δ_{ij}).");
 
     mb.def(
+        "simplify_basis_cross",
+        [](PyExpr const& e, PyBasis const& b) -> PyExpr
+        { return derive(e, simplify_basis_cross(*e.ctx, e.expr, b.basis)); },
+        "expr"_a,
+        "basis"_a,
+        "Expand the cross of two covariant basis vectors via Levi-Civita: "
+        "e_i × e_j -> √g ε_{ijk} e^k (orthonormal: ε_{ijk} e_k).");
+
+    mb.def(
         "reassemble",
         [](PyExpr const& e, PyBasis const& b) -> PyExpr
         { return derive(e, reassemble(*e.ctx, e.expr, b.basis)); },

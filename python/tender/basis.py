@@ -41,6 +41,7 @@ spherical = _b.spherical
 polar_2d = _b.polar_2d
 expand_in_basis = _b.expand_in_basis
 simplify_basis_dot = _b.simplify_basis_dot
+simplify_basis_cross = _b.simplify_basis_cross
 reassemble = _b.reassemble
 
 __all__ = [
@@ -54,5 +55,6 @@ __all__ = [
     "polar_2d",
     "expand_in_basis",
     "simplify_basis_dot",
+    "simplify_basis_cross",
     "reassemble",
 ]

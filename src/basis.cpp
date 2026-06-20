@@ -19,12 +19,14 @@ Basis::Basis(
     IndexSpace const* space,
     TensorName symbol,
     std::vector<Expr const*> vectors,
-    std::vector<Expr const*> covectors) :
+    std::vector<Expr const*> covectors,
+    Expr const* volume) :
   realm_(realm),
   space_(space),
   symbol_(symbol),
   vectors_(std::move(vectors)),
-  covectors_(std::move(covectors))
+  covectors_(std::move(covectors)),
+  volume_(volume)
 {
 }
 
@@ -107,14 +109,15 @@ auto make_orthonormal_basis(
 {
     validate_basis_vectors("make_orthonormal_basis", space, vectors);
 
-    // Orthonormal: the cobasis coincides with the basis.
+    // Orthonormal: the cobasis coincides with the basis, and √g = 1 (nullptr).
     auto covectors = vectors;
     return Basis{
         Realm::Orthonormal,
         space,
         vector_symbol,
         std::move(vectors),
-        std::move(covectors)};
+        std::move(covectors),
+        nullptr};
 }
 
 auto make_oblique_basis(
@@ -130,7 +133,7 @@ auto make_oblique_basis(
             "derived via the cross-product formula)");
 
     // Reciprocal basis: e^0 = (e_1×e_2)/V, e^1 = (e_2×e_0)/V, e^2 = (e_0×e_1)/V
-    // with the cell volume V = e_0·(e_1×e_2).
+    // with the cell volume V = √g = e_0·(e_1×e_2).
     Expr const* const vol =
         make_dot(ctx, vectors[0], make_cross(ctx, vectors[1], vectors[2]));
     auto cob = [&](Expr const* a, Expr const* b) -> Expr const*
@@ -145,7 +148,8 @@ auto make_oblique_basis(
         space,
         vector_symbol,
         std::move(vectors),
-        std::move(covectors)};
+        std::move(covectors),
+        vol};
 }
 
 namespace
@@ -336,6 +340,46 @@ auto simplify_basis_dot(Context& ctx, Expr const* e, Basis const& basis)
                 r->level,
                 IndexAssoc{l->index},
                 IndexAssoc{r->index});
+            if (r->scalar)
+                result = make_tensor_product(c, r->scalar, result);
+            if (l->scalar)
+                result = make_tensor_product(c, l->scalar, result);
+            return result;
+        });
+}
+
+auto simplify_basis_cross(Context& ctx, Expr const* e, Basis const& basis)
+    -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const* x = std::get_if<Cross>(&node->node);
+            if (!x || basis.space()->values().size() != 3)
+                return node; // the cross-product formula is 3D
+            auto const l = as_vec_side(x->left, basis);
+            auto const r = as_vec_side(x->right, basis);
+            if (!l || !r)
+                return node;
+            // Only the covariant case e_i × e_j = √g ε_{ijk} e^k (both inputs
+            // lower); contravariant / mixed inputs are left for later.
+            if (l->level != Level::Lower || r->level != Level::Lower)
+                return node;
+
+            CountableIndex const k{c.alloc_index_id()};
+            Expr const* const eps = make_levi_civita(
+                c,
+                basis.realm(),
+                basis.space(),
+                {Level::Lower, Level::Lower, Level::Lower},
+                {IndexAssoc{l->index}, IndexAssoc{r->index}, IndexAssoc{k}});
+            Expr const* result =
+                make_tensor_product(c, eps, basis.contravariant_vector(c, k));
+            // √g weight (omitted for an orthonormal basis, where it is 1).
+            if (basis.volume())
+                result = make_tensor_product(c, basis.volume(), result);
             if (r->scalar)
                 result = make_tensor_product(c, r->scalar, result);
             if (l->scalar)

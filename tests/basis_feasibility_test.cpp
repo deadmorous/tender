@@ -6,9 +6,12 @@
 #include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
+#include <tender/identity.hpp>
 #include <tender/index_space.hpp>
 
 #include <gtest/gtest.h>
+
+#include <vector>
 
 using namespace tender;
 
@@ -146,4 +149,68 @@ TEST(BasisFeasibility, DotProductCommutes)
     auto const* ab = reduce_in_wcs(ctx, b, make_dot(ctx, a, c));
     auto const* ba = reduce_in_wcs(ctx, b, make_dot(ctx, c, a));
     EXPECT_TRUE(algebraic_eq(ctx, ab, ba));
+}
+
+// (e_i × e_j) · e_k = ε_ijk for an orthonormal right-handed basis, derived by
+// dotting the cross-product formula with a basis vector:
+//   e_i × e_j → ε_ijl e^l,   (… ) · e_k → ε_ijl δ^l_k → ε_ijk.
+// The final ε-δ substitution is supplied as a data identity (it is the same
+// shape as delta-contraction, which the generic matcher already handles).
+TEST(BasisFeasibility, CrossDotIsLeviCivita)
+{
+    Context ctx;
+    auto b = wcs(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+
+    auto const* expr = make_dot(
+        ctx,
+        make_cross(ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j)),
+        b.covariant_vector(ctx, k));
+    // Cross → ε e^l, dot → ε δ, then canonicalize.
+    auto const* reduced = steps::canonicalize(
+        ctx, simplify_basis_dot(ctx, simplify_basis_cross(ctx, expr, b), b));
+
+    // Close with Σ_l ε_{a b l} δ_{l c} = ε_{a b c}.
+    std::vector<Level> const lll{Level::Lower, Level::Lower, Level::Lower};
+    auto a2 = CountableIndex{ctx.alloc_index_id()};
+    auto b2 = CountableIndex{ctx.alloc_index_id()};
+    auto c2 = CountableIndex{ctx.alloc_index_id()};
+    auto l2 = CountableIndex{ctx.alloc_index_id()};
+    auto const* lhs = make_explicit_sum(
+        ctx,
+        l2,
+        make_tensor_product(
+            ctx,
+            make_levi_civita(
+                ctx,
+                Realm::Orthonormal,
+                space_3d(),
+                lll,
+                {IndexAssoc{a2}, IndexAssoc{b2}, IndexAssoc{l2}}),
+            make_delta(
+                ctx,
+                Realm::Orthonormal,
+                space_3d(),
+                Level::Lower,
+                Level::Lower,
+                IndexAssoc{l2},
+                IndexAssoc{c2})));
+    auto const* rhs = make_levi_civita(
+        ctx,
+        Realm::Orthonormal,
+        space_3d(),
+        lll,
+        {IndexAssoc{a2}, IndexAssoc{b2}, IndexAssoc{c2}});
+    auto const* result =
+        apply_identity(ctx, reduced, Identity{"eps-dot", lhs, rhs});
+
+    auto const* expected = make_levi_civita(
+        ctx,
+        Realm::Orthonormal,
+        space_3d(),
+        lll,
+        {IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k}});
+    EXPECT_TRUE(algebraic_eq(ctx, result, expected));
 }

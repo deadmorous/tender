@@ -164,6 +164,17 @@ class TestBasisSteps:
                 a, b, [tb.Variance.Covariant, tb.Variance.Contravariant]
             )
 
+    def test_cross_gives_levi_civita(self):
+        # e_i × e_j → ε_{ijk} e_k (orthonormal).
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        i = ctx.alloc_index()
+        j = ctx.alloc_index()
+        res = tb.simplify_basis_cross(
+            b.covariant_vector(i) % b.covariant_vector(j), b
+        )
+        assert "varepsilon" in res.latex()
+
     def test_dot_product_commutes(self):
         ctx = tender.Context()
         b = tb.wcs(ctx)
