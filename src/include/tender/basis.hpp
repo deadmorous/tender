@@ -10,6 +10,14 @@
 namespace tender
 {
 
+// Orientation of an orthonormal frame, fixing the sign of its cell volume √g
+// (and hence the cross product e_i × e_j = √g ε_{ijk} e^k).
+enum class Handedness
+{
+    Right, // √g = +1
+    Left,  // √g = -1
+};
+
 // A vector basis: the index-emitting bridge between the invariant and
 // coordinate layers (vibes 000036, 000049).  It is built from a tuple of
 // rank-1 vectors and owns the realm together with the index space those
@@ -51,9 +59,11 @@ public:
         return symbol_;
     }
 
-    // The cell volume √g = e_0·(e_1×e_2) as an invariant scalar, or nullptr for
-    // an orthonormal basis (√g = 1).  It is the weight of the Levi-Civita
-    // tensor relative to the symbol (ε_ijk = √g·[ijk]).
+    // The signed cell volume √g as an invariant scalar.  For an orthonormal
+    // basis it is the scalar +1 (right-handed) or -1 (left-handed); for an
+    // oblique basis it is the scalar triple product e_0·(e_1×e_2).  It is the
+    // weight of the Levi-Civita tensor relative to the symbol (ε_ijk =
+    // √g·[ijk]).
     auto volume() const noexcept -> Expr const*
     {
         return volume_;
@@ -93,7 +103,11 @@ private:
         Expr const* volume);
 
     friend auto make_orthonormal_basis(
-        IndexSpace const*, std::vector<Expr const*>, TensorName) -> Basis;
+        Context&,
+        IndexSpace const*,
+        std::vector<Expr const*>,
+        TensorName,
+        Handedness) -> Basis;
     friend auto make_oblique_basis(
         Context&,
         IndexSpace const*,
@@ -105,11 +119,12 @@ private:
     TensorName symbol_;
     std::vector<Expr const*> vectors_;   // covariant   e_i
     std::vector<Expr const*> covectors_; // contravariant e^i
-    Expr const* volume_;                 // √g, or nullptr (orthonormal: 1)
+    Expr const* volume_; // signed √g (scalar ±1, or triple prod)
 };
 
 // Build an orthonormal basis from rank-1 vectors.  The realm is Orthonormal and
-// the cobasis coincides with the basis.
+// the cobasis coincides with the basis.  The handedness fixes the signed volume
+// √g = ±1 (right-handed by default), which orients the cross product.
 //
 // vector_symbol is the name of the generic symbolic basis vector (default "e").
 //
@@ -117,9 +132,11 @@ private:
 // vector; vectors.size() == space->values().size(); every vector is non-null
 // and rank 1 (where its rank is known).
 [[nodiscard]] auto make_orthonormal_basis(
+    Context& ctx,
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
-    TensorName vector_symbol = make_tensor_name("e")) -> Basis;
+    TensorName vector_symbol = make_tensor_name("e"),
+    Handedness handedness = Handedness::Right) -> Basis;
 
 // Build an oblique basis from its covariant vectors.  The realm is Oblique and
 // the contravariant cobasis e^i is derived via the reciprocal (cross-product)

@@ -684,6 +684,10 @@ NB_MODULE(_core, m)
         .value("Covariant", Variance::Covariant)
         .value("Contravariant", Variance::Contravariant);
 
+    nb::enum_<Handedness>(mb, "Handedness")
+        .value("Right", Handedness::Right)
+        .value("Left", Handedness::Left);
+
     nb::class_<PyBasis>(mb, "Basis")
         .def_prop_ro("realm", [](PyBasis const& b) { return b.basis.realm(); })
         .def_prop_ro(
@@ -742,7 +746,8 @@ NB_MODULE(_core, m)
         "make_orthonormal_basis",
         [](std::vector<PyExpr> const& vectors,
            IndexSpace const* space,
-           std::string const& symbol) -> PyBasis
+           std::string const& symbol,
+           Handedness handedness) -> PyBasis
         {
             // The basis vectors' Expr pointers live in their own context; that
             // is the context the basis (and its emissions) must use.
@@ -758,12 +763,18 @@ NB_MODULE(_core, m)
                 keep,
                 ctx,
                 make_orthonormal_basis(
-                    space, std::move(vs), make_tensor_name(symbol))};
+                    *ctx,
+                    space,
+                    std::move(vs),
+                    make_tensor_name(symbol),
+                    handedness)};
         },
         "vectors"_a,
         "space"_a,
         "symbol"_a = "e",
-        "Build an orthonormal basis from rank-1 vectors (cobasis = basis).");
+        "handedness"_a = Handedness::Right,
+        "Build an orthonormal basis from rank-1 vectors (cobasis = basis); "
+        "handedness fixes √g = ±1.");
 
     mb.def(
         "make_oblique_basis",

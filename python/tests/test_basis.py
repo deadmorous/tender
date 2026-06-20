@@ -174,6 +174,25 @@ class TestBasisSteps:
             b.covariant_vector(i) % b.covariant_vector(j), b
         )
         assert "varepsilon" in res.latex()
+        assert "-1" not in res.latex()  # right-handed: √g = +1, no sign
+
+    def test_left_handed_cross_flips_sign(self):
+        ctx = tender.Context()
+        b = tb.make_orthonormal_basis(
+            [
+                tender.tensor("i", rank=1, ctx=ctx),
+                tender.tensor("j", rank=1, ctx=ctx),
+                tender.tensor("k", rank=1, ctx=ctx),
+            ],
+            tender.space_3d,
+            handedness=tb.Handedness.Left,
+        )
+        i = ctx.alloc_index()
+        j = ctx.alloc_index()
+        res = tb.simplify_basis_cross(
+            b.covariant_vector(i) % b.covariant_vector(j), b
+        )
+        assert "-1" in res.latex()  # left-handed: √g = -1
 
     def test_dot_product_commutes(self):
         ctx = tender.Context()

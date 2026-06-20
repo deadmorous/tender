@@ -103,21 +103,26 @@ void validate_basis_vectors(
 } // namespace
 
 auto make_orthonormal_basis(
+    Context& ctx,
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
-    TensorName vector_symbol) -> Basis
+    TensorName vector_symbol,
+    Handedness handedness) -> Basis
 {
     validate_basis_vectors("make_orthonormal_basis", space, vectors);
 
-    // Orthonormal: the cobasis coincides with the basis, and √g = 1 (nullptr).
+    // Orthonormal: the cobasis coincides with the basis, and √g = ±1 by
+    // handedness (+1 right-handed, -1 left-handed).
     auto covectors = vectors;
+    Expr const* const vol =
+        make_scalar(ctx, Rational{handedness == Handedness::Right ? 1 : -1});
     return Basis{
         Realm::Orthonormal,
         space,
         vector_symbol,
         std::move(vectors),
         std::move(covectors),
-        nullptr};
+        vol};
 }
 
 auto make_oblique_basis(
@@ -289,6 +294,12 @@ auto as_basis_vector(Expr const* e, Basis const& b)
     return std::pair{*ci, t->slots[0].slot.level};
 }
 
+auto is_scalar_one(Expr const* e) -> bool
+{
+    auto const* s = std::get_if<ScalarLiteral>(&e->node);
+    return s && s->value == Rational{1};
+}
+
 // Split one dot operand into an optional component factor and a basis vector.
 // Accepts a bare basis vector or a product of a component value with one.
 auto as_vec_side(Expr const* e, Basis const& b) -> std::optional<VecSide>
@@ -377,8 +388,9 @@ auto simplify_basis_cross(Context& ctx, Expr const* e, Basis const& basis)
                 {IndexAssoc{l->index}, IndexAssoc{r->index}, IndexAssoc{k}});
             Expr const* result =
                 make_tensor_product(c, eps, basis.contravariant_vector(c, k));
-            // √g weight (omitted for an orthonormal basis, where it is 1).
-            if (basis.volume())
+            // √g weight; the right-handed orthonormal case (√g = 1) needs no
+            // factor, so it is omitted for a clean ε_{ijk} e_k.
+            if (!is_scalar_one(basis.volume()))
                 result = make_tensor_product(c, basis.volume(), result);
             if (r->scalar)
                 result = make_tensor_product(c, r->scalar, result);

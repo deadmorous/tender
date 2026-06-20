@@ -23,7 +23,7 @@ auto vec(Context& ctx, char const* name) -> Expr const*
 auto wcs_basis(Context& ctx) -> Basis
 {
     return make_orthonormal_basis(
-        space_3d(), {vec(ctx, "i"), vec(ctx, "j"), vec(ctx, "k")});
+        ctx, space_3d(), {vec(ctx, "i"), vec(ctx, "j"), vec(ctx, "k")});
 }
 
 // A 3D oblique basis with covariant vectors a, b, c.
@@ -46,7 +46,7 @@ TEST(Basis, OrthonormalWcsAccessors)
     auto const* i = vec(ctx, "i");
     auto const* j = vec(ctx, "j");
     auto const* k = vec(ctx, "k");
-    auto b = make_orthonormal_basis(space_3d(), {i, j, k});
+    auto b = make_orthonormal_basis(ctx, space_3d(), {i, j, k});
 
     EXPECT_EQ(b.realm(), Realm::Orthonormal);
     EXPECT_TRUE(b.is_orthonormal());
@@ -66,7 +66,7 @@ TEST(Basis, SubspaceBasisIsAllowed)
     Context ctx;
     auto const* u = vec(ctx, "u");
     auto const* v = vec(ctx, "v");
-    auto b = make_orthonormal_basis(space_2d(), {u, v});
+    auto b = make_orthonormal_basis(ctx, space_2d(), {u, v});
     EXPECT_EQ(b.dim(), 2);
     EXPECT_EQ(b.basis(1), v);
     EXPECT_EQ(b.cobasis(1), v);
@@ -79,14 +79,16 @@ TEST(Basis, CardinalityMismatchThrows)
     auto const* j = vec(ctx, "j");
     // Two vectors but a 3-value space.
     EXPECT_THROW(
-        (void)make_orthonormal_basis(space_3d(), {i, j}),
+        (void)make_orthonormal_basis(ctx, space_3d(), {i, j}),
         std::invalid_argument);
 }
 
 TEST(Basis, EmptyVectorsThrow)
 {
+    Context ctx;
     EXPECT_THROW(
-        (void)make_orthonormal_basis(space_3d(), {}), std::invalid_argument);
+        (void)make_orthonormal_basis(ctx, space_3d(), {}),
+        std::invalid_argument);
 }
 
 TEST(Basis, NullSpaceThrows)
@@ -94,7 +96,7 @@ TEST(Basis, NullSpaceThrows)
     Context ctx;
     auto const* i = vec(ctx, "i");
     EXPECT_THROW(
-        (void)make_orthonormal_basis(nullptr, {i}), std::invalid_argument);
+        (void)make_orthonormal_basis(ctx, nullptr, {i}), std::invalid_argument);
 }
 
 TEST(Basis, NonRankOneVectorThrows)
@@ -104,7 +106,7 @@ TEST(Basis, NonRankOneVectorThrows)
     auto const* j = vec(ctx, "j");
     auto const* rank2 = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
     EXPECT_THROW(
-        (void)make_orthonormal_basis(space_3d(), {i, j, rank2}),
+        (void)make_orthonormal_basis(ctx, space_3d(), {i, j, rank2}),
         std::invalid_argument);
 }
 
@@ -114,7 +116,7 @@ TEST(Basis, NullVectorThrows)
     auto const* i = vec(ctx, "i");
     auto const* j = vec(ctx, "j");
     EXPECT_THROW(
-        (void)make_orthonormal_basis(space_3d(), {i, j, nullptr}),
+        (void)make_orthonormal_basis(ctx, space_3d(), {i, j, nullptr}),
         std::invalid_argument);
 }
 
@@ -124,7 +126,7 @@ TEST(Basis, OutOfRangeAccessThrows)
     auto const* i = vec(ctx, "i");
     auto const* j = vec(ctx, "j");
     auto const* k = vec(ctx, "k");
-    auto b = make_orthonormal_basis(space_3d(), {i, j, k});
+    auto b = make_orthonormal_basis(ctx, space_3d(), {i, j, k});
     EXPECT_THROW((void)b.basis(3), std::out_of_range);
     EXPECT_THROW((void)b.cobasis(5), std::out_of_range);
 }
@@ -135,7 +137,7 @@ TEST(Basis, DefaultVectorSymbolIsE)
     auto const* i = vec(ctx, "i");
     auto const* j = vec(ctx, "j");
     auto const* k = vec(ctx, "k");
-    auto b = make_orthonormal_basis(space_3d(), {i, j, k});
+    auto b = make_orthonormal_basis(ctx, space_3d(), {i, j, k});
     EXPECT_EQ(b.vector_symbol().v.view(), "e");
 }
 
@@ -145,7 +147,7 @@ TEST(Basis, SymbolicEmissionCovariant)
     auto const* i = vec(ctx, "i");
     auto const* j = vec(ctx, "j");
     auto const* k = vec(ctx, "k");
-    auto b = make_orthonormal_basis(space_3d(), {i, j, k});
+    auto b = make_orthonormal_basis(ctx, space_3d(), {i, j, k});
 
     auto m = CountableIndex{ctx.alloc_index_id()};
     auto const* e_m = b.covariant_vector(ctx, m);
@@ -168,7 +170,7 @@ TEST(Basis, SymbolicEmissionContravariantIsLowerForOrthonormal)
     auto const* i = vec(ctx, "i");
     auto const* j = vec(ctx, "j");
     auto const* k = vec(ctx, "k");
-    auto b = make_orthonormal_basis(space_3d(), {i, j, k});
+    auto b = make_orthonormal_basis(ctx, space_3d(), {i, j, k});
 
     auto m = CountableIndex{ctx.alloc_index_id()};
     auto const& t =
@@ -181,7 +183,8 @@ TEST(Basis, CustomVectorSymbol)
     Context ctx;
     auto const* u = vec(ctx, "u");
     auto const* v = vec(ctx, "v");
-    auto b = make_orthonormal_basis(space_2d(), {u, v}, make_tensor_name("g"));
+    auto b =
+        make_orthonormal_basis(ctx, space_2d(), {u, v}, make_tensor_name("g"));
     EXPECT_EQ(b.vector_symbol().v.view(), "g");
     auto m = CountableIndex{ctx.alloc_index_id()};
     EXPECT_EQ(
@@ -572,6 +575,7 @@ TEST(SimplifyBasisDot, DifferentVectorSymbolUnchanged)
     Context ctx;
     auto e_basis = wcs_basis(ctx); // symbol "e"
     auto g_basis = make_orthonormal_basis(
+        ctx,
         space_3d(),
         {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")},
         make_tensor_name("g"));
@@ -637,6 +641,47 @@ TEST(SimplifyBasisCross, ObliqueCarriesVolumeAndContravariantVector)
     auto const& evec = std::get<TensorObject>(inner->right->node);
     EXPECT_EQ(evec.name.v.view(), "e");
     EXPECT_EQ(evec.slots[0].slot.level, Level::Upper);
+}
+
+TEST(SimplifyBasisCross, OrthonormalVolumeIsPlusOne)
+{
+    // A right-handed orthonormal basis has √g = +1 (the scalar literal 1).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* vol = b.volume();
+    ASSERT_NE(vol, nullptr);
+    auto const* s = std::get_if<ScalarLiteral>(&vol->node);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->value, Rational{1});
+}
+
+TEST(SimplifyBasisCross, LeftHandedFlipsSign)
+{
+    // A left-handed orthonormal basis: √g = -1, so e_i × e_j = -ε_{ijk} e_k.
+    Context ctx;
+    auto b = make_orthonormal_basis(
+        ctx,
+        space_3d(),
+        {vec(ctx, "i"), vec(ctx, "j"), vec(ctx, "k")},
+        make_tensor_name("e"),
+        Handedness::Left);
+    auto const* vol = b.volume();
+    auto const* s = std::get_if<ScalarLiteral>(&vol->node);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->value, Rational{-1});
+
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* res = simplify_basis_cross(
+        ctx,
+        make_cross(ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j)),
+        b);
+    // The -1 volume rides along as the leading factor: -1 ⊗ (ε ⊗ e_k).
+    auto const* tp = std::get_if<TensorProduct>(&res->node);
+    ASSERT_NE(tp, nullptr);
+    auto const* lead = std::get_if<ScalarLiteral>(&tp->left->node);
+    ASSERT_NE(lead, nullptr);
+    EXPECT_EQ(lead->value, Rational{-1});
 }
 
 TEST(SimplifyBasisCross, NonBasisCrossUnchanged)
@@ -733,6 +778,7 @@ TEST(Reassemble, ForeignBasisUnchanged)
     Context ctx;
     auto e_basis = wcs_basis(ctx);
     auto g_basis = make_orthonormal_basis(
+        ctx,
         space_3d(),
         {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")},
         make_tensor_name("g"));

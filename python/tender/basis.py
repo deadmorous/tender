@@ -33,6 +33,7 @@ from tender._core import basis as _b
 
 Basis = _b.Basis
 Variance = _b.Variance
+Handedness = _b.Handedness
 make_orthonormal_basis = _b.make_orthonormal_basis
 make_oblique_basis = _b.make_oblique_basis
 wcs = _b.wcs
@@ -47,6 +48,7 @@ reassemble = _b.reassemble
 __all__ = [
     "Basis",
     "Variance",
+    "Handedness",
     "make_orthonormal_basis",
     "make_oblique_basis",
     "wcs",
