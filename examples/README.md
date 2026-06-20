@@ -60,6 +60,7 @@ MathJax.
 |---|---|
 | `kronecker_delta.py` / `.ipynb` | Kronecker delta δ^i_j in 3D oblique space — renders to LaTeX |
 | `basis_dot_product.py` / `.ipynb` | Dot product through a basis: deriving a·b = b·a from first principles |
+| `cross_identity.py` / `.ipynb` | Cross with the identity tensor: deriving the theorem a × I = I × a |
 
 ## Notebook hygiene — stripping outputs before committing
 
