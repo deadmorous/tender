@@ -1,8 +1,11 @@
 #include <tender/basis.hpp>
 
+#include <tender/rewrite.hpp>
+
 #include <stdexcept>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace tender
 {
@@ -101,6 +104,63 @@ auto make_orthonormal_basis(
         make_tensor_name(vector_symbol),
         std::move(vectors),
         std::move(covectors)};
+}
+
+namespace
+{
+
+// A generic invariant tensor worth expanding: slot-less, rank >= 1, and not a
+// well-known tensor (whose coordinates are special, e.g. I -> δ).
+auto is_expandable_invariant(TensorObject const& t) -> bool
+{
+    return t.slots.empty() && t.rank && *t.rank >= 1
+           && !(t.traits && t.traits->well_known);
+}
+
+} // namespace
+
+auto expand_in_basis(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    Variance variance) -> Expr const*
+{
+    bool const ortho = basis.is_orthonormal();
+    // Coordinate index level, chosen so the shared index Einstein-contracts
+    // against the basis vector: orthonormal pairs two lower indices; oblique
+    // pairs one upper with one lower.
+    Level const coord_level = variance == Variance::Covariant ?
+                                  (ortho ? Level::Lower : Level::Upper) :
+                                  Level::Lower;
+
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&node->node);
+            if (!t || !is_expandable_invariant(*t))
+                return node;
+
+            int const r = *t->rank;
+            std::vector<SlotBinding> coord_slots;
+            coord_slots.reserve(static_cast<std::size_t>(r));
+            Expr const* polyad = nullptr;
+            for (int k = 0; k < r; ++k)
+            {
+                CountableIndex const idx{c.alloc_index_id()};
+                coord_slots.push_back(SlotBinding{
+                    IndexSlot{coord_level, basis.realm(), basis.space()},
+                    IndexAssoc{idx}});
+                Expr const* const vec = variance == Variance::Covariant ?
+                                            basis.covariant_vector(c, idx) :
+                                            basis.contravariant_vector(c, idx);
+                polyad = polyad ? make_tensor_product(c, polyad, vec) : vec;
+            }
+            Expr const* const coord =
+                make_tensor_object(c, t->name, std::move(coord_slots), 0);
+            return make_tensor_product(c, coord, polyad);
+        });
 }
 
 } // namespace tender

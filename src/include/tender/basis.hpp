@@ -105,4 +105,30 @@ private:
     std::vector<Expr const*> vectors,
     std::string_view vector_symbol = "e") -> Basis;
 
+// ---- basis-parameterized steps -----------------------------------------
+
+// Which homogeneous polyad an expansion uses (vibe 000049 §3).
+//   Covariant     — covariant basis vectors e_i, coordinates A^{i…}
+//   Contravariant — contravariant cobasis vectors e^i, coordinates A_{i…}
+// For an orthonormal basis the two coincide.
+enum class Variance
+{
+    Covariant,
+    Contravariant
+};
+
+// Expand every generic invariant tensor in e into its coordinate form in the
+// given basis: a slot-less rank-r TensorObject A becomes A^{i…} ⊗ (e_i ⊗ …)
+// (covariant) or A_{i…} ⊗ (e^i ⊗ …) (contravariant), the r indices left
+// implicitly Einstein-summed (canonicalize materializes the sums).
+//
+// Walks the whole tree (so operands of products expand in place).  Well-known
+// tensors (Identity / Delta / Levi-Civita), whose coordinates are not generic,
+// and already-indexed objects are left unchanged.
+[[nodiscard]] auto expand_in_basis(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    Variance variance) -> Expr const*;
+
 } // namespace tender

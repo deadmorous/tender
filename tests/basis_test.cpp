@@ -1,10 +1,12 @@
 #include <tender/basis.hpp>
+#include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/index_space.hpp>
 
 #include <gtest/gtest.h>
 
 #include <stdexcept>
+#include <variant>
 
 using namespace tender;
 
@@ -15,6 +17,18 @@ namespace
 auto vec(Context& ctx, char const* name) -> Expr const*
 {
     return make_tensor_object(ctx, make_tensor_name(name), {}, 1);
+}
+
+// A standard 3D orthonormal basis i, j, k.
+auto wcs_basis(Context& ctx) -> Basis
+{
+    return make_orthonormal_basis(
+        space_3d(), {vec(ctx, "i"), vec(ctx, "j"), vec(ctx, "k")});
+}
+
+auto idx_of(SlotBinding const& sb) -> int
+{
+    return std::get<CountableIndex>(*sb.index).id;
 }
 
 } // namespace
@@ -166,4 +180,114 @@ TEST(Basis, CustomVectorSymbol)
     EXPECT_EQ(
         std::get<TensorObject>(b.covariant_vector(ctx, m)->node).name.v.view(),
         "g");
+}
+
+// ---- expand_in_basis ---------------------------------------------------
+
+TEST(ExpandInBasis, VectorCovariant)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+
+    auto const* ex = expand_in_basis(ctx, a, b, Variance::Covariant);
+    auto const* tp = std::get_if<TensorProduct>(&ex->node);
+    ASSERT_NE(tp, nullptr);
+
+    auto const& coord = std::get<TensorObject>(tp->left->node);
+    auto const& evec = std::get<TensorObject>(tp->right->node);
+    // coordinate a_i: rank 0, one lower slot.
+    EXPECT_EQ(coord.name.v.view(), "a");
+    EXPECT_EQ(coord.rank, std::optional<int>{0});
+    ASSERT_EQ(coord.slots.size(), 1u);
+    EXPECT_EQ(coord.slots[0].slot.level, Level::Lower);
+    // basis vector e_i: rank 1, one lower slot, generic symbol.
+    EXPECT_EQ(evec.name.v.view(), "e");
+    EXPECT_EQ(evec.rank, std::optional<int>{1});
+    ASSERT_EQ(evec.slots.size(), 1u);
+    EXPECT_EQ(evec.slots[0].slot.level, Level::Lower);
+    // The shared Einstein index.
+    EXPECT_EQ(idx_of(coord.slots[0]), idx_of(evec.slots[0]));
+}
+
+TEST(ExpandInBasis, CanonicalizesToImplicitSum)
+{
+    // The repeated index makes the expansion an implicit Einstein sum, which
+    // canonicalize materializes into an ExplicitSum.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+
+    auto const* ex = expand_in_basis(ctx, a, b, Variance::Covariant);
+    auto const* canon = steps::canonicalize(ctx, ex);
+    EXPECT_TRUE(std::holds_alternative<ExplicitSum>(canon->node));
+}
+
+TEST(ExpandInBasis, Rank2)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+
+    auto const* ex = expand_in_basis(ctx, A, b, Variance::Covariant);
+    auto const* tp = std::get_if<TensorProduct>(&ex->node);
+    ASSERT_NE(tp, nullptr);
+    // coordinate A_{ij}: rank 0, two slots.
+    auto const& coord = std::get<TensorObject>(tp->left->node);
+    ASSERT_EQ(coord.slots.size(), 2u);
+    // polyad e_i ⊗ e_j.
+    auto const* poly = std::get_if<TensorProduct>(&tp->right->node);
+    ASSERT_NE(poly, nullptr);
+    auto const& ei = std::get<TensorObject>(poly->left->node);
+    auto const& ej = std::get<TensorObject>(poly->right->node);
+    // Indices pair up positionally: coord slot k shares with polyad vector k.
+    EXPECT_EQ(idx_of(coord.slots[0]), idx_of(ei.slots[0]));
+    EXPECT_EQ(idx_of(coord.slots[1]), idx_of(ej.slots[0]));
+    EXPECT_NE(idx_of(coord.slots[0]), idx_of(coord.slots[1]));
+}
+
+TEST(ExpandInBasis, RecursesIntoDotWithDistinctIndices)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+
+    auto const* ex =
+        expand_in_basis(ctx, make_dot(ctx, a, c), b, Variance::Covariant);
+    auto const* dot = std::get_if<Dot>(&ex->node);
+    ASSERT_NE(dot, nullptr);
+    auto const* lhs = std::get_if<TensorProduct>(&dot->left->node);
+    auto const* rhs = std::get_if<TensorProduct>(&dot->right->node);
+    ASSERT_NE(lhs, nullptr);
+    ASSERT_NE(rhs, nullptr);
+    // a and c expand with independent dummy indices, so they do not contract.
+    auto const& acoord = std::get<TensorObject>(lhs->left->node);
+    auto const& ccoord = std::get<TensorObject>(rhs->left->node);
+    EXPECT_NE(idx_of(acoord.slots[0]), idx_of(ccoord.slots[0]));
+}
+
+TEST(ExpandInBasis, LeavesWellKnownUnchanged)
+{
+    // The identity's coordinates are δ, not generic — it must be left alone.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* I = make_identity(ctx);
+    EXPECT_EQ(expand_in_basis(ctx, I, b, Variance::Covariant), I);
+}
+
+TEST(ExpandInBasis, LeavesIndexedCoordinateUnchanged)
+{
+    // An already-indexed object (non-empty slots) is not an invariant.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto const* a_i = make_tensor_object(
+        ctx,
+        make_tensor_name("a"),
+        {SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexAssoc{m}}},
+        0);
+    EXPECT_EQ(expand_in_basis(ctx, a_i, b, Variance::Covariant), a_i);
 }
