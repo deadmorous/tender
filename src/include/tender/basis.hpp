@@ -117,13 +117,28 @@ enum class Variance
 };
 
 // Expand every generic invariant tensor in e into its coordinate form in the
-// given basis: a slot-less rank-r TensorObject A becomes A^{i…} ⊗ (e_i ⊗ …)
-// (covariant) or A_{i…} ⊗ (e^i ⊗ …) (contravariant), the r indices left
-// implicitly Einstein-summed (canonicalize materializes the sums).
+// given basis: a slot-less rank-r TensorObject A becomes a coordinate ⊗ polyad,
+// with each slot's variance chosen independently — covariant slots use e_i and
+// an A^{…i…} coordinate index, contravariant slots use e^i and an A_{…i…}
+// index. The r indices are left implicitly Einstein-summed (canonicalize
+// materializes the sums).  Mixed variance gives e.g. A^i{}_j e_i e^j (vibe
+// 000049 §3).
+//
+// `variances` holds one Variance per slot; a single entry broadcasts to every
+// slot of every expanded tensor, otherwise the count must equal the tensor's
+// rank exactly (else std::invalid_argument — no silent misapplication).  For an
+// orthonormal basis the two variances coincide, so the choice has no effect.
 //
 // Walks the whole tree (so operands of products expand in place).  Well-known
 // tensors (Identity / Delta / Levi-Civita), whose coordinates are not generic,
 // and already-indexed objects are left unchanged.
+[[nodiscard]] auto expand_in_basis(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    std::vector<Variance> variances) -> Expr const*;
+
+// Convenience overload: one variance applied to every slot.
 [[nodiscard]] auto expand_in_basis(
     Context& ctx,
     Expr const* e,

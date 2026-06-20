@@ -292,6 +292,78 @@ TEST(ExpandInBasis, LeavesIndexedCoordinateUnchanged)
     EXPECT_EQ(expand_in_basis(ctx, a_i, b, Variance::Covariant), a_i);
 }
 
+TEST(ExpandInBasis, PerSlotVarianceList)
+{
+    // Mixed variance A^i{}_j: covariant slot 0, contravariant slot 1.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* ex = expand_in_basis(
+        ctx,
+        A,
+        b,
+        std::vector<Variance>{Variance::Covariant, Variance::Contravariant});
+    auto const* tp = std::get_if<TensorProduct>(&ex->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(std::get<TensorObject>(tp->left->node).slots.size(), 2u);
+    EXPECT_TRUE(std::holds_alternative<TensorProduct>(tp->right->node));
+}
+
+TEST(ExpandInBasis, MixedVarianceRoundTrips)
+{
+    // reassemble matches basis vectors by symbol, not variance, so a mixed
+    // expansion still folds back to the invariant.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* ex = steps::canonicalize(
+        ctx,
+        expand_in_basis(
+            ctx,
+            A,
+            b,
+            std::vector<Variance>{
+                Variance::Covariant, Variance::Contravariant}));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, ex, b), A));
+}
+
+TEST(ExpandInBasis, SingleVarianceBroadcastsToRank2)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* ex =
+        expand_in_basis(ctx, A, b, std::vector<Variance>{Variance::Covariant});
+    auto const* tp = std::get_if<TensorProduct>(&ex->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(std::get<TensorObject>(tp->left->node).slots.size(), 2u);
+}
+
+TEST(ExpandInBasis, VarianceCountMismatchThrows)
+{
+    // A rank-1 tensor cannot take a length-2 variance pattern.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    EXPECT_THROW(
+        (void)expand_in_basis(
+            ctx,
+            a,
+            b,
+            std::vector<Variance>{Variance::Covariant, Variance::Contravariant}),
+        std::invalid_argument);
+}
+
+TEST(ExpandInBasis, EmptyVarianceThrows)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    EXPECT_THROW(
+        (void)expand_in_basis(ctx, a, b, std::vector<Variance>{}),
+        std::invalid_argument);
+}
+
 // ---- simplify_basis_dot ------------------------------------------------
 
 TEST(SimplifyBasisDot, BasisVectorPairBecomesDelta)

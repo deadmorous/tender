@@ -789,6 +789,23 @@ NB_MODULE(_core, m)
         "basis (A -> A^{i...} (e_i ...)).");
 
     mb.def(
+        "expand_in_basis",
+        [](PyExpr const& e,
+           PyBasis const& b,
+           std::vector<Variance> variances) -> PyExpr
+        {
+            return derive(
+                e,
+                expand_in_basis(*e.ctx, e.expr, b.basis, std::move(variances)));
+        },
+        "expr"_a,
+        "basis"_a,
+        "variances"_a,
+        "Expand with a per-slot variance list (one Variance per slot; a single "
+        "entry broadcasts to every slot, otherwise the count must equal the "
+        "tensor rank). Enables mixed coordinates like A^i_j.");
+
+    mb.def(
         "simplify_basis_dot",
         [](PyExpr const& e, PyBasis const& b) -> PyExpr
         { return derive(e, simplify_basis_dot(*e.ctx, e.expr, b.basis)); },

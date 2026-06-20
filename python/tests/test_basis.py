@@ -111,6 +111,27 @@ class TestBasisSteps:
         x = tender.tensor("x", rank=1, ctx=ctx)
         assert td.structural_eq(tb.reassemble(x, b), x)
 
+    def test_per_slot_variance_round_trip(self):
+        # Mixed variance A^i_j: a list of Variance, one per slot.
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        A = tender.tensor("A", rank=2, ctx=ctx)
+        expanded = td.canonicalize(
+            tb.expand_in_basis(
+                A, b, [tb.Variance.Covariant, tb.Variance.Contravariant]
+            )
+        )
+        assert td.structural_eq(tb.reassemble(expanded, b), A)
+
+    def test_variance_count_mismatch_raises(self):
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        with pytest.raises(Exception):
+            tb.expand_in_basis(
+                a, b, [tb.Variance.Covariant, tb.Variance.Contravariant]
+            )
+
     def test_dot_product_commutes(self):
         ctx = tender.Context()
         b = tb.wcs(ctx)

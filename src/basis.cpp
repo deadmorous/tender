@@ -120,21 +120,30 @@ auto is_expandable_invariant(TensorObject const& t) -> bool
            && !(t.traits && t.traits->well_known);
 }
 
+// Coordinate index level for one slot, chosen so the shared index
+// Einstein-contracts against its basis vector: orthonormal pairs two lower
+// indices; oblique pairs one upper coordinate with one lower (covariant) basis
+// vector, or one lower coordinate with one upper (contravariant) cobasis
+// vector.
+auto coord_level_for(Variance v, bool ortho) -> Level
+{
+    if (ortho)
+        return Level::Lower;
+    return v == Variance::Covariant ? Level::Upper : Level::Lower;
+}
+
 } // namespace
 
 auto expand_in_basis(
     Context& ctx,
     Expr const* e,
     Basis const& basis,
-    Variance variance) -> Expr const*
+    std::vector<Variance> variances) -> Expr const*
 {
+    if (variances.empty())
+        throw std::invalid_argument(
+            "expand_in_basis: at least one variance is required");
     bool const ortho = basis.is_orthonormal();
-    // Coordinate index level, chosen so the shared index Einstein-contracts
-    // against the basis vector: orthonormal pairs two lower indices; oblique
-    // pairs one upper with one lower.
-    Level const coord_level = variance == Variance::Covariant ?
-                                  (ortho ? Level::Lower : Level::Upper) :
-                                  Level::Lower;
 
     return rewrite_tree(
         ctx,
@@ -146,16 +155,32 @@ auto expand_in_basis(
                 return node;
 
             int const r = *t->rank;
+            // One variance broadcasts to every slot; otherwise the count must
+            // match the tensor rank exactly (no silent misapplication).
+            if (variances.size() != 1
+                && variances.size() != static_cast<std::size_t>(r))
+                throw std::invalid_argument(
+                    "expand_in_basis: variance count must be 1 or the tensor "
+                    "rank");
+            auto const slot_variance = [&](int k) -> Variance
+            {
+                return variances.size() == 1 ?
+                           variances[0] :
+                           variances[static_cast<std::size_t>(k)];
+            };
+
             std::vector<SlotBinding> coord_slots;
             coord_slots.reserve(static_cast<std::size_t>(r));
             Expr const* polyad = nullptr;
             for (int k = 0; k < r; ++k)
             {
+                Variance const v = slot_variance(k);
                 CountableIndex const idx{c.alloc_index_id()};
                 coord_slots.push_back(SlotBinding{
-                    IndexSlot{coord_level, basis.realm(), basis.space()},
+                    IndexSlot{
+                        coord_level_for(v, ortho), basis.realm(), basis.space()},
                     IndexAssoc{idx}});
-                Expr const* const vec = variance == Variance::Covariant ?
+                Expr const* const vec = v == Variance::Covariant ?
                                             basis.covariant_vector(c, idx) :
                                             basis.contravariant_vector(c, idx);
                 polyad = polyad ? make_tensor_product(c, polyad, vec) : vec;
@@ -164,6 +189,15 @@ auto expand_in_basis(
                 make_tensor_object(c, t->name, std::move(coord_slots), 0);
             return make_tensor_product(c, coord, polyad);
         });
+}
+
+auto expand_in_basis(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    Variance variance) -> Expr const*
+{
+    return expand_in_basis(ctx, e, basis, std::vector<Variance>{variance});
 }
 
 namespace

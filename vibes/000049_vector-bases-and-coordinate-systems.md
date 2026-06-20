@@ -262,6 +262,21 @@ path rather than a symbolic δ-substitution, which remains the parametric-RHS
 gap (vibes 000033/000040). ~30 C++ tests across `basis_test`,
 `coord_system_test`, `basis_feasibility_test`; full suite 443 green.
 
-Still deferred (unchanged): oblique flavor + metric/√g + ε-tensor-vs-symbol;
-mixed-variance polyads; symbolic δ-substitution; Python bindings for the basis
-layer; Stage 5 (position-dependent frames, Christoffel, covariant derivative).
+Still deferred: oblique flavor + metric/√g + ε-tensor-vs-symbol; symbolic
+δ-substitution; Stage 5 (position-dependent frames, Christoffel, covariant
+derivative).
+
+### Follow-ups landed after the initial slices
+
+- **Python bindings** (`tender.basis`): `Basis`, the coordinate systems, the
+  `Variance` enum, and the three steps, mirroring `tender.derivation`; plus the
+  `basis_dot_product.{py,ipynb}` example (a·b = b·a).
+- **Per-slot variance.** `expand_in_basis` takes a `std::vector<Variance>` (one
+  per slot) so a rank-≥2 tensor can get **mixed** coordinates `A^i{}_j e_i e^j`,
+  not only all-co/all-contra; a single-element list broadcasts to any rank
+  (preserving the uniform `Variance` convenience overload) and a length that is
+  neither 1 nor the tensor rank throws (no silent misapplication). Under an
+  orthonormal basis the two variances coincide, so the choice is observable only
+  once the oblique flavor lands — the API is now the right shape for it.
+  `reassemble` matches polyad vectors by symbol (not variance/level), so mixed
+  expansions still fold back.
