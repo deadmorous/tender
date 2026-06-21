@@ -294,3 +294,39 @@ def test_bac_cab():
     lhs = reduce_cross(a % (b % c))
     rhs = reduce_dot(b * (a @ c) - c * (a @ b))
     assert td.algebraic_eq(lhs, rhs)
+
+
+def test_cross_identity_cross():
+    # a × I × b = b ⊗ a − (a·b) I — the rank-2 cross identity.
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    I = tender.identity(ctx=ctx)
+
+    def reduce_cross(e):
+        e = tb.expand_in_basis(e, frame, tb.Variance.Covariant)
+        e = tb.simplify_basis_cross(e, frame)
+        e = td.canonicalize(e)
+        e = td.contract_eps_pair(e)
+        e = td.expand_products(e)
+        e = td.canonicalize(e)
+        e = td.unroll_sums(e)
+        e = td.eval_delta_concrete(e)
+        e = td.fold_arithmetic(e)
+        return td.canonicalize(e)
+
+    def reduce_dot(e):
+        e = tb.expand_in_basis(e, frame, tb.Variance.Covariant)
+        e = tb.simplify_basis_dot(e, frame)
+        e = td.canonicalize(e)
+        e = td.unroll_sums(e)
+        e = td.eval_delta_concrete(e)
+        e = td.fold_arithmetic(e)
+        return td.canonicalize(e)
+
+    lhs = reduce_cross((a % I) % b)
+    rhs = reduce_dot(b * a - (a @ b) * I)
+    assert td.algebraic_eq(lhs, rhs)
+    # Not the transpose.
+    assert not td.algebraic_eq(lhs, reduce_dot(a * b - (a @ b) * I))

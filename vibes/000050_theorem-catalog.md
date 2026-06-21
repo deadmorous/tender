@@ -21,7 +21,7 @@ can currently take it.
 |---|---------|-----------|--------|---------------|
 | 1 | cross-with-identity commutes | `a × I = I × a` | ✅ Proven | — |
 | 2 | bac-cab | `a × (b × c) = b (a·c) − c (a·b)` | ✅ Proven | — |
-| 3 | cross-identity-cross | `a × I × b = b ⊗ a − (a·b) I` | 🟠 Blocked by bug | a rank-2 transpose bug in the cross pipeline (see below) |
+| 3 | cross-identity-cross | `a × I × b = b ⊗ a − (a·b) I` | ✅ Proven | — |
 | 4 | identity has no axial vector | `vec(I) = 0` | ✅ Proven | — |
 | 5 | trace of the identity | `tr(I) = n` (`= 3` in 3D) | ✅ Proven | — |
 
@@ -79,19 +79,30 @@ two ε's among the other factors, contracts over the indices **shared by both
 ε's** (not all peeled sums), and re-attaches the others — and peels a leading
 `Negate`.  Backward-compatible with the bare `ε ⊗ ε` `eps_delta_*` cases.
 
-### 3. cross-identity-cross `a × I × b = b ⊗ a − (a·b) I` — 🟠 Blocked by a bug
+### 3. cross-identity-cross `a × I × b = b ⊗ a − (a·b) I` — ✅ Proven
 
-Same shape as bac-cab, and the ε-pair machinery now fires — but the engine
-reduces `(a × I) × b` to `a ⊗ b − (a·b) I`, the **transpose** of the correct
-`b ⊗ a − (a·b) I` (verified by hand and by a concrete `a = e₁, b = e₂` check:
-the answer is `e₂ ⊗ e₁ = b ⊗ a`).  bac-cab is rank-1 so it cannot expose this;
-`a × I × b` is rank-2 and does.  The reduction of the engine's *own* intermediate
-form `Σ −ε_{mlj} ε_{mki} a_l b_k e_j⊗e_i` works out to `b ⊗ a` by hand, so the
-δ-symmetric `build_kronecker_det` is not the obvious culprit — the transpose is
-somewhere in the rank-2 cross/contract path (a wrong free-slot↔dyad-leg
-association, or a leg choice in the cross-with-dyad distribution).  **A genuine
-bug to hunt**, not a missing feature.  Until fixed, `a × I × b` (and any rank-2
-cross identity) cannot be trusted.
+Same shape as bac-cab, but rank 2 — and proving it flushed out a real transpose
+bug in `contract_eps_pair`.  The pipeline (expand in WCS → `simplify_basis_cross`
+→ `canonicalize`) produces the *correct* intermediate
+`Σ −ε_{mlj} ε_{mki} a_l b_k e_j⊗e_i`; the ε-pair contracts over `m` into the
+generalized Kronecker δ-form, and the concrete-unroll path closes the δ's — same
+recipe as bac-cab.  Test: `BasisFeasibility.CrossIdentityCross` (C++, with a guard
+that the result is *not* the transpose `a ⊗ b − (a·b) I`); Python:
+`test_cross_identity_cross`.
+
+**The bug (fixed):** after contracting the ε-pair, `try_contract_eps_pair`
+re-attached the surviving non-ε factors (`others`) with a forward `for (o:
+others) result = o ⊗ result;` loop.  Prepending in forward order **reverses** the
+sequence, which is harmless for the commuting coordinates but **swaps the two
+non-commuting basis vectors** of the dyad — transposing the result.  bac-cab has
+a single free basis vector (rank 1), so the swap was invisible; `a × I × b` has
+two (rank 2) and exposed it.  Fix: re-attach in reverse (`others.rbegin()..rend()`)
+so the original left-to-right order — left leg before right leg — is preserved.
+One line, in `src/derivation.cpp`.
+
+The lesson for future rank-≥2 work: any step that flattens a polyad and rebuilds
+it must preserve the order of the non-commuting (basis/dyad-leg) factors; a
+"prepend in a loop" is a reversal in disguise.
 
 ## Capabilities now in place
 
@@ -106,9 +117,7 @@ cross identity) cannot be trusted.
 
 ## Next
 
-1. **Fix the rank-2 cross transpose bug** (theorem #3) — the one thing standing
-   between the engine and trustworthy rank-2 cross identities.
-2. Then add theorems as the infrastructure grows; each proven one gets a test
-   and, where instructive, a maintained example.  Candidates: Binet–Cauchy, the
+1. Add theorems as the infrastructure grows; each proven one gets a test and,
+   where instructive, a maintained example.  Candidates: Binet–Cauchy, the
    scalar/vector triple-product identities, symmetric/antisymmetric
    decompositions, and the differential-operator theorems of Stage 5.

@@ -2951,10 +2951,13 @@ auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
             det :
             make_tensor_product(ctx, make_scalar(ctx, Rational{fact}), det);
 
-    // Re-attach the other (non-ε) factors of the product.
+    // Re-attach the other (non-ε) factors of the product, preserving their
+    // original left-to-right order.  This matters for the non-commuting basis
+    // vectors of a dyad: prepending in forward order would reverse them and
+    // transpose the result (invisible at rank 1, wrong at rank ≥ 2).
     Expr const* result = core;
-    for (auto const* o: others)
-        result = make_tensor_product(ctx, o, result);
+    for (auto it = others.rbegin(); it != others.rend(); ++it)
+        result = make_tensor_product(ctx, *it, result);
     if (sign < 0)
         result = make_negate(ctx, result);
     if (negated)
