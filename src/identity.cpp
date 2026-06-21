@@ -359,7 +359,10 @@ auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
             return node;
         });
 
-    return done ? steps::canonicalize(ctx, rewritten) : target;
+    // On a match the rewritten tree is returned in canonical form; with no
+    // match the original input is returned untouched (a true no-op — matching
+    // canonicalizes internally, but that must not leak when nothing fired).
+    return done ? steps::canonicalize(ctx, rewritten) : e;
 }
 
 namespace steps

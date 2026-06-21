@@ -292,7 +292,12 @@ NB_MODULE(_core, m)
                 auto s = py_to_scalar(b, *a.ctx);
                 return derive(a, make_scalar_div(*a.ctx, a.expr, s));
             })
-        // double-contraction (no natural operator)
+        // // = alternate double contraction (··); ':' is not a Python operator,
+        // so ddot keeps the method form only.
+        .def(
+            "__floordiv__",
+            [](PyExpr const& a, PyExpr const& b) -> PyExpr
+            { return derive(a, make_ddot_alt(*a.ctx, a.expr, b.expr)); })
         .def(
             "ddot",
             [](PyExpr const& a, PyExpr const& b) -> PyExpr
@@ -304,7 +309,7 @@ NB_MODULE(_core, m)
             [](PyExpr const& a, PyExpr const& b) -> PyExpr
             { return derive(a, make_ddot_alt(*a.ctx, a.expr, b.expr)); },
             "other"_a,
-            "Alternate double contraction (·̣·).")
+            "Alternate double contraction (··); also the // operator.")
         // rendering
         .def(
             "_repr_latex_",
