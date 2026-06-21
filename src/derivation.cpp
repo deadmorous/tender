@@ -1716,6 +1716,98 @@ auto implicitize(Context& ctx, Expr const* e) -> Expr const*
         });
 }
 
+// If `operand` is a null-bound ExplicitSum, return a fresh binder and the body
+// renamed to it (so floating the binder up cannot capture a free index in a
+// sibling operand).  nullopt otherwise.
+auto as_floatable_sum(Context& ctx, Expr const* operand)
+    -> std::optional<std::pair<CountableIndex, Expr const*>>
+{
+    auto const* s = std::get_if<ExplicitSum>(&operand->node);
+    if (!s || s->bound)
+        return std::nullopt;
+    CountableIndex const fresh{ctx.alloc_index_id()};
+    return std::pair{
+        fresh, substitute_index_id(ctx, s->body, s->index.id, fresh.id)};
+}
+
+// Pull a null-bound ExplicitSum out of a *multilinear* operand position of
+// `node` to the head: op(Σ_i A, B) → Σ_i op(A, B), recursively, so a term ends
+// up as a stack of binders over a sum-free body (Fubini-ordered later by
+// canon).  The floatable positions are exactly those linear in the summed
+// operand — both legs of TensorProduct / Dot / DDot / DDotAlt / Cross, the
+// numerator of ScalarDiv, and the operand of Negate / Trace / VectorInvariant /
+// Transpose.  Sum/Difference operands and a ScalarDiv denominator are NOT
+// floatable (Σ would change meaning).
+auto pull_sums_up(Context& ctx, Expr const* node) -> Expr const*
+{
+    using Mk2 = Expr const* (*)(Context&, Expr const*, Expr const*);
+    using Mk1 = Expr const* (*)(Context&, Expr const*);
+
+    // Float from a binary op's left or right leg (both multilinear).
+    auto bin = [&](Expr const* l, Expr const* r, Mk2 mk) -> Expr const*
+    {
+        if (auto f = as_floatable_sum(ctx, l))
+            return make_explicit_sum(
+                ctx, f->first, pull_sums_up(ctx, mk(ctx, f->second, r)));
+        if (auto f = as_floatable_sum(ctx, r))
+            return make_explicit_sum(
+                ctx, f->first, pull_sums_up(ctx, mk(ctx, l, f->second)));
+        return node;
+    };
+    // Float from a unary op's operand.
+    auto un = [&](Expr const* x, Mk1 mk) -> Expr const*
+    {
+        if (auto f = as_floatable_sum(ctx, x))
+            return make_explicit_sum(
+                ctx, f->first, pull_sums_up(ctx, mk(ctx, f->second)));
+        return node;
+    };
+
+    return visit(
+        Overloads{
+            [&](TensorProduct const& p) -> Expr const*
+            { return bin(p.left, p.right, &make_tensor_product); },
+            [&](Dot const& p) -> Expr const*
+            { return bin(p.left, p.right, &make_dot); },
+            [&](DDot const& p) -> Expr const*
+            { return bin(p.left, p.right, &make_ddot); },
+            [&](DDotAlt const& p) -> Expr const*
+            { return bin(p.left, p.right, &make_ddot_alt); },
+            [&](Cross const& p) -> Expr const*
+            { return bin(p.left, p.right, &make_cross); },
+            // ScalarDiv: numerator only (the denominator is not linear in Σ).
+            [&](ScalarDiv const& d) -> Expr const*
+            {
+                if (auto f = as_floatable_sum(ctx, d.left))
+                    return make_explicit_sum(
+                        ctx,
+                        f->first,
+                        pull_sums_up(
+                            ctx, make_scalar_div(ctx, f->second, d.right)));
+                return node;
+            },
+            [&](Negate const& n) -> Expr const*
+            { return un(n.operand, &make_negate); },
+            [&](Trace const& u) -> Expr const*
+            { return un(u.operand, &make_trace); },
+            [&](VectorInvariant const& u) -> Expr const*
+            { return un(u.operand, &make_vector_invariant); },
+            [&](Transpose const& u) -> Expr const*
+            { return un(u.operand, &make_transpose); },
+            [&](auto const&) -> Expr const* { return node; },
+        },
+        *node);
+}
+
+// Float every null-bound ExplicitSum out of multilinear positions to the head
+// of its term (bottom-up, so an already-floated operand is itself a binder by
+// the time its parent is visited).
+auto float_sums(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx, e, [](Context& c, Expr const* n) { return pull_sums_up(c, n); });
+}
+
 } // namespace
 
 namespace steps
@@ -1723,7 +1815,7 @@ namespace steps
 
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
 {
-    return canon(ctx, materialize(ctx, e, {}), 0);
+    return canon(ctx, float_sums(ctx, materialize(ctx, e, {})), 0);
 }
 
 auto contract_identity(Context& ctx, Expr const* e) -> Expr const*

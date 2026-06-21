@@ -580,3 +580,50 @@ TEST(SubtreeVars, WellKnownStaysLiteral)
     EXPECT_TRUE(match(I, make_identity(ctx)).has_value());
     EXPECT_FALSE(match(I, A).has_value());
 }
+
+TEST(ApplyIdentity, SubtreeVarFiresUnderFloatedBinders)
+{
+    // The (a⊗b):(c⊗d) = (a·c)(b·d) identity fires on a target whose dyads carry
+    // summation binders, once they are floated to the head (part 1 + part 2).
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* d = v("d");
+    Identity id{
+        "ddot",
+        make_ddot(
+            ctx, make_tensor_product(ctx, a, b), make_tensor_product(ctx, c, d)),
+        make_tensor_product(ctx, make_dot(ctx, a, c), make_dot(ctx, b, d))};
+
+    auto slot = [&](CountableIndex x)
+    {
+        return SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexAssoc{x}};
+    };
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto evec = [&](CountableIndex x)
+    { return make_tensor_object(ctx, make_tensor_name("e"), {slot(x)}, 1); };
+    auto const* target = make_ddot(
+        ctx,
+        make_explicit_sum(ctx, i, make_tensor_product(ctx, evec(i), evec(i))),
+        make_explicit_sum(ctx, j, make_tensor_product(ctx, evec(j), evec(j))));
+
+    // After firing: Σ_i Σ_j (e_i·e_j)(e_i·e_j).  Build the same and compare.
+    auto const* result = apply_identity(ctx, target, id);
+    auto const* expected = make_explicit_sum(
+        ctx,
+        i,
+        make_explicit_sum(
+            ctx,
+            j,
+            make_tensor_product(
+                ctx,
+                make_dot(ctx, evec(i), evec(j)),
+                make_dot(ctx, evec(i), evec(j)))));
+    EXPECT_TRUE(algebraic_eq(ctx, result, expected));
+}

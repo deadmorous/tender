@@ -239,3 +239,24 @@ def test_vec_of_identity_is_zero():
     e = td.eval_eps_concrete(e)
     e = td.canonicalize(td.fold_arithmetic(e))
     assert td.algebraic_eq(e, tender.scalar(0, ctx=ctx))
+
+
+def test_user_ddot_identity_fires_on_basis_expansion():
+    # A hand-written dyad identity fires on the basis-expanded I:I via
+    # subtree variables + binder-to-top canonicalization (vibe 000051).
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    c = tender.tensor("c", rank=1, ctx=ctx)
+    d = tender.tensor("d", rank=1, ctx=ctx)
+    I = tender.identity(ctx=ctx)
+    expand_ddot = td.Identity("ddot", (a * b).ddot(c * d), (a @ c) * (b @ d))
+
+    y = tb.expand_in_basis(I.ddot(I), frame, tb.Variance.Covariant)
+    y = td.apply_identity(expand_ddot)(y)   # fires now
+    y = tb.simplify_basis_dot(y, frame)
+    y = td.contract_delta(y)
+    y = td.unroll_sums(y)
+    y = td.fold_arithmetic(td.eval_delta_concrete(y))
+    assert td.algebraic_eq(td.canonicalize(y), tender.scalar(3, ctx=ctx))

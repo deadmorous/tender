@@ -3243,3 +3243,29 @@ TEST(EvalEpsConcrete, SymbolicIndexUnchanged)
     EXPECT_EQ(steps::eval_eps_concrete(ctx, eps), eps); // a symbolic slot
                                                         // remains
 }
+
+// ---- binder-to-top canonicalization (vibe 000051 part 2) -------------------
+
+TEST(Canonicalize, FloatsSumsToHeadOfTerm)
+{
+    // op(Σ_i A_i, Σ_j B_j) canonicalizes with the binders at the head, so the
+    // top node is an ExplicitSum (not the contraction).
+    Context ctx;
+    auto slot = [&](CountableIndex x)
+    {
+        return SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexAssoc{x}};
+    };
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto evec = [&](CountableIndex x)
+    { return make_tensor_object(ctx, make_tensor_name("e"), {slot(x)}, 1); };
+    // (Σ_i e_i⊗e_i) : (Σ_j e_j⊗e_j)
+    auto const* lhs =
+        make_explicit_sum(ctx, i, make_tensor_product(ctx, evec(i), evec(i)));
+    auto const* rhs =
+        make_explicit_sum(ctx, j, make_tensor_product(ctx, evec(j), evec(j)));
+    auto const* canon = steps::canonicalize(ctx, make_ddot(ctx, lhs, rhs));
+    EXPECT_TRUE(std::holds_alternative<ExplicitSum>(canon->node));
+}
