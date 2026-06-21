@@ -3198,3 +3198,48 @@ TEST(UnrollSums, NoSumIsNoOp)
         IndexAssoc{j});
     EXPECT_EQ(steps::unroll_sums(ctx, d), d);
 }
+
+// ---- eval_eps_concrete -----------------------------------------------------
+
+TEST(EvalEpsConcrete, SignAndZero)
+{
+    Context ctx;
+    auto eps = [&](int a, int b, int c)
+    {
+        return make_levi_civita(
+            ctx,
+            Realm::Orthonormal,
+            space_3d(),
+            {Level::Lower, Level::Lower, Level::Lower},
+            {IndexAssoc{ConcreteIndex{a}},
+             IndexAssoc{ConcreteIndex{b}},
+             IndexAssoc{ConcreteIndex{c}}});
+    };
+    auto val = [&](Expr const* e)
+    {
+        return std::get<ScalarLiteral>(steps::eval_eps_concrete(ctx, e)->node)
+            .value;
+    };
+    EXPECT_EQ(val(eps(1, 2, 3)), Rational{1});  // even
+    EXPECT_EQ(val(eps(2, 3, 1)), Rational{1});  // even (cyclic)
+    EXPECT_EQ(val(eps(2, 1, 3)), Rational{-1}); // odd
+    EXPECT_EQ(val(eps(3, 2, 1)), Rational{-1}); // odd
+    EXPECT_EQ(val(eps(1, 1, 2)), Rational{0});  // repeat
+    EXPECT_EQ(val(eps(3, 3, 3)), Rational{0});  // repeat
+}
+
+TEST(EvalEpsConcrete, SymbolicIndexUnchanged)
+{
+    Context ctx;
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto const* eps = make_levi_civita(
+        ctx,
+        Realm::Orthonormal,
+        space_3d(),
+        {Level::Lower, Level::Lower, Level::Lower},
+        {IndexAssoc{ConcreteIndex{1}},
+         IndexAssoc{ConcreteIndex{2}},
+         IndexAssoc{k}});
+    EXPECT_EQ(steps::eval_eps_concrete(ctx, eps), eps); // a symbolic slot
+                                                        // remains
+}

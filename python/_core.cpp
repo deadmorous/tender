@@ -576,6 +576,14 @@ NB_MODULE(_core, m)
         "Evaluate delta(a,b) with concrete indices to 1 or 0.");
 
     md.def(
+        "_eval_eps_concrete",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::eval_eps_concrete(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Evaluate a Levi-Civita symbol with concrete indices to its sign "
+        "(+1/-1) or 0 on a repeat.");
+
+    md.def(
         "_fold_arithmetic",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::fold_arithmetic(*e.ctx, e.expr)); },

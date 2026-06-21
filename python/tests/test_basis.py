@@ -225,3 +225,17 @@ class TestBasisSteps:
             return td.fold_sums(td.canonicalize(expr))
 
         assert td.algebraic_eq(reduce(a @ c), reduce(c @ a))
+
+
+def test_vec_of_identity_is_zero():
+    # vec(I) = 0 through the basis: I = Σ e_i⊗e_i, vec → Σ e_i×e_i, each = 0.
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    e = tender.vec(tender.identity(ctx=ctx))
+    e = tb.expand_in_basis(e, frame, tb.Variance.Covariant)
+    e = td.expand_dyad_ops(e)
+    e = tb.simplify_basis_cross(e, frame)
+    e = td.unroll_sums(e)
+    e = td.eval_eps_concrete(e)
+    e = td.canonicalize(td.fold_arithmetic(e))
+    assert td.algebraic_eq(e, tender.scalar(0, ctx=ctx))

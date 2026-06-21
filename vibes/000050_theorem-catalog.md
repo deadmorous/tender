@@ -22,8 +22,11 @@ can currently take it.
 | 1 | cross-with-identity commutes | `a × I = I × a` | ✅ Proven | — |
 | 2 | bac-cab | `a × (b × c) = b (a·c) − c (a·b)` | 🟡 In reach | ε-pair contraction *inside a product* + δ-substitution |
 | 3 | cross-identity-cross | `a × I × b = b ⊗ a − (a·b) I` | 🟡 In reach | same as #2 |
+| 4 | identity has no axial vector | `vec(I) = 0` | ✅ Proven | — |
+| 5 | trace of the identity | `tr(I) = n` (`= 3` in 3D) | ✅ Proven | — |
 
-(`I` is the identity tensor; `×` cross, `⊗` tensor product, `·` dot.)
+(`I` is the identity tensor; `×` cross, `⊗` tensor product, `·` dot; `vec`/`tr`
+the vector invariant / trace.)
 
 ## Notes per theorem
 
@@ -39,6 +42,25 @@ contraction-over-⊗ distribution, ε's cyclic symmetry (already in
 (Fubini).  Test: `BasisFeasibility.CrossWithIdentityCommutes`; Python:
 `TestBasisSteps.test_cross_with_identity_commutes`.  Worked example:
 `examples/cross_identity.{py,ipynb}`.
+
+### 4. `vec(I) = 0` — ✅ Proven
+
+The vector invariant (axial vector) of a symmetric tensor vanishes; the identity
+is symmetric.  Through the basis `I = Σ_i e_i⊗e_i`, so `vec(I) = Σ_i e_i × e_i`,
+and each `e_i × e_i = 0` by the antisymmetry of the cross product.  Derivation:
+`expand_in_basis` → `expand_dyad_ops` (`vec(e_i⊗e_i) = e_i × e_i`) →
+`simplify_basis_cross` (`→ ε_{iik} e_k`) → `unroll_sums` →
+**`eval_eps_concrete`** (every term has a repeated index, so ε = 0) →
+`fold_arithmetic` → `0`.  `eval_eps_concrete` (the concrete Levi-Civita
+evaluator, sibling of `eval_delta_concrete`) was the missing piece.  Test:
+`BasisFeasibility.VectorInvariantOfIdentityIsZero`.
+
+### 5. `tr(I) = n` — ✅ Proven
+
+Through the basis, `tr(I) = Σ_i e_i·e_i = Σ_i δ_ii = n` (3 in 3D); reached by the
+same coordinate machinery (`expand_dyad_ops` `tr(e_i⊗e_i) = e_i·e_i`,
+`simplify_basis_dot`, `unroll_sums`, `eval_delta_concrete`, `fold_arithmetic`).
+The closely related `I:I = tr(I) = 3` runs through `expand_double_dot`.
 
 ### 2. bac-cab `a × (b × c) = b (a·c) − c (a·b)` — 🟡 In reach
 

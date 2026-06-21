@@ -26,6 +26,7 @@ __all__ = [
     "Derivation",
     "unroll_sums",
     "eval_delta_concrete",
+    "eval_eps_concrete",
     "fold_arithmetic",
     "expand_products",
     "expand_eps",
@@ -108,6 +109,15 @@ def unroll_sums(expr, *indices):
 def eval_delta_concrete(expr):
     """Replace ``δ(a, b)`` with concrete indices by ``1`` (a == b) or ``0`` (a != b)."""
     return _d._eval_delta_concrete(expr)
+
+
+def eval_eps_concrete(expr):
+    """Replace a Levi-Civita symbol with concrete indices by its value.
+
+    ``0`` on any repeated index, else the sign of the permutation (``+1`` even,
+    ``-1`` odd).  A symbol with any symbolic index is left unchanged.
+    """
+    return _d._eval_eps_concrete(expr)
 
 
 def fold_arithmetic(expr):

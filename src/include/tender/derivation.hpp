@@ -60,6 +60,12 @@ auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*;
 // ScalarLiteral(1) when a == b and ScalarLiteral(0) otherwise.
 auto eval_delta_concrete(Context& ctx, Expr const* e) -> Expr const*;
 
+// Replace a Levi-Civita symbol ε whose every slot carries a ConcreteIndex with
+// its permutation-symbol value: 0 on any repeated index, else the sign of the
+// permutation (+1 even, −1 odd).  A symbol with any symbolic index is left
+// unchanged.
+auto eval_eps_concrete(Context& ctx, Expr const* e) -> Expr const*;
+
 // Constant-fold arithmetic operations on ScalarLiteral nodes:
 //   Sum / Difference / TensorProduct / ScalarDiv / Negate
 // applied to scalar literals are reduced to a single ScalarLiteral.

@@ -2087,6 +2087,46 @@ auto eval_delta_concrete(Context& ctx, Expr const* e) -> Expr const*
         });
 }
 
+auto eval_eps_concrete(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&e->node);
+            if (!t || !t->traits
+                || t->traits->well_known != WellKnownKind::LeviCivita)
+                return e;
+
+            // Every slot must carry a concrete value to evaluate the symbol.
+            std::vector<int> vals;
+            vals.reserve(t->slots.size());
+            for (auto const& sb: t->slots)
+            {
+                if (!sb.index)
+                    return e;
+                auto const* c = std::get_if<ConcreteIndex>(&*sb.index);
+                if (!c)
+                    return e; // a symbolic index remains — cannot evaluate
+                vals.push_back(c->value);
+            }
+
+            // The permutation symbol: 0 on any repeated value, else the sign of
+            // the permutation (parity of the inversion count).
+            int sign = 1;
+            for (std::size_t i = 0; i < vals.size(); ++i)
+                for (std::size_t j = i + 1; j < vals.size(); ++j)
+                {
+                    if (vals[i] == vals[j])
+                        return make_scalar(ctx, Rational{0});
+                    if (vals[i] > vals[j])
+                        sign = -sign;
+                }
+            return make_scalar(ctx, Rational{sign});
+        });
+}
+
 auto fold_arithmetic(Context& ctx, Expr const* e) -> Expr const*
 {
     return rewrite_tree(

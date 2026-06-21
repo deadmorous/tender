@@ -688,3 +688,22 @@ def test_unary_op_ranks():
     assert tender.tr(A).rank == 0
     assert tender.vec(A).rank == 1
     assert tender.transpose(A).rank == 2
+
+
+# ---- eval_eps_concrete -----------------------------------------------------
+
+
+def test_eval_eps_concrete():
+    ctx = tender.Context()
+    sp = tender.space_3d
+    L = [tender.Level.Lower] * 3
+
+    def eps(a, b, c):
+        return tender.levi_civita(tender.Realm.Orthonormal, sp, L, [a, b, c], ctx=ctx)
+
+    one = tender.scalar(1, ctx=ctx)
+    assert td.algebraic_eq(td.eval_eps_concrete(eps(1, 2, 3)), one)
+    assert td.algebraic_eq(td.eval_eps_concrete(eps(2, 1, 3)), -one)
+    assert td.algebraic_eq(
+        td.eval_eps_concrete(eps(1, 1, 2)), tender.scalar(0, ctx=ctx)
+    )

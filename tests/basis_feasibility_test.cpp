@@ -236,3 +236,20 @@ TEST(BasisFeasibility, CrossWithIdentityCommutes)
     EXPECT_TRUE(algebraic_eq(
         ctx, reduce(make_cross(ctx, a, I)), reduce(make_cross(ctx, I, a))));
 }
+
+// vec(I) = 0: the vector invariant of the identity vanishes.  Through the
+// basis I = Σ e_i⊗e_i, so vec(I) = Σ e_i × e_i, and each e_i × e_i = 0 by the
+// antisymmetry of the cross product (ε with a repeated index).
+TEST(BasisFeasibility, VectorInvariantOfIdentityIsZero)
+{
+    Context ctx;
+    auto b = wcs(ctx);
+    auto const* e = make_vector_invariant(ctx, make_identity(ctx));
+    e = expand_in_basis(ctx, e, b, Variance::Covariant);
+    e = steps::expand_dyad_ops(ctx, e);
+    e = simplify_basis_cross(ctx, e, b);
+    e = steps::unroll_sums(ctx, e);
+    e = steps::eval_eps_concrete(ctx, e);
+    e = steps::canonicalize(ctx, steps::fold_arithmetic(ctx, e));
+    EXPECT_TRUE(algebraic_eq(ctx, e, make_scalar(ctx, Rational{0})));
+}
