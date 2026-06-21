@@ -93,6 +93,9 @@ static bool is_scalar_expr(Expr const& e)
             [](ScalarLiteral const&) { return true; },
             [](TensorObject const&) { return false; },
             [](Negate const& n) { return is_scalar_expr(*n.operand); },
+            [](Trace const&) { return false; },
+            [](VectorInvariant const&) { return false; },
+            [](Transpose const&) { return false; },
             [](Sum const& s)
             { return is_scalar_expr(*s.left) && is_scalar_expr(*s.right); },
             [](Difference const& d)
@@ -126,6 +129,10 @@ struct Renderer
                 [](ExplicitSum const&) { return ATOM_PREC; },
                 [](NoSum const&) { return ATOM_PREC; },
                 [](Negate const&) { return UNARY_PREC; },
+                // Function applications / postfix — self-delimiting, so atomic.
+                [](Trace const&) { return ATOM_PREC; },
+                [](VectorInvariant const&) { return ATOM_PREC; },
+                [](Transpose const&) { return ATOM_PREC; },
                 [](Sum const&) { return ADD_PREC; },
                 [](Difference const&) { return ADD_PREC; },
                 [](TensorProduct const&) { return TENSOR_PREC; },
@@ -336,6 +343,12 @@ struct Renderer
                     // "-a \, b" and "-a \times b" are unambiguous.
                     return "-" + sub(*n.operand, CONTRACT_PREC);
                 },
+                [&](Trace const& u) -> std::string
+                { return "\\operatorname{tr}(" + render(*u.operand) + ")"; },
+                [&](VectorInvariant const& u) -> std::string
+                { return "\\operatorname{vec}(" + render(*u.operand) + ")"; },
+                [&](Transpose const& u) -> std::string
+                { return sub(*u.operand, ATOM_PREC) + "^{\\mathsf{T}}"; },
                 [&](Sum const& s) -> std::string
                 {
                     // A sum whose right addend is negated renders as

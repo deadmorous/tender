@@ -45,6 +45,9 @@ auto find_index_space(Expr const* e, int id) -> IndexSpace const*
                 },
                 [&](ScalarLiteral const&) {},
                 [&](Negate const& n) { go(n.operand); },
+                [&](Trace const& u) { go(u.operand); },
+                [&](VectorInvariant const& u) { go(u.operand); },
+                [&](Transpose const& u) { go(u.operand); },
                 [&](Sum const& s)
                 {
                     go(s.left);
@@ -199,6 +202,9 @@ auto find_space_from_concrete(Expr const* e) -> IndexSpace const*
                 },
                 [&](ScalarLiteral const&) {},
                 [&](Negate const& n) { go(n.operand); },
+                [&](Trace const& u) { go(u.operand); },
+                [&](VectorInvariant const& u) { go(u.operand); },
+                [&](Transpose const& u) { go(u.operand); },
                 [&](Sum const& s)
                 {
                     go(s.left);
@@ -277,6 +283,9 @@ void collect_concrete_values(Expr const* e, std::vector<int>& out)
                 },
                 [&](ScalarLiteral const&) {},
                 [&](Negate const& n) { go(n.operand); },
+                [&](Trace const& u) { go(u.operand); },
+                [&](VectorInvariant const& u) { go(u.operand); },
+                [&](Transpose const& u) { go(u.operand); },
                 [&](Sum const& s)
                 {
                     go(s.left);
@@ -409,6 +418,21 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
             [&](Negate const& na) -> bool
             {
                 auto const* nb = std::get_if<Negate>(&b->node);
+                return nb && structural_eq(na.operand, nb->operand);
+            },
+            [&](Trace const& na) -> bool
+            {
+                auto const* nb = std::get_if<Trace>(&b->node);
+                return nb && structural_eq(na.operand, nb->operand);
+            },
+            [&](VectorInvariant const& na) -> bool
+            {
+                auto const* nb = std::get_if<VectorInvariant>(&b->node);
+                return nb && structural_eq(na.operand, nb->operand);
+            },
+            [&](Transpose const& na) -> bool
+            {
+                auto const* nb = std::get_if<Transpose>(&b->node);
                 return nb && structural_eq(na.operand, nb->operand);
             },
             [&](Sum const& sa) -> bool
@@ -609,6 +633,12 @@ auto has_free_index_for(
             [&](ScalarLiteral const&) -> bool { return false; },
             [&](Negate const& n) -> bool
             { return has_free_index_for(n.operand, indices, bound); },
+            [&](Trace const& u) -> bool
+            { return has_free_index_for(u.operand, indices, bound); },
+            [&](VectorInvariant const& u) -> bool
+            { return has_free_index_for(u.operand, indices, bound); },
+            [&](Transpose const& u) -> bool
+            { return has_free_index_for(u.operand, indices, bound); },
             [&](Sum const& s) -> bool
             {
                 return has_free_index_for(s.left, indices, bound)
@@ -779,6 +809,16 @@ auto expr_cmp(Expr const* a, Expr const* b) -> int
             },
             [&](Negate const& na) -> int
             { return expr_cmp(na.operand, std::get<Negate>(b->node).operand); },
+            [&](Trace const& na) -> int
+            { return expr_cmp(na.operand, std::get<Trace>(b->node).operand); },
+            [&](VectorInvariant const& na) -> int {
+                return expr_cmp(
+                    na.operand, std::get<VectorInvariant>(b->node).operand);
+            },
+            [&](Transpose const& na) -> int {
+                return expr_cmp(
+                    na.operand, std::get<Transpose>(b->node).operand);
+            },
             [&](Sum const& sa) -> int
             {
                 auto const& sb = std::get<Sum>(b->node);
@@ -873,6 +913,11 @@ auto is_component_valued(Expr const* e) -> bool
                 return true;          // fully indexed, rank unknown: coordinate
             },
             [](Negate const& n) { return is_component_valued(n.operand); },
+            // tr/vec/transpose are invariant tensor operations, not
+            // coordinates.
+            [](Trace const&) { return false; },
+            [](VectorInvariant const&) { return false; },
+            [](Transpose const&) { return false; },
             [](Sum const& s) {
                 return is_component_valued(s.left)
                        && is_component_valued(s.right);
@@ -919,6 +964,11 @@ auto infer_rank(Expr const* e) -> std::optional<int>
             [](ScalarLiteral const&) -> std::optional<int> { return 0; },
             [](Negate const& n) -> std::optional<int>
             { return infer_rank(n.operand); },
+            // tr(A) is a scalar; vec(A) is a vector; transpose keeps the rank.
+            [](Trace const&) -> std::optional<int> { return 0; },
+            [](VectorInvariant const&) -> std::optional<int> { return 1; },
+            [](Transpose const& u) -> std::optional<int>
+            { return infer_rank(u.operand); },
             // A sum keeps the shared rank of its operands; trust the known
             // side.
             [](Sum const& s) -> std::optional<int>
@@ -1337,6 +1387,13 @@ auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*
             { return canon_symmetry(ctx, e); },
             [&](Negate const&) -> Expr const*
             { return canon_additive(ctx, e, depth); },
+            [&](Trace const& u) -> Expr const*
+            { return make_trace(ctx, canon(ctx, u.operand, depth)); },
+            [&](VectorInvariant const& u) -> Expr const* {
+                return make_vector_invariant(ctx, canon(ctx, u.operand, depth));
+            },
+            [&](Transpose const& u) -> Expr const*
+            { return make_transpose(ctx, canon(ctx, u.operand, depth)); },
             [&](Sum const&) -> Expr const*
             { return canon_additive(ctx, e, depth); },
             [&](Difference const&) -> Expr const*
@@ -1543,6 +1600,14 @@ auto materialize(Context& ctx, Expr const* e, std::set<int> bound) -> Expr const
             },
             [&](Negate const& n) -> Expr const*
             { return make_negate(ctx, materialize(ctx, n.operand, bound)); },
+            [&](Trace const& u) -> Expr const*
+            { return make_trace(ctx, materialize(ctx, u.operand, bound)); },
+            [&](VectorInvariant const& u) -> Expr const* {
+                return make_vector_invariant(
+                    ctx, materialize(ctx, u.operand, bound));
+            },
+            [&](Transpose const& u) -> Expr const*
+            { return make_transpose(ctx, materialize(ctx, u.operand, bound)); },
             [&](Sum const& s) -> Expr const*
             {
                 return make_sum(
@@ -1816,6 +1881,111 @@ auto expand_double_dot(Context& ctx, Expr const* e) -> Expr const*
                 out = dd_expand(c, d->left, d->right, /*alt=*/true);
             // Preserve the no-op pointer contract when nothing actually
             // changed.
+            return structural_eq(out, node) ? node : out;
+        });
+}
+
+namespace
+{
+
+// Is e a well-known symmetric tensor (I, δ, g), so transpose(e) = e?
+auto is_symmetric_well_known(Expr const* e) -> bool
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    if (!t || !t->traits || !t->traits->well_known)
+        return false;
+    switch (*t->traits->well_known)
+    {
+        case WellKnownKind::Identity:
+        case WellKnownKind::Delta:
+        case WellKnownKind::Metric: return true;
+        case WellKnownKind::LeviCivita: return false;
+    }
+    return false; // GCOV_EXCL_LINE
+}
+
+// Apply a linear rank-2 operation (tr/vec/transpose) by its definition,
+// distributing over sums/negation and acting on each dyad.  `dyad_rule` builds
+// the result from a dyad's scalar factors and its two legs; `make_node`
+// rebuilds the original unary node when the operand is not reducible.
+template <typename DyadRule, typename MakeNode>
+auto expand_unary(
+    Context& ctx, Expr const* operand, DyadRule dyad_rule, MakeNode make_node)
+    -> Expr const*
+{
+    auto recur = [&](Expr const* x)
+    { return expand_unary(ctx, x, dyad_rule, make_node); };
+
+    if (auto const* s = std::get_if<Sum>(&operand->node))
+        return make_sum(ctx, recur(s->left), recur(s->right));
+    if (auto const* d = std::get_if<Difference>(&operand->node))
+        return make_difference(ctx, recur(d->left), recur(d->right));
+    if (auto const* n = std::get_if<Negate>(&operand->node))
+        return make_negate(ctx, recur(n->operand));
+    if (auto const sp = split_dyad(operand))
+        return dyad_rule(*sp);
+    return make_node(operand); // not reducible — leave the op in place
+}
+
+} // namespace
+
+auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& c, Expr const* node) -> Expr const*
+        {
+            Expr const* out = node;
+            if (auto const* u = std::get_if<Trace>(&node->node))
+            {
+                // tr(s a⊗b) = s (a·b)
+                out = expand_unary(
+                    c,
+                    u->operand,
+                    [&](DyadSplit const& sp)
+                    {
+                        auto fs = sp.scalars;
+                        fs.push_back(make_dot(c, sp.leg0, sp.leg1));
+                        return product_of(c, fs);
+                    },
+                    [&](Expr const* op) { return make_trace(c, op); });
+            }
+            else if (auto const* u = std::get_if<VectorInvariant>(&node->node))
+            {
+                // vec(s a⊗b) = s (a×b)
+                out = expand_unary(
+                    c,
+                    u->operand,
+                    [&](DyadSplit const& sp)
+                    {
+                        auto fs = sp.scalars;
+                        fs.push_back(make_cross(c, sp.leg0, sp.leg1));
+                        return product_of(c, fs);
+                    },
+                    [&](Expr const* op)
+                    { return make_vector_invariant(c, op); });
+            }
+            else if (auto const* u = std::get_if<Transpose>(&node->node))
+            {
+                // (s a⊗b)^T = s b⊗a; a symmetric well-known transposes to
+                // itself.
+                out = expand_unary(
+                    c,
+                    u->operand,
+                    [&](DyadSplit const& sp)
+                    {
+                        auto fs = sp.scalars;
+                        fs.push_back(sp.leg1);
+                        fs.push_back(sp.leg0);
+                        return product_of(c, fs);
+                    },
+                    [&](Expr const* op) -> Expr const* {
+                        return is_symmetric_well_known(op) ?
+                                   op :
+                                   make_transpose(c, op);
+                    });
+            }
             return structural_eq(out, node) ? node : out;
         });
 }
@@ -2372,6 +2542,21 @@ auto map_children(Context& ctx, Expr const* e, Rec const& rec) -> Expr const*
                 auto* o = rec(n.operand);
                 return o == n.operand ? e : make_negate(ctx, o);
             },
+            [&](Trace const& u) -> Expr const*
+            {
+                auto* o = rec(u.operand);
+                return o == u.operand ? e : make_trace(ctx, o);
+            },
+            [&](VectorInvariant const& u) -> Expr const*
+            {
+                auto* o = rec(u.operand);
+                return o == u.operand ? e : make_vector_invariant(ctx, o);
+            },
+            [&](Transpose const& u) -> Expr const*
+            {
+                auto* o = rec(u.operand);
+                return o == u.operand ? e : make_transpose(ctx, o);
+            },
             [&](Sum const& s) -> Expr const*
             {
                 auto* l = rec(s.left);
@@ -2666,6 +2851,9 @@ auto has_explicit_sum_for(
                 [&](TensorObject const&) {},
                 [&](ScalarLiteral const&) {},
                 [&](Negate const& n) { go(n.operand); },
+                [&](Trace const& u) { go(u.operand); },
+                [&](VectorInvariant const& u) { go(u.operand); },
+                [&](Transpose const& u) { go(u.operand); },
                 [&](Sum const& s)
                 {
                     go(s.left);

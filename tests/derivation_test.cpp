@@ -3042,3 +3042,71 @@ TEST(ExpandDoubleDot, NonDyadUnchanged)
     auto const* e = make_ddot(ctx, A, a);
     EXPECT_EQ(steps::expand_double_dot(ctx, e), e);
 }
+
+// ---- expand_dyad_ops -------------------------------------------------------
+
+TEST(ExpandDyadOps, TraceVecTransposeOnDyad)
+{
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* dyad = make_tensor_product(ctx, a, b);
+
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::expand_dyad_ops(ctx, make_trace(ctx, dyad)),
+        make_dot(ctx, a, b)));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::expand_dyad_ops(ctx, make_vector_invariant(ctx, dyad)),
+        make_cross(ctx, a, b)));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::expand_dyad_ops(ctx, make_transpose(ctx, dyad)),
+        make_tensor_product(ctx, b, a)));
+}
+
+TEST(ExpandDyadOps, TransposeOfSymmetricWellKnownIsSelf)
+{
+    Context ctx;
+    auto const* I = make_identity(ctx);
+    EXPECT_TRUE(
+        structural_eq(steps::expand_dyad_ops(ctx, make_transpose(ctx, I)), I));
+}
+
+TEST(ExpandDyadOps, DistributesOverSum)
+{
+    // tr(a⊗b + c⊗d) → a·b + c·d
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* d = v("d");
+    auto const* sum = make_sum(
+        ctx, make_tensor_product(ctx, a, b), make_tensor_product(ctx, c, d));
+    auto const* expected =
+        make_sum(ctx, make_dot(ctx, a, b), make_dot(ctx, c, d));
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::expand_dyad_ops(ctx, make_trace(ctx, sum)), expected));
+}
+
+TEST(ExpandDyadOps, NonDyadUnchanged)
+{
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* e = make_trace(ctx, A); // tr of a bare rank-2 tensor
+    EXPECT_EQ(steps::expand_dyad_ops(ctx, e), e);
+}
+
+TEST(InferRank, UnaryOps)
+{
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    EXPECT_EQ(infer_rank(make_trace(ctx, A)), std::optional<int>{0});
+    EXPECT_EQ(infer_rank(make_vector_invariant(ctx, A)), std::optional<int>{1});
+    EXPECT_EQ(infer_rank(make_transpose(ctx, A)), std::optional<int>{2});
+}

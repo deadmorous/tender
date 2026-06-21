@@ -174,6 +174,21 @@ auto match_node(Expr const* pat, Expr const* tgt, MatchBinding& bnd) -> bool
                 auto const* t = std::get_if<Negate>(&tgt->node);
                 return t && match_node(p.operand, t->operand, bnd);
             },
+            [&](Trace const& p) -> bool
+            {
+                auto const* t = std::get_if<Trace>(&tgt->node);
+                return t && match_node(p.operand, t->operand, bnd);
+            },
+            [&](VectorInvariant const& p) -> bool
+            {
+                auto const* t = std::get_if<VectorInvariant>(&tgt->node);
+                return t && match_node(p.operand, t->operand, bnd);
+            },
+            [&](Transpose const& p) -> bool
+            {
+                auto const* t = std::get_if<Transpose>(&tgt->node);
+                return t && match_node(p.operand, t->operand, bnd);
+            },
             [&](Sum const&) -> bool
             {
                 if (!std::get_if<Sum>(&tgt->node))

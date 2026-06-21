@@ -662,3 +662,29 @@ def test_expand_double_dot_alternate():
     # (a⊗b)··(c⊗d) → (a·d)(b·c); // is the ddot_alt operator
     res = td.expand_double_dot((a * b) // (c * d))
     assert td.algebraic_eq(res, (a @ d) * (b @ c))
+
+
+# ---- tr / vec / transpose --------------------------------------------------
+
+
+def test_expand_dyad_ops():
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    assert td.algebraic_eq(td.expand_dyad_ops(tender.tr(a * b)), a @ b)
+    assert td.algebraic_eq(td.expand_dyad_ops(tender.vec(a * b)), a % b)
+    assert td.algebraic_eq(td.expand_dyad_ops(tender.transpose(a * b)), b * a)
+
+
+def test_transpose_identity_is_self():
+    ctx = tender.Context()
+    I = tender.identity(ctx=ctx)
+    assert td.structural_eq(td.expand_dyad_ops(tender.transpose(I)), I)
+
+
+def test_unary_op_ranks():
+    ctx = tender.Context()
+    A = tender.tensor("A", rank=2, ctx=ctx)
+    assert tender.tr(A).rank == 0
+    assert tender.vec(A).rank == 1
+    assert tender.transpose(A).rank == 2

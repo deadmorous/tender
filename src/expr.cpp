@@ -32,6 +32,21 @@ auto make_negate(Context& ctx, Expr const* operand) -> Expr const*
     return ctx.make<Expr>(Negate{operand});
 }
 
+auto make_trace(Context& ctx, Expr const* operand) -> Expr const*
+{
+    return ctx.make<Expr>(Trace{operand});
+}
+
+auto make_vector_invariant(Context& ctx, Expr const* operand) -> Expr const*
+{
+    return ctx.make<Expr>(VectorInvariant{operand});
+}
+
+auto make_transpose(Context& ctx, Expr const* operand) -> Expr const*
+{
+    return ctx.make<Expr>(Transpose{operand});
+}
+
 // ---- Binary factories --------------------------------------------------
 
 auto make_sum(Context& ctx, Expr const* left, Expr const* right) -> Expr const*

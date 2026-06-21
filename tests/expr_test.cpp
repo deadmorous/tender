@@ -420,6 +420,9 @@ TEST(Visit, DispatchesCorrectAlternative)
             },
             [](TensorObject const&) {},
             [](Negate const&) {},
+            [](Trace const&) {},
+            [](VectorInvariant const&) {},
+            [](Transpose const&) {},
             [](Sum const&) {},
             [](Difference const&) {},
             [](TensorProduct const&) {},
@@ -450,6 +453,18 @@ TEST(Visit, TreeDepthCounter)
         auto operator()(Negate const& n) const -> int
         {
             return 1 + visit(*this, *n.operand);
+        }
+        auto operator()(Trace const& u) const -> int
+        {
+            return 1 + visit(*this, *u.operand);
+        }
+        auto operator()(VectorInvariant const& u) const -> int
+        {
+            return 1 + visit(*this, *u.operand);
+        }
+        auto operator()(Transpose const& u) const -> int
+        {
+            return 1 + visit(*this, *u.operand);
         }
         auto operator()(Sum const& s) const -> int
         {

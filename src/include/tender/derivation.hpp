@@ -113,6 +113,15 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*;
 // unchanged.
 auto expand_double_dot(Context& ctx, Expr const* e) -> Expr const*;
 
+// Expand the rank-2 invariant operations by their definition on dyads, linear
+// over sums and negation:
+//   tr(a⊗b)        → a·b
+//   vec(a⊗b)       → a×b
+//   transpose(a⊗b) → b⊗a   (a symmetric well-known I/δ/g transposes to itself)
+// Scalar factors are pulled through.  An operation whose operand is not a dyad
+// (or a sum/negation of dyads) is left in place.
+auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*;
+
 // Contract a pair of Levi-Civita symbols sharing p summed indices, directly to
 // the generalized Kronecker delta (no concrete WCS unrolling):
 //

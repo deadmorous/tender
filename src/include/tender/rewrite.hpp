@@ -27,6 +27,21 @@ auto rewrite_tree(Context& ctx, Expr const* e, F const& f) -> Expr const*
                 auto* op = rewrite_tree(ctx, n.operand, f);
                 return op == n.operand ? e : make_negate(ctx, op);
             },
+            [&](Trace const& u) -> Expr const*
+            {
+                auto* op = rewrite_tree(ctx, u.operand, f);
+                return op == u.operand ? e : make_trace(ctx, op);
+            },
+            [&](VectorInvariant const& u) -> Expr const*
+            {
+                auto* op = rewrite_tree(ctx, u.operand, f);
+                return op == u.operand ? e : make_vector_invariant(ctx, op);
+            },
+            [&](Transpose const& u) -> Expr const*
+            {
+                auto* op = rewrite_tree(ctx, u.operand, f);
+                return op == u.operand ? e : make_transpose(ctx, op);
+            },
 
             // Binary.
             [&](Sum const& s) -> Expr const*

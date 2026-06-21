@@ -94,9 +94,27 @@ struct ScalarLiteral final
     Rational value;
 };
 
-// ---- Unary node --------------------------------------------------------
+// ---- Unary nodes -------------------------------------------------------
 
 struct Negate final
+{
+    Expr const* operand;
+};
+
+// tr(A) — the trace of a rank-2 tensor (a scalar).  For a dyad tr(a⊗b) = a·b.
+struct Trace final
+{
+    Expr const* operand;
+};
+
+// vec(A) — the vector invariant of a rank-2 tensor.  For a dyad vec(a⊗b) = a×b.
+struct VectorInvariant final
+{
+    Expr const* operand;
+};
+
+// A^T — the transpose of a rank-2 tensor.  For a dyad (a⊗b)^T = b⊗a.
+struct Transpose final
 {
     Expr const* operand;
 };
@@ -178,6 +196,9 @@ struct Expr final
         TensorObject,
         ScalarLiteral,
         Negate,
+        Trace,
+        VectorInvariant,
+        Transpose,
         Sum,
         Difference,
         TensorProduct,
@@ -237,6 +258,9 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 
 // Unary
 [[nodiscard]] auto make_negate(Context&, Expr const*) -> Expr const*;
+[[nodiscard]] auto make_trace(Context&, Expr const*) -> Expr const*;
+[[nodiscard]] auto make_vector_invariant(Context&, Expr const*) -> Expr const*;
+[[nodiscard]] auto make_transpose(Context&, Expr const*) -> Expr const*;
 
 // Binary
 [[nodiscard]] auto make_sum(Context&, Expr const*, Expr const*) -> Expr const*;

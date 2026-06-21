@@ -572,3 +572,24 @@ TEST(RenderParens, TensorProductRightNoParens)
     auto* e = make_tensor_product(ctx, T(ctx, "a", 1), bc);
     EXPECT_EQ(latex(*e), "\\mathbf{a} \\, \\mathbf{b} \\, \\mathbf{c}");
 }
+
+TEST(RenderUnary, TraceVecTranspose)
+{
+    Context ctx;
+    auto* a = T(ctx, "a", 1);
+    auto* b = T(ctx, "b", 1);
+    auto* dyad = make_tensor_product(ctx, a, b);
+    EXPECT_EQ(
+        latex(*make_trace(ctx, dyad)),
+        "\\operatorname{tr}(\\mathbf{a} \\, \\mathbf{b})");
+    EXPECT_EQ(
+        latex(*make_vector_invariant(ctx, dyad)),
+        "\\operatorname{vec}(\\mathbf{a} \\, \\mathbf{b})");
+    EXPECT_EQ(
+        latex(*make_transpose(ctx, T(ctx, "A", 2))),
+        "\\mathbf{A}^{\\mathsf{T}}");
+    // A transpose of a composite operand wraps it.
+    EXPECT_EQ(
+        latex(*make_transpose(ctx, dyad)),
+        "(\\mathbf{a} \\, \\mathbf{b})^{\\mathsf{T}}");
+}

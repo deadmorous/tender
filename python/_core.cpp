@@ -310,6 +310,22 @@ NB_MODULE(_core, m)
             { return derive(a, make_ddot_alt(*a.ctx, a.expr, b.expr)); },
             "other"_a,
             "Alternate double contraction (··); also the // operator.")
+        // rank-2 invariant operations
+        .def(
+            "tr",
+            [](PyExpr const& a) -> PyExpr
+            { return derive(a, make_trace(*a.ctx, a.expr)); },
+            "Trace tr(A) (a scalar; tr(a⊗b) = a·b).")
+        .def(
+            "vec",
+            [](PyExpr const& a) -> PyExpr
+            { return derive(a, make_vector_invariant(*a.ctx, a.expr)); },
+            "Vector invariant vec(A) (a vector; vec(a⊗b) = a×b).")
+        .def(
+            "transpose",
+            [](PyExpr const& a) -> PyExpr
+            { return derive(a, make_transpose(*a.ctx, a.expr)); },
+            "Transpose A^T (transpose(a⊗b) = b⊗a).")
         // rendering
         .def(
             "_repr_latex_",
@@ -388,6 +404,25 @@ NB_MODULE(_core, m)
         },
         "ctx"_a = nb::none(),
         "Create the identity tensor.");
+
+    m.def(
+        "tr",
+        [](PyExpr const& a) -> PyExpr
+        { return derive(a, make_trace(*a.ctx, a.expr)); },
+        "A"_a,
+        "Trace tr(A) (a scalar; tr(a⊗b) = a·b).");
+    m.def(
+        "vec",
+        [](PyExpr const& a) -> PyExpr
+        { return derive(a, make_vector_invariant(*a.ctx, a.expr)); },
+        "A"_a,
+        "Vector invariant vec(A) (a vector; vec(a⊗b) = a×b).");
+    m.def(
+        "transpose",
+        [](PyExpr const& a) -> PyExpr
+        { return derive(a, make_transpose(*a.ctx, a.expr)); },
+        "A"_a,
+        "Transpose A^T (transpose(a⊗b) = b⊗a).");
 
     m.def(
         "delta",
@@ -597,6 +632,14 @@ NB_MODULE(_core, m)
         "expr"_a,
         "Expand a double contraction of dyads: (a⊗b):(c⊗d) -> (a·c)(b·d), "
         "(a⊗b)··(c⊗d) -> (a·d)(b·c); distributes over sums and binders.");
+
+    md.def(
+        "_expand_dyad_ops",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::expand_dyad_ops(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Expand tr/vec/transpose on dyads: tr(a⊗b)->a·b, vec(a⊗b)->a×b, "
+        "transpose(a⊗b)->b⊗a.");
 
     md.def(
         "_contract_eps_pair",

@@ -34,6 +34,7 @@ __all__ = [
     "contract_identity",
     "distribute_contraction",
     "expand_double_dot",
+    "expand_dyad_ops",
     "contract_eps_pair",
     "fold_equal_addends",
     "canonicalize",
@@ -152,6 +153,17 @@ def expand_double_dot(expr):
     both dyads is left unchanged.
     """
     return _d._expand_double_dot(expr)
+
+
+def expand_dyad_ops(expr):
+    """Expand tr/vec/transpose on dyads by their definition.
+
+    ``tr(a⊗b) → a·b``, ``vec(a⊗b) → a×b``, ``transpose(a⊗b) → b⊗a``; linear over
+    sums and negation, scalar factors pulled through, and a symmetric well-known
+    (I, δ, g) transposes to itself.  An operation whose operand is not a dyad is
+    left in place.
+    """
+    return _d._expand_dyad_ops(expr)
 
 
 def distribute_contraction(expr):

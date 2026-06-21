@@ -26,6 +26,9 @@ enum class EKind : std::uint8_t
     TensorObject,
     ScalarLiteral,
     Negate,
+    Trace,
+    VectorInvariant,
+    Transpose,
     Sum,
     Difference,
     TensorProduct,
@@ -244,6 +247,23 @@ struct EGraph::Impl final
                     return add_node(ENode{
                         EKind::Negate, nullptr, 0, {add_canon(n.operand)}});
                 },
+                [&](Trace const& u) {
+                    return add_node(
+                        ENode{EKind::Trace, nullptr, 0, {add_canon(u.operand)}});
+                },
+                [&](VectorInvariant const& u)
+                {
+                    return add_node(ENode{
+                        EKind::VectorInvariant,
+                        nullptr,
+                        0,
+                        {add_canon(u.operand)}});
+                },
+                [&](Transpose const& u)
+                {
+                    return add_node(ENode{
+                        EKind::Transpose, nullptr, 0, {add_canon(u.operand)}});
+                },
                 [&](Sum const& s) { return bin(EKind::Sum, s.left, s.right); },
                 // GCOV_EXCL_START  canonicalize carries signs as coefficients,
                 // so a canonical form (all that add() inserts) never holds a
@@ -359,6 +379,11 @@ struct EGraph::Impl final
             case EKind::TensorObject:
             case EKind::ScalarLiteral: r = n.leaf; break;
             case EKind::Negate: r = make_negate(ctx, child(0)); break;
+            case EKind::Trace: r = make_trace(ctx, child(0)); break;
+            case EKind::VectorInvariant:
+                r = make_vector_invariant(ctx, child(0));
+                break;
+            case EKind::Transpose: r = make_transpose(ctx, child(0)); break;
             case EKind::Sum:
                 r = make_sum(ctx, child(0), child(1));
                 break;
@@ -555,6 +580,24 @@ struct EGraph::Impl final
                 [&](Negate const& p) -> Bindings
                 {
                     return n.kind == EKind::Negate ?
+                               match_class(p.operand, n.children[0], bnd) :
+                               Bindings{};
+                },
+                [&](Trace const& p) -> Bindings
+                {
+                    return n.kind == EKind::Trace ?
+                               match_class(p.operand, n.children[0], bnd) :
+                               Bindings{};
+                },
+                [&](VectorInvariant const& p) -> Bindings
+                {
+                    return n.kind == EKind::VectorInvariant ?
+                               match_class(p.operand, n.children[0], bnd) :
+                               Bindings{};
+                },
+                [&](Transpose const& p) -> Bindings
+                {
+                    return n.kind == EKind::Transpose ?
                                match_class(p.operand, n.children[0], bnd) :
                                Bindings{};
                 },
