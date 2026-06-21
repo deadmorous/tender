@@ -73,11 +73,16 @@ namespace
 {
 
 // Precedence levels (higher = binds tighter).
-constexpr int ADD_PREC = 1;   // Sum, Difference
-constexpr int MUL_PREC = 2;   // TensorProduct, Dot, DDot, DDotAlt, Cross,
-                              // ScalarDiv
-constexpr int UNARY_PREC = 3; // Negate
-constexpr int ATOM_PREC = 4;  // TensorObject, ScalarLiteral, ExplicitSum, NoSum
+//
+// The contractions (× · : ··) sit *below* the tensor product: they are
+// non-associative and have no agreed precedence with ⊗, so a contraction
+// nested under any product is parenthesized, while ⊗ (juxtaposition, which
+// reads tightest) needs none.
+constexpr int ADD_PREC = 1;      // Sum, Difference
+constexpr int CONTRACT_PREC = 2; // Dot, DDot, DDotAlt, Cross (non-associative)
+constexpr int TENSOR_PREC = 3;   // TensorProduct, ScalarDiv
+constexpr int UNARY_PREC = 4;    // Negate
+constexpr int ATOM_PREC = 5; // TensorObject, ScalarLiteral, ExplicitSum, NoSum
 
 // True iff every leaf in the expression tree is a ScalarLiteral (no tensors).
 static bool is_scalar_expr(Expr const& e)
@@ -122,12 +127,12 @@ struct Renderer
                 [](Negate const&) { return UNARY_PREC; },
                 [](Sum const&) { return ADD_PREC; },
                 [](Difference const&) { return ADD_PREC; },
-                [](TensorProduct const&) { return MUL_PREC; },
-                [](ScalarDiv const&) { return MUL_PREC; },
-                [](Dot const&) { return MUL_PREC; },
-                [](DDot const&) { return MUL_PREC; },
-                [](DDotAlt const&) { return MUL_PREC; },
-                [](Cross const&) { return MUL_PREC; },
+                [](TensorProduct const&) { return TENSOR_PREC; },
+                [](ScalarDiv const&) { return TENSOR_PREC; },
+                [](Dot const&) { return CONTRACT_PREC; },
+                [](DDot const&) { return CONTRACT_PREC; },
+                [](DDotAlt const&) { return CONTRACT_PREC; },
+                [](Cross const&) { return CONTRACT_PREC; },
             },
             e);
     }
@@ -156,16 +161,6 @@ struct Renderer
         bool wrap =
             prec(e) <= ADD_PREC || std::holds_alternative<Negate>(e.node);
         return wrap ? "(" + s + ")" : s;
-    }
-
-    // Right child of a non-associative contraction (× · : ··): wrap a
-    // same-or-lower-precedence product child, since a × b × c reads as
-    // (a × b) × c — so a × (b × c) needs explicit parens.  (TensorProduct is
-    // associative and is rendered without these.)
-    auto sub_contraction_right(Expr const& e) -> std::string
-    {
-        auto s = render(e);
-        return prec(e) <= MUL_PREC ? "(" + s + ")" : s;
     }
 
     // ---- leaves --------------------------------------------------------
@@ -312,11 +307,11 @@ struct Renderer
                 { return rational_str(s.value); },
                 [&](Negate const& n) -> std::string
                 {
-                    // Wrap only if the operand is a sum/difference — those
-                    // have lower precedence than multiplication, so "-a + b"
-                    // would be misread without parens. Products and atoms
-                    // don't need parens: "-a \, b" is unambiguous.
-                    return "-" + sub(*n.operand, MUL_PREC);
+                    // Wrap only a sum/difference operand — those have lower
+                    // precedence, so "-a + b" would be misread without parens.
+                    // Products, contractions, and atoms don't need them:
+                    // "-a \, b" and "-a \times b" are unambiguous.
+                    return "-" + sub(*n.operand, CONTRACT_PREC);
                 },
                 [&](Sum const& s) -> std::string
                 {
@@ -337,31 +332,34 @@ struct Renderer
                     bool both_scalar =
                         is_scalar_expr(*p.left) && is_scalar_expr(*p.right);
                     std::string sep = both_scalar ? " \\cdot " : " \\, ";
-                    return sub(*p.left, MUL_PREC) + sep
-                           + sub(*p.right, MUL_PREC);
+                    return sub(*p.left, TENSOR_PREC) + sep
+                           + sub(*p.right, TENSOR_PREC);
                 },
                 [&](ScalarDiv const& d) -> std::string {
                     return "\\frac{" + render(*d.left) + "}{" + render(*d.right)
                            + "}";
                 },
-                [&](Dot const& d) -> std::string
-                {
-                    return sub(*d.left, MUL_PREC) + " \\cdot "
-                           + sub_contraction_right(*d.right);
+                // The contractions are non-associative and have no settled
+                // precedence with ⊗, so both operands wrap any nested
+                // contraction (and any sum): a × b × c → (a × b) × c, and
+                // a × (b × c) keeps its parens.
+                [&](Dot const& d) -> std::string {
+                    return sub(*d.left, TENSOR_PREC) + " \\cdot "
+                           + sub(*d.right, TENSOR_PREC);
                 },
                 [&](DDot const& d) -> std::string {
-                    return sub(*d.left, MUL_PREC) + " : "
-                           + sub_contraction_right(*d.right);
+                    return sub(*d.left, TENSOR_PREC) + " : "
+                           + sub(*d.right, TENSOR_PREC);
                 },
                 [&](DDotAlt const& d) -> std::string
                 {
-                    return sub(*d.left, MUL_PREC) + " \\cdot\\!\\cdot "
-                           + sub_contraction_right(*d.right);
+                    return sub(*d.left, TENSOR_PREC) + " \\cdot\\!\\cdot "
+                           + sub(*d.right, TENSOR_PREC);
                 },
                 [&](Cross const& c) -> std::string
                 {
-                    return sub(*c.left, MUL_PREC) + " \\times "
-                           + sub_contraction_right(*c.right);
+                    return sub(*c.left, TENSOR_PREC) + " \\times "
+                           + sub(*c.right, TENSOR_PREC);
                 },
                 [&](ExplicitSum const& s) -> std::string
                 { return sum_str(s.index, s.body, "\\sum"); },

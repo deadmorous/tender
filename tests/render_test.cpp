@@ -516,8 +516,7 @@ TEST(RenderParens, SumNestedInSum)
 
 TEST(RenderParens, CrossRightNeedsParens)
 {
-    // a × (b × c): the right operand of a non-associative cross is wrapped,
-    // since a × b × c reads as (a × b) × c.
+    // a × (b × c): the cross is non-associative, so the grouping is explicit.
     Context ctx;
     auto* bc = make_cross(ctx, T(ctx, "b", 1), T(ctx, "c", 1));
     auto* e = make_cross(ctx, T(ctx, "a", 1), bc);
@@ -525,22 +524,34 @@ TEST(RenderParens, CrossRightNeedsParens)
         latex(*e), "\\mathbf{a} \\times (\\mathbf{b} \\times \\mathbf{c})");
 }
 
-TEST(RenderParens, CrossLeftNoParens)
+TEST(RenderParens, CrossLeftAlsoNeedsParens)
 {
-    // (a × b) × c renders as a × b × c (left-associative reading).
+    // (a × b) × c: the cross is non-associative, so the left grouping is shown
+    // too — distinct from a × (b × c).
     Context ctx;
     auto* ab = make_cross(ctx, T(ctx, "a", 1), T(ctx, "b", 1));
     auto* e = make_cross(ctx, ab, T(ctx, "c", 1));
-    EXPECT_EQ(latex(*e), "\\mathbf{a} \\times \\mathbf{b} \\times \\mathbf{c}");
+    EXPECT_EQ(
+        latex(*e), "(\\mathbf{a} \\times \\mathbf{b}) \\times \\mathbf{c}");
 }
 
 TEST(RenderParens, DotOfCrossNeedsParens)
 {
-    // a · (b × c): the cross on the right is wrapped.
+    // a · (b × c): the cross is wrapped (the scalar triple product).
     Context ctx;
     auto* bc = make_cross(ctx, T(ctx, "b", 1), T(ctx, "c", 1));
     auto* e = make_dot(ctx, T(ctx, "a", 1), bc);
     EXPECT_EQ(latex(*e), "\\mathbf{a} \\cdot (\\mathbf{b} \\times \\mathbf{c})");
+}
+
+TEST(RenderParens, ContractionInTensorProductNeedsParens)
+{
+    // (a · b) ⊗ c: a contraction nested in a tensor product is wrapped, since
+    // juxtaposition (⊗) binds tighter than the contractions.
+    Context ctx;
+    auto* ab = make_dot(ctx, T(ctx, "a", 1), T(ctx, "b", 1));
+    auto* e = make_tensor_product(ctx, ab, T(ctx, "c", 1));
+    EXPECT_EQ(latex(*e), "(\\mathbf{a} \\cdot \\mathbf{b}) \\, \\mathbf{c}");
 }
 
 TEST(RenderParens, TensorProductRightNoParens)
