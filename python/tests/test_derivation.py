@@ -707,3 +707,22 @@ def test_eval_eps_concrete():
     assert td.algebraic_eq(
         td.eval_eps_concrete(eps(1, 1, 2)), tender.scalar(0, ctx=ctx)
     )
+
+
+# ---- subtree pattern variables (vibe 000051) -------------------------------
+
+
+def test_subtree_variable_identity():
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    c = tender.tensor("c", rank=1, ctx=ctx)
+    d = tender.tensor("d", rank=1, ctx=ctx)
+    ddot = td.Identity("ddot", (a * b).ddot(c * d), (a @ c) * (b @ d))
+    # Fires on a *different* dyad pair via the subtree variables a,b,c,d.
+    x = tender.tensor("x", rank=1, ctx=ctx)
+    y = tender.tensor("y", rank=1, ctx=ctx)
+    u = tender.tensor("u", rank=1, ctx=ctx)
+    w = tender.tensor("w", rank=1, ctx=ctx)
+    res = td.apply_identity(ddot)((x * y).ddot(u * w))
+    assert td.algebraic_eq(res, (x @ u) * (y @ w))

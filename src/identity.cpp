@@ -2,7 +2,7 @@
 
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/context.hpp>
-#include <tender/derivation.hpp> // steps::canonicalize, is_component_valued
+#include <tender/derivation.hpp> // steps::canonicalize, is_component_valued, infer_rank, structural_eq
 #include <tender/rewrite.hpp>
 
 #include <vector>
@@ -18,6 +18,14 @@ auto MatchBinding::find(int id) const -> std::optional<IndexAssoc>
         if (pid == id)
             return target;
     return std::nullopt;
+}
+
+auto MatchBinding::find_subtree(std::string_view name) const -> Expr const*
+{
+    for (auto const& [n, target]: subtrees)
+        if (n == name)
+            return target;
+    return nullptr;
 }
 
 namespace
@@ -100,6 +108,25 @@ void flatten(Expr const* e, std::vector<Expr const*>& out)
 
 auto match_node(Expr const* pat, Expr const* tgt, MatchBinding& bnd) -> bool;
 
+// A slot-less, non-well-known named tensor in the LHS is a *subtree variable*:
+// it matches any whole subtree.  Well-known tensors (I, δ, ε) and slotted
+// tensors stay literal.
+auto is_subtree_var(TensorObject const& t) -> bool
+{
+    return t.slots.empty() && !(t.traits && t.traits->well_known);
+}
+
+// Bind subtree variable `name` to target `tgt`, or require consistency
+// (structural equality) with an existing binding.
+auto try_bind_subtree(MatchBinding& bnd, std::string_view name, Expr const* tgt)
+    -> bool
+{
+    if (auto const* cur = bnd.find_subtree(name))
+        return structural_eq(cur, tgt);
+    bnd.subtrees.emplace_back(std::string{name}, tgt);
+    return true;
+}
+
 // Match a multiset of pattern children against a multiset of target children,
 // modulo order.  Bounded backtracking — the child lists are tiny after
 // canonicalization, so the worst-case factorial cost is negligible.
@@ -153,6 +180,15 @@ auto match_node(Expr const* pat, Expr const* tgt, MatchBinding& bnd) -> bool
         Overloads{
             [&](TensorObject const& p) -> bool
             {
+                // Subtree variable: bind the whole target subtree (rank-checked
+                // when both ranks are known), consistently across the match.
+                if (is_subtree_var(p))
+                {
+                    if (p.rank)
+                        if (auto tr = infer_rank(tgt); tr && *tr != *p.rank)
+                            return false;
+                    return try_bind_subtree(bnd, p.name.v.view(), tgt);
+                }
                 auto const* t = std::get_if<TensorObject>(&tgt->node);
                 if (!t)
                     return false;
@@ -305,6 +341,12 @@ auto instantiate(Context& ctx, Expr const* rhs, MatchBinding const& bnd)
                 Overloads{
                     [&](TensorObject const& t) -> Expr const*
                     {
+                        // A slot-less subtree variable expands to its bound
+                        // target subtree.
+                        if (t.slots.empty())
+                            if (auto const* sub =
+                                    bnd.find_subtree(t.name.v.view()))
+                                return sub;
                         auto slots = t.slots;
                         bool changed = false;
                         for (auto& sb: slots)

@@ -5,6 +5,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -18,13 +19,16 @@ namespace tender
 // aggregate a Derivation and expose the Identity it proves, never inherit from
 // it.
 //
-// Pattern variables are the *free indices* of the LHS: every CountableIndex not
-// bound by an ExplicitSum/NoSum inside the LHS matches whatever index sits in
-// the corresponding target slot, consistently across the whole match.  Indices
-// bound by an ExplicitSum/NoSum are local (alpha) variables, matched to the
-// target's binder.  (Slot-less named tensors as whole-subtree variables are not
-// supported — see vibe 000033 §4.1; index matching is what the index identities
-// actually need.)
+// Pattern variables come in two kinds (vibes 000033, 000051):
+//
+//  - *Index variables* — every free CountableIndex of the LHS matches whatever
+//    index sits in the corresponding target slot, consistently across the
+//    match. Indices bound by an ExplicitSum/NoSum are local (alpha) variables
+//    matched to the target's binder.
+//  - *Subtree variables* — a slot-less, non-well-known named TensorObject (e.g.
+//    `a`, `A`) matches any whole subtree of compatible rank, consistently. This
+//    is what invariant (direct-notation) identities like (a⊗b):(c⊗d)=(a·c)(b·d)
+//    need.  Well-known tensors (I, δ, ε) and slotted tensors stay literal.
 struct Identity final
 {
     std::string name;
@@ -32,14 +36,18 @@ struct Identity final
     Expr const* rhs;
 };
 
-// The result of a successful match: each LHS pattern index id paired with the
-// target index it was bound to.
+// The result of a successful match: pattern index ids paired with the target
+// indices they bound, and pattern subtree-variable names paired with the target
+// subtrees they bound.
 struct MatchBinding final
 {
     std::vector<std::pair<int, IndexAssoc>> indices;
+    std::vector<std::pair<std::string, Expr const*>> subtrees;
 
     // The target index bound to pattern index `id`, or nullopt if unbound.
     [[nodiscard]] auto find(int id) const -> std::optional<IndexAssoc>;
+    // The target subtree bound to pattern variable `name`, or nullptr.
+    [[nodiscard]] auto find_subtree(std::string_view name) const -> Expr const*;
 };
 
 // Try to match `pattern` against `target` at the root (no descent into the

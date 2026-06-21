@@ -288,9 +288,10 @@ TEST(MatchNodeKinds, InvariantBinaryOps)
 TEST(MatchNodeKinds, NegateScalarAndKindMismatch)
 {
     Context ctx;
-    auto const* A = obj(ctx, "A");
+    auto const* A = obj(ctx, "A"); // a slot-less name → a subtree variable
     EXPECT_TRUE(match(make_negate(ctx, A), make_negate(ctx, A)).has_value());
-    EXPECT_FALSE(
+    // The operand A is a subtree variable, so it binds B (vibe 000051).
+    EXPECT_TRUE(
         match(make_negate(ctx, A), make_negate(ctx, obj(ctx, "B"))).has_value());
     EXPECT_TRUE(
         match(make_scalar(ctx, Rational{2}), make_scalar(ctx, Rational{2}))
@@ -298,8 +299,12 @@ TEST(MatchNodeKinds, NegateScalarAndKindMismatch)
     EXPECT_FALSE(
         match(make_scalar(ctx, Rational{2}), make_scalar(ctx, Rational{3}))
             .has_value());
-    // A TensorObject pattern against a non-object target.
-    EXPECT_FALSE(match(A, make_scalar(ctx, Rational{2})).has_value());
+    // A *literal* (well-known) tensor pattern against a non-object target
+    // fails.
+    EXPECT_FALSE(
+        match(make_identity(ctx), make_scalar(ctx, Rational{2})).has_value());
+    // A subtree variable matches any subtree (including a scalar).
+    EXPECT_TRUE(match(A, make_scalar(ctx, Rational{2})).has_value());
 }
 
 TEST(MatchNodeKinds, SumCommutativeAndBacktrack)
@@ -418,7 +423,8 @@ TEST(MatchNodeKinds, ExplicitSumBoundAndNoSum)
     // NoSum binds its index and matches the body.
     EXPECT_TRUE(
         match(make_no_sum(ctx, p, A), make_no_sum(ctx, q, A)).has_value());
-    EXPECT_FALSE(
+    // The body A is a subtree variable, so it binds B (vibe 000051).
+    EXPECT_TRUE(
         match(make_no_sum(ctx, p, A), make_no_sum(ctx, q, obj(ctx, "B")))
             .has_value());
     // NoSum pattern against a non-NoSum target.
@@ -495,4 +501,82 @@ TEST(Instantiate, SelfMappingLeavesBindersUnchanged)
         make_explicit_sum(ctx, p, A)));
     EXPECT_TRUE(structural_eq(
         instantiate(ctx, make_no_sum(ctx, p, A), bnd), make_no_sum(ctx, p, A)));
+}
+
+// ---- subtree pattern variables (vibe 000051) -------------------------------
+
+TEST(SubtreeVars, MatchesAndInstantiates)
+{
+    // Identity (a⊗b):(c⊗d) = (a·c)(b·d) with a,b,c,d as subtree variables.
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* d = v("d");
+    Identity id{
+        "ddot",
+        make_ddot(
+            ctx, make_tensor_product(ctx, a, b), make_tensor_product(ctx, c, d)),
+        make_tensor_product(ctx, make_dot(ctx, a, c), make_dot(ctx, b, d))};
+
+    // Apply to a different dyad pair (x⊗y):(u⊗v).
+    auto const* x = v("x");
+    auto const* y = v("y");
+    auto const* u = v("u");
+    auto const* w = v("w");
+    auto const* target = make_ddot(
+        ctx, make_tensor_product(ctx, x, y), make_tensor_product(ctx, u, w));
+    auto const* result = apply_identity(ctx, target, id);
+
+    auto const* expected =
+        make_tensor_product(ctx, make_dot(ctx, x, u), make_dot(ctx, y, w));
+    EXPECT_TRUE(algebraic_eq(ctx, result, expected));
+}
+
+TEST(SubtreeVars, ConsistencyAcrossOccurrences)
+{
+    // transpose(a⊗a) = a⊗a only matches when both legs are the same subtree.
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    Identity id{
+        "sym",
+        make_transpose(ctx, make_tensor_product(ctx, a, a)),
+        make_tensor_product(ctx, a, a)};
+
+    auto const* x = v("x");
+    auto const* y = v("y");
+    // Same leg: matches.
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        apply_identity(
+            ctx, make_transpose(ctx, make_tensor_product(ctx, x, x)), id),
+        make_tensor_product(ctx, x, x)));
+    // Different legs: does not match (transpose(x⊗y) stays, modulo canonical).
+    auto const* xy = make_transpose(ctx, make_tensor_product(ctx, x, y));
+    EXPECT_TRUE(algebraic_eq(ctx, apply_identity(ctx, xy, id), xy));
+}
+
+TEST(SubtreeVars, RankCheckRejectsMismatch)
+{
+    // A rank-1 subtree variable does not match a rank-2 subtree.
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    EXPECT_FALSE(match(a, A).has_value());
+    EXPECT_TRUE(match(a, make_tensor_object(ctx, make_tensor_name("b"), {}, 1))
+                    .has_value());
+}
+
+TEST(SubtreeVars, WellKnownStaysLiteral)
+{
+    // The identity tensor in an LHS is a literal, not a variable.
+    Context ctx;
+    auto const* I = make_identity(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    EXPECT_TRUE(match(I, make_identity(ctx)).has_value());
+    EXPECT_FALSE(match(I, A).has_value());
 }
