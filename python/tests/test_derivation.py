@@ -637,3 +637,28 @@ def test_distribute_contraction_noop():
     a = tender.tensor("a", rank=1, ctx=ctx)
     b = tender.tensor("b", rank=1, ctx=ctx)
     assert td.structural_eq(td.distribute_contraction(a @ b), a @ b)
+
+
+# ---- expand_double_dot -----------------------------------------------------
+
+
+def test_expand_double_dot_vertical():
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    c = tender.tensor("c", rank=1, ctx=ctx)
+    d = tender.tensor("d", rank=1, ctx=ctx)
+    # (a⊗b):(c⊗d) → (a·c)(b·d)
+    res = td.expand_double_dot((a * b).ddot(c * d))
+    assert td.algebraic_eq(res, (a @ c) * (b @ d))
+
+
+def test_expand_double_dot_alternate():
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    c = tender.tensor("c", rank=1, ctx=ctx)
+    d = tender.tensor("d", rank=1, ctx=ctx)
+    # (a⊗b)··(c⊗d) → (a·d)(b·c); // is the ddot_alt operator
+    res = td.expand_double_dot((a * b) // (c * d))
+    assert td.algebraic_eq(res, (a @ d) * (b @ c))

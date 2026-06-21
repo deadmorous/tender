@@ -2,6 +2,7 @@
 
 #include <mpk/mix/enum_flags.hpp>
 #include <mpk/mix/util/overloads.hpp>
+#include <tender/derivation.hpp> // infer_rank
 
 #include <stdexcept>
 #include <string>
@@ -143,6 +144,28 @@ struct Renderer
     {
         auto s = render(e);
         return prec(e) < min_prec ? "(" + s + ")" : s;
+    }
+
+    // A contraction that evaluates to a scalar (rank 0) — e.g. a dot product
+    // a·c — reads as an atom inside a product, so (a·c)(b·d) renders without
+    // the redundant parens as "a·c \, b·d".
+    static auto is_scalar_contraction(Expr const& e) -> bool
+    {
+        bool const contraction = std::holds_alternative<Dot>(e.node)
+                                 || std::holds_alternative<DDot>(e.node)
+                                 || std::holds_alternative<DDotAlt>(e.node)
+                                 || std::holds_alternative<Cross>(e.node);
+        return contraction && infer_rank(&e) == std::optional<int>{0};
+    }
+
+    // Child of a product (⊗ or a contraction operand): like sub(e, TENSOR_PREC)
+    // but a scalar-valued contraction is left unwrapped.
+    auto sub_product_child(Expr const& e) -> std::string
+    {
+        auto s = render(e);
+        if (is_scalar_contraction(e))
+            return s;
+        return prec(e) < TENSOR_PREC ? "(" + s + ")" : s;
     }
 
     // Child of a Sum: no wrapping needed — Sum rendering converts a Negate
@@ -332,8 +355,8 @@ struct Renderer
                     bool both_scalar =
                         is_scalar_expr(*p.left) && is_scalar_expr(*p.right);
                     std::string sep = both_scalar ? " \\cdot " : " \\, ";
-                    return sub(*p.left, TENSOR_PREC) + sep
-                           + sub(*p.right, TENSOR_PREC);
+                    return sub_product_child(*p.left) + sep
+                           + sub_product_child(*p.right);
                 },
                 [&](ScalarDiv const& d) -> std::string {
                     return "\\frac{" + render(*d.left) + "}{" + render(*d.right)

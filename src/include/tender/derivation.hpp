@@ -103,6 +103,16 @@ auto contract_identity(Context& ctx, Expr const* e) -> Expr const*;
 // (: , ··) span two factors and are left unchanged.
 auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*;
 
+// Expand a double contraction of dyads by definition:
+//   (a⊗b) :  (c⊗d)  →  (a·c)(b·d)      [DDot, the "vertical" double dot]
+//   (a⊗b) ·· (c⊗d)  →  (a·d)(b·c)      [DDotAlt, the alternate pairing]
+// Scalar coordinate factors are pulled through, and the contraction is
+// distributed over sums and pushed through summation binders (fresh-renamed to
+// avoid capture), so e.g. (Σ_i e_i⊗e_i):(Σ_j e_j⊗e_j) → Σ_i Σ_j
+// (e_i·e_j)(e_i·e_j). A double dot whose sides are not both 2-leg dyads is left
+// unchanged.
+auto expand_double_dot(Context& ctx, Expr const* e) -> Expr const*;
+
 // Contract a pair of Levi-Civita symbols sharing p summed indices, directly to
 // the generalized Kronecker delta (no concrete WCS unrolling):
 //

@@ -33,6 +33,7 @@ __all__ = [
     "contract_delta",
     "contract_identity",
     "distribute_contraction",
+    "expand_double_dot",
     "contract_eps_pair",
     "fold_equal_addends",
     "canonicalize",
@@ -139,6 +140,18 @@ def contract_delta(expr):
 def contract_identity(expr):
     """Contract the identity tensor in a dot product: ``I·x → x``, ``x·I → x``."""
     return _d._contract_identity(expr)
+
+
+def expand_double_dot(expr):
+    """Expand a double contraction of dyads by definition.
+
+    ``(a⊗b) : (c⊗d) → (a·c)(b·d)`` and ``(a⊗b) ·· (c⊗d) → (a·d)(b·c)``;
+    scalar factors are pulled through and the contraction distributes over sums
+    and summation binders, so it also fires on indexed / implicitly-summed dyads
+    (e.g. ``(Σ_i e_i⊗e_i):(Σ_j e_j⊗e_j)``).  A double dot whose sides are not
+    both dyads is left unchanged.
+    """
+    return _d._expand_double_dot(expr)
 
 
 def distribute_contraction(expr):

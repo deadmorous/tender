@@ -2968,3 +2968,77 @@ TEST(Canonicalize, NestedSumOrderIsNormalized)
     auto const* c = steps::canonicalize(ctx, sij);
     EXPECT_TRUE(structural_eq(steps::canonicalize(ctx, c), c));
 }
+
+// ---- expand_double_dot -----------------------------------------------------
+
+TEST(ExpandDoubleDot, DyadVertical)
+{
+    // (a⊗b):(c⊗d) → (a·c)(b·d)
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* d = v("d");
+    auto const* e = make_ddot(
+        ctx, make_tensor_product(ctx, a, b), make_tensor_product(ctx, c, d));
+    auto const* expected =
+        make_tensor_product(ctx, make_dot(ctx, a, c), make_dot(ctx, b, d));
+    EXPECT_TRUE(algebraic_eq(ctx, steps::expand_double_dot(ctx, e), expected));
+}
+
+TEST(ExpandDoubleDot, DyadAlternate)
+{
+    // (a⊗b)··(c⊗d) → (a·d)(b·c)
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* d = v("d");
+    auto const* e = make_ddot_alt(
+        ctx, make_tensor_product(ctx, a, b), make_tensor_product(ctx, c, d));
+    auto const* expected =
+        make_tensor_product(ctx, make_dot(ctx, a, d), make_dot(ctx, b, c));
+    EXPECT_TRUE(algebraic_eq(ctx, steps::expand_double_dot(ctx, e), expected));
+}
+
+TEST(ExpandDoubleDot, DistributesThroughSummationBinders)
+{
+    // (Σ_i e_i⊗e_i) : (Σ_j e_j⊗e_j) expands and (in 3D, orthonormal) the body
+    // becomes (e·e)(e·e); the sums survive (one per side).
+    Context ctx;
+    auto evec = [&](CountableIndex idx)
+    {
+        return make_tensor_object(
+            ctx,
+            make_tensor_name("e"),
+            {SlotBinding{
+                IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+                IndexAssoc{idx}}},
+            1);
+    };
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* li =
+        make_explicit_sum(ctx, i, make_tensor_product(ctx, evec(i), evec(i)));
+    auto const* lj =
+        make_explicit_sum(ctx, j, make_tensor_product(ctx, evec(j), evec(j)));
+    auto const* res = steps::expand_double_dot(ctx, make_ddot(ctx, li, lj));
+    // Two nested sums over a product of two dots — no DDot left.
+    auto const* outer = std::get_if<ExplicitSum>(&res->node);
+    ASSERT_NE(outer, nullptr);
+    EXPECT_TRUE(std::holds_alternative<ExplicitSum>(outer->body->node));
+}
+
+TEST(ExpandDoubleDot, NonDyadUnchanged)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    // A : (a) — right side is not a 2-leg dyad; left alone.
+    auto const* e = make_ddot(ctx, A, a);
+    EXPECT_EQ(steps::expand_double_dot(ctx, e), e);
+}

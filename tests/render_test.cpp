@@ -544,14 +544,24 @@ TEST(RenderParens, DotOfCrossNeedsParens)
     EXPECT_EQ(latex(*e), "\\mathbf{a} \\cdot (\\mathbf{b} \\times \\mathbf{c})");
 }
 
-TEST(RenderParens, ContractionInTensorProductNeedsParens)
+TEST(RenderParens, ScalarContractionInProductNoParens)
 {
-    // (a · b) ⊗ c: a contraction nested in a tensor product is wrapped, since
-    // juxtaposition (⊗) binds tighter than the contractions.
+    // (a · b) ⊗ c with a, b vectors: a · b is a scalar (rank 0), so it reads as
+    // an atom in the product — no parens: a·b \, c.  Likewise (a·c)(b·d).
     Context ctx;
     auto* ab = make_dot(ctx, T(ctx, "a", 1), T(ctx, "b", 1));
     auto* e = make_tensor_product(ctx, ab, T(ctx, "c", 1));
-    EXPECT_EQ(latex(*e), "(\\mathbf{a} \\cdot \\mathbf{b}) \\, \\mathbf{c}");
+    EXPECT_EQ(latex(*e), "\\mathbf{a} \\cdot \\mathbf{b} \\, \\mathbf{c}");
+}
+
+TEST(RenderParens, NonScalarContractionInProductNeedsParens)
+{
+    // (A · b) ⊗ c with A rank 2: A · b is rank 1 (a vector), not a scalar, so
+    // it is wrapped — juxtaposition binds tighter than the contraction.
+    Context ctx;
+    auto* Ab = make_dot(ctx, T(ctx, "A", 2), T(ctx, "b", 1));
+    auto* e = make_tensor_product(ctx, Ab, T(ctx, "c", 1));
+    EXPECT_EQ(latex(*e), "(\\mathbf{A} \\cdot \\mathbf{b}) \\, \\mathbf{c}");
 }
 
 TEST(RenderParens, TensorProductRightNoParens)

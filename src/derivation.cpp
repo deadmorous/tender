@@ -1709,6 +1709,117 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
     }
 }
 
+namespace
+{
+
+// Split a (possibly scalar-weighted) dyad into its scalar factors and exactly
+// two non-scalar legs, or nullopt if it is not a 2-leg product.  E.g.
+// s ⊗ (a ⊗ b) → ({s}, a, b).
+struct DyadSplit final
+{
+    std::vector<Expr const*> scalars;
+    Expr const* leg0;
+    Expr const* leg1;
+};
+auto split_dyad(Expr const* e) -> std::optional<DyadSplit>
+{
+    std::vector<Expr const*> flat;
+    flatten_factors(e, flat);
+    std::vector<Expr const*> scalars;
+    std::vector<Expr const*> legs;
+    for (auto const* f: flat)
+    {
+        if (infer_rank(f) == std::optional<int>{0})
+            scalars.push_back(f);
+        else
+            legs.push_back(f);
+    }
+    if (legs.size() != 2)
+        return std::nullopt;
+    return DyadSplit{std::move(scalars), legs[0], legs[1]};
+}
+
+// Left-fold factors into a TensorProduct (one factor returns itself).
+auto product_of(Context& ctx, std::vector<Expr const*> const& factors)
+    -> Expr const*
+{
+    Expr const* p = nullptr;
+    for (auto const* f: factors)
+        p = p ? make_tensor_product(ctx, p, f) : f;
+    return p;
+}
+
+// Expand one double-dot of two dyads by definition, distributing through sums
+// and summation binders.  `alt` selects the pairing:
+//   :  (a⊗b):(c⊗d)  = (a·c)(b·d)
+//   ·· (a⊗b)··(c⊗d) = (a·d)(b·c)
+auto dd_expand(Context& ctx, Expr const* l, Expr const* r, bool alt)
+    -> Expr const*
+{
+    auto rebuild = [&](Expr const* a, Expr const* b)
+    { return alt ? make_ddot_alt(ctx, a, b) : make_ddot(ctx, a, b); };
+
+    // Distribute over sums on either side.
+    if (auto const* s = std::get_if<Sum>(&l->node))
+        return make_sum(
+            ctx,
+            dd_expand(ctx, s->left, r, alt),
+            dd_expand(ctx, s->right, r, alt));
+    if (auto const* s = std::get_if<Sum>(&r->node))
+        return make_sum(
+            ctx,
+            dd_expand(ctx, l, s->left, alt),
+            dd_expand(ctx, l, s->right, alt));
+
+    // Pull a summation binder out (renaming to a fresh id to avoid capture).
+    if (auto const* es = std::get_if<ExplicitSum>(&l->node); es && !es->bound)
+    {
+        CountableIndex fresh{ctx.alloc_index_id()};
+        auto const* body =
+            substitute_index_id(ctx, es->body, es->index.id, fresh.id);
+        return make_explicit_sum(ctx, fresh, dd_expand(ctx, body, r, alt));
+    }
+    if (auto const* es = std::get_if<ExplicitSum>(&r->node); es && !es->bound)
+    {
+        CountableIndex fresh{ctx.alloc_index_id()};
+        auto const* body =
+            substitute_index_id(ctx, es->body, es->index.id, fresh.id);
+        return make_explicit_sum(ctx, fresh, dd_expand(ctx, l, body, alt));
+    }
+
+    // Core dyad rule.
+    auto const ls = split_dyad(l);
+    auto const rs = split_dyad(r);
+    if (!ls || !rs)
+        return rebuild(l, r); // not a dyad pair — leave it
+
+    std::vector<Expr const*> factors = ls->scalars;
+    factors.insert(factors.end(), rs->scalars.begin(), rs->scalars.end());
+    factors.push_back(make_dot(ctx, ls->leg0, alt ? rs->leg1 : rs->leg0));
+    factors.push_back(make_dot(ctx, ls->leg1, alt ? rs->leg0 : rs->leg1));
+    return product_of(ctx, factors);
+}
+
+} // namespace
+
+auto expand_double_dot(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& c, Expr const* node) -> Expr const*
+        {
+            Expr const* out = node;
+            if (auto const* d = std::get_if<DDot>(&node->node))
+                out = dd_expand(c, d->left, d->right, /*alt=*/false);
+            else if (auto const* d = std::get_if<DDotAlt>(&node->node))
+                out = dd_expand(c, d->left, d->right, /*alt=*/true);
+            // Preserve the no-op pointer contract when nothing actually
+            // changed.
+            return structural_eq(out, node) ? node : out;
+        });
+}
+
 auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
 {
     return rewrite_tree(

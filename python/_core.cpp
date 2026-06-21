@@ -591,6 +591,14 @@ NB_MODULE(_core, m)
         "product: op(L, A⊗B) -> op(L,A)⊗B, op(A⊗B, R) -> A⊗op(B,R).");
 
     md.def(
+        "_expand_double_dot",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::expand_double_dot(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Expand a double contraction of dyads: (a⊗b):(c⊗d) -> (a·c)(b·d), "
+        "(a⊗b)··(c⊗d) -> (a·d)(b·c); distributes over sums and binders.");
+
+    md.def(
         "_contract_eps_pair",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::contract_eps_pair(*e.ctx, e.expr)); },
