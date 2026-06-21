@@ -3110,3 +3110,29 @@ TEST(InferRank, UnaryOps)
     EXPECT_EQ(infer_rank(make_vector_invariant(ctx, A)), std::optional<int>{1});
     EXPECT_EQ(infer_rank(make_transpose(ctx, A)), std::optional<int>{2});
 }
+
+TEST(ContractDelta, FiresOnImplicitSumForm)
+{
+    // δ_ij δ_ij with sums still implicit (no ExplicitSum) contracts the same as
+    // the explicit Σ form: contract over i gives δ_jj (then j is implicit).
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto delta = [&](CountableIndex a, CountableIndex b)
+    {
+        return make_delta(
+            ctx,
+            Realm::Orthonormal,
+            sp,
+            Level::Lower,
+            Level::Lower,
+            IndexAssoc{a},
+            IndexAssoc{b});
+    };
+    auto const* prod = make_tensor_product(ctx, delta(i, j), delta(i, j));
+    auto const* res = steps::contract_delta(ctx, prod);
+    // Expected: Σ_j δ_jj  (trace form), equivalently the canonical of it.
+    auto const* expected = make_explicit_sum(ctx, j, delta(j, j));
+    EXPECT_TRUE(algebraic_eq(ctx, res, expected));
+}

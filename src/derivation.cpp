@@ -2379,10 +2379,29 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*
 
 auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
 {
-    return rewrite_tree(
+    // Expose implicit Einstein sums first, so the step fires on a pre-canonical
+    // δ_ij δ_ij (sums still implicit) the same as on an explicit Σ form.  Track
+    // whether any contraction actually fired, so a genuine no-op returns the
+    // original input untouched (no materialized sums leak out).
+    //
+    // materialize throws on ill-formed implicit sums (e.g. an Oblique
+    // same-level pair); for this step that just means "nothing to contract", so
+    // we fall back to the original expression rather than propagating the
+    // error.
+    bool fired = false;
+    Expr const* m = e;
+    try
+    {
+        m = materialize(ctx, e, {});
+    }
+    catch (std::invalid_argument const&)
+    {
+        return e;
+    }
+    auto const* out = rewrite_tree(
         ctx,
-        e,
-        [](Context& ctx, Expr const* e) -> Expr const*
+        m,
+        [&fired](Context& ctx, Expr const* e) -> Expr const*
         {
             auto const* s = std::get_if<ExplicitSum>(&e->node);
             if (!s || s->bound)
@@ -2439,6 +2458,7 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             if (!sur1.index || !sur2.index)
                 return e;
 
+            fired = true;
             return make_delta(
                 ctx,
                 sur1.slot.realm,
@@ -2448,6 +2468,8 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
                 *sur1.index,
                 *sur2.index);
         });
+    // No contraction fired — return the original input, untouched.
+    return fired ? out : e;
 }
 
 namespace
