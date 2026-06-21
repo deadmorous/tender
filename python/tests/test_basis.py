@@ -260,3 +260,37 @@ def test_user_ddot_identity_fires_on_basis_expansion():
     y = td.unroll_sums(y)
     y = td.fold_arithmetic(td.eval_delta_concrete(y))
     assert td.algebraic_eq(td.canonicalize(y), tender.scalar(3, ctx=ctx))
+
+
+def test_bac_cab():
+    # a × (b × c) = b(a·c) − c(a·b), via ε-pair contraction in a product.
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    c = tender.tensor("c", rank=1, ctx=ctx)
+
+    def reduce_cross(e):
+        e = tb.expand_in_basis(e, frame, tb.Variance.Covariant)
+        e = tb.simplify_basis_cross(e, frame)
+        e = td.canonicalize(e)
+        e = td.contract_eps_pair(e)
+        e = td.expand_products(e)
+        e = td.canonicalize(e)
+        e = td.unroll_sums(e)
+        e = td.eval_delta_concrete(e)
+        e = td.fold_arithmetic(e)
+        return td.canonicalize(e)
+
+    def reduce_dot(e):
+        e = tb.expand_in_basis(e, frame, tb.Variance.Covariant)
+        e = tb.simplify_basis_dot(e, frame)
+        e = td.canonicalize(e)
+        e = td.unroll_sums(e)
+        e = td.eval_delta_concrete(e)
+        e = td.fold_arithmetic(e)
+        return td.canonicalize(e)
+
+    lhs = reduce_cross(a % (b % c))
+    rhs = reduce_dot(b * (a @ c) - c * (a @ b))
+    assert td.algebraic_eq(lhs, rhs)

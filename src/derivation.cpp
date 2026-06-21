@@ -2809,12 +2809,15 @@ auto map_children(Context& ctx, Expr const* e, Rec const& rec) -> Expr const*
 }
 
 // Attempt the ε-pair contraction anchored at node `e`: peel every nested
-// concrete-bound ExplicitSum, and if the result is Σ ε ε of two rank-3
-// Levi-Civita symbols whose shared dummies are exactly the peeled indices,
-// return the generalized-Kronecker result.  Returns nullptr on no match.
+// null-bound ExplicitSum (and a leading −1 sign), then look inside the product
+// body for exactly two rank-3 Levi-Civita symbols.  Contract them over the
+// indices they *share* (summed in both), via the generalized-Kronecker formula,
+// keeping any other factors and re-wrapping the non-contracted sums.  So it
+// fires on a bare Σ ε ε *and* on Σ ε ε buried in a coordinate product (e.g.
+// bac-cab's Σ −ε ε a b c e).  Returns nullptr on no match.
 auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
 {
-    // Peel nested concrete-bound ExplicitSum nodes; collect dummy ids.
+    // Peel nested null-bound ExplicitSum nodes; collect dummy ids.
     std::vector<int> summed;
     Expr const* body = e;
     while (auto const* s = std::get_if<ExplicitSum>(&body->node))
@@ -2827,66 +2830,100 @@ auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
     if (summed.empty())
         return nullptr;
 
-    // Body must be a product of exactly two Levi-Civita symbols.
-    auto const* prod = std::get_if<TensorProduct>(&body->node);
-    if (!prod)
-        return nullptr;
-    auto const* ea = std::get_if<TensorObject>(&prod->left->node);
-    auto const* eb = std::get_if<TensorObject>(&prod->right->node);
-    auto is_eps = [](TensorObject const* t)
+    // Peel one leading sign (canonical forms carry it as a Negate wrapper).
+    bool negated = false;
+    if (auto const* n = std::get_if<Negate>(&body->node))
     {
-        return t && t->traits
-               && t->traits->well_known == WellKnownKind::LeviCivita
-               && t->slots.size() == 3;
+        negated = true;
+        body = n->operand;
+    }
+
+    // Flatten the product; find exactly two ε's, collect the other factors.
+    std::vector<Expr const*> factors;
+    flatten_factors(body, factors);
+    auto as_eps = [](Expr const* f) -> TensorObject const*
+    {
+        auto const* t = std::get_if<TensorObject>(&f->node);
+        return (t && t->traits
+                && t->traits->well_known == WellKnownKind::LeviCivita
+                && t->slots.size() == 3) ?
+                   t :
+                   nullptr;
     };
-    if (!is_eps(ea) || !is_eps(eb))
+    TensorObject const* ea = nullptr;
+    TensorObject const* eb = nullptr;
+    std::vector<Expr const*> others;
+    for (auto const* f: factors)
+    {
+        if (auto const* t = as_eps(f))
+        {
+            if (!ea)
+                ea = t;
+            else if (!eb)
+                eb = t;
+            else
+                return nullptr; // more than two ε's — not handled
+        }
+        else
+            others.push_back(f);
+    }
+    if (!ea || !eb)
         return nullptr;
 
-    auto in_summed = [&summed](int id)
-    { return std::find(summed.begin(), summed.end(), id) != summed.end(); };
-
-    // Split an ε's slots into contracted-id list and free slots, preserving
-    // order.  Fails (returns false) if any slot is not a CountableIndex.
-    auto split = [&](TensorObject const& eps,
-                     std::vector<int>& contracted_ids,
-                     std::vector<FreeSlot>& free) -> bool
+    // All ε slots must be CountableIndex; gather each ε's id set.
+    auto eps_ids = [](TensorObject const& t, std::set<int>& s) -> bool
     {
-        for (auto const& sb: eps.slots)
+        for (auto const& sb: t.slots)
         {
             if (!sb.index)
                 return false;
             auto const* ci = std::get_if<CountableIndex>(&*sb.index);
             if (!ci)
                 return false;
-            if (in_summed(ci->id))
-                contracted_ids.push_back(ci->id);
-            else
-                free.push_back(FreeSlot{sb.slot.level, *sb.index});
+            s.insert(ci->id);
         }
         return true;
     };
+    std::set<int> ida, idb;
+    if (!eps_ids(*ea, ida) || !eps_ids(*eb, idb))
+        return nullptr;
 
+    // The ε-pair contracts over the indices shared by both ε's that are summed.
+    std::set<int> const summed_set(summed.begin(), summed.end());
+    std::set<int> shared;
+    for (int id: ida)
+        if (idb.count(id) && summed_set.count(id))
+            shared.insert(id);
+    if (shared.empty())
+        return nullptr;
+
+    // Split each ε into contracted (shared) ids and free slots, in slot order.
+    auto split = [&](TensorObject const& eps,
+                     std::vector<int>& cids,
+                     std::vector<FreeSlot>& free)
+    {
+        for (auto const& sb: eps.slots)
+        {
+            int id = std::get<CountableIndex>(*sb.index).id;
+            if (shared.count(id))
+                cids.push_back(id);
+            else
+                free.push_back(FreeSlot{sb.slot.level, *sb.index});
+        }
+    };
     std::vector<int> ca, cb;
     std::vector<FreeSlot> fa, fb;
-    if (!split(*ea, ca, fa) || !split(*eb, cb, fb))
-        return nullptr;
+    split(*ea, ca, fa);
+    split(*eb, cb, fb);
 
-    // Every summed dummy must be a genuine contraction: present exactly once
-    // in each ε.
-    int const p = static_cast<int>(summed.size());
+    // Each shared index must appear exactly once in each ε.
+    int const p = static_cast<int>(shared.size());
     if (static_cast<int>(ca.size()) != p || static_cast<int>(cb.size()) != p)
         return nullptr;
-    {
-        std::set<int> sa(ca.begin(), ca.end()), sb(cb.begin(), cb.end());
-        std::set<int> ss(summed.begin(), summed.end());
-        if (sa != ss || sb != ss)
-            return nullptr;
-    }
     if (fa.size() != fb.size())
         return nullptr;
 
-    // Sign of re-ordering each ε to [contracted-in-ca-order, free].  Use ca as
-    // the shared contracted-index order for both ε's.
+    // Sign of re-ordering each ε to [shared-in-ca-order, free].
     std::vector<int> ids_a, ids_b, target_a, target_b;
     for (auto const& sb: ea->slots)
         ids_a.push_back(std::get<CountableIndex>(*sb.index).id);
@@ -2895,7 +2932,7 @@ auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
     target_a = ca;
     for (auto const& f: fa)
         target_a.push_back(std::get<CountableIndex>(f.index).id);
-    target_b = ca; // same contracted order for the second ε
+    target_b = ca; // same shared order for the second ε
     for (auto const& f: fb)
         target_b.push_back(std::get<CountableIndex>(f.index).id);
     int sign = reorder_sign(ids_a, target_a) * reorder_sign(ids_b, target_b);
@@ -2905,16 +2942,30 @@ auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
 
     Expr const* det = build_kronecker_det(ctx, realm, space, fa, fb);
 
-    // Scalar weight: sign · p!  (factorial small: p ∈ {1,2,3}).
+    // Scalar weight: p!  (factorial small: p ∈ {1,2,3}).
     int fact = 1;
     for (int k = 2; k <= p; ++k)
         fact *= k;
-
     Expr const* core =
         (fact == 1) ?
             det :
             make_tensor_product(ctx, make_scalar(ctx, Rational{fact}), det);
-    return sign < 0 ? make_negate(ctx, core) : core;
+
+    // Re-attach the other (non-ε) factors of the product.
+    Expr const* result = core;
+    for (auto const* o: others)
+        result = make_tensor_product(ctx, o, result);
+    if (sign < 0)
+        result = make_negate(ctx, result);
+    if (negated)
+        result = make_negate(ctx, result);
+
+    // Re-wrap the summed indices that were not contracted by the ε-pair.
+    for (int id: summed)
+        if (!shared.count(id))
+            result =
+                make_explicit_sum(ctx, CountableIndex{id}, result, nullptr);
+    return result;
 }
 
 // Top-down walk: try the contraction at each node; on a match the whole

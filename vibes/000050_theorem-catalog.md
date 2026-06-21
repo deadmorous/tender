@@ -20,8 +20,8 @@ can currently take it.
 | # | Theorem | Statement | Status | Closing needs |
 |---|---------|-----------|--------|---------------|
 | 1 | cross-with-identity commutes | `a × I = I × a` | ✅ Proven | — |
-| 2 | bac-cab | `a × (b × c) = b (a·c) − c (a·b)` | 🟡 In reach | ε-pair contraction *inside a product* + δ-substitution |
-| 3 | cross-identity-cross | `a × I × b = b ⊗ a − (a·b) I` | 🟡 In reach | same as #2 |
+| 2 | bac-cab | `a × (b × c) = b (a·c) − c (a·b)` | ✅ Proven | — |
+| 3 | cross-identity-cross | `a × I × b = b ⊗ a − (a·b) I` | 🟠 Blocked by bug | a rank-2 transpose bug in the cross pipeline (see below) |
 | 4 | identity has no axial vector | `vec(I) = 0` | ✅ Proven | — |
 | 5 | trace of the identity | `tr(I) = n` (`= 3` in 3D) | ✅ Proven | — |
 
@@ -62,45 +62,53 @@ same coordinate machinery (`expand_dyad_ops` `tr(e_i⊗e_i) = e_i·e_i`,
 `simplify_basis_dot`, `unroll_sums`, `eval_delta_concrete`, `fold_arithmetic`).
 The closely related `I:I = tr(I) = 3` runs through `expand_double_dot`.
 
-### 2. bac-cab `a × (b × c) = b (a·c) − c (a·b)` — 🟡 In reach
+### 2. bac-cab `a × (b × c) = b (a·c) − c (a·b)` — ✅ Proven
 
-The geometric half works: expand, `distribute_contraction`, two rounds of
-`simplify_basis_cross`, `canonicalize` reduce `a × (b × c)` to the index form
-`Σ −ε_{mli} ε_{mkj} a_l b_k c_j e_i` — a product of two Levi-Civita symbols
-sharing the summed index `m`.  Closing it then needs two things still deferred:
-(a) **ε-pair contraction inside a larger product** — `contract_eps_pair` exists
-but matches only a bare `ε ⊗ ε`, not `ε ε · (coordinates) · e`; the e-graph +
-identity library (`eps_delta_*`, vibe 000046) is the general route, not yet
-wired to the basis steps / Python; (b) **δ-substitution** — collapsing the
-resulting `δ_{ab} x_a → x_b` against the coordinates, the recognized
-parametric-RHS gap (vibes 000033/000040).
+`expand_in_basis`, `simplify_basis_cross`, `canonicalize` reduce `a × (b × c)`
+to `Σ −ε_{mli} ε_{mkj} a_l b_k c_j e_i` — two Levi-Civita symbols sharing the
+summed index `m`.  `contract_eps_pair` (now extended to fire **inside a larger
+product**) contracts the ε-pair over `m` into the generalized Kronecker δ-form,
+keeping `a,b,c,e`; the δ's then collapse via the **concrete unroll path**
+(`expand_products` → `unroll_sums` → `eval_delta_concrete` → `fold_arithmetic`),
+so no symbolic δ-substitution is needed.  Both sides reduce to the same
+coordinate form (`algebraic_eq`).  Test: `BasisFeasibility.BacCab`; the new
+ε-pair-in-product unit test is `ContractEpsPair.FiresInsideProduct`.
 
-### 3. cross-identity-cross `a × I × b = b ⊗ a − (a·b) I` — 🟡 In reach
+The key extension: `try_contract_eps_pair` now flattens the product, finds the
+two ε's among the other factors, contracts over the indices **shared by both
+ε's** (not all peeled sums), and re-attaches the others — and peels a leading
+`Negate`.  Backward-compatible with the bare `ε ⊗ ε` `eps_delta_*` cases.
 
-Same shape as bac-cab: the cross/identity-dyad pipeline reduces it to an ε-ε
-index expression; closing needs the same ε-pair-in-product contraction and
-δ-substitution.
+### 3. cross-identity-cross `a × I × b = b ⊗ a − (a·b) I` — 🟠 Blocked by a bug
 
-## The shared blockers (what unlocks the 🟡 rows)
+Same shape as bac-cab, and the ε-pair machinery now fires — but the engine
+reduces `(a × I) × b` to `a ⊗ b − (a·b) I`, the **transpose** of the correct
+`b ⊗ a − (a·b) I` (verified by hand and by a concrete `a = e₁, b = e₂` check:
+the answer is `e₂ ⊗ e₁ = b ⊗ a`).  bac-cab is rank-1 so it cannot expose this;
+`a × I × b` is rank-2 and does.  The reduction of the engine's *own* intermediate
+form `Σ −ε_{mlj} ε_{mki} a_l b_k e_j⊗e_i` works out to `b ⊗ a` by hand, so the
+δ-symmetric `build_kronecker_det` is not the obvious culprit — the transpose is
+somewhere in the rank-2 cross/contract path (a wrong free-slot↔dyad-leg
+association, or a leg choice in the cross-with-dyad distribution).  **A genuine
+bug to hunt**, not a missing feature.  Until fixed, `a × I × b` (and any rank-2
+cross identity) cannot be trusted.
 
-Two deferred capabilities recur and would convert the in-reach theorems to
-proven:
+## Capabilities now in place
 
-- **δ-substitution** as a first-class step/rule: `Σ_p δ^{p}_{a} f(p,…) → f(a,…)`
-  — needs a parametric slot + computed RHS (vibe 000033 §6, 000040).  Today it is
-  worked around per-case with a data `Identity` (as in the `(e_i×e_j)·e_k = ε_ijk`
-  example) or the concrete-unroll path.
-- **ε-pair contraction within a product**: applying `eps_delta_*` to an `ε ⊗ ε`
-  buried in a polyad of coordinates, via the e-graph saturator — exposing the
-  identity library to the basis workflow (and to Python).
-
-Once these land, #2 and #3 (and most cross-product vector identities) follow the
-same expand → simplify_basis_cross → ε-δ → δ-substitution → reassemble arc.
+- **ε-pair contraction within a product** — done (theorem #2): `contract_eps_pair`
+  fires on an `ε ⊗ ε` buried in a coordinate polyad, contracting over the shared
+  index and keeping the rest.
+- **δ-collapse** — the concrete-unroll path (`unroll_sums` →
+  `eval_delta_concrete` → `fold_arithmetic`) closes the δ's without a symbolic
+  δ-substitution.  A first-class `Σ_p δ^p_a f(p,…) → f(a,…)` step (the
+  parametric-RHS gap, vibes 000033 §6 / 000040) would give cleaner *symbolic*
+  results but is not required to *prove* these.
 
 ## Next
 
-Add theorems as the infrastructure grows; each proven theorem gets a test and,
-where instructive, a maintained example.  Candidates after the δ-substitution /
-ε-pair work: `tr(I) = n`, `I · a = a` (already a step), Binet–Cauchy, the
-scalar/vector triple-product identities, and the differential-operator theorems
-of Stage 5.
+1. **Fix the rank-2 cross transpose bug** (theorem #3) — the one thing standing
+   between the engine and trustworthy rank-2 cross identities.
+2. Then add theorems as the infrastructure grows; each proven one gets a test
+   and, where instructive, a maintained example.  Candidates: Binet–Cauchy, the
+   scalar/vector triple-product identities, symmetric/antisymmetric
+   decompositions, and the differential-operator theorems of Stage 5.

@@ -3302,3 +3302,42 @@ TEST(Materialize, ContractsIndicesAcrossDots)
     EXPECT_FALSE(std::holds_alternative<ExplicitSum>(implicit->node));
     EXPECT_TRUE(algebraic_eq(ctx, implicit, term));
 }
+
+TEST(ContractEpsPair, FiresInsideProduct)
+{
+    // Σ_m ε_{mjk} ε_{mpq} x_j  →  (δ-det) x_j  (the ε-pair contracts over m,
+    // the extra factor x_j is kept).  Result must be free of ε and of the m
+    // sum.
+    Context ctx;
+    auto const* sp = space_3d();
+    std::vector<Level> const lll{Level::Lower, Level::Lower, Level::Lower};
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto p = CountableIndex{ctx.alloc_index_id()};
+    auto q = CountableIndex{ctx.alloc_index_id()};
+    auto eps = [&](CountableIndex x, CountableIndex y, CountableIndex z)
+    {
+        return make_levi_civita(
+            ctx,
+            Realm::Orthonormal,
+            sp,
+            lll,
+            {IndexAssoc{x}, IndexAssoc{y}, IndexAssoc{z}});
+    };
+    auto const* x_j = make_tensor_object(
+        ctx,
+        make_tensor_name("x"),
+        {SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, sp}, IndexAssoc{j}}},
+        0);
+    auto const* body = make_tensor_product(
+        ctx, make_tensor_product(ctx, eps(m, j, k), eps(m, p, q)), x_j);
+    auto const* summed = make_explicit_sum(ctx, m, body);
+
+    auto const* res = steps::contract_eps_pair(ctx, summed);
+    // The contraction fired: no Levi-Civita symbol remains in the result.
+    IndexNameMap map;
+    auto const tex = render_latex(*res, map);
+    EXPECT_EQ(tex.find("varepsilon"), std::string::npos);
+}

@@ -253,3 +253,49 @@ TEST(BasisFeasibility, VectorInvariantOfIdentityIsZero)
     e = steps::canonicalize(ctx, steps::fold_arithmetic(ctx, e));
     EXPECT_TRUE(algebraic_eq(ctx, e, make_scalar(ctx, Rational{0})));
 }
+
+// bac-cab: a × (b × c) = b(a·c) − c(a·b), proven by reducing both sides to
+// their coordinate form.  The cross side needs the ε-pair contraction to fire
+// INSIDE the coordinate product Σ −ε ε a b c e (contracting the two ε's over
+// their shared index, keeping a,b,c,e), then the δ's collapse via the concrete
+// unroll path.
+TEST(BasisFeasibility, BacCab)
+{
+    Context ctx;
+    auto b3 = wcs(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+
+    auto reduce_cross = [&](Expr const* e)
+    {
+        e = expand_in_basis(ctx, e, b3, Variance::Covariant);
+        e = simplify_basis_cross(ctx, e, b3);
+        e = steps::canonicalize(ctx, e);
+        e = steps::contract_eps_pair(ctx, e);
+        e = steps::expand_products(ctx, e);
+        e = steps::canonicalize(ctx, e);
+        e = steps::unroll_sums(ctx, e);
+        e = steps::eval_delta_concrete(ctx, e);
+        e = steps::fold_arithmetic(ctx, e);
+        return steps::canonicalize(ctx, e);
+    };
+    auto reduce_dot = [&](Expr const* e)
+    {
+        e = expand_in_basis(ctx, e, b3, Variance::Covariant);
+        e = simplify_basis_dot(ctx, e, b3);
+        e = steps::canonicalize(ctx, e);
+        e = steps::unroll_sums(ctx, e);
+        e = steps::eval_delta_concrete(ctx, e);
+        e = steps::fold_arithmetic(ctx, e);
+        return steps::canonicalize(ctx, e);
+    };
+
+    auto const* lhs = reduce_cross(make_cross(ctx, a, make_cross(ctx, b, c)));
+    // b(a·c) − c(a·b)
+    auto const* rhs = reduce_dot(make_difference(
+        ctx,
+        make_tensor_product(ctx, b, make_dot(ctx, a, c)),
+        make_tensor_product(ctx, c, make_dot(ctx, a, b))));
+    EXPECT_TRUE(algebraic_eq(ctx, lhs, rhs));
+}
