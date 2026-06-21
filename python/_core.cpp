@@ -954,4 +954,14 @@ NB_MODULE(_core, m)
         "basis"_a,
         "Fold a coordinate expansion back to its invariant (inverse of "
         "expand_in_basis); a no-op on anything that is not such an expansion.");
+
+    mb.def(
+        "reassemble_completeness",
+        [](PyExpr const& e, PyBasis const& b) -> PyExpr
+        { return derive(e, reassemble_completeness(*e.ctx, e.expr, b.basis)); },
+        "expr"_a,
+        "basis"_a,
+        "Fold the resolution of identity Σ_i e_i⊗e^i = I where it is partially "
+        "contracted: Σ_i (X·e_i) e_i -> X (and Σ_i (scalars) e_i⊗e_i -> "
+        "(scalars) I).  Complements reassemble; a no-op otherwise.");
 }

@@ -455,6 +455,197 @@ auto sorted(std::vector<int> v) -> std::vector<int>
     return v;
 }
 
+// Does index id appear in any tensor slot within e?  (Binders other than the
+// summed indices being folded are not expected on the terms passed here.)
+auto mentions_index(Context& ctx, Expr const* e, int id) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node))
+                for (auto const& sb: t->slots)
+                    if (sb.index)
+                        if (auto const* ci =
+                                std::get_if<CountableIndex>(&*sb.index);
+                            ci && ci->id == id)
+                            found = true;
+            return n;
+        });
+    return found;
+}
+
+// One half of the resolution of identity Σ_i e_i ⊗ e^i = I: a *scalar* Dot in
+// which one operand is a bare basis vector e_i and the other is a rank-1
+// invariant X.  Paired with a bare e_i leg over the same summed index, the term
+// Σ_i (X·e_i) e_i folds to X·I = X — the "X·I = X" route of completeness
+// reassembly (the alternative "X·e_i = X_i, then Σ X_i e_i = X" route would
+// instead need component materialization and a symbolic δ-substitution, which
+// this avoids).
+struct CompletenessDot final
+{
+    int index;
+    Expr const* other;
+};
+auto as_completeness_dot(Expr const* e, Basis const& b)
+    -> std::optional<CompletenessDot>
+{
+    auto const* d = std::get_if<Dot>(&e->node);
+    if (!d || infer_rank(e) != std::optional<int>{0})
+        return std::nullopt; // must be a scalar contraction (X rank 1)
+    if (auto bv = as_basis_vector(d->right, b))
+        return CompletenessDot{bv->first.id, d->left};
+    if (auto bv = as_basis_vector(d->left, b))
+        return CompletenessDot{bv->first.id, d->right};
+    return std::nullopt;
+}
+
+auto product_of(Context& ctx, std::vector<Expr const*> const& fs) -> Expr const*
+{
+    if (fs.empty())
+        return make_scalar(ctx, Rational{1});
+    Expr const* p = fs.front();
+    for (std::size_t i = 1; i < fs.size(); ++i)
+        p = make_tensor_product(ctx, p, fs[i]);
+    return p;
+}
+
+auto wrap_sums(Context& ctx, std::vector<int> const& ids, Expr const* e)
+    -> Expr const*
+{
+    for (int id: ids)
+        e = make_explicit_sum(ctx, CountableIndex{id}, e, nullptr);
+    return e;
+}
+
+// Fold a resolution of identity in a product term Σ_summed (factors) over one
+// summed index i that occurs nowhere else.  Two shapes (nullptr if neither):
+//   A. one bare leg e_i + one completeness dot (X·e_i) → X at the leg's place
+//      (Σ_i (X·e_i) e_i = X·I = X), and
+//   B. two bare legs e_i and only rank-0 (scalar) other factors → the two legs
+//      become I (Σ_i (scalars) e_i⊗e_i = (scalars) I); the scalars commute out
+//      so they need not be adjacent to the legs.
+auto fold_completeness_term(
+    Context& ctx,
+    std::vector<int> const& summed,
+    std::vector<Expr const*> const& factors,
+    Basis const& basis) -> Expr const*
+{
+    for (int id: summed)
+    {
+        std::vector<int> legs;
+        int dot = -1, dots = 0;
+        Expr const* X = nullptr;
+        bool other = false, nonscalar_other = false;
+        for (std::size_t p = 0; p < factors.size(); ++p)
+        {
+            auto const* f = factors[p];
+            if (auto bv = as_basis_vector(f, basis); bv && bv->first.id == id)
+            {
+                legs.push_back(static_cast<int>(p));
+                continue;
+            }
+            if (auto cd = as_completeness_dot(f, basis); cd && cd->index == id)
+            {
+                ++dots;
+                dot = static_cast<int>(p);
+                X = cd->other;
+                continue;
+            }
+            if (mentions_index(ctx, f, id))
+                other = true;
+            if (infer_rank(f) != std::optional<int>{0})
+                nonscalar_other = true;
+        }
+        if (other)
+            continue;
+
+        // A. completeness contraction: Σ_i (X·e_i) e_i → X.
+        if (legs.size() == 1 && dots == 1)
+        {
+            std::vector<Expr const*> out;
+            for (std::size_t p = 0; p < factors.size(); ++p)
+            {
+                if (static_cast<int>(p) == dot)
+                    continue;
+                out.push_back(static_cast<int>(p) == legs[0] ? X : factors[p]);
+            }
+            std::vector<int> rest;
+            for (int s: summed)
+                if (s != id)
+                    rest.push_back(s);
+            return wrap_sums(ctx, rest, product_of(ctx, out));
+        }
+
+        // B. resolution of identity: Σ_i (scalars) e_i⊗e_i → (scalars) I.  The
+        // scalars are emitted first (the conventional coefficient·tensor
+        // order), then I; both are invariants whose order the canonicalizer
+        // preserves.
+        if (legs.size() == 2 && dots == 0 && !nonscalar_other)
+        {
+            std::vector<Expr const*> out;
+            for (std::size_t p = 0; p < factors.size(); ++p)
+                if (static_cast<int>(p) != legs[0]
+                    && static_cast<int>(p) != legs[1])
+                    out.push_back(factors[p]);
+            out.push_back(make_identity(ctx));
+            std::vector<int> rest;
+            for (int s: summed)
+                if (s != id)
+                    rest.push_back(s);
+            return wrap_sums(ctx, rest, product_of(ctx, out));
+        }
+    }
+    return nullptr;
+}
+
+// Recursive driver: peel the summed binders, distribute over Sum/Negate by
+// linearity (only when a fold actually fires below, so the step is a no-op
+// otherwise), and fold each product term.  Returns nullptr when nothing folds.
+auto fold_completeness(Context& ctx, Expr const* node, Basis const& basis)
+    -> Expr const*
+{
+    std::vector<int> summed;
+    Expr const* body = node;
+    while (auto const* es = std::get_if<ExplicitSum>(&body->node))
+    {
+        if (es->bound)
+            return nullptr; // symbolic bound: not a basis expansion
+        summed.push_back(es->index.id);
+        body = es->body;
+    }
+    if (auto const* s = std::get_if<Sum>(&body->node))
+    {
+        auto* lf =
+            fold_completeness(ctx, wrap_sums(ctx, summed, s->left), basis);
+        auto* rf =
+            fold_completeness(ctx, wrap_sums(ctx, summed, s->right), basis);
+        if (!lf && !rf)
+            return nullptr;
+        return make_sum(
+            ctx,
+            lf ? lf : wrap_sums(ctx, summed, s->left),
+            rf ? rf : wrap_sums(ctx, summed, s->right));
+    }
+    if (auto const* n = std::get_if<Negate>(&body->node))
+    {
+        auto* f =
+            fold_completeness(ctx, wrap_sums(ctx, summed, n->operand), basis);
+        return f ? make_negate(ctx, f) : nullptr;
+    }
+    if (summed.empty())
+        return nullptr;
+    std::vector<Expr const*> factors;
+    flatten_product(body, factors);
+    auto* folded = fold_completeness_term(ctx, summed, factors, basis);
+    if (!folded)
+        return nullptr;
+    auto* more = fold_completeness(ctx, folded, basis);
+    return more ? more : folded;
+}
+
 } // namespace
 
 auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
@@ -520,6 +711,19 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
 
             return make_tensor_object(
                 c, coord->name, {}, static_cast<int>(s.size()));
+        });
+}
+
+auto reassemble_completeness(Context& ctx, Expr const* e, Basis const& basis)
+    -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto* f = fold_completeness(c, node, basis);
+            return f ? f : node;
         });
 }
 

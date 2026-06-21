@@ -330,3 +330,30 @@ def test_cross_identity_cross():
     assert td.algebraic_eq(lhs, rhs)
     # Not the transpose.
     assert not td.algebraic_eq(lhs, reduce_dot(a * b - (a @ b) * I))
+
+
+def test_cross_identity_cross_via_reassembly():
+    # Second proof of a × I × b: pattern matcher (bac-cab as a reusable
+    # identity) + completeness reassembly, landing in pure direct notation.
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    I = tender.identity(ctx=ctx)
+    x = tender.tensor("x", rank=1, ctx=ctx)
+    y = tender.tensor("y", rank=1, ctx=ctx)
+    z = tender.tensor("z", rank=1, ctx=ctx)
+    baccab = td.Identity("bac-cab", x % (y % z), y * (x @ z) - z * (x @ y))
+
+    I_exp = tb.expand_in_basis(I, frame, tb.Variance.Covariant)
+    s = td.canonicalize(a % (b % I_exp))
+    s = td.distribute_contraction(s)
+    s = td.canonicalize(s)
+    s = td.apply_identity(baccab)(s)
+    s = td.expand_products(s)
+    s = td.canonicalize(s)
+    s = tb.reassemble_completeness(s, frame)
+    s = td.canonicalize(s)
+
+    want = td.canonicalize(b * a - (a @ b) * I)
+    assert td.structural_eq(s, want)

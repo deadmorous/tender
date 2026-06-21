@@ -44,6 +44,7 @@ expand_in_basis = _b.expand_in_basis
 simplify_basis_dot = _b.simplify_basis_dot
 simplify_basis_cross = _b.simplify_basis_cross
 reassemble = _b.reassemble
+reassemble_completeness = _b.reassemble_completeness
 
 __all__ = [
     "Basis",
@@ -59,4 +60,5 @@ __all__ = [
     "simplify_basis_dot",
     "simplify_basis_cross",
     "reassemble",
+    "reassemble_completeness",
 ]

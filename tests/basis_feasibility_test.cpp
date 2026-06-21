@@ -350,3 +350,52 @@ TEST(BasisFeasibility, CrossIdentityCross)
         make_tensor_product(ctx, make_dot(ctx, a, b), I)));
     EXPECT_FALSE(algebraic_eq(ctx, lhs, transposed));
 }
+
+// The same theorem proved a second way, to stress the pattern matcher and the
+// completeness reassembly instead of the ε-pair contraction:
+//   a × (b × I), expand ONLY I, distribute the cross over the dyad, apply
+//   bac-cab (a reusable Identity with subtree pattern variables) on the
+//   a×(b×e_i) subterm, distribute, then fold the resolution of identity.
+// Reads out symbolically as b ⊗ a − (a·b) I (structural equality, not just
+// algebraic — the derivation lands in pure direct notation).
+TEST(BasisFeasibility, CrossIdentityCrossViaReassembly)
+{
+    Context ctx;
+    auto b3 = wcs(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* I = make_identity(ctx);
+
+    // bac-cab as a reusable Identity with subtree pattern variables x,y,z.
+    auto const* x = make_tensor_object(ctx, make_tensor_name("x"), {}, 1);
+    auto const* y = make_tensor_object(ctx, make_tensor_name("y"), {}, 1);
+    auto const* z = make_tensor_object(ctx, make_tensor_name("z"), {}, 1);
+    Identity const baccab{
+        "bac-cab",
+        make_cross(ctx, x, make_cross(ctx, y, z)),
+        make_difference(
+            ctx,
+            make_tensor_product(ctx, y, make_dot(ctx, x, z)),
+            make_tensor_product(ctx, z, make_dot(ctx, x, y)))};
+
+    // Expand ONLY I (work with it as a standalone expression), splice back.
+    auto const* Iexp = expand_in_basis(ctx, I, b3, Variance::Covariant);
+    auto const* e = make_cross(ctx, a, make_cross(ctx, b, Iexp));
+
+    auto const* s = steps::canonicalize(ctx, e);
+    s = steps::distribute_contraction(ctx, s); // b×(e_i⊗e^i) = (b×e_i)⊗e^i
+    s = steps::canonicalize(ctx, s);
+    s = apply_identity(ctx, s, baccab); // fires on the a×(b×e_i) subterm
+    s = steps::expand_products(ctx, s); // distribute the (…)⊗e^i
+    s = steps::canonicalize(ctx, s);
+    s = reassemble_completeness(ctx, s, b3); // fold the resolution of identity
+    s = steps::canonicalize(ctx, s);
+
+    auto const* want = steps::canonicalize(
+        ctx,
+        make_difference(
+            ctx,
+            make_tensor_product(ctx, b, a),
+            make_tensor_product(ctx, make_dot(ctx, a, b), I)));
+    EXPECT_TRUE(structural_eq(s, want));
+}

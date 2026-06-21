@@ -228,4 +228,21 @@ enum class Variance
 [[nodiscard]] auto reassemble(Context& ctx, Expr const* e, Basis const& basis)
     -> Expr const*;
 
+// Fold the resolution of identity Σ_i e_i ⊗ e^i = I where it appears partially
+// contracted — the completeness reassembly that `reassemble` (which needs a
+// literal coordinate tensor a_i) cannot do.  In a product term under Σ_i, a
+// bare basis vector e_i together with a scalar contraction (X·e_i) over the
+// same summed index i (occurring nowhere else) collapses to X in the leg's
+// position:
+//
+//   Σ_i (X·e_i) e_i           → X            (= X·I = X)
+//   Σ_i (a·e_i) (b ⊗ e_i)     → b ⊗ a
+//
+// X must be rank 1 (the dot is scalar).  The sum is distributed over Sum/Negate
+// addends by linearity so the fold reaches each term; addends without the
+// pattern (e.g. the pure Σ_i e_i⊗e_i = I) are left for `reassemble`.  A no-op
+// when no such pattern is present.  Walks the whole tree.
+[[nodiscard]] auto reassemble_completeness(
+    Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
+
 } // namespace tender

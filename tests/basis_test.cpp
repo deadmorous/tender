@@ -816,3 +816,99 @@ TEST(Reassemble, IdentityRoundTrip)
         ctx, expand_in_basis(ctx, I, b, Variance::Covariant));
     EXPECT_TRUE(structural_eq(reassemble(ctx, ex, b), I));
 }
+
+// Completeness, shape A: Σ_i (a·e_i) e_i = a·I = a.
+TEST(ReassembleCompleteness, ContractionFoldsToVector)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* e_i = b.covariant_vector(ctx, i);
+    auto const* term = make_explicit_sum(
+        ctx, i, make_tensor_product(ctx, make_dot(ctx, a, e_i), e_i));
+    auto const* back = steps::canonicalize(
+        ctx, reassemble_completeness(ctx, steps::canonicalize(ctx, term), b));
+    EXPECT_TRUE(structural_eq(back, a));
+}
+
+// Completeness, shape A inside a dyad: Σ_i (a·e_i)(b ⊗ e_i) = b ⊗ a — the leg
+// the cross product writes a onto is the RIGHT one (guards against transpose).
+TEST(ReassembleCompleteness, ContractionFoldsRightLegOfDyad)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* av = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* bv = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* e_i = b.covariant_vector(ctx, i);
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_tensor_product(
+            ctx, make_dot(ctx, av, e_i), make_tensor_product(ctx, bv, e_i)));
+    auto const* back = steps::canonicalize(
+        ctx, reassemble_completeness(ctx, steps::canonicalize(ctx, term), b));
+    EXPECT_TRUE(structural_eq(back, make_tensor_product(ctx, bv, av))); // b ⊗ a
+    EXPECT_FALSE(structural_eq(back, make_tensor_product(ctx, av, bv))); // not
+                                                                         // a ⊗
+                                                                         // b
+}
+
+// Completeness, shape B with a scalar coefficient: Σ_i (a·b) e_i⊗e_i = (a·b) I.
+TEST(ReassembleCompleteness, ScaledResolutionFoldsToIdentity)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* av = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* bv = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* e_i = b.covariant_vector(ctx, i);
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_tensor_product(
+            ctx, make_dot(ctx, av, bv), make_tensor_product(ctx, e_i, e_i)));
+    auto const* back = steps::canonicalize(
+        ctx, reassemble_completeness(ctx, steps::canonicalize(ctx, term), b));
+    auto const* want = steps::canonicalize(
+        ctx,
+        make_tensor_product(ctx, make_dot(ctx, av, bv), make_identity(ctx)));
+    EXPECT_TRUE(structural_eq(back, want));
+}
+
+// No completeness pattern (a lone resolution with no contraction or coefficient
+// is reassemble's job, not this step's): left unchanged.
+TEST(ReassembleCompleteness, PlainResolutionUnchanged)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* e_i = b.covariant_vector(ctx, i);
+    auto const* term = steps::canonicalize(
+        ctx, make_explicit_sum(ctx, i, make_tensor_product(ctx, e_i, e_i)));
+    // Σ_i e_i⊗e_i has two bare legs and no scalar coefficient: shape B with an
+    // empty coefficient still folds it to I (the resolution of identity).
+    EXPECT_TRUE(structural_eq(
+        reassemble_completeness(ctx, term, b), make_identity(ctx)));
+}
+
+// A genuine non-pattern (Kronecker trace) is a no-op.
+TEST(ReassembleCompleteness, NonPatternUnchanged)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* trace = make_explicit_sum(
+        ctx,
+        i,
+        make_delta(
+            ctx,
+            Realm::Orthonormal,
+            space_3d(),
+            Level::Lower,
+            Level::Lower,
+            IndexAssoc{i},
+            IndexAssoc{i}));
+    EXPECT_EQ(reassemble_completeness(ctx, trace, b), trace);
+}
