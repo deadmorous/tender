@@ -67,3 +67,33 @@ Both blockers must be cleared for the example to match via `apply_identity`.
   subtree, so unconstrained patterns could be expensive in the e-graph; keep the
   Expr-matcher (single bottom-up pass) as the first, cheaper consumer and
   measure before turning subtree rules loose in `saturate`.
+
+## Implemented
+
+Both blockers cleared; the user's `(a⊗b):(c⊗d)=(a·c)(b·d)` identity now fires
+through `apply_identity` on the basis-expanded `I:I`, and the full `I:I = 3`
+reduction runs through that *user-defined* identity.
+
+- **Part 1 — subtree variables** (commit *subtree pattern variables*). A
+  slot-less, non-well-known named `TensorObject` in an LHS is a wildcard.
+  `MatchBinding` gained a `subtrees` (name→Expr) map + `find_subtree`;
+  `match_node`'s `TensorObject` arm binds the whole target subtree
+  (rank-checked via `infer_rank` when both ranks are known), consistently via
+  `structural_eq`; `instantiate` expands a bound subtree variable in the RHS.
+  Well-known (I/δ/ε) and slotted tensors stay literal, so the index identities
+  are untouched.  Wired into the **Expr-matcher** (`apply_identity`); the
+  **e-matcher (`saturate`) is deliberately left index-only** — no current rule
+  needs subtree vars there, and the cost/representation (binding to e-classes)
+  is a separate piece for when a saturation rule first needs it.
+- **Part 2 — binder-to-top** (commit *binder-to-top canonicalization*).
+  `float_sums` (run between `materialize` and `canon` in `canonicalize`) pulls a
+  null-bound `ExplicitSum` out of multilinear operand positions to the term
+  head — both legs of `TensorProduct`/`Dot`/`DDot`/`DDotAlt`/`Cross`, the
+  `ScalarDiv` numerator, and the operand of `Negate`/`Trace`/`VectorInvariant`/
+  `Transpose` — fresh-renaming to avoid capture; `Sum`/`Difference` operands and
+  a `ScalarDiv` denominator are *not* floatable.  The resulting binder stack is
+  Fubini-ordered by the existing `canon_sum_stack` (vibe 000049).
+
+Next within this theme: the e-matcher integration (subtree vars in `saturate`),
+which—together with ε-pair contraction in a product—promotes the 🟡 catalog
+theorems (bac-cab, `a×I×b`) toward ✅ (vibe 000050).
