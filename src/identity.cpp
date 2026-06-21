@@ -416,10 +416,13 @@ auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
             return node;
         });
 
-    // On a match the rewritten tree is returned in canonical form; with no
-    // match the original input is returned untouched (a true no-op — matching
-    // canonicalizes internally, but that must not leak when nothing fired).
-    return done ? steps::canonicalize(ctx, rewritten) : e;
+    // On a match the rewritten tree is returned in canonical form, then
+    // implicitized so the explicit sums the canonical form (and the binder
+    // floating) introduce do not leak out — the user works in implicit
+    // notation. With no match the original input is returned untouched (a true
+    // no-op).
+    return done ? steps::implicitize(ctx, steps::canonicalize(ctx, rewritten)) :
+                  e;
 }
 
 namespace steps

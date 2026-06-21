@@ -183,6 +183,13 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*;
 // normalization).
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*;
 
+// Inverse of the implicit-sum convention: strip a null-bound ExplicitSum whose
+// index is already an implicit Einstein contraction in its body (so the
+// explicit wrapper is redundant), returning the expression in the implicit form
+// the user works in.  A symbolic-bound sum, or one over a non-contracted index,
+// is kept.
+auto implicitize(Context& ctx, Expr const* e) -> Expr const*;
+
 } // namespace steps
 
 // ---- Equality -----------------------------------------------------------

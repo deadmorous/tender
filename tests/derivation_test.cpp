@@ -3269,3 +3269,36 @@ TEST(Canonicalize, FloatsSumsToHeadOfTerm)
     auto const* canon = steps::canonicalize(ctx, make_ddot(ctx, lhs, rhs));
     EXPECT_TRUE(std::holds_alternative<ExplicitSum>(canon->node));
 }
+
+// ---- deep implicit summation through contractions --------------------------
+
+TEST(Materialize, ContractsIndicesAcrossDots)
+{
+    // (e_i·e_j)(e_i·e_j): i and j each appear twice across the dots, so both
+    // are implicitly summed — canonicalize materializes a double sum, and
+    // implicitize round-trips it back to the implicit form.
+    Context ctx;
+    auto slot = [&](CountableIndex x)
+    {
+        return SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexAssoc{x}};
+    };
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto ev = [&](CountableIndex x)
+    { return make_tensor_object(ctx, make_tensor_name("e"), {slot(x)}, 1); };
+    auto const* dot = make_dot(ctx, ev(i), ev(j));
+    auto const* term = make_tensor_product(ctx, dot, dot);
+
+    // Canonicalize floats two binders to the head.
+    auto const* canon = steps::canonicalize(ctx, term);
+    ASSERT_TRUE(std::holds_alternative<ExplicitSum>(canon->node));
+    auto const& outer = std::get<ExplicitSum>(canon->node);
+    EXPECT_TRUE(std::holds_alternative<ExplicitSum>(outer.body->node));
+
+    // implicitize strips them back; re-canonicalizing re-derives the same form.
+    auto const* implicit = steps::implicitize(ctx, canon);
+    EXPECT_FALSE(std::holds_alternative<ExplicitSum>(implicit->node));
+    EXPECT_TRUE(algebraic_eq(ctx, implicit, term));
+}

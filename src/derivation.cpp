@@ -1470,45 +1470,96 @@ auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*
 // implicit contraction as an ExplicitSum, so the canonical form is uniform and
 // the matcher need only understand explicit binders.  It runs before `canon`.
 //
-// Scope: contraction is detected among the direct TensorObject factors of a
-// product (and the slots of a lone tensor — a trace).  Indices that are free
-// only inside a composite factor (e.g. an un-distributed Sum) are not counted
-// at the enclosing term; that interacts with distribution and is deferred.
+// Scope: a *term* is a pure multilinear tree of tensors — products and
+// contractions (⊗ · : ·· ×) and the linear unary ops — with no Sum/Difference/
+// ScalarDiv/binder.  Contraction is detected across the whole term (so the
+// indices of e_i·e_j and another e_i·e_j sum together).  Indices free only
+// inside an un-distributed Sum (a scope boundary) are still deferred.
 
-// One free occurrence of a CountableIndex within a product term.
+// One free occurrence of a CountableIndex within a term.
 struct IndexUse final
 {
     Level level;
     Realm realm;
 };
 
+// A *term*: a pure multilinear expression (no Sum/Difference/ScalarDiv/binder),
+// so the whole thing is one Einstein-summation scope.
+auto is_term(Expr const* e) -> bool
+{
+    return visit(
+        Overloads{
+            [](TensorObject const&) { return true; },
+            [](ScalarLiteral const&) { return true; },
+            [](Negate const& n) { return is_term(n.operand); },
+            [](Trace const& u) { return is_term(u.operand); },
+            [](VectorInvariant const& u) { return is_term(u.operand); },
+            [](Transpose const& u) { return is_term(u.operand); },
+            [](TensorProduct const& p)
+            { return is_term(p.left) && is_term(p.right); },
+            [](Dot const& d) { return is_term(d.left) && is_term(d.right); },
+            [](DDot const& d) { return is_term(d.left) && is_term(d.right); },
+            [](DDotAlt const& d)
+            { return is_term(d.left) && is_term(d.right); },
+            [](Cross const& c) { return is_term(c.left) && is_term(c.right); },
+            [](auto const&) { return false; }, // Sum/Diff/ScalarDiv/binders
+        },
+        *e);
+}
+
+// Collect every free CountableIndex occurrence in a term, descending through
+// its multilinear structure.  Stops at scope boundaries (a non-term node is
+// opaque).
+void collect_term_uses(
+    Expr const* e,
+    std::set<int> const& bound,
+    std::map<int, std::vector<IndexUse>>& uses)
+{
+    auto bin = [&](Expr const* l, Expr const* r)
+    {
+        collect_term_uses(l, bound, uses);
+        collect_term_uses(r, bound, uses);
+    };
+    visit(
+        Overloads{
+            [&](TensorObject const& t)
+            {
+                for (auto const& sb: t.slots)
+                {
+                    if (!sb.index)
+                        continue;
+                    auto const* ci = std::get_if<CountableIndex>(&*sb.index);
+                    if (!ci || bound.count(ci->id))
+                        continue;
+                    uses[ci->id].push_back({sb.slot.level, sb.slot.realm});
+                }
+            },
+            [&](Negate const& n) { collect_term_uses(n.operand, bound, uses); },
+            [&](Trace const& u) { collect_term_uses(u.operand, bound, uses); },
+            [&](VectorInvariant const& u)
+            { collect_term_uses(u.operand, bound, uses); },
+            [&](Transpose const& u)
+            { collect_term_uses(u.operand, bound, uses); },
+            [&](TensorProduct const& p) { bin(p.left, p.right); },
+            [&](Dot const& d) { bin(d.left, d.right); },
+            [&](DDot const& d) { bin(d.left, d.right); },
+            [&](DDotAlt const& d) { bin(d.left, d.right); },
+            [&](Cross const& c) { bin(c.left, c.right); },
+            [&](auto const&) {}, // ScalarLiteral / scope boundaries: opaque
+        },
+        *e);
+}
+
 // Decide which free ids among `factors` are implicitly contracted, per each
 // id's realm rule.  Ids already bound by an enclosing ExplicitSum/NoSum are in
 // `bound` and excluded — so an explicit override both suppresses contraction
 // and silences the error checks.  Throws for ill-formed terms with no such
 // override.  Returns the contracted ids ascending (std::map key order).
-auto contracted_ids(
-    std::vector<Expr const*> const& factors,
-    std::set<int> const& bound) -> std::vector<int>
+auto contracted_ids(Expr const* term, std::set<int> const& bound)
+    -> std::vector<int>
 {
     std::map<int, std::vector<IndexUse>> uses;
-    for (auto const* f: factors)
-    {
-        // Every indexed tensor factor of the term participates — coordinates
-        // and basis vectors alike (their indices Einstein-sum together).
-        auto const* t = std::get_if<TensorObject>(&f->node);
-        if (!t)
-            continue;
-        for (auto const& sb: t->slots)
-        {
-            if (!sb.index)
-                continue;
-            auto const* ci = std::get_if<CountableIndex>(&*sb.index);
-            if (!ci || bound.count(ci->id))
-                continue;
-            uses[ci->id].push_back({sb.slot.level, sb.slot.realm});
-        }
-    }
+    collect_term_uses(term, bound, uses);
 
     std::vector<int> result;
     for (auto const& [id, us]: uses)
@@ -1549,17 +1600,6 @@ auto contracted_ids(
 auto materialize(Context& ctx, Expr const* e, std::set<int> bound)
     -> Expr const*;
 
-// A flat polyad: a product whose factors are all bare tensors (coordinates or
-// basis vectors), so the whole product is one Einstein-summation scope.
-auto is_polyad(Expr const* e) -> bool
-{
-    if (std::holds_alternative<TensorObject>(e->node))
-        return true;
-    if (auto const* p = std::get_if<TensorProduct>(&e->node))
-        return is_polyad(p->left) && is_polyad(p->right);
-    return false;
-}
-
 // Wrap `body` in an ExplicitSum per id (ids already ascending).
 auto wrap_sums(Context& ctx, Expr const* body, std::vector<int> const& ids)
     -> Expr const*
@@ -1569,106 +1609,45 @@ auto wrap_sums(Context& ctx, Expr const* body, std::vector<int> const& ids)
     return body;
 }
 
-auto materialize_product(
-    Context& ctx, Expr const* e, std::set<int> const& bound) -> Expr const*
-{
-    std::vector<Expr const*> flat;
-    flatten_factors(e, flat);
-    auto const ids = contracted_ids(flat, bound);
-    // Composite (non-tensor) factors are independent scopes; tensor factors
-    // carry only index slots, already accounted for above.
-    Expr const* prod = nullptr;
-    for (auto const* f: flat)
-    {
-        auto const* nf = std::get_if<TensorObject>(&f->node) ?
-                             f :
-                             materialize(ctx, f, bound);
-        prod = prod ? make_tensor_product(ctx, prod, nf) : nf;
-    }
-    return wrap_sums(ctx, prod, ids);
-}
-
 auto materialize(Context& ctx, Expr const* e, std::set<int> bound) -> Expr const*
 {
+    // A pure multilinear term is one Einstein-summation scope: contract its
+    // repeated free indices (counted across the whole term, through the
+    // contractions) and wrap once.
+    if (is_term(e))
+        return wrap_sums(ctx, e, contracted_ids(e, bound));
+
+    // Otherwise descend.  A multilinear node with a scope-boundary child scopes
+    // each operand independently (the un-distributed-sum deferral); Sum /
+    // Difference / ScalarDiv parts are separate scopes; a binder adds its
+    // index.
+    auto rec = [&](Expr const* x) { return materialize(ctx, x, bound); };
     return visit(
         Overloads{
-            [&](ScalarLiteral const&) -> Expr const* { return e; },
-            [&](TensorObject const&) -> Expr const*
-            {
-                // A lone tensor can carry an implicit contraction (a trace).
-                return wrap_sums(ctx, e, contracted_ids({e}, bound));
-            },
             [&](Negate const& n) -> Expr const*
-            { return make_negate(ctx, materialize(ctx, n.operand, bound)); },
+            { return make_negate(ctx, rec(n.operand)); },
             [&](Trace const& u) -> Expr const*
-            { return make_trace(ctx, materialize(ctx, u.operand, bound)); },
-            [&](VectorInvariant const& u) -> Expr const* {
-                return make_vector_invariant(
-                    ctx, materialize(ctx, u.operand, bound));
-            },
+            { return make_trace(ctx, rec(u.operand)); },
+            [&](VectorInvariant const& u) -> Expr const*
+            { return make_vector_invariant(ctx, rec(u.operand)); },
             [&](Transpose const& u) -> Expr const*
-            { return make_transpose(ctx, materialize(ctx, u.operand, bound)); },
+            { return make_transpose(ctx, rec(u.operand)); },
             [&](Sum const& s) -> Expr const*
-            {
-                return make_sum(
-                    ctx,
-                    materialize(ctx, s.left, bound),
-                    materialize(ctx, s.right, bound));
-            },
+            { return make_sum(ctx, rec(s.left), rec(s.right)); },
             [&](Difference const& d) -> Expr const*
-            {
-                return make_difference(
-                    ctx,
-                    materialize(ctx, d.left, bound),
-                    materialize(ctx, d.right, bound));
-            },
+            { return make_difference(ctx, rec(d.left), rec(d.right)); },
             [&](TensorProduct const& p) -> Expr const*
-            {
-                // A flat polyad (coordinates and/or basis vectors) is one
-                // Einstein-summation scope; a product with a composite factor
-                // scopes each operand independently.
-                if (is_polyad(e))
-                    return materialize_product(ctx, e, bound);
-                return make_tensor_product(
-                    ctx,
-                    materialize(ctx, p.left, bound),
-                    materialize(ctx, p.right, bound));
-            },
+            { return make_tensor_product(ctx, rec(p.left), rec(p.right)); },
             [&](ScalarDiv const& d) -> Expr const*
-            {
-                return make_scalar_div(
-                    ctx,
-                    materialize(ctx, d.left, bound),
-                    materialize(ctx, d.right, bound));
-            },
+            { return make_scalar_div(ctx, rec(d.left), rec(d.right)); },
             [&](Dot const& d) -> Expr const*
-            {
-                return make_dot(
-                    ctx,
-                    materialize(ctx, d.left, bound),
-                    materialize(ctx, d.right, bound));
-            },
+            { return make_dot(ctx, rec(d.left), rec(d.right)); },
             [&](DDot const& d) -> Expr const*
-            {
-                return make_ddot(
-                    ctx,
-                    materialize(ctx, d.left, bound),
-                    materialize(ctx, d.right, bound));
-            },
+            { return make_ddot(ctx, rec(d.left), rec(d.right)); },
             [&](DDotAlt const& d) -> Expr const*
-            {
-                return make_ddot_alt(
-                    ctx,
-                    materialize(ctx, d.left, bound),
-                    materialize(ctx, d.right, bound));
-            },
+            { return make_ddot_alt(ctx, rec(d.left), rec(d.right)); },
             [&](Cross const& c) -> Expr const*
-            {
-                return make_cross(
-                    ctx,
-                    materialize(ctx, c.left, bound),
-                    materialize(ctx, c.right, bound));
-            },
+            { return make_cross(ctx, rec(c.left), rec(c.right)); },
             [&](ExplicitSum const& s) -> Expr const*
             {
                 bound.insert(s.index.id);
@@ -1681,39 +1660,10 @@ auto materialize(Context& ctx, Expr const* e, std::set<int> bound) -> Expr const
                 return make_no_sum(
                     ctx, s.index, materialize(ctx, s.body, bound));
             },
+            // ScalarLiteral / TensorObject are always terms (handled above).
+            [&](auto const&) -> Expr const* { return e; },
         },
         *e);
-}
-
-// Inverse of the implicit-sum convention: strip a null-bound ExplicitSum whose
-// index is *already* an implicit Einstein contraction in its body, so the
-// explicit wrapper is redundant.  Used to return index-algebra results in the
-// same implicit form the user works in (no materialized sums leaking out).
-auto implicitize(Context& ctx, Expr const* e) -> Expr const*
-{
-    return rewrite_tree(
-        ctx,
-        e,
-        [](Context&, Expr const* node) -> Expr const*
-        {
-            auto const* s = std::get_if<ExplicitSum>(&node->node);
-            if (!s || s->bound)
-                return node;
-            std::vector<Expr const*> flat;
-            flatten_factors(s->body, flat);
-            std::vector<int> ids;
-            try
-            {
-                ids = contracted_ids(flat, {});
-            }
-            catch (std::invalid_argument const&)
-            {
-                return node;
-            }
-            if (std::find(ids.begin(), ids.end(), s->index.id) != ids.end())
-                return s->body; // redundant explicit sum → back to implicit
-            return node;
-        });
 }
 
 // If `operand` is a null-bound ExplicitSum, return a fresh binder and the body
@@ -1816,6 +1766,31 @@ namespace steps
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
 {
     return canon(ctx, float_sums(ctx, materialize(ctx, e, {})), 0);
+}
+
+auto implicitize(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context&, Expr const* node) -> Expr const*
+        {
+            auto const* s = std::get_if<ExplicitSum>(&node->node);
+            if (!s || s->bound)
+                return node;
+            std::vector<int> ids;
+            try
+            {
+                ids = contracted_ids(s->body, {});
+            }
+            catch (std::invalid_argument const&)
+            {
+                return node;
+            }
+            if (std::find(ids.begin(), ids.end(), s->index.id) != ids.end())
+                return s->body; // redundant explicit sum → back to implicit
+            return node;
+        });
 }
 
 auto contract_identity(Context& ctx, Expr const* e) -> Expr const*
