@@ -582,9 +582,13 @@ TEST(RenderUnary, TraceVecTranspose)
     EXPECT_EQ(
         latex(*make_trace(ctx, dyad)),
         "\\operatorname{tr}(\\mathbf{a} \\, \\mathbf{b})");
+    // vec of a bare tensor: A_× ; vec of a dyad: (a b)_×.
+    EXPECT_EQ(
+        latex(*make_vector_invariant(ctx, T(ctx, "A", 2))),
+        "\\mathbf{A}_\\times");
     EXPECT_EQ(
         latex(*make_vector_invariant(ctx, dyad)),
-        "\\operatorname{vec}(\\mathbf{a} \\, \\mathbf{b})");
+        "(\\mathbf{a} \\, \\mathbf{b})_\\times");
     EXPECT_EQ(
         latex(*make_transpose(ctx, T(ctx, "A", 2))),
         "\\mathbf{A}^{\\mathsf{T}}");

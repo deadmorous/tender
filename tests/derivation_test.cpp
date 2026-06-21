@@ -3136,3 +3136,65 @@ TEST(ContractDelta, FiresOnImplicitSumForm)
     auto const* expected = make_explicit_sum(ctx, j, delta(j, j));
     EXPECT_TRUE(algebraic_eq(ctx, res, expected));
 }
+
+TEST(ContractDelta, ResultStaysImplicit)
+{
+    // δ_ij δ_ij contracts to the implicit δ_ii (a trace) — NOT Σ_i δ_ii.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto delta = [&](CountableIndex a, CountableIndex b)
+    {
+        return make_delta(
+            ctx,
+            Realm::Orthonormal,
+            sp,
+            Level::Lower,
+            Level::Lower,
+            IndexAssoc{a},
+            IndexAssoc{b});
+    };
+    auto const* res = steps::contract_delta(
+        ctx, make_tensor_product(ctx, delta(i, j), delta(i, j)));
+    // A single Kronecker delta (the trace δ_ii), no ExplicitSum wrapper.
+    EXPECT_TRUE(std::holds_alternative<TensorObject>(res->node));
+}
+
+TEST(UnrollSums, FiresOnImplicitTrace)
+{
+    // Implicit δ_ii (trace) unrolls to δ_11 + δ_22 + δ_33.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* trace = make_delta(
+        ctx,
+        Realm::Orthonormal,
+        sp,
+        Level::Lower,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{i});
+    auto const* unrolled = steps::unroll_sums(ctx, trace);
+    auto const* evaluated =
+        steps::fold_arithmetic(ctx, steps::eval_delta_concrete(ctx, unrolled));
+    EXPECT_TRUE(algebraic_eq(ctx, evaluated, make_scalar(ctx, Rational{3})));
+}
+
+TEST(UnrollSums, NoSumIsNoOp)
+{
+    // No implicit or explicit sum: returned untouched (pointer identity).
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto const* d = make_delta(
+        ctx,
+        Realm::Orthonormal,
+        sp,
+        Level::Lower,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    EXPECT_EQ(steps::unroll_sums(ctx, d), d);
+}

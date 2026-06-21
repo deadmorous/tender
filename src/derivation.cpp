@@ -1685,6 +1685,37 @@ auto materialize(Context& ctx, Expr const* e, std::set<int> bound) -> Expr const
         *e);
 }
 
+// Inverse of the implicit-sum convention: strip a null-bound ExplicitSum whose
+// index is *already* an implicit Einstein contraction in its body, so the
+// explicit wrapper is redundant.  Used to return index-algebra results in the
+// same implicit form the user works in (no materialized sums leaking out).
+auto implicitize(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context&, Expr const* node) -> Expr const*
+        {
+            auto const* s = std::get_if<ExplicitSum>(&node->node);
+            if (!s || s->bound)
+                return node;
+            std::vector<Expr const*> flat;
+            flatten_factors(s->body, flat);
+            std::vector<int> ids;
+            try
+            {
+                ids = contracted_ids(flat, {});
+            }
+            catch (std::invalid_argument const&)
+            {
+                return node;
+            }
+            if (std::find(ids.begin(), ids.end(), s->index.id) != ids.end())
+                return s->body; // redundant explicit sum → back to implicit
+            return node;
+        });
+}
+
 } // namespace
 
 namespace steps
@@ -1992,9 +2023,21 @@ auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
 
 auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
 {
-    return rewrite_tree(
+    // Expose implicit Einstein sums first, so an implicit δ_ii (a trace)
+    // unrolls the same as an explicit Σ_i δ_ii.  Ill-formed implicit sums
+    // (which materialize rejects) just have nothing to unroll, so fall back.
+    Expr const* m = e;
+    try
+    {
+        m = materialize(ctx, e, {});
+    }
+    catch (std::invalid_argument const&)
+    {
+        m = e;
+    }
+    auto const* out = rewrite_tree(
         ctx,
-        e,
+        m,
         [](Context& ctx, Expr const* e) -> Expr const*
         {
             auto const* s = std::get_if<ExplicitSum>(&e->node);
@@ -2015,6 +2058,9 @@ auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
             }
             return result ? result : make_scalar(ctx, Rational{0});
         });
+    // Preserve the no-op: if materialization + unrolling changed nothing
+    // (no concrete sum, implicit or explicit), return the original input.
+    return structural_eq(out, e) ? e : out;
 }
 
 auto eval_delta_concrete(Context& ctx, Expr const* e) -> Expr const*
@@ -2468,8 +2514,11 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
                 *sur1.index,
                 *sur2.index);
         });
-    // No contraction fired — return the original input, untouched.
-    return fired ? out : e;
+    // No contraction fired — return the original input, untouched.  When it
+    // did, strip any explicit sums materialization added but the contraction
+    // left behind, so the result stays in implicit form (e.g. δ_ij δ_ij → δ_ii,
+    // not Σ_i δ_ii).
+    return fired ? implicitize(ctx, out) : e;
 }
 
 namespace

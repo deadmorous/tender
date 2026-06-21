@@ -346,7 +346,15 @@ struct Renderer
                 [&](Trace const& u) -> std::string
                 { return "\\operatorname{tr}(" + render(*u.operand) + ")"; },
                 [&](VectorInvariant const& u) -> std::string
-                { return "\\operatorname{vec}(" + render(*u.operand) + ")"; },
+                {
+                    // vec(A) renders as A_× (subscript cross).  A slot-less
+                    // tensor object stays bare; anything else (a dyad, a sum,
+                    // …) is parenthesized: (a b)_×.
+                    auto const* t = std::get_if<TensorObject>(&u.operand->node);
+                    bool const bare = t && t->slots.empty();
+                    auto const inner = render(*u.operand);
+                    return (bare ? inner : "(" + inner + ")") + "_\\times";
+                },
                 [&](Transpose const& u) -> std::string
                 { return sub(*u.operand, ATOM_PREC) + "^{\\mathsf{T}}"; },
                 [&](Sum const& s) -> std::string
