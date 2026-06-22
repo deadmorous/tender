@@ -399,3 +399,30 @@ TEST(BasisFeasibility, CrossIdentityCrossViaReassembly)
             make_tensor_product(ctx, make_dot(ctx, a, b), I)));
     EXPECT_TRUE(structural_eq(s, want));
 }
+
+// The cross re-association payoff: a user writes a × I × b, which the surface
+// parses LEFT-associated as (a×I)×b, so the subterm I×b that the commute
+// identity I×x = x×I needs is not a node.  Because I is a rank-2 fence, canon
+// re-associates to a×(I×b) — and apply_identity (which canonicalizes first) now
+// fires on the exposed I×b, reaching a×(b×I) regardless of how it was
+// bracketed.
+TEST(BasisFeasibility, CrossReassociationExposesIdentityForMatch)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* I = make_identity(ctx);
+
+    // I × x = x × I (x a rank-1 subtree pattern variable; I stays literal).
+    auto const* x = make_tensor_object(ctx, make_tensor_name("x"), {}, 1);
+    Identity const commute{
+        "I-commute", make_cross(ctx, I, x), make_cross(ctx, x, I)};
+
+    // Left-associated input, as the surface would build it.
+    auto const* lassoc = make_cross(ctx, make_cross(ctx, a, I), b);
+    auto const* got = apply_identity(ctx, lassoc, commute);
+
+    auto const* want = steps::canonicalize(
+        ctx, make_cross(ctx, a, make_cross(ctx, b, I))); // a × (b × I)
+    EXPECT_TRUE(structural_eq(got, want));
+}

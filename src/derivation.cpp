@@ -1378,6 +1378,30 @@ auto is_rank1_vector(Expr const* e) -> bool
     return t && t->rank && *t->rank == 1 && t->slots.empty();
 }
 
+// Re-associate a cross chain around a rank-≥2 fence: (x × M) × z → x × (M × z).
+// When the middle operand M is rank ≥ 2, the ⊗ inside it fences the two crosses
+// onto M's disjoint outer legs (x onto the first, z onto the last), so the
+// bracketing is immaterial — (x×M)×z and x×(M×z) are equal.  We normalize to
+// the right-associated form, which exposes the `M × z` subterm (e.g. `I × b`)
+// for the matcher.  The rank-1 middle case (x×y)×z is the vector triple
+// product, genuinely non-associative (bac-cab), and is deliberately left
+// untouched. Returns the re-associated expr, or nullptr when the pattern does
+// not apply. Operands are assumed already canonicalized.
+auto reassociate_cross_fence(Context& ctx, Expr const* l, Expr const* r)
+    -> Expr const*
+{
+    auto const* inner = std::get_if<Cross>(&l->node);
+    if (!inner)
+        return nullptr;
+    auto const rx = infer_rank(inner->left);
+    auto const rm = infer_rank(inner->right);
+    auto const rz = infer_rank(r);
+    if (rx == std::optional<int>{1} && rm && *rm >= 2
+        && rz == std::optional<int>{1})
+        return make_cross(ctx, inner->left, make_cross(ctx, inner->right, r));
+    return nullptr;
+}
+
 auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*
 {
     return visit(
@@ -1427,6 +1451,8 @@ auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*
                     && expr_cmp(l, r) > 0)
                     return make_negate(ctx, make_cross(ctx, r, l)); // a×b =
                                                                     // -(b×a)
+                if (auto const* ra = reassociate_cross_fence(ctx, l, r))
+                    return ra; // (x×M)×z → x×(M×z) around a rank-≥2 fence
                 return make_cross(ctx, l, r);
             },
             [&](DDot const& d) -> Expr const*

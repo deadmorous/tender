@@ -148,6 +148,12 @@ coordinate tensor `a_i`) could not.
   an `Identity` with slot-less rank-1 pattern variables (vibe 000051) is applied
   by `apply_identity` on a subterm buried inside `Σ_i (…) ⊗ e_i`.  Reusing a
   proved theorem as a rewrite rule, today, without a first-class `Theorem` type.
+- **Cross re-association around a rank-≥2 fence** (vibe 000055) — canon normalizes
+  `(x×M)×z → x×(M×z)` when `M` is rank ≥ 2 (the `⊗` fences the crosses onto
+  disjoint legs), so a left-associated `a×I×b` exposes `I×b` and the commute
+  identity fires regardless of how the surface bracketed it.  The rank-1 middle
+  (vector triple product, bac-cab) is left untouched — it is genuinely
+  non-associative.
 
 ## Next
 

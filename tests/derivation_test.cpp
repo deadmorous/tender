@@ -2226,6 +2226,49 @@ TEST(Canonicalize, CrossAnticommutesForVectors)
         render_with_names(neg->operand, {}), render_with_names(ordered, {}));
 }
 
+// (a × I) × b and a × (I × b) are equal (the ⊗ inside I fences the two crosses
+// onto disjoint legs); canon normalizes both to the right-associated form.
+TEST(Canonicalize, CrossReassociatesAroundIdentityFence)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* I = make_identity(ctx);
+    auto const* left =
+        steps::canonicalize(ctx, make_cross(ctx, make_cross(ctx, a, I), b));
+    auto const* right =
+        steps::canonicalize(ctx, make_cross(ctx, a, make_cross(ctx, I, b)));
+    EXPECT_TRUE(structural_eq(left, right));
+    // Normal form is the right-associated a × (I × b), which exposes I × b.
+    EXPECT_TRUE(structural_eq(left, make_cross(ctx, a, make_cross(ctx, I, b))));
+}
+
+// Not identity-specific: any rank-≥2 middle is a fence.
+TEST(Canonicalize, CrossReassociatesAroundGenericRank2Fence)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* M = make_tensor_object(ctx, make_tensor_name("M"), {}, 2);
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, make_cross(ctx, make_cross(ctx, a, M), b)),
+        steps::canonicalize(ctx, make_cross(ctx, a, make_cross(ctx, M, b)))));
+}
+
+// Correctness guard: the vector triple product (a×b)×c (rank-1 middle, no
+// fence) is genuinely non-associative — it must NOT be re-associated to
+// a×(b×c).
+TEST(Canonicalize, CrossDoesNotReassociateVectorTripleProduct)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    EXPECT_FALSE(structural_eq(
+        steps::canonicalize(ctx, make_cross(ctx, make_cross(ctx, a, b), c)),
+        steps::canonicalize(ctx, make_cross(ctx, a, make_cross(ctx, b, c)))));
+}
+
 TEST(Canonicalize, AlphaEquivalentDummies)
 {
     // Σ_i δ^i_a δ^i_b  ≡  Σ_p δ^p_a δ^p_b   (bound index renamed)

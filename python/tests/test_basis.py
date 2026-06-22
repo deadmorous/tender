@@ -357,3 +357,20 @@ def test_cross_identity_cross_via_reassembly():
 
     want = td.canonicalize(b * a - (a @ b) * I)
     assert td.structural_eq(s, want)
+
+
+def test_cross_reassociation_exposes_identity():
+    # a % I % b parses left-associated as (a%I)%b, so the subterm I%b the commute
+    # identity needs is not a node.  Because I is a rank-2 fence, canon re-
+    # associates to a%(I%b); apply_identity (which canonicalizes first) then fires
+    # I%x = x%I on the exposed I%b, reaching a%(b%I) regardless of bracketing.
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    I = tender.identity(ctx=ctx)
+    x = tender.tensor("x", rank=1, ctx=ctx)
+    commute = td.Identity("I-commute", I % x, x % I)
+
+    got = td.apply_identity(commute)((a % I) % b)
+    want = td.canonicalize(a % (b % I))
+    assert td.structural_eq(got, want)
