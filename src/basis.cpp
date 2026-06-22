@@ -477,28 +477,34 @@ auto mentions_index(Context& ctx, Expr const* e, int id) -> bool
     return found;
 }
 
-// One half of the resolution of identity Σ_i e_i ⊗ e^i = I: a *scalar* Dot in
-// which one operand is a bare basis vector e_i and the other is a rank-1
-// invariant X.  Paired with a bare e_i leg over the same summed index, the term
-// Σ_i (X·e_i) e_i folds to X·I = X — the "X·I = X" route of completeness
+// One half of the resolution of identity Σ_i e_i ⊗ e^i = I: a Dot in which one
+// operand is a bare basis vector e_i and the other is an invariant X of rank
+// ≥ 1.  Paired with a bare e_i leg over the same summed index, the term
+// Σ_i (X·e_i) ⊗ e_i folds to X·I = X — the "X·I = X" route of completeness
 // reassembly (the alternative "X·e_i = X_i, then Σ X_i e_i = X" route would
 // instead need component materialization and a symbolic δ-substitution, which
-// this avoids).
+// this avoids).  `basis_on_right` records which slot of X the dot contracts:
+// X·e_i (true) contracts X's last slot, e_i·X (false) its first — this matters
+// for rank ≥ 2, where the leg must sit on the contracted side or the term would
+// reassemble to Xᵀ rather than X.
 struct CompletenessDot final
 {
     int index;
-    Expr const* other;
+    Expr const* other;   // X
+    bool basis_on_right; // true: X·e_i (last slot); false: e_i·X (first slot)
 };
 auto as_completeness_dot(Expr const* e, Basis const& b)
     -> std::optional<CompletenessDot>
 {
     auto const* d = std::get_if<Dot>(&e->node);
-    if (!d || infer_rank(e) != std::optional<int>{0})
-        return std::nullopt; // must be a scalar contraction (X rank 1)
-    if (auto bv = as_basis_vector(d->right, b))
-        return CompletenessDot{bv->first.id, d->left};
-    if (auto bv = as_basis_vector(d->left, b))
-        return CompletenessDot{bv->first.id, d->right};
+    if (!d)
+        return std::nullopt;
+    if (auto bv = as_basis_vector(d->right, b);
+        bv && infer_rank(d->left).value_or(0) >= 1)
+        return CompletenessDot{bv->first.id, d->left, true};
+    if (auto bv = as_basis_vector(d->left, b);
+        bv && infer_rank(d->right).value_or(0) >= 1)
+        return CompletenessDot{bv->first.id, d->right, false};
     return std::nullopt;
 }
 
@@ -523,7 +529,10 @@ auto wrap_sums(Context& ctx, std::vector<int> const& ids, Expr const* e)
 // Fold a resolution of identity in a product term Σ_summed (factors) over one
 // summed index i that occurs nowhere else.  Two shapes (nullptr if neither):
 //   A. one bare leg e_i + one completeness dot (X·e_i) → X at the leg's place
-//      (Σ_i (X·e_i) e_i = X·I = X), and
+//      (Σ_i (X·e_i) ⊗ e_i = X·I = X).  X may be any rank ≥ 1, provided it can
+//      stay atomic: every factor strictly between the dot and the leg must be a
+//      scalar (so the dot slides to the leg), and for non-scalar X the leg must
+//      sit on the contracted side (else the term would reassemble to Xᵀ); and
 //   B. two bare legs e_i and only rank-0 (scalar) other factors → the two legs
 //      become I (Σ_i (scalars) e_i⊗e_i = (scalars) I); the scalars commute out
 //      so they need not be adjacent to the legs.
@@ -538,6 +547,7 @@ auto fold_completeness_term(
         std::vector<int> legs;
         int dot = -1, dots = 0;
         Expr const* X = nullptr;
+        bool dot_basis_right = false;
         bool other = false, nonscalar_other = false;
         for (std::size_t p = 0; p < factors.size(); ++p)
         {
@@ -552,6 +562,7 @@ auto fold_completeness_term(
                 ++dots;
                 dot = static_cast<int>(p);
                 X = cd->other;
+                dot_basis_right = cd->basis_on_right;
                 continue;
             }
             if (mentions_index(ctx, f, id))
@@ -562,21 +573,43 @@ auto fold_completeness_term(
         if (other)
             continue;
 
-        // A. completeness contraction: Σ_i (X·e_i) e_i → X.
+        // A. completeness contraction: Σ_i (X·e_i) ⊗ e_i → X.
         if (legs.size() == 1 && dots == 1)
         {
-            std::vector<Expr const*> out;
-            for (std::size_t p = 0; p < factors.size(); ++p)
+            int const leg = legs[0];
+            int const xr = infer_rank(X).value_or(1);
+            bool ok = xr <= 1; // scalar dot: X commutes freely to the leg
+            if (!ok)
             {
-                if (static_cast<int>(p) == dot)
-                    continue;
-                out.push_back(static_cast<int>(p) == legs[0] ? X : factors[p]);
+                // Non-scalar X stays atomic only if it can slide to the leg
+                // (scalars only strictly between) and the leg is on X's
+                // contracted side (right of X·e_i, left of e_i·X), so the
+                // reassembled legs spell X, not Xᵀ.
+                bool scalars_between = true;
+                for (int q = std::min(dot, leg) + 1; q < std::max(dot, leg);
+                     ++q)
+                    if (infer_rank(factors[static_cast<std::size_t>(q)])
+                        != std::optional<int>{0})
+                        scalars_between = false;
+                bool const side_ok =
+                    dot_basis_right ? (leg > dot) : (leg < dot);
+                ok = scalars_between && side_ok;
             }
-            std::vector<int> rest;
-            for (int s: summed)
-                if (s != id)
-                    rest.push_back(s);
-            return wrap_sums(ctx, rest, product_of(ctx, out));
+            if (ok)
+            {
+                std::vector<Expr const*> out;
+                for (std::size_t p = 0; p < factors.size(); ++p)
+                {
+                    if (static_cast<int>(p) == dot)
+                        continue;
+                    out.push_back(static_cast<int>(p) == leg ? X : factors[p]);
+                }
+                std::vector<int> rest;
+                for (int s: summed)
+                    if (s != id)
+                        rest.push_back(s);
+                return wrap_sums(ctx, rest, product_of(ctx, out));
+            }
         }
 
         // B. resolution of identity: Σ_i (scalars) e_i⊗e_i → (scalars) I.  The

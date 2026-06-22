@@ -877,6 +877,79 @@ TEST(ReassembleCompleteness, ScaledResolutionFoldsToIdentity)
     EXPECT_TRUE(structural_eq(back, want));
 }
 
+// Completeness, shape A with a rank-2 X: Σ_i (T·e_i) ⊗ e_i = T·I = T.  The dot
+// contracts T's last slot and the leg sits on that (right) side, so the legs
+// reassemble to T, not Tᵀ.
+TEST(ReassembleCompleteness, Rank2ContractionFoldsToTensor)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* T = make_tensor_object(ctx, make_tensor_name("T"), {}, 2);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* e_i = b.covariant_vector(ctx, i);
+    auto const* term = make_explicit_sum(
+        ctx, i, make_tensor_product(ctx, make_dot(ctx, T, e_i), e_i));
+    auto const* back = steps::canonicalize(
+        ctx, reassemble_completeness(ctx, steps::canonicalize(ctx, term), b));
+    EXPECT_TRUE(structural_eq(back, T));
+}
+
+// Mirror of the above: the leg on the LEFT with the dot contracting T's first
+// slot, Σ_i e_i ⊗ (e_i·T) = I·T = T.
+TEST(ReassembleCompleteness, Rank2ContractionLeftLegFoldsToTensor)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* T = make_tensor_object(ctx, make_tensor_name("T"), {}, 2);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* e_i = b.covariant_vector(ctx, i);
+    auto const* term = make_explicit_sum(
+        ctx, i, make_tensor_product(ctx, e_i, make_dot(ctx, e_i, T)));
+    auto const* back = steps::canonicalize(
+        ctx, reassemble_completeness(ctx, steps::canonicalize(ctx, term), b));
+    EXPECT_TRUE(structural_eq(back, T));
+}
+
+// A non-scalar factor between the dot and the leg blocks the fold: there is no
+// atomic direct-notation form for Σ_i (T·e_i) ⊗ b ⊗ e_i (= T_{ji} e_j⊗b⊗e_i),
+// so the step refuses rather than mis-reassemble.
+TEST(ReassembleCompleteness, Rank2NonScalarBetweenIsNoOp)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* T = make_tensor_object(ctx, make_tensor_name("T"), {}, 2);
+    auto const* bv = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* e_i = b.covariant_vector(ctx, i);
+    auto const* term = steps::canonicalize(
+        ctx,
+        make_explicit_sum(
+            ctx,
+            i,
+            make_tensor_product(
+                ctx, make_dot(ctx, T, e_i), make_tensor_product(ctx, bv, e_i))));
+    EXPECT_EQ(reassemble_completeness(ctx, term, b), term);
+}
+
+// Wrong-side guard: Σ_i (e_i·T) ⊗ e_i would reassemble to Tᵀ (the dot contracts
+// T's FIRST slot but the leg is on the right), which the step has no atomic
+// form for, so it refuses — and in particular must not silently yield T.
+TEST(ReassembleCompleteness, Rank2WrongSideIsNoOp)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* T = make_tensor_object(ctx, make_tensor_name("T"), {}, 2);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* e_i = b.covariant_vector(ctx, i);
+    auto const* term = steps::canonicalize(
+        ctx,
+        make_explicit_sum(
+            ctx, i, make_tensor_product(ctx, make_dot(ctx, e_i, T), e_i)));
+    auto const* back = reassemble_completeness(ctx, term, b);
+    EXPECT_EQ(back, term);
+    EXPECT_FALSE(structural_eq(steps::canonicalize(ctx, back), T));
+}
+
 // No completeness pattern (a lone resolution with no contraction or coefficient
 // is reassemble's job, not this step's): left unchanged.
 TEST(ReassembleCompleteness, PlainResolutionUnchanged)

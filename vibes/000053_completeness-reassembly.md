@@ -29,13 +29,20 @@ There are two ways to fold `Σ_i (a·e_i) e_i`:
 
 In a product term under `Σ_i`, over a summed index `i` that occurs nowhere else:
 
-- **shape A** (contraction): one bare basis vector `e_i` together with a *scalar*
-  contraction `(X·e_i)` (so `X` is rank 1) collapses to `X` in the leg's
-  position:
+- **shape A** (contraction): one bare basis vector `e_i` together with a
+  completeness dot `(X·e_i)` (the dot contracting one slot of an invariant `X` of
+  **any rank ≥ 1**) collapses to `X` in the leg's position:
   ```
   Σ_i (X·e_i) e_i        → X
   Σ_i (a·e_i) (b ⊗ e_i)  → b ⊗ a      -- a lands on the leg e_i held (the RIGHT leg)
+  Σ_i (T·e_i) ⊗ e_i      → T          -- T rank 2; legs reassemble to T, not Tᵀ
   ```
+  For rank ≥ 2 the result is only atomic when `X` can slide to the leg —
+  every factor strictly **between** the dot and the leg must be a scalar — and
+  the leg sits on `X`'s contracted side (right of `X·e_i`, left of `e_i·X`).  A
+  non-scalar factor between (e.g. `Σ_i (T·e_i)⊗b⊗e_i = T_{ji} e_j⊗b⊗e_i`) has no
+  atomic direct-notation form, so the step refuses; a wrong-side dot would spell
+  `Xᵀ`, which it also refuses (no transpose-emitting path yet).
 - **shape B** (resolution → I): two bare basis vectors `e_i` with only rank-0
   (scalar) other factors fold to `I`, the scalars passing through:
   ```
@@ -77,10 +84,13 @@ out structurally as `b ⊗ a − (a·b) I`.  Tests: `ReassembleCompleteness.*`
 
 ## Future
 
-- **Higher-rank shape A**: `Σ_i (T·e_i) ⊗ e_i = T` for `T` rank ≥ 2 (the dot is
-  then rank ≥ 1, not scalar) — currently restricted to rank-1 `X`.  The general
-  `T·I = T` holds; the leg/slot bookkeeping for non-commuting reattachment is
-  the only reason it is deferred.
+- **Non-scalar factor between the dot and the leg** — `Σ_i (T·e_i)⊗b⊗e_i`
+  (`= T_{ji} e_j⊗b⊗e_i`) has no atomic direct-notation form while `T` stays one
+  object, so it is refused.  Closing it would mean either splitting `T`'s legs
+  across the intervening factor (gives up atomicity) or a richer slot-routing
+  representation.
+- **Transpose-emitting fold** — a wrong-side dot (`Σ_i (e_i·T)⊗e_i = Tᵀ`) is
+  refused today; emitting `make_transpose(T)` would close it.
 - Folding a completeness pattern that straddles a `Sum`/`Difference` *factor*
   (un-distributed) — today the caller distributes (`expand_products`) first, the
   same boundary as vibe 000052.
