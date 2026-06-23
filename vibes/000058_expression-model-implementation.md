@@ -257,6 +257,21 @@ check.
 **Stage 3 — render + raise.**
 - C11 `render_nf` (precedence table, paren rule); golden tests for every
       000056 rendering case.
+      **DONE** — `render_nf_latex(Nf const&, IndexNameMap&)` in render.cpp,
+      reusing the existing LaTeX conventions.  First extracted the leaf helpers
+      (`name_str` / `slots_str` / `index_str` / `rational_str`) out of the
+      anonymous `Renderer` into free functions (DRY; `Expr` atoms == `Nf`
+      atoms), then added an `NfRenderer` over `Nf` / `Term` / `Factor`: the
+      additive layer composes `+` / `-` from each term's signed `coeff`; a term
+      is `coeff · scalars · tensors` joined by `\,`; a tensor-valued
+      contraction / cross wraps only when juxtaposed with a sibling part (a lone
+      `a × b` stays unwrapped, `(a × b) \, C` wraps); a scalar contraction reads
+      as an atom; `Paren` recurses; `Unary` → `tr` / `vec` / `^T`.  A `Default`
+      bound index renders **implicitly** (repeated slot index, the Einstein
+      form, no prefix) while `Sum` / `NoSum` get a `\sum` / `\cancel{\sum}`
+      prefix — the implicit/explicit split the model is built around, recovered
+      at render time.  16 golden tests (`tests/nf_render_test.cpp`).  Suite
+      green at 627.
 - C12 `raise` `Nf → Expr`; round-trip tests (`lower ∘ raise = id`).
 
 **Stage 4 — adopt under the public API (the flip; the one non-additive stage).**
@@ -306,10 +321,13 @@ canonical term-set order.  **Stage 2 complete**: C10 done — `canonicalize_nf`
 assembles the full chain, the `Paren` (genuine-sum) recursion is wired through
 `encapsulate`, the differential harness (`canonicalize_nf(e) ==
 canonicalize_nf(canonicalize(e))`) is green over a corpus, and
-`nf_canon_bench` lands.  Suite green at 611.  Next action: Stage 3 / C11
-(`render_nf` — precedence table + paren rule; golden tests for every 000056
-rendering case), then C12 (`raise` Nf → Expr; round-trip `lower ∘ raise = id`),
-which together unlock a stronger render-level differential and the C13 flip.
+`nf_canon_bench` lands.  Suite green at 611.  **Stage 3 started**: C11 done —
+`render_nf_latex` renders the all-`*` form in the existing LaTeX conventions
+(shared leaf helpers extracted; Default bound indices render implicitly,
+Sum/NoSum get `\sum`/`\cancel{\sum}`).  Suite green at 627.  Next action:
+Stage 3 / C12 (`raise` Nf → Expr; round-trip `lower ∘ raise = id`), which
+unlocks a stronger render-level differential and sets up the C13 flip
+(`canonicalize := raise ∘ lower`).
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with

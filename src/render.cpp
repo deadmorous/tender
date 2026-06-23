@@ -3,9 +3,12 @@
 #include <mpk/mix/enum_flags.hpp>
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/derivation.hpp> // infer_rank
+#include <tender/nf.hpp>
 
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace tender
 {
@@ -114,6 +117,119 @@ static bool is_scalar_expr(Expr const& e)
         e);
 }
 
+// ---- shared leaf rendering (Expr atoms == Nf atoms) --------------------
+
+auto index_str(
+    IndexNameMap& map,
+    std::optional<IndexAssoc> const& assoc,
+    IndexSpace const* space) -> std::string
+{
+    if (!assoc)
+        return "\\bullet";
+    return std::visit(
+        mpk::mix::Overloads{
+            [&](CountableIndex const& ci) -> std::string
+            { return std::string{map.name_for(ci, space).v.view()}; },
+            [](ConcreteIndex const& ci) -> std::string
+            { return std::to_string(ci.value); },
+            [](LabelIndex const& li) -> std::string
+            { return std::string{li.name.v.view()}; }},
+        *assoc);
+}
+
+// Bold for rank >= 1 or rank nullopt (treated as tensor); plain for rank == 0.
+auto name_str(TensorName const& name, std::optional<int> rank) -> std::string
+{
+    std::string n{name.v.view()};
+    bool bold = !rank.has_value() || *rank >= 1;
+    if (!bold)
+        return n;
+    bool is_cmd = (n.size() > 1 && n[0] == '\\');
+    return is_cmd ? "\\boldsymbol{" + n + "}" : "\\mathbf{" + n + "}";
+}
+
+// Render index slots.
+//
+// Pure-level (all upper or all lower): flat grouping, e.g. ^{ijk}.
+//
+// Mixed-level, OmitVoidIndexPlaceholders set: separate ^{...} and _{...} bands
+// with no \cdot markers — appropriate for objects whose symmetry makes slot
+// order unimportant (e.g. Kronecker delta).
+//
+// Mixed-level, default: positional interleaving — each slot contributes its
+// index to its own band and \cdot to the other, making position explicit.  E.g.
+// [upper-i, lower-j] → ^{i\cdot}_{\cdot j}.
+auto slots_str(
+    IndexNameMap& map,
+    std::vector<SlotBinding> const& slots,
+    mpk::mix::EnumFlags<RenderHint> hints) -> std::string
+{
+    if (slots.empty())
+        return {};
+
+    bool has_upper = false, has_lower = false;
+    for (auto const& sb: slots)
+    {
+        if (sb.slot.level == Level::Upper)
+            has_upper = true;
+        else
+            has_lower = true;
+    }
+
+    if (!has_upper || !has_lower
+        || hints.contains(RenderHint::OmitVoidIndexPlaceholders))
+    {
+        // Flat grouping: collect upper indices then lower indices.
+        std::string upper, lower;
+        for (auto const& sb: slots)
+        {
+            auto s = index_str(map, sb.index, sb.slot.space);
+            if (sb.slot.level == Level::Upper)
+                upper += s;
+            else
+                lower += s;
+        }
+        std::string result;
+        if (has_upper)
+            result += "^{" + upper + "}";
+        if (has_lower)
+            result += "_{" + lower + "}";
+        return result;
+    }
+
+    // Mixed positional: build both bands with \cdot placeholders.
+    // "\\cdot " (with trailing space) safely terminates the LaTeX command
+    // before any following letter; trimmed from band ends for clean output.
+    std::string upper, lower;
+    for (auto const& sb: slots)
+    {
+        auto s = index_str(map, sb.index, sb.slot.space);
+        if (sb.slot.level == Level::Upper)
+        {
+            upper += s;
+            lower += "\\cdot ";
+        }
+        else
+        {
+            upper += "\\cdot ";
+            lower += s;
+        }
+    }
+    if (!upper.empty() && upper.back() == ' ')
+        upper.pop_back();
+    if (!lower.empty() && lower.back() == ' ')
+        lower.pop_back();
+    return "^{" + upper + "}_{" + lower + "}";
+}
+
+auto rational_str(Rational const& r) -> std::string
+{
+    if (r.is_integer())
+        return std::to_string(r.num());
+    return "\\frac{" + std::to_string(r.num()) + "}{" + std::to_string(r.den())
+           + "}";
+}
+
 struct Renderer
 {
     IndexNameMap& map;
@@ -195,117 +311,6 @@ struct Renderer
 
     // ---- leaves --------------------------------------------------------
 
-    auto index_str(
-        std::optional<IndexAssoc> const& assoc,
-        IndexSpace const* space) -> std::string
-    {
-        if (!assoc)
-            return "\\bullet";
-        return std::visit(
-            mpk::mix::Overloads{
-                [&](CountableIndex const& ci) -> std::string
-                { return std::string{map.name_for(ci, space).v.view()}; },
-                [](ConcreteIndex const& ci) -> std::string
-                { return std::to_string(ci.value); },
-                [](LabelIndex const& li) -> std::string
-                { return std::string{li.name.v.view()}; }},
-            *assoc);
-    }
-
-    // Bold for rank >= 1 or rank nullopt (treated as tensor); plain for rank ==
-    // 0.
-    static auto name_str(TensorName const& name, std::optional<int> rank)
-        -> std::string
-    {
-        std::string n{name.v.view()};
-        bool bold = !rank.has_value() || *rank >= 1;
-        if (!bold)
-            return n;
-        bool is_cmd = (n.size() > 1 && n[0] == '\\');
-        return is_cmd ? "\\boldsymbol{" + n + "}" : "\\mathbf{" + n + "}";
-    }
-
-    // Render index slots.
-    //
-    // Pure-level (all upper or all lower): flat grouping, e.g. ^{ijk}.
-    //
-    // Mixed-level, OmitVoidIndexPlaceholders set: separate ^{...} and _{...}
-    // bands with no \cdot markers — appropriate for objects whose symmetry
-    // makes slot order unimportant (e.g. Kronecker delta).
-    //
-    // Mixed-level, default: positional interleaving — each slot contributes
-    // its index to its own band and \cdot to the other, making position
-    // explicit.  E.g. [upper-i, lower-j] → ^{i\cdot}_{\cdot j}.
-    auto slots_str(
-        std::vector<SlotBinding> const& slots,
-        mpk::mix::EnumFlags<RenderHint> hints) -> std::string
-    {
-        if (slots.empty())
-            return {};
-
-        bool has_upper = false, has_lower = false;
-        for (auto const& sb: slots)
-        {
-            if (sb.slot.level == Level::Upper)
-                has_upper = true;
-            else
-                has_lower = true;
-        }
-
-        if (!has_upper || !has_lower
-            || hints.contains(RenderHint::OmitVoidIndexPlaceholders))
-        {
-            // Flat grouping: collect upper indices then lower indices.
-            std::string upper, lower;
-            for (auto const& sb: slots)
-            {
-                auto s = index_str(sb.index, sb.slot.space);
-                if (sb.slot.level == Level::Upper)
-                    upper += s;
-                else
-                    lower += s;
-            }
-            std::string result;
-            if (has_upper)
-                result += "^{" + upper + "}";
-            if (has_lower)
-                result += "_{" + lower + "}";
-            return result;
-        }
-
-        // Mixed positional: build both bands with \cdot placeholders.
-        // "\\cdot " (with trailing space) safely terminates the LaTeX command
-        // before any following letter; trimmed from band ends for clean output.
-        std::string upper, lower;
-        for (auto const& sb: slots)
-        {
-            auto s = index_str(sb.index, sb.slot.space);
-            if (sb.slot.level == Level::Upper)
-            {
-                upper += s;
-                lower += "\\cdot ";
-            }
-            else
-            {
-                upper += "\\cdot ";
-                lower += s;
-            }
-        }
-        if (!upper.empty() && upper.back() == ' ')
-            upper.pop_back();
-        if (!lower.empty() && lower.back() == ' ')
-            lower.pop_back();
-        return "^{" + upper + "}_{" + lower + "}";
-    }
-
-    static auto rational_str(Rational const& r) -> std::string
-    {
-        if (r.is_integer())
-            return std::to_string(r.num());
-        return "\\frac{" + std::to_string(r.num()) + "}{"
-               + std::to_string(r.den()) + "}";
-    }
-
     // Render a sum-annotation node.  Body is rendered first so that the
     // index name is allocated before the annotation prefix is composed.
     auto sum_str(CountableIndex idx, Expr const* body, std::string const& sym)
@@ -331,7 +336,8 @@ struct Renderer
                     mpk::mix::EnumFlags<RenderHint> hints;
                     if (t.traits)
                         hints = t.traits->render_hints;
-                    return name_str(t.name, t.rank) + slots_str(t.slots, hints);
+                    return name_str(t.name, t.rank)
+                           + slots_str(map, t.slots, hints);
                 },
                 [&](ScalarLiteral const& s) -> std::string
                 { return rational_str(s.value); },
@@ -414,11 +420,178 @@ struct Renderer
     }
 };
 
+// ---- Nf renderer (C11) -------------------------------------------------
+
+// Renders the all-`*` normal form (nf.hpp) in the same LaTeX conventions as the
+// `Expr` Renderer above, reusing the shared leaf helpers.  An `Nf` is an
+// additive set of signed `coeff · scalars · tensors` terms; a `Default` bound
+// index renders *implicitly* (it is just a repeated slot index — the Einstein
+// form), while `Sum` / `NoSum` overrides get a `\sum` / `\cancel{\sum}` prefix.
+struct NfRenderer
+{
+    IndexNameMap& map;
+
+    static auto prec(nf::Factor const& f) -> int
+    {
+        return nf::visit(
+            mpk::mix::Overloads{
+                [](nf::Atom const&) { return ATOM_PREC; },
+                [](nf::Contraction const&) { return CONTRACT_PREC; },
+                [](nf::Cross const&) { return CONTRACT_PREC; },
+                [](nf::Paren const&)
+                { return ATOM_PREC; }, // self-parenthesized
+                [](nf::Unary const&) { return ATOM_PREC; }, // self-delimiting
+            },
+            f);
+    }
+
+    // Render a factor, wrapping in parens if its precedence is below min_prec.
+    auto sub(nf::Factor const& f, int min_prec) -> std::string
+    {
+        auto s = render_factor(f);
+        return prec(f) < min_prec ? "(" + s + ")" : s;
+    }
+
+    static auto cop_str(nf::COp op) -> char const*
+    {
+        switch (op)
+        {
+            case nf::COp::Dot: return " \\cdot ";
+            case nf::COp::DDot: return " : ";
+            case nf::COp::DDotAlt: return " \\cdot\\!\\cdot ";
+        }
+        return " \\, "; // unreachable
+    }
+
+    auto render_factor(nf::Factor const& f) -> std::string
+    {
+        return nf::visit(
+            mpk::mix::Overloads{
+                [&](nf::Atom const& a) -> std::string
+                {
+                    mpk::mix::EnumFlags<RenderHint> hints;
+                    if (a.obj.traits)
+                        hints = a.obj.traits->render_hints;
+                    return name_str(a.obj.name, a.obj.rank)
+                           + slots_str(map, a.obj.slots, hints);
+                },
+                // Flat contraction chain: f0 op0 f1 op1 …  Each operand wraps a
+                // nested contraction / cross (prec < TENSOR_PREC).
+                [&](nf::Contraction const& c) -> std::string
+                {
+                    std::string s = sub(*c.factors[0], TENSOR_PREC);
+                    for (std::size_t i = 0; i + 1 < c.factors.size(); ++i)
+                        s += cop_str(c.ops[i])
+                             + sub(*c.factors[i + 1], TENSOR_PREC);
+                    return s;
+                },
+                [&](nf::Cross const& c) -> std::string
+                {
+                    std::string s = sub(*c.factors[0], TENSOR_PREC);
+                    for (std::size_t i = 1; i < c.factors.size(); ++i)
+                        s += " \\times " + sub(*c.factors[i], TENSOR_PREC);
+                    return s;
+                },
+                [&](nf::Paren const& p) -> std::string
+                { return "(" + render_nf(*p.body) + ")"; },
+                [&](nf::Unary const& u) -> std::string
+                {
+                    switch (u.op)
+                    {
+                        case nf::UnaryOp::Trace:
+                            return "\\operatorname{tr}("
+                                   + render_factor(*u.operand) + ")";
+                        case nf::UnaryOp::VectorInvariant:
+                        {
+                            auto const* a =
+                                std::get_if<nf::Atom>(&u.operand->node);
+                            bool const bare = a && a->obj.slots.empty();
+                            auto const inner = render_factor(*u.operand);
+                            return (bare ? inner : "(" + inner + ")")
+                                   + "_\\times";
+                        }
+                        case nf::UnaryOp::Transpose:
+                            return sub(*u.operand, ATOM_PREC)
+                                   + "^{\\mathsf{T}}";
+                    }
+                    return "?"; // unreachable
+                },
+            },
+            f);
+    }
+
+    // Render one term's signed magnitude.  Returns (negative?, body) so the Nf
+    // layer can compose `+` / `-` joins.
+    auto render_term(nf::Term const& t) -> std::pair<bool, std::string>
+    {
+        bool const neg = t.coeff < Rational{0};
+        Rational const mag = neg ? -t.coeff : t.coeff;
+
+        bool const has_factors = !t.scalars.empty() || !t.tensors.empty();
+        bool const has_coeff = !(mag == Rational{1} && has_factors);
+        std::size_t const nparts =
+            (has_coeff ? 1 : 0) + t.scalars.size() + t.tensors.size();
+        // A tensor-valued contraction / cross needs parens only when it is
+        // juxtaposed with a sibling part (coeff or another factor); alone in a
+        // term it reads cleanly (`a × b`, not `(a × b)`).  Scalars are
+        // scalar-valued, so they always read as atoms (no wrap).
+        bool const multi = nparts > 1;
+
+        std::vector<std::string> parts;
+        if (has_coeff)
+            parts.push_back(rational_str(mag));
+        for (auto const* f: t.scalars)
+            parts.push_back(render_factor(*f));
+        for (auto const* f: t.tensors)
+            parts.push_back(multi ? sub(*f, TENSOR_PREC) : render_factor(*f));
+
+        std::string body;
+        for (std::size_t i = 0; i < parts.size(); ++i)
+            body += (i ? " \\, " : "") + parts[i];
+
+        // Explicit summation overrides prefix the term; a Default bound index
+        // is implicit (carried by its repeated slot index), so it adds nothing.
+        std::string prefix;
+        for (auto const& b: t.bound)
+        {
+            if (b.mode == nf::SumMode::Default)
+                continue;
+            auto name = map.lookup(b.index);
+            auto idx_s = name ? std::string{name->v.view()} : "?";
+            char const* sym =
+                b.mode == nf::SumMode::Sum ? "\\sum" : "\\cancel{\\sum}";
+            prefix += std::string{sym} + "_{" + idx_s + "} ";
+        }
+        return {neg, prefix + body};
+    }
+
+    auto render_nf(nf::Nf const& value) -> std::string
+    {
+        if (value.terms.empty())
+            return "0";
+        std::string out;
+        for (std::size_t i = 0; i < value.terms.size(); ++i)
+        {
+            auto [neg, body] = render_term(value.terms[i]);
+            if (i == 0)
+                out = (neg ? "-" : "") + body;
+            else
+                out += (neg ? " - " : " + ") + body;
+        }
+        return out;
+    }
+};
+
 } // anonymous namespace
 
 auto render_latex(Expr const& e, IndexNameMap& map) -> std::string
 {
     return Renderer{map}.render(e);
+}
+
+auto render_nf_latex(nf::Nf const& value, IndexNameMap& map) -> std::string
+{
+    return NfRenderer{map}.render_nf(value);
 }
 
 } // namespace tender
