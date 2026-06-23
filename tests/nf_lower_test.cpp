@@ -1,5 +1,6 @@
 #include <tender/nf_lower.hpp>
 
+#include <tender/derivation.hpp>  // steps::canonicalize (differential harness)
 #include <tender/index_space.hpp> // space_3d
 
 #include <gtest/gtest.h>
@@ -278,14 +279,29 @@ TEST(Encapsulate, DDotOperatorRecorded)
     EXPECT_EQ(con.ops, (std::vector<COp>{COp::DDot}));
 }
 
+TEST(Encapsulate, GenuineSumBecomesParen)
+{
+    // A genuine sum factor encapsulates into a Paren over the recursively
+    // canonicalized interior (b + c → Nf with two terms).
+    Context ctx;
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto sf = encapsulate(ctx, make_sum(ctx, b, c));
+    EXPECT_EQ(sf.sign, +1);
+    ASSERT_TRUE(std::holds_alternative<Paren>(sf.factor->node));
+    EXPECT_EQ(std::get<Paren>(sf.factor->node).body->terms.size(), 2u);
+}
+
 TEST(Encapsulate, UnsupportedNodeThrows)
 {
     Context ctx;
     auto const* a = atom(ctx, "a");
-    // A Sum factor is not yet encapsulable (→ Paren awaits the recursive
-    // lower).
+    auto const* b = atom(ctx, "b");
+    // A bare ⊗ inside an operand awaits fence distribution — encapsulate alone
+    // does not split it.
     EXPECT_THROW(
-        (void)encapsulate(ctx, make_sum(ctx, a, a)), std::invalid_argument);
+        (void)encapsulate(ctx, make_tensor_product(ctx, a, b)),
+        std::invalid_argument);
 }
 
 // ---- unary invariants --------------------------------------------------
@@ -576,17 +592,23 @@ TEST(LowerTerm, CrossFenceDistributesTensorProductOut)
     EXPECT_EQ(std::get<Atom>(t.tensors[1]->node).obj.name.v.view(), "c");
 }
 
-TEST(LowerTerm, GenuineSumOperandStaysSunkAndAwaitsLower)
+TEST(LowerTerm, GenuineSumOperandBecomesParen)
 {
     // A·(b+c): the sum is NOT distributed (explicit transform only); the sum
-    // operand becomes a Paren that still awaits the recursive lower → throws.
+    // operand becomes a Paren, so the term is the contraction A·(b+c) with a
+    // Paren second operand.
     Context ctx;
     auto const* A = atomr(ctx, "A", 2);
     auto const* b = atom(ctx, "b");
     auto const* c = atom(ctx, "c");
-    EXPECT_THROW(
-        (void)term1(ctx, make_dot(ctx, A, make_sum(ctx, b, c))),
-        std::invalid_argument);
+    auto t = term1(ctx, make_dot(ctx, A, make_sum(ctx, b, c)));
+    ASSERT_EQ(t.tensors.size(), 1u);
+    ASSERT_TRUE(std::holds_alternative<Contraction>(t.tensors[0]->node));
+    auto const& con = std::get<Contraction>(t.tensors[0]->node);
+    ASSERT_EQ(con.factors.size(), 2u);
+    EXPECT_TRUE(std::holds_alternative<Atom>(con.factors[0]->node));
+    EXPECT_TRUE(std::holds_alternative<Paren>(con.factors[1]->node));
+    EXPECT_EQ(std::get<Paren>(con.factors[1]->node).body->terms.size(), 2u);
 }
 
 // ---- summation resolution (C8) -----------------------------------------
@@ -793,4 +815,117 @@ TEST(CollectTerms, MergesAndSortsTogether)
 TEST(CollectTerms, EmptyIsZero)
 {
     EXPECT_TRUE(collect_terms({}).empty());
+}
+
+// ---- canonicalize_nf entry point (C10) ---------------------------------
+
+TEST(CanonicalizeNf, SingleAtom)
+{
+    Context ctx;
+    auto const* nf = canonicalize_nf(ctx, atom(ctx, "a"));
+    ASSERT_EQ(nf->terms.size(), 1u);
+    EXPECT_EQ(nf->terms[0].coeff, Rational{1});
+    ASSERT_EQ(nf->terms[0].tensors.size(), 1u);
+    EXPECT_EQ(tname(nf->terms[0], 0), "a");
+}
+
+TEST(CanonicalizeNf, SumCancelsAcrossTerms)
+{
+    // (a + b) − a → b  (sign-drift cancellation is structural).
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* nf =
+        canonicalize_nf(ctx, make_difference(ctx, make_sum(ctx, a, b), a));
+    ASSERT_EQ(nf->terms.size(), 1u);
+    EXPECT_EQ(tname(nf->terms[0], 0), "b");
+    EXPECT_EQ(nf->terms[0].coeff, Rational{1});
+}
+
+TEST(CanonicalizeNf, LikeTermsMerge)
+{
+    // 2a + 3a → 5a
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto sa = [&](int n)
+    { return make_tensor_product(ctx, make_scalar(ctx, Rational{n}), a); };
+    auto const* nf = canonicalize_nf(ctx, make_sum(ctx, sa(2), sa(3)));
+    ASSERT_EQ(nf->terms.size(), 1u);
+    EXPECT_EQ(nf->terms[0].coeff, Rational{5});
+}
+
+TEST(CanonicalizeNf, WedgedScalarFloatsOut)
+{
+    // (a·b) ⊗ C: the scalar a·b floats to the scalar region; C is the tensor.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* C = atomr(ctx, "C", 2);
+    auto const* nf =
+        canonicalize_nf(ctx, make_tensor_product(ctx, make_dot(ctx, a, b), C));
+    ASSERT_EQ(nf->terms.size(), 1u);
+    auto const& t = nf->terms[0];
+    EXPECT_EQ(t.scalars.size(), 1u); // a·b
+    ASSERT_EQ(t.tensors.size(), 1u); // C
+    EXPECT_EQ(tname(t, 0), "C");
+}
+
+TEST(CanonicalizeNf, EmptyIsZero)
+{
+    // a − a → 0 (empty term set).
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* nf = canonicalize_nf(ctx, make_difference(ctx, a, a));
+    EXPECT_TRUE(nf->terms.empty());
+}
+
+TEST(CanonicalizeNf, ParenSumRecurses)
+{
+    // A·(b+c): the genuine sum sinks into a Paren whose interior canonicalizes.
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto const* nf =
+        canonicalize_nf(ctx, make_dot(ctx, A, make_sum(ctx, b, c)));
+    ASSERT_EQ(nf->terms.size(), 1u);
+    auto const& con = std::get<Contraction>(nf->terms[0].tensors[0]->node);
+    EXPECT_TRUE(std::holds_alternative<Paren>(con.factors[1]->node));
+    EXPECT_EQ(std::get<Paren>(con.factors[1]->node).body->terms.size(), 2u);
+}
+
+// The new lowering maps an expr and its old-canonical form to the same `Nf`:
+// `canonicalize_nf(e) == canonicalize_nf(canonicalize(e))`.  Old canon is
+// semantics-preserving, so any divergence is a real disagreement (a bug or a
+// signed-off improvement) — the C10 differential check.
+TEST(CanonicalizeNf, DifferentialVsOldCanon)
+{
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* C = atomr(ctx, "C", 2);
+    CountableIndex i{ctx.alloc_index_id()};
+    auto sa = [&](int n)
+    { return make_tensor_product(ctx, make_scalar(ctx, Rational{n}), a); };
+
+    std::vector<Expr const*> corpus = {
+        a,
+        make_dot(ctx, a, b),
+        make_dot(ctx, b, a), // commutes → same form
+        make_tensor_product(ctx, make_dot(ctx, a, b), C), // wedged scalar
+        make_difference(ctx, make_sum(ctx, a, b), a),     // a+b−a → b
+        make_sum(ctx, sa(2), sa(3)),                      // 2a+3a → 5a
+        make_tensor_product( // a^i b_i (implicit Σ)
+            ctx,
+            ivec(ctx, "a", Level::Upper, i),
+            ivec(ctx, "b", Level::Lower, i)),
+    };
+    for (std::size_t n = 0; n < corpus.size(); ++n)
+    {
+        auto const* e = corpus[n];
+        auto const* via_raw = canonicalize_nf(ctx, e);
+        auto const* via_canon =
+            canonicalize_nf(ctx, steps::canonicalize(ctx, e));
+        EXPECT_TRUE(equal(*via_raw, *via_canon)) << "corpus #" << n;
+    }
 }

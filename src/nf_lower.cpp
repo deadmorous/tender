@@ -278,9 +278,27 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
         return {sl.sign * sr.sign, make_cross(ctx, {sl.factor, sr.factor})};
     }
 
+    // A bare `Negate` factor (e.g. a contraction operand `A·(−b)`): lift the
+    // sign and encapsulate the operand.  (A top-level / multiplicative `Negate`
+    // is already folded into `coeff` by multiplicative_flatten; this arm only
+    // fires for a `Negate` reached through a contraction / cross operand.)
+    if (auto const* n = std::get_if<Negate>(&factor->node))
+    {
+        auto sf = encapsulate(ctx, n->operand);
+        return {-sf.sign, sf.factor};
+    }
+
+    // A *genuine sum* factor (`b + c`, `b − c`) — never distributed — becomes a
+    // `Paren` whose interior is the recursively canonicalized `Nf` (000057 /
+    // C10).  Its sign rides in the inner terms' coeffs, so the lifted sign here
+    // is `+1`.
+    if (std::holds_alternative<Sum>(factor->node)
+        || std::holds_alternative<Difference>(factor->node))
+        return {+1, make_paren(ctx, canonicalize_nf(ctx, factor))};
+
     throw std::invalid_argument(
-        "encapsulate: unsupported factor node (sums → Paren and nested ⊗ await "
-        "the recursive lower / fence distribution)");
+        "encapsulate: unsupported factor node (a nested ⊗ inside an operand "
+        "awaits fence distribution)");
 }
 
 // ---- pass 4: region placement (C5) -------------------------------------
@@ -497,6 +515,20 @@ auto collect_terms(std::vector<Term> terms) -> std::vector<Term>
     // Cancellation: a merged zero coefficient means the term vanishes.
     std::erase_if(out, [](Term const& t) { return t.coeff == Rational{0}; });
     return out;
+}
+
+// ---- entry point: lower `Expr → Nf` (C10) ------------------------------
+
+auto canonicalize_nf(Context& ctx, Expr const* e) -> Nf const*
+{
+    // Expand the outermost additive layer into signed terms, lower each
+    // (multiplicative flatten + encapsulate + region placement + summation
+    // resolution), then collect like terms into the canonical term set.  A
+    // genuine-sum factor recurses back through `encapsulate` → `make_paren`.
+    std::vector<Term> lowered;
+    for (auto const& st: additive_flatten(e))
+        lowered.push_back(lower_term(ctx, st));
+    return make_nf(ctx, collect_terms(std::move(lowered)));
 }
 
 } // namespace tender::nf

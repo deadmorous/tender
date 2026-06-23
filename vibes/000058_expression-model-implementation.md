@@ -234,6 +234,25 @@ check.
 - C10 `canonicalize_nf` entry point; **differential harness** vs old
       `canonicalize` on a corpus (divergences are bugs or signed-off
       improvements); canon benchmark.
+      **DONE** — `canonicalize_nf(ctx, e) -> Nf const*` assembles the chain:
+      `additive_flatten` → per-term `lower_term` → `collect_terms` → `make_nf`.
+      The deferred **`Paren`** (genuine-sum factor) is now handled: `encapsulate`
+      recurses through `canonicalize_nf` on a `Sum` / `Difference` factor and
+      wraps the result in `make_paren` (never distributed — 000057); it also
+      gained a `Negate`-operand arm (lift the sign) for completeness.  The
+      **differential harness** checks `canonicalize_nf(e) ==
+      canonicalize_nf(canonicalize(e))` over a corpus (direct-notation dots, the
+      commuting `b·a`, a wedged scalar, sign-drift cancellation, like-term
+      merge, and an implicit-Σ `a^i b_i`) — old canon is semantics-preserving,
+      so both sides land in the new lowering and any divergence is a real
+      disagreement; this also exercises the materialize/float prep indirectly
+      (through old canon) without needing render/raise yet.  Added
+      `benchmarks/nf_canon_bench.cpp` (fresh Context per iter; ~2 µs/op,
+      2 canonical terms on the sample).  Not yet wired here: the `materialize` /
+      `float_sums` prep, so an explicit binder must be at a term head and a
+      buried/ranged `ExplicitSum` still throws (deferred).  10 tests
+      (`CanonicalizeNf.*`, `Encapsulate.GenuineSumBecomesParen`,
+      `LowerTerm.GenuineSumOperandBecomesParen`).  Suite green at 611.
 
 **Stage 3 — render + raise.**
 - C11 `render_nf` (precedence table, paren rule); golden tests for every
@@ -283,10 +302,14 @@ indices into `Term::bound` + α-renamed slots (mode realm-verdict-driven; NoSum
 kept free; Fubini-minimized dummy ids).  Suite green at 598.  Next action:
 Stage 2 / C9 (like-term collection).  C9 done — `collect_terms` merges/cancels
 like terms via the new coeff-ignoring `compare_term_key` and leaves the
-canonical term-set order.  Suite green at 603.  Next action: Stage 2 / C10
-(`canonicalize_nf` entry point assembling additive_flatten → per-term
-lower_term → collect_terms → make_nf, plus the differential harness vs the old
-`canonicalize` on a corpus, and a canon benchmark).
+canonical term-set order.  **Stage 2 complete**: C10 done — `canonicalize_nf`
+assembles the full chain, the `Paren` (genuine-sum) recursion is wired through
+`encapsulate`, the differential harness (`canonicalize_nf(e) ==
+canonicalize_nf(canonicalize(e))`) is green over a corpus, and
+`nf_canon_bench` lands.  Suite green at 611.  Next action: Stage 3 / C11
+(`render_nf` — precedence table + paren rule; golden tests for every 000056
+rendering case), then C12 (`raise` Nf → Expr; round-trip `lower ∘ raise = id`),
+which together unlock a stronger render-level differential and the C13 flip.
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with

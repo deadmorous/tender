@@ -133,4 +133,18 @@ struct SignedFactor final
 // the zero expression.  Context-free: it only merges already-built `Term`s.
 [[nodiscard]] auto collect_terms(std::vector<Term> terms) -> std::vector<Term>;
 
+// ---- entry point: lower `Expr → Nf` (C10) ------------------------------
+
+// Canonicalize a surface `Expr` into the normal form `Nf`: additive flatten →
+// per-term `lower_term` → `collect_terms`.  This is the public lowering used by
+// the (future) flip at C13; until then it grows beside the existing `Expr`
+// `canonicalize`.  Total and deterministic; a genuine-sum factor is canonical-
+// ized recursively into a `Paren` (never distributed — 000057).
+//
+// Not yet handled (throws, via `lower_term` / `encapsulate`): an explicit
+// `ExplicitSum` / `NoSum` binder not at a term head (the `Expr` canon's
+// `float_sums` prep is not run here yet), a ranged `ExplicitSum`, and a `⊗`
+// nested inside a contraction operand that fence distribution has not exposed.
+[[nodiscard]] auto canonicalize_nf(Context&, Expr const* e) -> Nf const*;
+
 } // namespace tender::nf
