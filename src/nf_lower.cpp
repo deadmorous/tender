@@ -471,4 +471,32 @@ auto lower_term(Context& ctx, SignedExpr const& term) -> Term
     return best;
 }
 
+// ---- pass 6: like-term collection + term-set ordering (C9) --------------
+
+auto collect_terms(std::vector<Term> terms) -> std::vector<Term>
+{
+    // Sort by the like-term key so equal keys are adjacent; their `coeff`s then
+    // merge in one linear sweep.  (Key order ignores `coeff`, and the surviving
+    // merged terms have distinct keys, so this is also the canonical term-set
+    // order — the `coeff` tiebreak in `compare` never separates two of them.)
+    std::stable_sort(
+        terms.begin(),
+        terms.end(),
+        [](Term const& x, Term const& y)
+        { return compare_term_key(x, y) < 0; });
+
+    std::vector<Term> out;
+    out.reserve(terms.size());
+    for (auto& t: terms)
+    {
+        if (!out.empty() && compare_term_key(out.back(), t) == 0)
+            out.back().coeff += t.coeff; // 2a + 3a → 5a
+        else
+            out.push_back(std::move(t));
+    }
+    // Cancellation: a merged zero coefficient means the term vanishes.
+    std::erase_if(out, [](Term const& t) { return t.coeff == Rational{0}; });
+    return out;
+}
+
 } // namespace tender::nf

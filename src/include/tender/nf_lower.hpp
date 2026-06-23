@@ -122,4 +122,15 @@ struct SignedFactor final
 // `ExplicitSum` (symbolic bound) is likewise deferred and throws.
 [[nodiscard]] auto lower_term(Context&, SignedExpr const& term) -> Term;
 
+// ---- pass 6: like-term collection + term-set ordering (C9) --------------
+
+// Collect a flat list of lowered terms into the canonical additive set: sort by
+// the like-term key (`compare_term_key` — tensors, scalars, bound, ignoring
+// `coeff`), merge equal keys by adding their signed `coeff`s, drop any term
+// whose merged `coeff` is zero, and leave the result in canonical term order.
+// This is where `a + (−a) → 0` and `2a + 3a → 5a` happen — 000056's sign-drift
+// and stray `+ −` artefacts become structurally impossible.  An empty result is
+// the zero expression.  Context-free: it only merges already-built `Term`s.
+[[nodiscard]] auto collect_terms(std::vector<Term> terms) -> std::vector<Term>;
+
 } // namespace tender::nf

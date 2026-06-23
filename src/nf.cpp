@@ -201,7 +201,7 @@ auto compare(Factor const& a, Factor const& b) -> int
         a);
 }
 
-auto compare(Term const& a, Term const& b) -> int
+auto compare_term_key(Term const& a, Term const& b) -> int
 {
     if (int c = factor_seq_cmp(a.tensors, b.tensors))
         return c;
@@ -216,6 +216,13 @@ auto compare(Term const& a, Term const& b) -> int
         if (a.bound[i].mode != b.bound[i].mode)
             return a.bound[i].mode < b.bound[i].mode ? -1 : 1;
     }
+    return 0;
+}
+
+auto compare(Term const& a, Term const& b) -> int
+{
+    if (int c = compare_term_key(a, b))
+        return c;
     return rational_cmp(a.coeff, b.coeff);
 }
 

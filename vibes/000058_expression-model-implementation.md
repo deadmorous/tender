@@ -221,6 +221,16 @@ check.
       term head (which `float_sums` will arrange when wired in at C10).
       6 tests (`tests/nf_lower_test.cpp` Summation.*).  Suite green at 598.
 - C9  like-term collection (cancellation, coeff merge) + term-set ordering.
+      **DONE** — `collect_terms(std::vector<Term>) -> std::vector<Term>`
+      (Context-free): stable-sort by the like-term key, merge equal keys by
+      adding signed `coeff`s, drop zero-`coeff` terms, leaving the canonical
+      term-set order.  The key is a new `compare_term_key` in nf.hpp — exactly
+      `compare(Term)` minus the final `coeff` tiebreak (tensors → scalars →
+      bound); `compare(Term)` now calls it then tiebreaks on `coeff`, so the two
+      stay consistent by construction.  `a + (−a) → 0` and `2a + 3a → 5a` are
+      now structural (000056's sign-drift / stray `+ −` artefacts are
+      impossible); an empty result is the zero `Nf`.  5 tests
+      (`tests/nf_lower_test.cpp` CollectTerms.*).  Suite green at 603.
 - C10 `canonicalize_nf` entry point; **differential harness** vs old
       `canonicalize` on a corpus (divergences are bugs or signed-off
       improvements); canon benchmark.
@@ -271,8 +281,12 @@ C7 (scalar sort + interior commutative-operand ordering) done.  Suite green at
 helpers into shared `tender/summation.{hpp,cpp}`, C8b resolves a term's bound
 indices into `Term::bound` + α-renamed slots (mode realm-verdict-driven; NoSum
 kept free; Fubini-minimized dummy ids).  Suite green at 598.  Next action:
-Stage 2 / C9 (like-term collection: cancellation + coeff merge, then term-set
-ordering → the additive layer of `Nf`).
+Stage 2 / C9 (like-term collection).  C9 done — `collect_terms` merges/cancels
+like terms via the new coeff-ignoring `compare_term_key` and leaves the
+canonical term-set order.  Suite green at 603.  Next action: Stage 2 / C10
+(`canonicalize_nf` entry point assembling additive_flatten → per-term
+lower_term → collect_terms → make_nf, plus the differential harness vs the old
+`canonicalize` on a corpus, and a canon benchmark).
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with

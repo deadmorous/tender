@@ -720,3 +720,77 @@ TEST(Summation, RangedExplicitSumIsDeferred)
         (void)term1(ctx, make_explicit_sum(ctx, i, a, n)),
         std::invalid_argument);
 }
+
+// ---- like-term collection (C9) -----------------------------------------
+
+namespace
+{
+
+// A single-tensor term `coeff · name` (name an abstract rank-1 tensor).
+auto scaled(Context& ctx, Rational coeff, std::string_view name) -> Term
+{
+    Term t;
+    t.coeff = coeff;
+    t.tensors.push_back(
+        make_atom(ctx, std::get<TensorObject>(atom(ctx, name)->node)));
+    return t;
+}
+
+auto tname(Term const& t, std::size_t i) -> std::string_view
+{
+    return std::get<Atom>(t.tensors.at(i)->node).obj.name.v.view();
+}
+
+} // namespace
+
+TEST(CollectTerms, MergesLikeTerms)
+{
+    // 2a + 3a → 5a  (distinct factor instances, same key → one term).
+    Context ctx;
+    auto out = collect_terms(
+        {scaled(ctx, Rational{2}, "a"), scaled(ctx, Rational{3}, "a")});
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].coeff, Rational{5});
+    ASSERT_EQ(out[0].tensors.size(), 1u);
+    EXPECT_EQ(tname(out[0], 0), "a");
+}
+
+TEST(CollectTerms, CancelsOpposite)
+{
+    // a + (−a) → 0  (empty term set).
+    Context ctx;
+    auto out = collect_terms(
+        {scaled(ctx, Rational{1}, "a"), scaled(ctx, Rational{-1}, "a")});
+    EXPECT_TRUE(out.empty());
+}
+
+TEST(CollectTerms, MergeThenCancel)
+{
+    // a + a − 2a → 0.
+    Context ctx;
+    auto out = collect_terms(
+        {scaled(ctx, Rational{1}, "a"),
+         scaled(ctx, Rational{1}, "a"),
+         scaled(ctx, Rational{-2}, "a")});
+    EXPECT_TRUE(out.empty());
+}
+
+TEST(CollectTerms, MergesAndSortsTogether)
+{
+    // b + a + 2a → [3a, b]  (merge like terms, drop nothing, canonical order).
+    Context ctx;
+    auto out = collect_terms(
+        {scaled(ctx, Rational{1}, "b"),
+         scaled(ctx, Rational{1}, "a"),
+         scaled(ctx, Rational{2}, "a")});
+    ASSERT_EQ(out.size(), 2u);
+    EXPECT_EQ(tname(out[0], 0), "a");
+    EXPECT_EQ(out[0].coeff, Rational{3});
+    EXPECT_EQ(tname(out[1], 0), "b");
+    EXPECT_EQ(out[1].coeff, Rational{1});
+}
+
+TEST(CollectTerms, EmptyIsZero)
+{
+    EXPECT_TRUE(collect_terms({}).empty());
+}

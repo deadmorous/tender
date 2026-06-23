@@ -233,6 +233,11 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
 [[nodiscard]] auto compare(Term const&, Term const&) -> int;
 [[nodiscard]] auto compare(Nf const&, Nf const&) -> int;
 
+// The like-term key order: `compare(Term)` minus the final `coeff` tiebreak —
+// by tensors, then scalars, then bound (ids + modes).  Two terms are like terms
+// (collected into one during canon) iff `compare_term_key(a, b) == 0`.
+[[nodiscard]] auto compare_term_key(Term const&, Term const&) -> int;
+
 // ---- structural hashing ------------------------------------------------
 
 // Hashes consistent with `equal`: equal structures hash equal.  Provided so
