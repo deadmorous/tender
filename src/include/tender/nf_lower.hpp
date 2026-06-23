@@ -96,19 +96,30 @@ struct SignedFactor final
 // collection are later passes.
 [[nodiscard]] auto place_factors(Context&, ProductParts const&) -> Term;
 
-// ---- per-term lowering (passes 3+4) ------------------------------------
+// ---- per-term lowering (passes 3+4+5) ----------------------------------
 
 // Lower one signed term to an `Nf` `Term`, composing the passes above with an
-// aggressive ⊗-fence distribution:
-//   1. `distribute_contraction` pushes every `·` / `×` through its adjacent ⊗
+// aggressive ⊗-fence distribution and summation resolution:
+//   1. strip the leading `ExplicitSum` / `NoSum` binder stack off the term;
+//   2. `distribute_contraction` pushes every `·` / `×` through its adjacent ⊗
 //      leg to a fixpoint (`A·(b⊗c) → (A·b)⊗c`), floating the ⊗ up so it joins
 //      factors at the top — a ⊗ never stays buried in a contraction operand;
-//   2. `multiplicative_flatten` then splits the exposed ⊗ chain;
-//   3. `place_factors` encapsulates and region-places.
+//   3. resolve summation (vibe 000058 / C8): the term's bound indices are its
+//      implicit realm contractions (mode `Default`) plus the stripped explicit
+//      binders (an explicit Σ is `Default` when it merely confirms the realm
+//      default, else `Sum`; a `NoSum` that suppresses a real contraction is a
+//      free override kept with its original id).  The summed dummies are
+//      α-renamed to canonical (negative) ids via a Fubini-minimizing
+//      permutation search (substitution at the Expr level, minimized under Nf
+//      `compare`), populating `Term::bound`;
+//   4. `multiplicative_flatten` then splits the exposed ⊗ chain;
+//   5. `place_factors` encapsulates and region-places.
 // Distribution is ⊗-only: a *genuine sum* operand (`A·(b+c)`) is left sunk —
 // distributing over a sum stays an explicit, user-invoked transform (000057).
 // Such a sum becomes a `Paren`, which still awaits the recursive `lower`, so a
-// term carrying a sum factor throws for now.
+// term carrying a sum factor throws for now.  Explicit binders must sit at the
+// term head (as `float_sums` arranges, wired in around C10); a ranged
+// `ExplicitSum` (symbolic bound) is likewise deferred and throws.
 [[nodiscard]] auto lower_term(Context&, SignedExpr const& term) -> Term;
 
 } // namespace tender::nf

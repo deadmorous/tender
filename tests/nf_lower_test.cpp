@@ -1,5 +1,7 @@
 #include <tender/nf_lower.hpp>
 
+#include <tender/index_space.hpp> // space_3d
+
 #include <gtest/gtest.h>
 
 using namespace tender;
@@ -584,5 +586,137 @@ TEST(LowerTerm, GenuineSumOperandStaysSunkAndAwaitsLower)
     auto const* c = atom(ctx, "c");
     EXPECT_THROW(
         (void)term1(ctx, make_dot(ctx, A, make_sum(ctx, b, c))),
+        std::invalid_argument);
+}
+
+// ---- summation resolution (C8) -----------------------------------------
+
+namespace
+{
+
+// An indexed rank-1 vector `name` carrying `idx` at level `lvl` (Oblique, 3D).
+auto ivec(Context& ctx, std::string_view name, Level lvl, CountableIndex idx)
+    -> Expr const*
+{
+    return make_tensor_object(
+        ctx,
+        make_tensor_name(name),
+        {SlotBinding{
+            IndexSlot{lvl, Realm::Oblique, space_3d()}, IndexAssoc{idx}}},
+        1);
+}
+
+// The CountableIndex id in the first slot of an Atom factor.
+auto slot0_id(Factor const* f) -> int
+{
+    auto const& obj = std::get<Atom>(f->node).obj;
+    return std::get<CountableIndex>(*obj.slots.at(0).index).id;
+}
+
+} // namespace
+
+TEST(Summation, ImplicitObliqueContraction)
+{
+    // a^i b_i: one realm-implicit dummy, mode Default, α-renamed to -1; both
+    // factors carry the renamed id.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* a = ivec(ctx, "a", Level::Upper, i);
+    auto const* b = ivec(ctx, "b", Level::Lower, i);
+    auto t = term1(ctx, make_tensor_product(ctx, a, b));
+    ASSERT_EQ(t.bound.size(), 1u);
+    EXPECT_EQ(t.bound[0].index.id, -1);
+    EXPECT_EQ(t.bound[0].mode, SumMode::Default);
+    ASSERT_EQ(t.tensors.size(), 2u);
+    EXPECT_EQ(slot0_id(t.tensors[0]), -1);
+    EXPECT_EQ(slot0_id(t.tensors[1]), -1);
+}
+
+TEST(Summation, ExplicitSumOnRealmDefaultNormalizesToDefault)
+{
+    // Σ_i (a^i b_i): the explicit Σ merely confirms the oblique default, so it
+    // normalizes to mode Default — identical to the implicit form above.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* a = ivec(ctx, "a", Level::Upper, i);
+    auto const* b = ivec(ctx, "b", Level::Lower, i);
+    auto t =
+        term1(ctx, make_explicit_sum(ctx, i, make_tensor_product(ctx, a, b)));
+    ASSERT_EQ(t.bound.size(), 1u);
+    EXPECT_EQ(t.bound[0].index.id, -1);
+    EXPECT_EQ(t.bound[0].mode, SumMode::Default);
+}
+
+TEST(Summation, ExplicitSumNotRealmDefaultIsSum)
+{
+    // Σ_i a_i: a single occurrence summed — the realm rule would NOT contract,
+    // so the explicit Σ is preserved as mode Sum (still α-renamed to -1).
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* a = ivec(ctx, "a", Level::Lower, i);
+    auto t = term1(ctx, make_explicit_sum(ctx, i, a));
+    ASSERT_EQ(t.bound.size(), 1u);
+    EXPECT_EQ(t.bound[0].index.id, -1);
+    EXPECT_EQ(t.bound[0].mode, SumMode::Sum);
+    ASSERT_EQ(t.tensors.size(), 1u);
+    EXPECT_EQ(slot0_id(t.tensors[0]), -1);
+}
+
+TEST(Summation, NoSumSuppressesContractionAndKeepsFreeId)
+{
+    // NoSum_i (a^i b_i): NoSum suppresses the oblique default; i stays free
+    // (its original id, not α-renamed) and is recorded with mode NoSum.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* a = ivec(ctx, "a", Level::Upper, i);
+    auto const* b = ivec(ctx, "b", Level::Lower, i);
+    auto t = term1(ctx, make_no_sum(ctx, i, make_tensor_product(ctx, a, b)));
+    ASSERT_EQ(t.bound.size(), 1u);
+    EXPECT_EQ(t.bound[0].index.id, i.id); // original free id, not -1
+    EXPECT_EQ(t.bound[0].mode, SumMode::NoSum);
+    ASSERT_EQ(t.tensors.size(), 2u);
+    EXPECT_EQ(slot0_id(t.tensors[0]), i.id);
+    EXPECT_EQ(slot0_id(t.tensors[1]), i.id);
+}
+
+TEST(Summation, TwoDummiesAreFubiniInvariant)
+{
+    // a^i b_i c^j d_j and its i↔j relabelling canonicalize equal: the two
+    // dummies are interchangeable (Fubini), both Default, renamed to -1 / -2.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto prod = [&](CountableIndex x, CountableIndex y)
+    {
+        return make_tensor_product(
+            ctx,
+            make_tensor_product(
+                ctx,
+                ivec(ctx, "a", Level::Upper, x),
+                ivec(ctx, "b", Level::Lower, x)),
+            make_tensor_product(
+                ctx,
+                ivec(ctx, "c", Level::Upper, y),
+                ivec(ctx, "d", Level::Lower, y)));
+    };
+    auto t1 = term1(ctx, prod(i, j));
+    auto t2 = term1(ctx, prod(j, i));
+    ASSERT_EQ(t1.bound.size(), 2u);
+    EXPECT_EQ(t1.bound[0].index.id, -1);
+    EXPECT_EQ(t1.bound[1].index.id, -2);
+    EXPECT_EQ(t1.bound[0].mode, SumMode::Default);
+    EXPECT_EQ(t1.bound[1].mode, SumMode::Default);
+    EXPECT_TRUE(equal(t1, t2));
+}
+
+TEST(Summation, RangedExplicitSumIsDeferred)
+{
+    // Σ_{i=1}^{n} a_i: a symbolic summation bound is not yet supported.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* a = ivec(ctx, "a", Level::Lower, i);
+    auto const* n = make_tensor_object(ctx, make_tensor_name("n"));
+    EXPECT_THROW(
+        (void)term1(ctx, make_explicit_sum(ctx, i, a, n)),
         std::invalid_argument);
 }

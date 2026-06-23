@@ -196,6 +196,30 @@ check.
       them as-written).  7 tests.  Suite green (592).
 - C8  summation: bound-index inference, mode map, α-renaming (reuse
       `materialize` / `bound_canon_id`).
+      **DONE** in two commits.
+      *C8a* — extracted the index/summation helper cluster out of
+      derivation.cpp into a shared `tender/summation.{hpp,cpp}`
+      (`substitute_index_id(s)`, `bound_canon_id`, and the implicit-summation
+      detection `is_term` / `collect_term_uses` / `contracted_ids`), so the Nf
+      lowering resolves bound indices with the *same* realm rule and the *same*
+      α-renaming the Expr canon uses (DRY; mirrors the C2 `tensor_order` split).
+      *C8b* — `lower_term` now resolves a term's summation into `Term::bound` +
+      α-renamed slots: strip the leading `ExplicitSum` / `NoSum` binder stack,
+      collect the bound indices (implicit realm contractions → `Default`; an
+      explicit Σ → `Default` when it merely confirms the realm default else
+      `Sum`; a `NoSum` suppressing a real contraction → a free override kept
+      with its original id, not α-renamed; a redundant `NoSum` is dropped), and
+      α-canonicalize the summed dummies to `bound_canon_id` negatives via a
+      Fubini-minimizing permutation search (substitution at the Expr level,
+      minimized under Nf `compare`).  Decisions taken here, all derived from the
+      vibe + existing Expr canon: mode is **realm-verdict-driven** (a redundant
+      explicit Σ on a realm-default index normalizes to `Default` — the
+      canonical form drops it, per the C10-raise rule "ExplicitSum/NoSum only
+      where an override differs from the realm default"); a `NoSum` index is
+      **free** (not α-renamed), matching the Expr canon's NoSum arm.  Deferred
+      (throws): a ranged `ExplicitSum` (symbolic bound) and binders not at the
+      term head (which `float_sums` will arrange when wired in at C10).
+      6 tests (`tests/nf_lower_test.cpp` Summation.*).  Suite green at 598.
 - C9  like-term collection (cancellation, coeff merge) + term-set ordering.
 - C10 `canonicalize_nf` entry point; **differential harness** vs old
       `canonicalize` on a corpus (divergences are bugs or signed-off
@@ -243,8 +267,12 @@ terms) and C4 (multiplicative flatten → `ProductParts`) done in
 `nf_lower.{hpp,cpp}`; C5 (contraction encapsulation + region placement) and C6
 (cross encapsulation + anticommutation sign lift) done, suite green at 579.
 C7 (scalar sort + interior commutative-operand ordering) done.  Suite green at
-591.  Next action: Stage 2 / C8 (summation: bound-index inference, mode map,
-α-renaming — reuse `materialize` / `bound_canon_id`).
+591.  C8 (summation) done in two commits — C8a extracted the index/summation
+helpers into shared `tender/summation.{hpp,cpp}`, C8b resolves a term's bound
+indices into `Term::bound` + α-renamed slots (mode realm-verdict-driven; NoSum
+kept free; Fubini-minimized dummy ids).  Suite green at 598.  Next action:
+Stage 2 / C9 (like-term collection: cancellation + coeff merge, then term-set
+ordering → the additive layer of `Nf`).
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with

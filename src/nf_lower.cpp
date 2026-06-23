@@ -1,11 +1,15 @@
 #include <tender/nf_lower.hpp>
 
 #include <tender/derivation.hpp> // infer_rank
+#include <tender/summation.hpp>  // contracted_ids, substitute_index_ids, …
 
 #include <mpk/mix/util/overloads.hpp>
 
 #include <algorithm>
+#include <map>
+#include <numeric>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <variant>
@@ -307,15 +311,164 @@ auto place_factors(Context& ctx, ProductParts const& pp) -> Term
     return t;
 }
 
-// ---- per-term lowering (passes 3+4) ------------------------------------
+// ---- pass 5: summation resolution (C8) ---------------------------------
+
+namespace
+{
+
+enum class BinderKind
+{
+    Sum,
+    NoSum,
+};
+
+struct RawBinder final
+{
+    int id;
+    BinderKind kind;
+};
+
+// Strip the leading `ExplicitSum` / `NoSum` binder stack off a term, recording
+// each `(id, kind)`.  A ranged `ExplicitSum` (a symbolic summation bound) is
+// not yet supported by the Nf lowering — it awaits a later commit.
+auto strip_binders(Expr const* e, std::vector<RawBinder>& out) -> Expr const*
+{
+    for (;;)
+    {
+        if (auto const* s = std::get_if<ExplicitSum>(&e->node))
+        {
+            if (s->bound)
+                throw std::invalid_argument(
+                    "Nf lowering: a ranged ExplicitSum is not yet supported");
+            out.push_back({s->index.id, BinderKind::Sum});
+            e = s->body;
+        }
+        else if (auto const* n = std::get_if<NoSum>(&e->node))
+        {
+            out.push_back({n->index.id, BinderKind::NoSum});
+            e = n->body;
+        }
+        else
+            return e;
+    }
+}
+
+// Whether the realm rule would *implicitly* contract index `id`, given its free
+// occurrences in the term (`uses`, from `collect_term_uses`).  Unlike
+// `contracted_ids`, this never throws — the ill-formed cases (an index that
+// needs an explicit override) simply answer "no", since the override already
+// dictates the mode.
+auto realm_contracts(std::map<int, std::vector<IndexUse>> const& uses, int id)
+    -> bool
+{
+    auto it = uses.find(id);
+    if (it == uses.end())
+        return false;
+    auto const& us = it->second;
+    switch (us.front().realm)
+    {
+        case Realm::Oblique:
+            return us.size() == 2 && us[0].level != us[1].level;
+        case Realm::Orthonormal: return us.size() == 2;
+        case Realm::Collection:
+        case Realm::Label: return false;
+    }
+    return false;
+}
+
+// A summed dummy that will be α-renamed to a canonical id.
+struct Dummy final
+{
+    int id;
+    SumMode mode; // Default (realm-implicit) or Sum (explicit, non-default)
+};
+
+} // namespace
+
+// ---- per-term lowering (passes 3+4+5) ----------------------------------
 
 auto lower_term(Context& ctx, SignedExpr const& term) -> Term
 {
-    // Push contractions through ⊗ fences (never over sums), then flatten +
-    // place.  distribute_contraction already iterates to a fixpoint.
-    auto const* distributed = steps::distribute_contraction(ctx, term.body);
-    auto pp = multiplicative_flatten(SignedExpr{term.sign, distributed});
-    return place_factors(ctx, pp);
+    // 1. Strip explicit head binders, then push contractions through ⊗ fences
+    //    (never over sums).  distribute_contraction iterates to a fixpoint.
+    std::vector<RawBinder> binders;
+    auto const* body = strip_binders(term.body, binders);
+    auto const* distributed = steps::distribute_contraction(ctx, body);
+
+    // 2. Census the free index occurrences (for mode classification), and
+    //    collect the term's bound indices:
+    //      - implicit realm contractions  → Default (α-renamed);
+    //      - an explicit Σ                → Default if it merely confirms the
+    //        realm default, else Sum      (α-renamed);
+    //      - a NoSum suppressing a real contraction → a free override, kept
+    //        with its original id (not α-renamed); a redundant NoSum is
+    //        dropped.
+    std::map<int, std::vector<IndexUse>> uses;
+    collect_term_uses(distributed, {}, uses);
+    std::set<int> explicit_ids;
+    for (auto const& b: binders)
+        explicit_ids.insert(b.id);
+
+    std::vector<Dummy> dummies;
+    for (int id: contracted_ids(distributed, explicit_ids))
+        dummies.push_back({id, SumMode::Default});
+    std::vector<BoundIndex> nosum_free;
+    for (auto const& b: binders)
+    {
+        bool const c = realm_contracts(uses, b.id);
+        if (b.kind == BinderKind::Sum)
+            dummies.push_back({b.id, c ? SumMode::Default : SumMode::Sum});
+        else if (c)
+            nosum_free.push_back({CountableIndex{b.id}, SumMode::NoSum});
+    }
+    std::sort(
+        nosum_free.begin(),
+        nosum_free.end(),
+        [](BoundIndex const& x, BoundIndex const& y)
+        { return x.index.id < y.index.id; });
+    // Deterministic base order for the (k > 6) fallback that skips the search.
+    std::sort(
+        dummies.begin(),
+        dummies.end(),
+        [](Dummy const& x, Dummy const& y) { return x.id < y.id; });
+
+    // 3. α-canonicalize the summed dummies: assign canonical (negative) ids,
+    //    choosing the permutation that minimizes the resulting term under
+    //    `compare` (Fubini — the binders are interchangeable).  Substitution is
+    //    at the Expr level; minimization at the Nf level.  Then flatten +
+    //    place.
+    int const k = static_cast<int>(dummies.size());
+    std::vector<int> order(static_cast<std::size_t>(k));
+    std::iota(order.begin(), order.end(), 0);
+    bool const search = k <= 6; // k! permutations; tall stacks keep their order
+    Term best;
+    bool have_best = false;
+    do
+    {
+        std::map<int, int> remap;
+        std::vector<BoundIndex> bound;
+        bound.reserve(static_cast<std::size_t>(k) + nosum_free.size());
+        for (int p = 0; p < k; ++p)
+        {
+            auto const& d = dummies[static_cast<std::size_t>(
+                order[static_cast<std::size_t>(p)])];
+            int const cid = bound_canon_id(p);
+            remap[d.id] = cid;
+            bound.push_back({CountableIndex{cid}, d.mode});
+        }
+        bound.insert(bound.end(), nosum_free.begin(), nosum_free.end());
+
+        auto const* renamed = substitute_index_ids(ctx, distributed, remap);
+        auto pp = multiplicative_flatten(SignedExpr{term.sign, renamed});
+        Term cand = place_factors(ctx, pp);
+        cand.bound = std::move(bound);
+        if (!have_best || compare(cand, best) < 0)
+        {
+            best = std::move(cand);
+            have_best = true;
+        }
+    } while (search && std::next_permutation(order.begin(), order.end()));
+    return best;
 }
 
 } // namespace tender::nf
