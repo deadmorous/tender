@@ -53,4 +53,29 @@ struct ProductParts final
 [[nodiscard]] auto multiplicative_flatten(SignedExpr const& term)
     -> ProductParts;
 
+// ---- pass 3b: factor encapsulation (C5) --------------------------------
+
+// Encapsulate one multiplicative factor (a non-numeric, non-`*` `Expr`) into
+// an `Nf` `Factor`:
+//   - a bare `TensorObject` becomes an `Atom`;
+//   - a maximal `{@ : //}` contraction tree becomes a flat `Contraction`, its
+//     operands encapsulated recursively and its bracketing dropped (the
+//     interface theorem of 000057 makes it immaterial).
+// Deferred to later commits (encapsulate throws `std::invalid_argument` until
+// then): `Cross` (C6); sums → `Paren`, nested `⊗`, and the unary invariants
+// (`Trace` / `VectorInvariant` / `Transpose`) — these await the recursive
+// `lower` assembled around C10.
+[[nodiscard]] auto encapsulate(Context&, Expr const* factor) -> Factor const*;
+
+// ---- pass 4: region placement (C5) -------------------------------------
+
+// Build a `Term` from `ProductParts`: carry `coeff`, then encapsulate each
+// factor and place it by `infer_rank` — rank 0 → `scalars`, rank ≥ 1 →
+// `tensors`.  This is the step that floats a wedged scalar (`a·b`) out from
+// between two legs (the 000056 fold failure).  Throws if a factor's rank is
+// unknown (region placement needs a trustworthy `infer_rank`).  Bound-index
+// inference, in-region normalization, and like-term collection are later
+// passes.
+[[nodiscard]] auto place_factors(Context&, ProductParts const&) -> Term;
+
 } // namespace tender::nf

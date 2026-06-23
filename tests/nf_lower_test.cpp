@@ -13,6 +13,12 @@ auto atom(Context& ctx, std::string_view name) -> Expr const*
     return make_tensor_object(ctx, make_tensor_name(name), {}, 1);
 }
 
+// An abstract tensor object of the given rank.
+auto atomr(Context& ctx, std::string_view name, int rank) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(name), {}, rank);
+}
+
 // Assert the flattened layer equals the given (sign, body) pairs, in order.
 void expect_terms(
     std::vector<SignedExpr> const& got,
@@ -224,4 +230,110 @@ TEST(MultiplicativeFlatten, ContractionIsOneFactorNotFlattened)
     auto const* e = make_tensor_product(ctx, a, dot);
     auto pp = flat(+1, e);
     EXPECT_EQ(pp.factors, (std::vector<Expr const*>{a, dot}));
+}
+
+// ---- factor encapsulation ----------------------------------------------
+
+TEST(Encapsulate, BareTensorObjectBecomesAtom)
+{
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* f = encapsulate(ctx, a);
+    ASSERT_TRUE(std::holds_alternative<Atom>(f->node));
+    EXPECT_EQ(std::get<Atom>(f->node).obj.name.v.view(), "a");
+}
+
+TEST(Encapsulate, DotChainBecomesFlatContraction)
+{
+    // (A·B)·c and A·(B·c) both flatten to factors [A,B,c], ops [Dot,Dot].
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    auto const* B = atomr(ctx, "B", 2);
+    auto const* c = atom(ctx, "c");
+    auto const* left = make_dot(ctx, make_dot(ctx, A, B), c);
+    auto const* right = make_dot(ctx, A, make_dot(ctx, B, c));
+    for (auto const* e: {left, right})
+    {
+        auto const* f = encapsulate(ctx, e);
+        ASSERT_TRUE(std::holds_alternative<Contraction>(f->node));
+        auto const& con = std::get<Contraction>(f->node);
+        ASSERT_EQ(con.factors.size(), 3u);
+        EXPECT_EQ(con.ops, (std::vector<COp>{COp::Dot, COp::Dot}));
+        EXPECT_EQ(std::get<Atom>(con.factors[0]->node).obj.name.v.view(), "A");
+        EXPECT_EQ(std::get<Atom>(con.factors[2]->node).obj.name.v.view(), "c");
+    }
+}
+
+TEST(Encapsulate, DDotOperatorRecorded)
+{
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    auto const* B = atomr(ctx, "B", 2);
+    auto const* f = encapsulate(ctx, make_ddot(ctx, A, B));
+    auto const& con = std::get<Contraction>(f->node);
+    EXPECT_EQ(con.ops, (std::vector<COp>{COp::DDot}));
+}
+
+TEST(Encapsulate, UnsupportedNodeThrows)
+{
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    EXPECT_THROW(
+        (void)encapsulate(ctx, make_cross(ctx, a, b)), std::invalid_argument);
+}
+
+// ---- region placement --------------------------------------------------
+
+TEST(PlaceFactors, RankOneGoesToTensors)
+{
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto t = place_factors(ctx, ProductParts{Rational{2}, {a}});
+    EXPECT_EQ(t.coeff, Rational{2});
+    EXPECT_TRUE(t.scalars.empty());
+    ASSERT_EQ(t.tensors.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<Atom>(t.tensors[0]->node));
+}
+
+TEST(PlaceFactors, ScalarContractionGoesToScalars)
+{
+    // a·b is rank 0 ⇒ scalars region.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto t =
+        place_factors(ctx, ProductParts{Rational{1}, {make_dot(ctx, a, b)}});
+    ASSERT_EQ(t.scalars.size(), 1u);
+    EXPECT_TRUE(t.tensors.empty());
+    EXPECT_TRUE(std::holds_alternative<Contraction>(t.scalars[0]->node));
+}
+
+TEST(PlaceFactors, WedgedScalarFloatsOutOfTensorRun)
+{
+    // [a, (b·c), d] with a,d rank-1 and (b·c) rank-0:
+    // the scalar lands in `scalars`, the two legs in `tensors` (adjacent) —
+    // the 000056 wedged-scalar fold failure dissolves here.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto const* d = atom(ctx, "d");
+    auto t = place_factors(
+        ctx, ProductParts{Rational{1}, {a, make_dot(ctx, b, c), d}});
+    ASSERT_EQ(t.scalars.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<Contraction>(t.scalars[0]->node));
+    ASSERT_EQ(t.tensors.size(), 2u);
+    EXPECT_EQ(std::get<Atom>(t.tensors[0]->node).obj.name.v.view(), "a");
+    EXPECT_EQ(std::get<Atom>(t.tensors[1]->node).obj.name.v.view(), "d");
+}
+
+TEST(PlaceFactors, UnknownRankThrows)
+{
+    Context ctx;
+    // A tensor object with no declared rank ⇒ infer_rank is nullopt.
+    auto const* x = make_tensor_object(ctx, make_tensor_name("X"));
+    EXPECT_THROW(
+        (void)place_factors(ctx, ProductParts{Rational{1}, {x}}),
+        std::invalid_argument);
 }

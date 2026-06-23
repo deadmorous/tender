@@ -161,6 +161,15 @@ check.
       contraction/cross/sum node stay opaque `Expr` factors (encapsulation is
       C5/C6).  Factor order preserved.  8 tests.  Suite green (567).
 - C5  contraction encapsulation + rank-based region placement.
+      **DONE** — `encapsulate(Expr factor) -> Factor`: a `TensorObject` →
+      `Atom`; a `{@ : //}` contraction tree → a flat `Contraction` (operands
+      encapsulated recursively, any bracketing dropped — `flatten_contraction`
+      handles arbitrary nesting via flatten(l)++[o]++flatten(r)).
+      `place_factors(ProductParts) -> Term` carries `coeff` and partitions
+      encapsulated factors by `infer_rank` (0 → scalars, ≥1 → tensors) — the
+      wedged-scalar float-out, tested.  Deferred (encapsulate throws): `Cross`
+      (C6); sums → `Paren`, nested `⊗`, unary invariants (await recursive
+      `lower`).  8 tests.  Suite green (575).
 - C6  cross encapsulation + anticommutation sign lift (reuse 000055).
 - C7  scalar floating + scalar sort + interior commutative-operand ordering.
 - C8  summation: bound-index inference, mode map, α-renaming (reuse
@@ -209,8 +218,9 @@ structs, builders, structural equality + hashing; C2: shared leaf comparators
 in `tensor_order.{hpp,cpp}` + `nf::compare` total orders).  22 Nf unit tests;
 full suite green at 550.  **Stage 2 started**: C3 (additive flatten → signed
 terms) and C4 (multiplicative flatten → `ProductParts`) done in
-`nf_lower.{hpp,cpp}`; suite green at 567.  Next action: Stage 2 / C5
-(contraction encapsulation + rank-based region placement).
+`nf_lower.{hpp,cpp}`; C5 (contraction encapsulation + region placement) done,
+suite green at 575.  Next action: Stage 2 / C6 (cross encapsulation +
+anticommutation sign lift, reuse 000055).
 Builds on [000057](000057_expression-model.md) (the model),
 [000056](000056_expression-representation-rethink.md) (the motivation),
 [000055](000055_cross-reassociation.md) (cross-fence reuse),
