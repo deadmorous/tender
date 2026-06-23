@@ -154,7 +154,7 @@ auto equal(Factor const& a, Factor const& b) -> bool
 
 auto equal(Term const& a, Term const& b) -> bool
 {
-    if (a.sign != b.sign || !(a.coeff == b.coeff))
+    if (!(a.coeff == b.coeff))
         return false;
     if (a.bound.size() != b.bound.size())
         return false;
@@ -253,8 +253,7 @@ auto hash(Factor const& f) -> std::size_t
 
 auto hash(Term const& t) -> std::size_t
 {
-    std::size_t h = static_cast<std::size_t>(t.sign);
-    h = hash_mix(h, static_cast<std::size_t>(t.coeff.num()));
+    std::size_t h = static_cast<std::size_t>(t.coeff.num());
     h = hash_mix(h, static_cast<std::size_t>(t.coeff.den()));
     for (auto const& b: t.bound)
     {

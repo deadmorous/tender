@@ -126,12 +126,13 @@ end-to-end gate; benchmarks (principle 4) guard canon.
 **Stage 1 — isolated `Nf` type (purely additive, no consumers).**
 - C1  `Nf`/`Term`/`Factor` structs, builders, hash-cons/equality, unit tests.
       **DONE** — `src/include/tender/nf.hpp`, `src/nf.cpp`, `tests/nf_test.cpp`
-      (17 tests).  Notes: `bound`/`modes` paired into one `BoundIndex` list
-      (kept in lockstep) rather than parallel arrays; equality is structural
-      and positional (scalar sorting / α-renaming are canon's job, not
-      equality's); "hash-cons/equality" realised as structural `equal` +
-      consistent `hash` (no global cons table — the arena `Context` matches
-      `Expr` and does not dedup), so callers can hash-cons later.
+      (16 tests).  Notes: `bound`/`modes` paired into one `BoundIndex` list
+      (kept in lockstep) rather than parallel arrays; no separate `Sign` field
+      (the signed `Rational coeff` carries the sign — settled at review);
+      equality is structural and positional (scalar sorting / α-renaming are
+      canon's job, not equality's); "hash-cons/equality" realised as structural
+      `equal` + consistent `hash` (no global cons table — the arena `Context`
+      matches `Expr` and does not dedup), so callers can hash-cons later.
 - C2  total orders (factor order, term order) on top of `expr_cmp`, tests.
 
 **Stage 2 — lowering `Expr → Nf` (the canon algorithm), behind `canonicalize_nf`.**
@@ -173,8 +174,9 @@ are additive or subtractive only.
 ## Micro-decisions deferred to implementation
 
 - Exact `Factor` variant set (is `Paren` distinct from a rank-0 `Contraction`?).
-- Whether `sign` is a separate field or just the sign bit of `coeff` (collection
-  treats them as one signed rational regardless).
+- ~~Whether `sign` is a separate field or just the sign bit of `coeff`~~
+  **Settled (C1 review): no separate `Sign` field — `Rational coeff` is signed
+  and carries the term's sign.**  Cross anticommutation flips `coeff`.
 - Scalar power-collection: yes/no.
 - `raise` product associativity convention (left vs right).
 - Whether identities are stored lowered (`Nf`) or lowered on demand at match

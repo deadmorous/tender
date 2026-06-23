@@ -6,7 +6,9 @@
 // as a parallel IR.  Where `Expr` is a binary tree of operator nodes, an `Nf`
 // is an additive set of signed `*`-terms — the "all-`*` canonical form" of
 // vibe 000057: every non-`*` operator is pushed inside a composite `Factor`,
-// and a term is `sign · coeff · [scalar factors] · [rank-≥1 factors]`.
+// and a term is `coeff · [scalar factors] · [rank-≥1 factors]`, where the
+// (signed) rational `coeff` carries the term's sign — there is no separate
+// `Sign` field, since `Rational` is already signed.
 //
 // This header (Stage 1 / C1) introduces the *isolated* data structures, their
 // builders, structural equality, and structural hashing.  It has no consumers
@@ -33,17 +35,9 @@ struct Nf;
 
 // ---- term-level scalars ------------------------------------------------
 
-// Sign of a term, carried as a field (vibe 000057): there is no `Negate`
-// node, so `A + (-B)` cannot survive as structure.
-enum class Sign : uint8_t
-{
-    Pos,
-    Neg,
-};
-
 // Per bound-index summation mode.  `Default` follows the realm-driven Einstein
-// convention; `Sum` / `NoSum` are explicit overrides, stored on the term just
-// like `Sign` (vibe 000057) rather than as `ExplicitSum` / `NoSum` wrapper
+// convention; `Sum` / `NoSum` are explicit overrides, stored as a small field
+// on the term (vibe 000057) rather than as `ExplicitSum` / `NoSum` wrapper
 // nodes.
 enum class SumMode : uint8_t
 {
@@ -80,8 +74,8 @@ struct Contraction final
 };
 
 // A `%` (cross) chain among its factors, with the anticommutation sign already
-// lifted to the owning term's `Sign`.  Genuinely non-associative among rank-1
-// factors; a rank-≥2 fence makes a run associative (vibe 000055).
+// lifted into the owning term's `coeff`.  Genuinely non-associative among
+// rank-1 factors; a rank-≥2 fence makes a run associative (vibe 000055).
 struct Cross final
 {
     std::vector<Factor const*> factors;
@@ -124,28 +118,21 @@ struct BoundIndex final
     SumMode mode = SumMode::Default;
 };
 
-// A signed `*`-term: `sign · coeff · [scalars] · [tensors]`.
+// A signed `*`-term: `coeff · [scalars] · [tensors]`.
 //
-//   sign, coeff : a signed rational magnitude (region 1).  Kept as two fields
-//                 per vibe 000057's "store sign like sign" decision; combine
-//                 with `signed_coeff()`.
-//   bound       : inferred dummy indices, α-canonical ids, with sum modes.
-//   scalars     : rank-0 factors (region 2) — commutative, kept sorted.
-//   tensors     : rank-≥1 factors (region 3) — positional (⊗ is
-//   non-commutative).
+//   coeff   : the term's signed rational magnitude (region 1).  `Rational` is
+//             signed, so this carries the term's sign — there is no separate
+//             `Sign` field, and `A + (-B)` cannot survive as structure.
+//   bound   : inferred dummy indices, α-canonical ids, with sum modes.  Their
+//             ids are shared with the factor slots they range over.
+//   scalars : rank-0 factors (region 2) — commutative, kept sorted.
+//   tensors : rank-≥1 factors (region 3) — positional (⊗ is non-commutative).
 struct Term final
 {
-    Sign sign = Sign::Pos;
     Rational coeff = Rational{1};
     std::vector<BoundIndex> bound = {};
     std::vector<Factor const*> scalars = {};
     std::vector<Factor const*> tensors = {};
-
-    // The signed coefficient as one rational (region 1 as a single number).
-    [[nodiscard]] auto signed_coeff() const -> Rational
-    {
-        return sign == Sign::Neg ? -coeff : coeff;
-    }
 };
 
 // ---- Nf ----------------------------------------------------------------
@@ -191,7 +178,7 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
 // ---- structural equality -----------------------------------------------
 
 // Deep structural equality.  Factors compare by node shape and contents;
-// terms by sign, coeff, bound (with modes), and both factor regions
+// terms by coeff, bound (with modes), and both factor regions
 // (positionally — scalar ordering is canon's job, not equality's); Nfs by
 // their term sequences.  CountableIndex ids are compared exactly (no
 // α-renaming — that is canon's job, performed before equality is meaningful).

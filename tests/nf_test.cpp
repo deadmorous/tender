@@ -102,16 +102,6 @@ TEST(NfBuilders, Paren)
     EXPECT_EQ(std::get<Paren>(p->node).body, inner);
 }
 
-// ---- Term::signed_coeff ------------------------------------------------
-
-TEST(NfTerm, SignedCoeff)
-{
-    Term pos{.sign = Sign::Pos, .coeff = Rational{3, 2}};
-    Term neg{.sign = Sign::Neg, .coeff = Rational{3, 2}};
-    EXPECT_EQ(pos.signed_coeff(), (Rational{3, 2}));
-    EXPECT_EQ(neg.signed_coeff(), (Rational{-3, 2}));
-}
-
 // ---- structural equality -----------------------------------------------
 
 TEST(NfEqual, AtomsByContents)
@@ -163,14 +153,15 @@ TEST(NfEqual, ParenRecurses)
     EXPECT_FALSE(equal(build("A"), build("B")));
 }
 
-TEST(NfEqual, TermSignAndCoeff)
+TEST(NfEqual, TermCoeff)
 {
+    // The sign lives in the (signed) coeff; there is no separate Sign field.
     Context ctx;
     auto const* a = abstract_atom(ctx, "A", 1);
-    Term t1{.sign = Sign::Pos, .coeff = Rational{2}, .tensors = {a}};
-    Term t2{.sign = Sign::Pos, .coeff = Rational{2}, .tensors = {a}};
-    Term t3{.sign = Sign::Neg, .coeff = Rational{2}, .tensors = {a}};
-    Term t4{.sign = Sign::Pos, .coeff = Rational{3}, .tensors = {a}};
+    Term t1{.coeff = Rational{2}, .tensors = {a}};
+    Term t2{.coeff = Rational{2}, .tensors = {a}};
+    Term t3{.coeff = Rational{-2}, .tensors = {a}};
+    Term t4{.coeff = Rational{3}, .tensors = {a}};
     EXPECT_TRUE(equal(t1, t2));
     EXPECT_FALSE(equal(t1, t3));
     EXPECT_FALSE(equal(t1, t4));
@@ -233,8 +224,8 @@ TEST(NfHash, EqualStructuresHashEqual)
         {COp::Dot});
     EXPECT_EQ(hash(*c1), hash(*c2));
 
-    Term t1{.sign = Sign::Neg, .coeff = Rational{2}, .tensors = {a1}};
-    Term t2{.sign = Sign::Neg, .coeff = Rational{2}, .tensors = {a2}};
+    Term t1{.coeff = Rational{-2}, .tensors = {a1}};
+    Term t2{.coeff = Rational{-2}, .tensors = {a2}};
     EXPECT_EQ(hash(t1), hash(t2));
 
     auto const* n1 = make_nf(ctx, {t1});
@@ -256,7 +247,7 @@ TEST(NfHash, DistinctStructuresHashDistinct)
         {COp::DDot});
     EXPECT_NE(hash(*dot), hash(*ddot));
 
-    Term pos{.sign = Sign::Pos, .coeff = Rational{2}};
-    Term neg{.sign = Sign::Neg, .coeff = Rational{2}};
+    Term pos{.coeff = Rational{2}};
+    Term neg{.coeff = Rational{-2}};
     EXPECT_NE(hash(pos), hash(neg));
 }
