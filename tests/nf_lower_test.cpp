@@ -392,6 +392,46 @@ TEST(EncapsulateCross, RankTwoFenceReassociates)
     EXPECT_EQ(std::get<Atom>(inner.factors[1]->node).obj.name.v.view(), "b");
 }
 
+// ---- interior commutative ordering (C7) --------------------------------
+
+TEST(EncapsulateInterior, RankOneDotIsOrdered)
+{
+    // b·a (rank-1 vectors) → operands ordered a, b (no sign change).
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto sf = encapsulate(ctx, make_dot(ctx, b, a));
+    EXPECT_EQ(sf.sign, +1);
+    auto const& con = std::get<Contraction>(sf.factor->node);
+    EXPECT_EQ(std::get<Atom>(con.factors[0]->node).obj.name.v.view(), "a");
+    EXPECT_EQ(std::get<Atom>(con.factors[1]->node).obj.name.v.view(), "b");
+}
+
+TEST(EncapsulateInterior, MatrixVectorDotDoesNotReorder)
+{
+    // A·b (rank-2 · rank-1) is not commutative: order is preserved.
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    auto const* b = atom(ctx, "b");
+    auto sf = encapsulate(ctx, make_dot(ctx, A, b));
+    auto const& con = std::get<Contraction>(sf.factor->node);
+    EXPECT_EQ(std::get<Atom>(con.factors[0]->node).obj.name.v.view(), "A");
+    EXPECT_EQ(std::get<Atom>(con.factors[1]->node).obj.name.v.view(), "b");
+}
+
+TEST(EncapsulateInterior, DoubleDotIsOrdered)
+{
+    // B:A → ordered A:B (double dot is symmetric).
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    auto const* B = atomr(ctx, "B", 2);
+    auto sf = encapsulate(ctx, make_ddot(ctx, B, A));
+    auto const& con = std::get<Contraction>(sf.factor->node);
+    EXPECT_EQ(con.ops, (std::vector<COp>{COp::DDot}));
+    EXPECT_EQ(std::get<Atom>(con.factors[0]->node).obj.name.v.view(), "A");
+    EXPECT_EQ(std::get<Atom>(con.factors[1]->node).obj.name.v.view(), "B");
+}
+
 // ---- region placement --------------------------------------------------
 
 TEST(PlaceFactors, RankOneGoesToTensors)
@@ -445,6 +485,23 @@ TEST(PlaceFactors, UnknownRankThrows)
     EXPECT_THROW(
         (void)place_factors(ctx, ProductParts{Rational{1}, {x}}),
         std::invalid_argument);
+}
+
+TEST(PlaceFactors, ScalarsAreSortedTensorsArePositional)
+{
+    // Scalars q, p (rank 0) come out sorted [p, q]; the rank-1 legs keep order.
+    Context ctx;
+    auto const* p = atomr(ctx, "p", 0);
+    auto const* q = atomr(ctx, "q", 0);
+    auto const* x = atom(ctx, "x");
+    auto const* y = atom(ctx, "y");
+    auto t = place_factors(ctx, ProductParts{Rational{1}, {q, x, p, y}});
+    ASSERT_EQ(t.scalars.size(), 2u);
+    EXPECT_EQ(std::get<Atom>(t.scalars[0]->node).obj.name.v.view(), "p");
+    EXPECT_EQ(std::get<Atom>(t.scalars[1]->node).obj.name.v.view(), "q");
+    ASSERT_EQ(t.tensors.size(), 2u);
+    EXPECT_EQ(std::get<Atom>(t.tensors[0]->node).obj.name.v.view(), "x");
+    EXPECT_EQ(std::get<Atom>(t.tensors[1]->node).obj.name.v.view(), "y");
 }
 
 // ---- per-term lowering (⊗-fence distribution) --------------------------

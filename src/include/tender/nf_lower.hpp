@@ -70,7 +70,8 @@ struct SignedFactor final
 //   - a maximal `{@ : //}` contraction tree becomes a flat `Contraction`, its
 //     operands encapsulated recursively and its bracketing dropped (the
 //     interface theorem of 000057 makes it immaterial); operand signs multiply
-//     out;
+//     out, and a binary *commutative* contraction (`a·b` between rank-1
+//     vectors, `A:B`, `A··B`) gets its two operands in canonical order;
 //   - a `Cross` becomes a `Cross`: a rank-1 pair is ordered canonically with
 //     its anticommutation sign lifted (`a×b = -(b×a)`), and a rank-≥2 fence is
 //     re-associated `(x×M)×z → x×(M×z)` (000055);
@@ -86,10 +87,11 @@ struct SignedFactor final
 // Build a `Term` from `ProductParts`: carry `coeff`, then encapsulate each
 // factor and place it by `infer_rank` — rank 0 → `scalars`, rank ≥ 1 →
 // `tensors`.  This is the step that floats a wedged scalar (`a·b`) out from
-// between two legs (the 000056 fold failure).  Throws if a factor's rank is
-// unknown (region placement needs a trustworthy `infer_rank`).  Bound-index
-// inference, in-region normalization, and like-term collection are later
-// passes.
+// between two legs (the 000056 fold failure).  The commutative `scalars` region
+// is then **sorted** into canonical order (tensors stay positional — ⊗ is
+// non-commutative).  Throws if a factor's rank is unknown (region placement
+// needs a trustworthy `infer_rank`).  Bound-index inference and like-term
+// collection are later passes.
 [[nodiscard]] auto place_factors(Context&, ProductParts const&) -> Term;
 
 // ---- per-term lowering (passes 3+4) ------------------------------------

@@ -4,8 +4,10 @@
 
 #include <mpk/mix/util/overloads.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 #include <variant>
 
 namespace tender::nf
@@ -151,6 +153,22 @@ auto is_rank1_vector(Expr const* e) -> bool
     return t && t->rank && *t->rank == 1 && t->slots.empty();
 }
 
+// Whether a binary contraction with operator `op` over Expr operands `l`, `r`
+// is commutative, so its two operands may be ordered canonically:
+//   - `·`  commutes only between two rank-1 vectors (`a·b = b·a`); `A·b`, a
+//     matrix-vector product, does not;
+//   - `:` and `··` are symmetric double contractions (`A:B = B:A`).
+auto contraction_commutes(COp op, Expr const* l, Expr const* r) -> bool
+{
+    switch (op)
+    {
+        case COp::Dot: return is_rank1_vector(l) && is_rank1_vector(r);
+        case COp::DDot:
+        case COp::DDotAlt: return true;
+    }
+    return false;
+}
+
 // Re-associate a cross around a rank-≥2 fence: `(x×M)×z → x×(M×z)` when M is
 // rank ≥ 2 (the ⊗ inside M fences the two crosses onto disjoint legs, so the
 // bracketing is immaterial — 000055).  Returns the re-associated `Expr`, or
@@ -195,6 +213,12 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
             sign *= sf.sign;
             encapsulated.push_back(sf.factor);
         }
+        // Interior order: a binary commutative contraction gets its two
+        // operands in canonical order (no sign change — unlike cross).
+        if (encapsulated.size() == 2
+            && contraction_commutes(ops[0], operands[0], operands[1])
+            && compare(*encapsulated[0], *encapsulated[1]) > 0)
+            std::swap(encapsulated[0], encapsulated[1]);
         return {
             sign,
             make_contraction(ctx, std::move(encapsulated), std::move(ops))};
@@ -263,6 +287,12 @@ auto place_factors(Context& ctx, ProductParts const& pp) -> Term
         else
             t.tensors.push_back(enc.factor);
     }
+    // Region 2 is commutative: sort the scalars into canonical order so that
+    // like terms collide (tensors stay positional — ⊗ is non-commutative).
+    std::sort(
+        t.scalars.begin(),
+        t.scalars.end(),
+        [](Factor const* x, Factor const* y) { return compare(*x, *y) < 0; });
     return t;
 }
 

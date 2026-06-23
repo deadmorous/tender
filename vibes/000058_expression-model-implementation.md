@@ -184,6 +184,13 @@ check.
       `place_factors` multiplies the lifted sign into `coeff`.  4 cross tests
       (+ C5 tests updated to `SignedFactor`).  Suite green (579).
 - C7  scalar floating + scalar sort + interior commutative-operand ordering.
+      **DONE** — scalar floating already landed in C5; C7 adds: (a) `place_factors`
+      **sorts** the commutative `scalars` region by `nf::compare` (tensors stay
+      positional); (b) `encapsulate` gives a binary *commutative* contraction
+      canonical operand order — `·` only between two rank-1 vectors (`a·b=b·a`;
+      `A·b` is left as-is), `:` / `··` always (symmetric).  Note: ordering the
+      double-dots is a deliberate improvement over old canon (which left them
+      as-written).  6 tests.  Suite green (591).
 - C8  summation: bound-index inference, mode map, α-renaming (reuse
       `materialize` / `bound_canon_id`).
 - C9  like-term collection (cancellation, coeff merge) + term-set ordering.
@@ -232,8 +239,9 @@ full suite green at 550.  **Stage 2 started**: C3 (additive flatten → signed
 terms) and C4 (multiplicative flatten → `ProductParts`) done in
 `nf_lower.{hpp,cpp}`; C5 (contraction encapsulation + region placement) and C6
 (cross encapsulation + anticommutation sign lift) done, suite green at 579.
-Next action: Stage 2 / C7 (scalar floating already done in C5; remaining:
-scalar sort + interior commutative-operand ordering).
+C7 (scalar sort + interior commutative-operand ordering) done.  Suite green at
+591.  Next action: Stage 2 / C8 (summation: bound-index inference, mode map,
+α-renaming — reuse `materialize` / `bound_canon_id`).
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with
