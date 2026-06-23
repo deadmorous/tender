@@ -308,14 +308,16 @@ auto place_factors(Context& ctx, ProductParts const& pp) -> Term
     Term t{.coeff = pp.coeff};
     for (auto const* f: pp.factors)
     {
+        // Region by *result* rank: a known scalar (rank 0) joins the
+        // commutative scalar region; everything else — a rank-≥1 tensor *or* an
+        // abstract tensor of unknown rank — goes positionally into the tensor
+        // region.  Unknown rank defaults to tensors because the scalar region
+        // is commutative: only a factor we *know* to be scalar may be reordered
+        // there, so an unknown stays positional (conservative, never wrong).
         auto rank = infer_rank(f);
-        if (!rank)
-            throw std::invalid_argument(
-                "place_factors: factor rank is unknown (region placement needs "
-                "a trustworthy infer_rank)");
         auto enc = encapsulate(ctx, f);
         t.coeff *= Rational{enc.sign}; // lift anticommutation sign into coeff
-        if (*rank == 0)
+        if (rank == std::optional<int>{0})
             t.scalars.push_back(enc.factor);
         else
             t.tensors.push_back(enc.factor);

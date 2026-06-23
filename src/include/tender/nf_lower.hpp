@@ -87,13 +87,15 @@ struct SignedFactor final
 // ---- pass 4: region placement (C5) -------------------------------------
 
 // Build a `Term` from `ProductParts`: carry `coeff`, then encapsulate each
-// factor and place it by `infer_rank` — rank 0 → `scalars`, rank ≥ 1 →
-// `tensors`.  This is the step that floats a wedged scalar (`a·b`) out from
-// between two legs (the 000056 fold failure).  The commutative `scalars` region
-// is then **sorted** into canonical order (tensors stay positional — ⊗ is
-// non-commutative).  Throws if a factor's rank is unknown (region placement
-// needs a trustworthy `infer_rank`).  Bound-index inference and like-term
-// collection are later passes.
+// factor and place it by `infer_rank` — rank 0 → `scalars`, everything else
+// (rank ≥ 1, or an abstract tensor of *unknown* rank) → `tensors`.  This is the
+// step that floats a wedged scalar (`a·b`) out from between two legs (the
+// 000056 fold failure).  The commutative `scalars` region is then **sorted**
+// into canonical order (tensors stay positional — ⊗ is non-commutative).  An
+// unknown rank defaults to `tensors` because only a factor *known* to be scalar
+// may be reordered in the commutative region; an unknown stays positional
+// (conservative, never wrong).  Bound-index inference and like-term collection
+// are later passes.
 [[nodiscard]] auto place_factors(Context&, ProductParts const&) -> Term;
 
 // ---- per-term lowering (passes 3+4+5) ----------------------------------

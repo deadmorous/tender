@@ -508,14 +508,16 @@ TEST(PlaceFactors, WedgedScalarFloatsOutOfTensorRun)
     EXPECT_EQ(std::get<Atom>(t.tensors[1]->node).obj.name.v.view(), "d");
 }
 
-TEST(PlaceFactors, UnknownRankThrows)
+TEST(PlaceFactors, UnknownRankGoesToTensors)
 {
     Context ctx;
-    // A tensor object with no declared rank ⇒ infer_rank is nullopt.
+    // A tensor object with no declared rank ⇒ infer_rank is nullopt; it lands
+    // positionally in the tensor region (not the commutative scalar region).
     auto const* x = make_tensor_object(ctx, make_tensor_name("X"));
-    EXPECT_THROW(
-        (void)place_factors(ctx, ProductParts{Rational{1}, {x}}),
-        std::invalid_argument);
+    auto t = place_factors(ctx, ProductParts{Rational{1}, {x}});
+    EXPECT_TRUE(t.scalars.empty());
+    ASSERT_EQ(t.tensors.size(), 1u);
+    EXPECT_EQ(std::get<Atom>(t.tensors[0]->node).obj.name.v.view(), "X");
 }
 
 TEST(PlaceFactors, ScalarsAreSortedTensorsArePositional)
@@ -1003,4 +1005,18 @@ TEST(Raise, RoundTripCorpus)
     };
     for (std::size_t n = 0; n < corpus.size(); ++n)
         EXPECT_TRUE(roundtrips(ctx, corpus[n])) << "corpus #" << n;
+}
+
+// ---- abstract (rank-less) tensors (C13a) -------------------------------
+
+TEST(CanonicalizeNf, RanklessTensorsSumCommutes)
+{
+    // A + B with abstract, rank-less tensors: no throw, and the additive layer
+    // orders the terms so the two orderings agree.
+    Context ctx;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
+    EXPECT_TRUE(equal(
+        *canonicalize_nf(ctx, make_sum(ctx, A, B)),
+        *canonicalize_nf(ctx, make_sum(ctx, B, A))));
 }
