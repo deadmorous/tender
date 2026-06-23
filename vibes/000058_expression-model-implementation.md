@@ -171,6 +171,14 @@ check.
       (C6); sums → `Paren`, nested `⊗`, unary invariants (await recursive
       `lower`).  8 tests.  Suite green (575).
 - C6  cross encapsulation + anticommutation sign lift (reuse 000055).
+      **DONE** — `encapsulate` now returns a `SignedFactor {sign, factor}` so a
+      lifted anticommutation sign flows up to the term `coeff` (threaded
+      through contraction operands too).  The `Cross` arm mirrors the canon
+      Cross arm: a rank-1 pair is ordered canonically with `a×b = -(b×a)`
+      lifted; a rank-≥2 fence re-associates `(x×M)×z → x×(M×z)` (000055,
+      reimplemented locally to avoid disturbing derivation.cpp).
+      `place_factors` multiplies the lifted sign into `coeff`.  4 cross tests
+      (+ C5 tests updated to `SignedFactor`).  Suite green (579).
 - C7  scalar floating + scalar sort + interior commutative-operand ordering.
 - C8  summation: bound-index inference, mode map, α-renaming (reuse
       `materialize` / `bound_canon_id`).
@@ -218,9 +226,17 @@ structs, builders, structural equality + hashing; C2: shared leaf comparators
 in `tensor_order.{hpp,cpp}` + `nf::compare` total orders).  22 Nf unit tests;
 full suite green at 550.  **Stage 2 started**: C3 (additive flatten → signed
 terms) and C4 (multiplicative flatten → `ProductParts`) done in
-`nf_lower.{hpp,cpp}`; C5 (contraction encapsulation + region placement) done,
-suite green at 575.  Next action: Stage 2 / C6 (cross encapsulation +
-anticommutation sign lift, reuse 000055).
+`nf_lower.{hpp,cpp}`; C5 (contraction encapsulation + region placement) and C6
+(cross encapsulation + anticommutation sign lift) done, suite green at 579.
+Next action: Stage 2 / C7 (scalar floating already done in C5; remaining:
+scalar sort + interior commutative-operand ordering).
+
+Open gap to resolve before C13: the `Factor` model has no variant for the
+unary invariants (`Trace` / `VectorInvariant` / `Transpose`) or a `⊗` nested
+inside a contraction operand (e.g. `A·(b⊗c)`, which canon keeps
+undistributed).  Both currently hit the `encapsulate` throw.  Decide their
+representation (new `Factor` variants vs `Paren`) when assembling the recursive
+`lower` (C8–C10).
 Builds on [000057](000057_expression-model.md) (the model),
 [000056](000056_expression-representation-rethink.md) (the motivation),
 [000055](000055_cross-reassociation.md) (cross-fence reuse),

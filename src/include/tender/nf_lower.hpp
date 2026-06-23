@@ -53,19 +53,32 @@ struct ProductParts final
 [[nodiscard]] auto multiplicative_flatten(SignedExpr const& term)
     -> ProductParts;
 
-// ---- pass 3b: factor encapsulation (C5) --------------------------------
+// ---- pass 3b: factor encapsulation (C5, C6) ----------------------------
+
+// A `Factor` together with a sign (+1 / -1) lifted out of it during
+// encapsulation — cross anticommutation produces such a sign, which must flow
+// up to the term's `coeff` (there is no per-factor sign in the model).
+struct SignedFactor final
+{
+    int sign;
+    Factor const* factor;
+};
 
 // Encapsulate one multiplicative factor (a non-numeric, non-`*` `Expr`) into
-// an `Nf` `Factor`:
-//   - a bare `TensorObject` becomes an `Atom`;
+// an `Nf` `Factor`, lifting any anticommutation sign:
+//   - a bare `TensorObject` becomes an `Atom` (sign +1);
 //   - a maximal `{@ : //}` contraction tree becomes a flat `Contraction`, its
 //     operands encapsulated recursively and its bracketing dropped (the
-//     interface theorem of 000057 makes it immaterial).
+//     interface theorem of 000057 makes it immaterial); operand signs multiply
+//     out;
+//   - a `Cross` becomes a `Cross`: a rank-1 pair is ordered canonically with
+//     its anticommutation sign lifted (`a×b = -(b×a)`), and a rank-≥2 fence is
+//     re-associated `(x×M)×z → x×(M×z)` (000055).
 // Deferred to later commits (encapsulate throws `std::invalid_argument` until
-// then): `Cross` (C6); sums → `Paren`, nested `⊗`, and the unary invariants
-// (`Trace` / `VectorInvariant` / `Transpose`) — these await the recursive
-// `lower` assembled around C10.
-[[nodiscard]] auto encapsulate(Context&, Expr const* factor) -> Factor const*;
+// then): sums → `Paren`, nested `⊗`, and the unary invariants (`Trace` /
+// `VectorInvariant` / `Transpose`) — these await the recursive `lower`
+// assembled around C10.
+[[nodiscard]] auto encapsulate(Context&, Expr const* factor) -> SignedFactor;
 
 // ---- pass 4: region placement (C5) -------------------------------------
 

@@ -238,9 +238,10 @@ TEST(Encapsulate, BareTensorObjectBecomesAtom)
 {
     Context ctx;
     auto const* a = atom(ctx, "a");
-    auto const* f = encapsulate(ctx, a);
-    ASSERT_TRUE(std::holds_alternative<Atom>(f->node));
-    EXPECT_EQ(std::get<Atom>(f->node).obj.name.v.view(), "a");
+    auto sf = encapsulate(ctx, a);
+    EXPECT_EQ(sf.sign, +1);
+    ASSERT_TRUE(std::holds_alternative<Atom>(sf.factor->node));
+    EXPECT_EQ(std::get<Atom>(sf.factor->node).obj.name.v.view(), "a");
 }
 
 TEST(Encapsulate, DotChainBecomesFlatContraction)
@@ -254,9 +255,10 @@ TEST(Encapsulate, DotChainBecomesFlatContraction)
     auto const* right = make_dot(ctx, A, make_dot(ctx, B, c));
     for (auto const* e: {left, right})
     {
-        auto const* f = encapsulate(ctx, e);
-        ASSERT_TRUE(std::holds_alternative<Contraction>(f->node));
-        auto const& con = std::get<Contraction>(f->node);
+        auto sf = encapsulate(ctx, e);
+        EXPECT_EQ(sf.sign, +1);
+        ASSERT_TRUE(std::holds_alternative<Contraction>(sf.factor->node));
+        auto const& con = std::get<Contraction>(sf.factor->node);
         ASSERT_EQ(con.factors.size(), 3u);
         EXPECT_EQ(con.ops, (std::vector<COp>{COp::Dot, COp::Dot}));
         EXPECT_EQ(std::get<Atom>(con.factors[0]->node).obj.name.v.view(), "A");
@@ -269,8 +271,8 @@ TEST(Encapsulate, DDotOperatorRecorded)
     Context ctx;
     auto const* A = atomr(ctx, "A", 2);
     auto const* B = atomr(ctx, "B", 2);
-    auto const* f = encapsulate(ctx, make_ddot(ctx, A, B));
-    auto const& con = std::get<Contraction>(f->node);
+    auto sf = encapsulate(ctx, make_ddot(ctx, A, B));
+    auto const& con = std::get<Contraction>(sf.factor->node);
     EXPECT_EQ(con.ops, (std::vector<COp>{COp::DDot}));
 }
 
@@ -278,9 +280,72 @@ TEST(Encapsulate, UnsupportedNodeThrows)
 {
     Context ctx;
     auto const* a = atom(ctx, "a");
-    auto const* b = atom(ctx, "b");
+    // A Sum factor is not yet encapsulable (→ Paren awaits the recursive
+    // lower).
     EXPECT_THROW(
-        (void)encapsulate(ctx, make_cross(ctx, a, b)), std::invalid_argument);
+        (void)encapsulate(ctx, make_sum(ctx, a, a)), std::invalid_argument);
+}
+
+// ---- cross encapsulation (C6) ------------------------------------------
+
+TEST(EncapsulateCross, BinaryInCanonicalOrderKeepsSign)
+{
+    // a×b with a<b: stays a×b, sign +1.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto sf = encapsulate(ctx, make_cross(ctx, a, b));
+    EXPECT_EQ(sf.sign, +1);
+    ASSERT_TRUE(std::holds_alternative<nf::Cross>(sf.factor->node));
+    auto const& cr = std::get<nf::Cross>(sf.factor->node);
+    ASSERT_EQ(cr.factors.size(), 2u);
+    EXPECT_EQ(std::get<Atom>(cr.factors[0]->node).obj.name.v.view(), "a");
+    EXPECT_EQ(std::get<Atom>(cr.factors[1]->node).obj.name.v.view(), "b");
+}
+
+TEST(EncapsulateCross, BinaryOutOfOrderFlipsSignAndReorders)
+{
+    // b×a with a<b: becomes a×b, sign -1  (a×b = -(b×a)).
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto sf = encapsulate(ctx, make_cross(ctx, b, a));
+    EXPECT_EQ(sf.sign, -1);
+    auto const& cr = std::get<nf::Cross>(sf.factor->node);
+    EXPECT_EQ(std::get<Atom>(cr.factors[0]->node).obj.name.v.view(), "a");
+    EXPECT_EQ(std::get<Atom>(cr.factors[1]->node).obj.name.v.view(), "b");
+}
+
+TEST(EncapsulateCross, AnticommutationSignLandsInCoeff)
+{
+    // place_factors lifts the -1 from b×a into the term coeff.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto t =
+        place_factors(ctx, ProductParts{Rational{1}, {make_cross(ctx, b, a)}});
+    EXPECT_EQ(t.coeff, Rational{-1});
+    ASSERT_EQ(t.tensors.size(), 1u); // a×b is rank 1
+    EXPECT_TRUE(std::holds_alternative<nf::Cross>(t.tensors[0]->node));
+}
+
+TEST(EncapsulateCross, RankTwoFenceReassociates)
+{
+    // (a × M) × b  with M rank 2  →  a × (M × b)  (000055 fence).
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* M = atomr(ctx, "M", 2);
+    auto const* e = make_cross(ctx, make_cross(ctx, a, M), b);
+    auto sf = encapsulate(ctx, e);
+    // Top level is a × (M×b): factors [a, (M×b)].
+    auto const& top = std::get<nf::Cross>(sf.factor->node);
+    ASSERT_EQ(top.factors.size(), 2u);
+    EXPECT_EQ(std::get<Atom>(top.factors[0]->node).obj.name.v.view(), "a");
+    ASSERT_TRUE(std::holds_alternative<nf::Cross>(top.factors[1]->node));
+    auto const& inner = std::get<nf::Cross>(top.factors[1]->node);
+    EXPECT_EQ(std::get<Atom>(inner.factors[0]->node).obj.name.v.view(), "M");
+    EXPECT_EQ(std::get<Atom>(inner.factors[1]->node).obj.name.v.view(), "b");
 }
 
 // ---- region placement --------------------------------------------------

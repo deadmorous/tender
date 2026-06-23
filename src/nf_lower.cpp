@@ -144,12 +144,42 @@ void flatten_contraction(
     flatten_contraction(r, operands, ops);
 }
 
+// A bare rank-1 vector (the only operand cross anticommutation applies to).
+auto is_rank1_vector(Expr const* e) -> bool
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    return t && t->rank && *t->rank == 1 && t->slots.empty();
+}
+
+// Re-associate a cross around a rank-≥2 fence: `(x×M)×z → x×(M×z)` when M is
+// rank ≥ 2 (the ⊗ inside M fences the two crosses onto disjoint legs, so the
+// bracketing is immaterial — 000055).  Returns the re-associated `Expr`, or
+// nullptr when the pattern does not apply.  Mirrors derivation.cpp's helper of
+// the same name (kept local to avoid disturbing that translation unit).
+auto reassociate_cross_fence(Context& ctx, Expr const* l, Expr const* r)
+    -> Expr const*
+{
+    // `Cross` / `make_cross` here are the Expr-level ones (tender::), not the
+    // Nf factor of the same name in this namespace.
+    auto const* inner = std::get_if<tender::Cross>(&l->node);
+    if (!inner)
+        return nullptr;
+    auto const rx = infer_rank(inner->left);
+    auto const rm = infer_rank(inner->right);
+    auto const rz = infer_rank(r);
+    if (rx == std::optional<int>{1} && rm && *rm >= 2
+        && rz == std::optional<int>{1})
+        return tender::make_cross(
+            ctx, inner->left, tender::make_cross(ctx, inner->right, r));
+    return nullptr;
+}
+
 } // namespace
 
-auto encapsulate(Context& ctx, Expr const* factor) -> Factor const*
+auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
 {
     if (auto const* t = std::get_if<TensorObject>(&factor->node))
-        return make_atom(ctx, *t);
+        return {+1, make_atom(ctx, *t)};
 
     if (contraction_op(factor))
     {
@@ -158,14 +188,43 @@ auto encapsulate(Context& ctx, Expr const* factor) -> Factor const*
         flatten_contraction(factor, operands, ops);
         std::vector<Factor const*> encapsulated;
         encapsulated.reserve(operands.size());
+        int sign = +1;
         for (auto const* o: operands)
-            encapsulated.push_back(encapsulate(ctx, o));
-        return make_contraction(ctx, std::move(encapsulated), std::move(ops));
+        {
+            auto sf = encapsulate(ctx, o);
+            sign *= sf.sign;
+            encapsulated.push_back(sf.factor);
+        }
+        return {
+            sign,
+            make_contraction(ctx, std::move(encapsulated), std::move(ops))};
+    }
+
+    if (auto const* c = std::get_if<tender::Cross>(&factor->node))
+    {
+        // Anticommutation: a rank-1 pair is ordered canonically, lifting the
+        // sign `a×b = -(b×a)`.  Mirrors the canon Cross arm.
+        if (is_rank1_vector(c->left) && is_rank1_vector(c->right))
+        {
+            auto sl = encapsulate(ctx, c->left);
+            auto sr = encapsulate(ctx, c->right);
+            int sign = sl.sign * sr.sign;
+            if (compare(*sl.factor, *sr.factor) > 0)
+                return {-sign, make_cross(ctx, {sr.factor, sl.factor})};
+            return {sign, make_cross(ctx, {sl.factor, sr.factor})};
+        }
+        // Rank-≥2 fence: re-associate, then encapsulate the result.
+        if (auto const* ra = reassociate_cross_fence(ctx, c->left, c->right))
+            return encapsulate(ctx, ra);
+        // General binary cross (e.g. a nested cross operand): structural.
+        auto sl = encapsulate(ctx, c->left);
+        auto sr = encapsulate(ctx, c->right);
+        return {sl.sign * sr.sign, make_cross(ctx, {sl.factor, sr.factor})};
     }
 
     throw std::invalid_argument(
-        "encapsulate: unsupported factor node (Cross is C6; sums / nested "
-        "products / unary invariants await the recursive lower)");
+        "encapsulate: unsupported factor node (sums / nested products / unary "
+        "invariants await the recursive lower)");
 }
 
 // ---- pass 4: region placement (C5) -------------------------------------
@@ -180,11 +239,12 @@ auto place_factors(Context& ctx, ProductParts const& pp) -> Term
             throw std::invalid_argument(
                 "place_factors: factor rank is unknown (region placement needs "
                 "a trustworthy infer_rank)");
-        auto const* enc = encapsulate(ctx, f);
+        auto enc = encapsulate(ctx, f);
+        t.coeff *= Rational{enc.sign}; // lift anticommutation sign into coeff
         if (*rank == 0)
-            t.scalars.push_back(enc);
+            t.scalars.push_back(enc.factor);
         else
-            t.tensors.push_back(enc);
+            t.tensors.push_back(enc.factor);
     }
     return t;
 }
