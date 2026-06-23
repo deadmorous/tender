@@ -4,6 +4,7 @@
 #include <tender/rewrite.hpp>
 #include <tender/summation.hpp>
 #include <tender/tensor_order.hpp>
+#include <tender/tensor_symmetry.hpp>
 
 #include <algorithm>
 #include <functional>
@@ -991,117 +992,28 @@ auto canon_sum_stack(Context& ctx, Expr const* e, int depth) -> Expr const*
 
 // ---- symmetry orbit canonicalization (vibe 000047) ----------------------
 
-// Total order on slot sequences (same key as expr_cmp's TensorObject arm).
-auto slot_seq_cmp(
-    std::vector<SlotBinding> const& a, std::vector<SlotBinding> const& b) -> int
-{
-    // a and b are arrangements of one tensor's slots, so they share the same
-    // multiset of (realm, space) — only level and index ever differ between two
-    // orbit elements.  The realm/space arms are kept for generality but cannot
-    // fire for any symmetric tensor we build.
-    for (std::size_t i = 0; i < a.size(); ++i)
-    {
-        if (a[i].slot.level != b[i].slot.level)
-            return a[i].slot.level < b[i].slot.level ? -1 : 1;
-        // GCOV_EXCL_START  (realm/space uniform across one tensor's slots)
-        if (a[i].slot.realm != b[i].slot.realm)
-            return a[i].slot.realm < b[i].slot.realm ? -1 : 1;
-        if (int c = space_cmp(a[i].slot.space, b[i].slot.space))
-            return c;
-        // GCOV_EXCL_STOP
-        if (int c = index_assoc_cmp(a[i].index, b[i].index))
-            return c;
-    }
-    return 0;
-}
-
-// Apply a permutation (image[i] = destination of slot i) to a slot sequence.
-auto permute_slots(
-    std::vector<SlotBinding> const& slots,
-    PermutationView const& p) -> std::vector<SlotBinding>
-{
-    std::vector<SlotBinding> out(slots.size());
-    for (std::size_t i = 0; i < slots.size(); ++i)
-        out[p[i]] = slots[i];
-    return out;
-}
-
-// Canonicalize a TensorObject under its declared (anti)symmetry: pick the
-// orbit-minimal slot arrangement and fold the sign of an antisymmetric
-// reordering into a leading −1.  The symmetry/antisymmetry generators induce a
-// sign homomorphism (+1 / −1) on the generated permutation group; the orbit is
-// the group orbit of the original slot sequence.  Returns:
-//   - e unchanged if there are no generators or e is already orbit-minimal,
-//   - a reordered TensorObject (sign +1),
-//   - Negate(reordered) (sign −1), or
-//   - scalar 0 when an arrangement is reachable with both signs — the object is
-//     identically zero (e.g. ε with a repeated index).
+// `slot_seq_cmp` and the orbit search (`canon_symmetry_slots`) now live in
+// tender/tensor_symmetry.hpp, shared with the `Nf` lowering (vibe 000058 /
+// C13).  This wrapper folds the result into an `Expr`.
+//
+// Returns: e unchanged if there are no generators or e is already
+// orbit-minimal, a reordered TensorObject (sign +1), Negate(reordered) (sign
+// −1), or scalar 0 when an arrangement is reachable with both signs (e.g. ε
+// with a repeated index — identically zero).
 auto canon_symmetry(Context& ctx, Expr const* e) -> Expr const*
 {
     auto const* t = std::get_if<TensorObject>(&e->node);
     if (!t || !t->traits)
         return e;
-    auto const& sym = t->traits->symmetry.generators;
-    auto const& asym = t->traits->antisymmetry.generators;
-    if (sym.empty() && asym.empty())
-        return e;
-
-    struct Reached final
-    {
-        std::vector<SlotBinding> slots;
-        int sign;
-    };
-    std::vector<Reached> seen;
-    seen.push_back({t->slots, +1});
-
-    auto find_seen = [&](std::vector<SlotBinding> const& s) -> Reached*
-    {
-        for (auto& r: seen)
-            if (slot_seq_cmp(r.slots, s) == 0)
-                return &r;
-        return nullptr;
-    };
-
-    // Breadth-first closure of the slot sequence under the generators.  The
-    // group is finite, so the forward closure (no explicit inverses) reaches
-    // every element.  Orbits are tiny (≤ |group|), so linear search suffices.
-    for (std::size_t head = 0; head < seen.size(); ++head)
-    {
-        Reached const cur = seen[head]; // copy: seen may reallocate
-        auto step = [&](PermutationView const& p, int gsign) -> bool
-        {
-            // Defensive: every generator we install matches the slot count.
-            if (p.size() != cur.slots.size()) // GCOV_EXCL_LINE
-                return false;                 // GCOV_EXCL_LINE
-            auto next = permute_slots(cur.slots, p);
-            int const nsign = cur.sign * gsign;
-            if (auto* r = find_seen(next))
-                return r->sign != nsign; // conflict ⇒ identically zero
-            seen.push_back({std::move(next), nsign});
-            return false;
-        };
-        // A symmetry step alone never sign-conflicts (all +1); a conflict
-        // through the symmetry loop needs a tensor with *both* symmetry and
-        // antisymmetry generators, which none we build has yet.
-        for (auto const& p: sym)
-            if (step(p, +1))                          // GCOV_EXCL_LINE
-                return make_scalar(ctx, Rational{0}); // GCOV_EXCL_LINE
-        for (auto const& p: asym)
-            if (step(p, -1))
-                return make_scalar(ctx, Rational{0});
-    }
-
-    Reached const* best = &seen.front();
-    for (auto const& r: seen)
-        if (slot_seq_cmp(r.slots, best->slots) < 0)
-            best = &r;
-
+    auto [slots, sign] = canon_symmetry_slots(*t);
+    if (sign == 0)
+        return make_scalar(ctx, Rational{0}); // identically zero
     Expr const* canon_t =
-        slot_seq_cmp(best->slots, t->slots) == 0 ?
+        slot_seq_cmp(slots, t->slots) == 0 ?
             e :
             ctx.make<Expr>(
-                TensorObject{t->name, t->rank, t->traits, best->slots});
-    return best->sign < 0 ? make_negate(ctx, canon_t) : canon_t;
+                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+    return sign < 0 ? make_negate(ctx, canon_t) : canon_t;
 }
 
 // Flatten a left/right TensorProduct tree into its factor leaves.

@@ -2,6 +2,7 @@
 
 #include <tender/derivation.hpp> // infer_rank
 #include <tender/summation.hpp>  // contracted_ids, substitute_index_ids, …
+#include <tender/tensor_symmetry.hpp> // canon_symmetry_slots
 
 #include <mpk/mix/util/overloads.hpp>
 
@@ -212,7 +213,19 @@ auto reassociate_cross_fence(Context& ctx, Expr const* l, Expr const* r)
 auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
 {
     if (auto const* t = std::get_if<TensorObject>(&factor->node))
-        return {+1, make_atom(ctx, *t)};
+    {
+        // Symmetry-orbit canonicalization (vibe 000047): put a symmetric /
+        // antisymmetric tensor's slots into orbit-minimal order, folding the
+        // antisymmetric sign out.  Sign 0 means the object is identically zero
+        // (e.g. ε with a repeated index) — carried as a 0 multiplier so the
+        // whole term collects to coeff 0 and drops out.
+        auto [slots, sign] = canon_symmetry_slots(*t);
+        if (sign == 0)
+            return {0, make_atom(ctx, *t)};
+        TensorObject obj = *t;
+        obj.slots = std::move(slots);
+        return {sign, make_atom(ctx, std::move(obj))};
+    }
 
     if (contraction_op(factor))
     {

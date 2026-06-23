@@ -55,9 +55,12 @@ struct ProductParts final
 
 // ---- pass 3b: factor encapsulation (C5, C6) ----------------------------
 
-// A `Factor` together with a sign (+1 / -1) lifted out of it during
-// encapsulation — cross anticommutation produces such a sign, which must flow
-// up to the term's `coeff` (there is no per-factor sign in the model).
+// A `Factor` together with a multiplier (`+1` / `-1` / `0`) lifted out of it
+// during encapsulation — cross anticommutation and antisymmetric-slot
+// reordering produce a `±1` sign, and a tensor that is identically zero (an
+// antisymmetric object with a repeated index) produces `0`; the multiplier
+// flows up to the term's `coeff` (there is no per-factor sign in the model), so
+// a `0` collects the whole term to coeff 0 and drops it.
 struct SignedFactor final
 {
     int sign;
@@ -65,8 +68,10 @@ struct SignedFactor final
 };
 
 // Encapsulate one multiplicative factor (a non-numeric, non-`*` `Expr`) into
-// an `Nf` `Factor`, lifting any anticommutation sign:
-//   - a bare `TensorObject` becomes an `Atom` (sign +1);
+// an `Nf` `Factor`, lifting any anticommutation / antisymmetry sign:
+//   - a bare `TensorObject` becomes an `Atom`, its slots put into orbit-minimal
+//     order under any declared (anti)symmetry with the sign folded out (0 when
+//     identically zero — vibe 000047);
 //   - a maximal `{@ : //}` contraction tree becomes a flat `Contraction`, its
 //     operands encapsulated recursively and its bracketing dropped (the
 //     interface theorem of 000057 makes it immaterial); operand signs multiply

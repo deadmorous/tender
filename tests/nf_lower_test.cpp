@@ -1020,3 +1020,61 @@ TEST(CanonicalizeNf, RanklessTensorsSumCommutes)
         *canonicalize_nf(ctx, make_sum(ctx, A, B)),
         *canonicalize_nf(ctx, make_sum(ctx, B, A))));
 }
+
+// ---- symmetry-orbit canonicalization in the Nf path (C13b) -------------
+
+namespace
+{
+auto eps3(Context& ctx, Level lvl, IndexAssoc a, IndexAssoc b, IndexAssoc c)
+    -> Expr const*
+{
+    return make_levi_civita(
+        ctx, Realm::Oblique, space_3d(), {lvl, lvl, lvl}, {a, b, c});
+}
+} // namespace
+
+TEST(NfSymmetry, DeltaSlotSwapCanonicalizesEqual)
+{
+    // δ is symmetric: δ^a_b and δ_b^a canonicalize to the same orbit-minimal
+    // Nf.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    auto const* d_ab =
+        make_delta(ctx, Realm::Oblique, sp, Level::Upper, Level::Lower, a, b);
+    auto const* d_ba =
+        make_delta(ctx, Realm::Oblique, sp, Level::Lower, Level::Upper, b, a);
+    EXPECT_TRUE(
+        equal(*canonicalize_nf(ctx, d_ab), *canonicalize_nf(ctx, d_ba)));
+}
+
+TEST(NfSymmetry, EpsTranspositionCancels)
+{
+    // Odd permutation flips sign: ε^{ijk} + ε^{jik} → 0 (empty Nf).
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    CountableIndex k{ctx.alloc_index_id()};
+    auto const* ijk =
+        eps3(ctx, Level::Upper, IndexAssoc{i}, IndexAssoc{j}, IndexAssoc{k});
+    auto const* jik =
+        eps3(ctx, Level::Upper, IndexAssoc{j}, IndexAssoc{i}, IndexAssoc{k});
+    auto const* nf = canonicalize_nf(ctx, make_sum(ctx, ijk, jik));
+    EXPECT_TRUE(nf->terms.empty());
+}
+
+TEST(NfSymmetry, EpsRepeatedConcreteIndexIsZero)
+{
+    // An arrangement reachable with both signs is identically zero: ε^{11k} →
+    // 0.
+    Context ctx;
+    auto const* z = eps3(
+        ctx,
+        Level::Upper,
+        IndexAssoc{ConcreteIndex{1}},
+        IndexAssoc{ConcreteIndex{1}},
+        IndexAssoc{ConcreteIndex{2}});
+    auto const* nf = canonicalize_nf(ctx, z);
+    EXPECT_TRUE(nf->terms.empty());
+}
