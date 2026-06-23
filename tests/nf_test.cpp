@@ -205,6 +205,98 @@ TEST(NfEqual, NfByTermSequence)
     EXPECT_FALSE(equal(n1, n4));
 }
 
+// ---- total order -------------------------------------------------------
+
+TEST(NfCompare, FactorsByVariantTag)
+{
+    // Atom < Contraction < Cross < Paren (variant declaration order).
+    Context ctx;
+    auto const* a = abstract_atom(ctx, "A", 2);
+    auto const* b = abstract_atom(ctx, "B", 2);
+    auto const* atom = abstract_atom(ctx, "A", 2);
+    auto const* con = make_contraction(ctx, {a, b}, {COp::Dot});
+    auto const* cross = make_cross(ctx, {a, b});
+    auto const* paren = make_paren(ctx, make_nf(ctx, {Term{.tensors = {a}}}));
+    EXPECT_LT(compare(*atom, *con), 0);
+    EXPECT_LT(compare(*con, *cross), 0);
+    EXPECT_LT(compare(*cross, *paren), 0);
+    EXPECT_GT(compare(*paren, *atom), 0);
+}
+
+TEST(NfCompare, AtomsByName)
+{
+    Context ctx;
+    auto const* a = abstract_atom(ctx, "A", 1);
+    auto const* b = abstract_atom(ctx, "B", 1);
+    EXPECT_LT(compare(*a, *b), 0);
+    EXPECT_GT(compare(*b, *a), 0);
+    EXPECT_EQ(compare(*a, *abstract_atom(ctx, "A", 1)), 0);
+}
+
+TEST(NfCompare, ContractionByOpsWhenFactorsEqual)
+{
+    Context ctx;
+    auto dot = [&]
+    {
+        return make_contraction(
+            ctx,
+            {abstract_atom(ctx, "A", 2), abstract_atom(ctx, "B", 2)},
+            {COp::Dot});
+    };
+    auto ddot = [&]
+    {
+        return make_contraction(
+            ctx,
+            {abstract_atom(ctx, "A", 2), abstract_atom(ctx, "B", 2)},
+            {COp::DDot});
+    };
+    EXPECT_LT(compare(*dot(), *ddot()), 0); // Dot < DDot
+    EXPECT_EQ(compare(*dot(), *dot()), 0);
+}
+
+TEST(NfCompare, TermsByTensorShapeThenCoeff)
+{
+    Context ctx;
+    auto const* a = abstract_atom(ctx, "A", 1);
+    auto const* b = abstract_atom(ctx, "B", 1);
+    // Same tensor shape ⇒ ordered by coeff.
+    Term t2{.coeff = Rational{2}, .tensors = {a}};
+    Term t5{.coeff = Rational{5}, .tensors = {a}};
+    EXPECT_LT(compare(t2, t5), 0);
+    // Different tensor shape dominates the coeff.
+    Term tb{.coeff = Rational{100}, .tensors = {b}};
+    EXPECT_LT(compare(t5, tb), 0); // A-shape < B-shape regardless of coeff
+}
+
+TEST(NfCompare, NfByTermSequenceLength)
+{
+    Context ctx;
+    auto const* a = abstract_atom(ctx, "A", 1);
+    auto const* n1 = make_nf(ctx, {Term{.tensors = {a}}});
+    auto const* n2 = make_nf(ctx, {Term{.tensors = {a}}, Term{.tensors = {a}}});
+    EXPECT_LT(compare(*n1, *n2), 0);
+}
+
+TEST(NfCompare, ConsistentWithEqualAndAntisymmetric)
+{
+    Context ctx;
+    auto const* a = abstract_atom(ctx, "A", 2);
+    auto const* b = abstract_atom(ctx, "B", 2);
+    std::vector<Factor const*> fs = {
+        a,
+        b,
+        make_contraction(ctx, {a, b}, {COp::Dot}),
+        make_cross(ctx, {a, b}),
+        make_paren(ctx, make_nf(ctx, {Term{.tensors = {a}}})),
+    };
+    for (auto const* x: fs)
+        for (auto const* y: fs)
+        {
+            EXPECT_EQ(compare(*x, *y) == 0, equal(x, y));
+            EXPECT_EQ(compare(*x, *y), -compare(*y, *x));
+        }
+}
+
 // ---- structural hashing ------------------------------------------------
 
 TEST(NfHash, EqualStructuresHashEqual)

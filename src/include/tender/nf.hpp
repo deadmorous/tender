@@ -195,6 +195,25 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
     return a == b || (a && b && equal(*a, *b));
 }
 
+// ---- total order -------------------------------------------------------
+
+// Total three-way order (strcmp convention: negative / zero / positive),
+// consistent with `equal`: `compare(x, y) == 0` iff `equal(x, y)`.
+//
+//   Factor : by variant tag (Atom < Contraction < Cross < Paren), then by
+//            contents — atoms by `tensor_object_cmp` (the same key as the
+//            `Expr` canonical order), composites by their factor/op sequences,
+//            parens by body.
+//   Term   : by tensors, then scalars, then bound (ids + modes), then coeff —
+//            so terms of the same tensor shape sort adjacently.
+//   Nf     : lexicographically by term sequence.
+//
+// Used to sort the commutative scalar region within a term and to order the
+// term set; the lowering passes apply it (canon), this commit only defines it.
+[[nodiscard]] auto compare(Factor const&, Factor const&) -> int;
+[[nodiscard]] auto compare(Term const&, Term const&) -> int;
+[[nodiscard]] auto compare(Nf const&, Nf const&) -> int;
+
 // ---- structural hashing ------------------------------------------------
 
 // Hashes consistent with `equal`: equal structures hash equal.  Provided so

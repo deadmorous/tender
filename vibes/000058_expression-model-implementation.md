@@ -134,6 +134,12 @@ end-to-end gate; benchmarks (principle 4) guard canon.
       `equal` + consistent `hash` (no global cons table — the arena `Context`
       matches `Expr` and does not dedup), so callers can hash-cons later.
 - C2  total orders (factor order, term order) on top of `expr_cmp`, tests.
+      **DONE** — extracted the leaf comparators (`name_view_cmp`, `space_cmp`,
+      `index_assoc_cmp`, `tensor_object_cmp`) out of `derivation.cpp`'s
+      `expr_cmp` into `tender/tensor_order.{hpp,cpp}`; `expr_cmp`'s TensorObject
+      arm and Nf's `compare`/`equal` now share that one atom key (DRY).  Added
+      `nf::compare(Factor|Term|Nf)` three-way orders + 6 tests
+      (`compare == 0 ⇔ equal`, antisymmetry).  Suite green (550).
 
 **Stage 2 — lowering `Expr → Nf` (the canon algorithm), behind `canonicalize_nf`.**
 Old `canonicalize` untouched; each pass its own commit + tests + differential
@@ -184,10 +190,11 @@ are additive or subtractive only.
 
 ## Status
 
-Algorithms + plan recorded.  **Stage 1 / C1 implemented** (isolated `Nf` type:
-structs, builders, structural equality + hashing, 17 unit tests; full suite
-green at 545).  Next action: Stage 1 / C2 (total factor/term orders on
-`expr_cmp`).
+Algorithms + plan recorded.  **Stage 1 complete** (C1: isolated `Nf` type —
+structs, builders, structural equality + hashing; C2: shared leaf comparators
+in `tensor_order.{hpp,cpp}` + `nf::compare` total orders).  22 Nf unit tests;
+full suite green at 550.  Next action: Stage 2 / C3 (additive flatten →
+signed terms, behind `canonicalize_nf`).
 Builds on [000057](000057_expression-model.md) (the model),
 [000056](000056_expression-representation-rethink.md) (the motivation),
 [000055](000055_cross-reassociation.md) (cross-fence reuse),

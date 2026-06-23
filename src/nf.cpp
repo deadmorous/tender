@@ -1,5 +1,7 @@
 #include <tender/nf.hpp>
 
+#include <tender/tensor_order.hpp>
+
 #include <mpk/mix/util/overloads.hpp>
 
 #include <functional>
@@ -53,65 +55,10 @@ auto make_nf(Context& ctx, std::vector<Term> terms) -> Nf const*
 
 // ---- structural equality -----------------------------------------------
 
-// These mirror `structural_eq`'s TensorObject arm (derivation.cpp): name,
-// rank, then per-slot level/realm/space/index.  Kept local so the Nf type
-// stays self-contained (Stage 1 / C1 has no dependency on derivation
-// internals); a later DRY pass may unify the two.
+// Atom equality reuses the shared `tensor_object_cmp` (tensor_order.hpp), the
+// same key the `Expr` canonical order uses — no duplicated slot comparison.
 namespace
 {
-
-auto index_assoc_eq(
-    std::optional<IndexAssoc> const& a,
-    std::optional<IndexAssoc> const& b) -> bool
-{
-    if (!a && !b)
-        return true;
-    if (!a || !b)
-        return false;
-    return visit(
-        Overloads{
-            [&](CountableIndex const& ca) -> bool
-            {
-                auto const* cb = std::get_if<CountableIndex>(&*b);
-                return cb && ca.id == cb->id;
-            },
-            [&](ConcreteIndex const& ca) -> bool
-            {
-                auto const* cb = std::get_if<ConcreteIndex>(&*b);
-                return cb && ca.value == cb->value;
-            },
-            [&](LabelIndex const& la) -> bool
-            {
-                auto const* lb = std::get_if<LabelIndex>(&*b);
-                return lb && la.name == lb->name;
-            },
-        },
-        *a);
-}
-
-auto tensor_object_eq(TensorObject const& a, TensorObject const& b) -> bool
-{
-    if (a.name != b.name)
-        return false;
-    if (a.rank != b.rank)
-        return false;
-    if (a.slots.size() != b.slots.size())
-        return false;
-    for (std::size_t i = 0; i < a.slots.size(); ++i)
-    {
-        auto const& sa = a.slots[i];
-        auto const& sb = b.slots[i];
-        if (sa.slot.level != sb.slot.level)
-            return false;
-        if (sa.slot.realm != sb.slot.realm)
-            return false;
-        if (sa.slot.space != sb.slot.space)
-            return false;
-        if (!index_assoc_eq(sa.index, sb.index))
-            return false;
-    }
-    return true;
-}
 
 auto factor_seq_eq(
     std::vector<Factor const*> const& a,
@@ -133,8 +80,10 @@ auto equal(Factor const& a, Factor const& b) -> bool
         return false;
     return visit(
         Overloads{
-            [&](Atom const& fa) -> bool
-            { return tensor_object_eq(fa.obj, std::get<Atom>(b.node).obj); },
+            [&](Atom const& fa) -> bool {
+                return tensor_object_cmp(fa.obj, std::get<Atom>(b.node).obj)
+                       == 0;
+            },
             [&](Contraction const& fa) -> bool
             {
                 auto const& fb = std::get<Contraction>(b.node);
@@ -174,6 +123,91 @@ auto equal(Nf const& a, Nf const& b) -> bool
         if (!equal(a.terms[i], b.terms[i]))
             return false;
     return true;
+}
+
+// ---- total order -------------------------------------------------------
+
+namespace
+{
+
+// Length-then-elementwise order over a factor sequence (shorter first).
+auto factor_seq_cmp(
+    std::vector<Factor const*> const& a,
+    std::vector<Factor const*> const& b) -> int
+{
+    if (a.size() != b.size())
+        return a.size() < b.size() ? -1 : 1;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        if (int c = compare(*a[i], *b[i]))
+            return c;
+    return 0;
+}
+
+auto rational_cmp(Rational const& a, Rational const& b) -> int
+{
+    auto o = a <=> b;
+    return o < 0 ? -1 : (o > 0 ? 1 : 0);
+}
+
+} // namespace
+
+auto compare(Factor const& a, Factor const& b) -> int
+{
+    auto ka = a.node.index(), kb = b.node.index();
+    if (ka != kb)
+        return ka < kb ? -1 : 1;
+    return visit(
+        Overloads{
+            [&](Atom const& fa) -> int
+            { return tensor_object_cmp(fa.obj, std::get<Atom>(b.node).obj); },
+            [&](Contraction const& fa) -> int
+            {
+                auto const& fb = std::get<Contraction>(b.node);
+                if (int c = factor_seq_cmp(fa.factors, fb.factors))
+                    return c;
+                if (fa.ops.size() != fb.ops.size())
+                    return fa.ops.size() < fb.ops.size() ? -1 : 1;
+                for (std::size_t i = 0; i < fa.ops.size(); ++i)
+                    if (fa.ops[i] != fb.ops[i])
+                        return fa.ops[i] < fb.ops[i] ? -1 : 1;
+                return 0;
+            },
+            [&](Cross const& fa) -> int {
+                return factor_seq_cmp(
+                    fa.factors, std::get<Cross>(b.node).factors);
+            },
+            [&](Paren const& fa) -> int
+            { return compare(*fa.body, *std::get<Paren>(b.node).body); },
+        },
+        a);
+}
+
+auto compare(Term const& a, Term const& b) -> int
+{
+    if (int c = factor_seq_cmp(a.tensors, b.tensors))
+        return c;
+    if (int c = factor_seq_cmp(a.scalars, b.scalars))
+        return c;
+    if (a.bound.size() != b.bound.size())
+        return a.bound.size() < b.bound.size() ? -1 : 1;
+    for (std::size_t i = 0; i < a.bound.size(); ++i)
+    {
+        if (a.bound[i].index.id != b.bound[i].index.id)
+            return a.bound[i].index.id < b.bound[i].index.id ? -1 : 1;
+        if (a.bound[i].mode != b.bound[i].mode)
+            return a.bound[i].mode < b.bound[i].mode ? -1 : 1;
+    }
+    return rational_cmp(a.coeff, b.coeff);
+}
+
+auto compare(Nf const& a, Nf const& b) -> int
+{
+    if (a.terms.size() != b.terms.size())
+        return a.terms.size() < b.terms.size() ? -1 : 1;
+    for (std::size_t i = 0; i < a.terms.size(); ++i)
+        if (int c = compare(a.terms[i], b.terms[i]))
+            return c;
+    return 0;
 }
 
 // ---- structural hashing ------------------------------------------------
