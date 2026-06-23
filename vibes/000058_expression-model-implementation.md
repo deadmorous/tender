@@ -145,6 +145,14 @@ end-to-end gate; benchmarks (principle 4) guard canon.
 Old `canonicalize` untouched; each pass its own commit + tests + differential
 check.
 - C3  additive flatten → signed terms (no distribution); like-term skeleton.
+      **DONE** — lowering grows in a new `tender/nf_lower.{hpp,cpp}` module
+      (passes added one per commit; the `canonicalize_nf` entry point is wired
+      only at C10).  `additive_flatten(Expr) -> [SignedExpr{sign, body}]`
+      expands the outermost `Sum`/`Difference`/`Negate` layer without
+      distributing; a sum inside a product stays an opaque leaf `body` (still
+      an `Expr` — multiplicative decomposition is C4/C5).  9 tests.  Like-term
+      collection itself is deferred to C9 (operates on built `Term`s).  Suite
+      green (559).
 - C4  multiplicative flatten; `Number`/`/` → `coeff`.
 - C5  contraction encapsulation + rank-based region placement.
 - C6  cross encapsulation + anticommutation sign lift (reuse 000055).
@@ -193,8 +201,9 @@ are additive or subtractive only.
 Algorithms + plan recorded.  **Stage 1 complete** (C1: isolated `Nf` type —
 structs, builders, structural equality + hashing; C2: shared leaf comparators
 in `tensor_order.{hpp,cpp}` + `nf::compare` total orders).  22 Nf unit tests;
-full suite green at 550.  Next action: Stage 2 / C3 (additive flatten →
-signed terms, behind `canonicalize_nf`).
+full suite green at 550.  **Stage 2 started**: C3 (additive flatten → signed
+terms) done in `nf_lower.{hpp,cpp}`; suite green at 559.  Next action: Stage 2
+/ C4 (multiplicative flatten; `Number`/`/` → `coeff`).
 Builds on [000057](000057_expression-model.md) (the model),
 [000056](000056_expression-representation-rethink.md) (the motivation),
 [000055](000055_cross-reassociation.md) (cross-fence reuse),
