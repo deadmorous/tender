@@ -115,3 +115,113 @@ TEST(AdditiveFlatten, NoDistributionOverInnerSum)
     auto const* prod = make_tensor_product(ctx, make_sum(ctx, a, b), c);
     expect_terms(additive_flatten(prod), {{+1, prod}});
 }
+
+// ---- multiplicative flatten --------------------------------------------
+
+namespace
+{
+auto flat(int sign, Expr const* body) -> ProductParts
+{
+    return multiplicative_flatten(SignedExpr{sign, body});
+}
+} // namespace
+
+TEST(MultiplicativeFlatten, BareAtomCarriesSign)
+{
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto pos = flat(+1, a);
+    EXPECT_EQ(pos.coeff, Rational{1});
+    ASSERT_EQ(pos.factors.size(), 1u);
+    EXPECT_EQ(pos.factors[0], a);
+
+    auto neg = flat(-1, a);
+    EXPECT_EQ(neg.coeff, Rational{-1});
+    EXPECT_EQ(neg.factors, (std::vector<Expr const*>{a}));
+}
+
+TEST(MultiplicativeFlatten, ScalarLiteralFolds)
+{
+    Context ctx;
+    auto const* three = make_scalar(ctx, Rational{3});
+    auto pp = flat(-1, three);
+    EXPECT_EQ(pp.coeff, Rational{-3});
+    EXPECT_TRUE(pp.factors.empty());
+}
+
+TEST(MultiplicativeFlatten, ProductChainPreservesOrder)
+{
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto const* prod =
+        make_tensor_product(ctx, make_tensor_product(ctx, a, b), c);
+    auto pp = flat(+1, prod);
+    EXPECT_EQ(pp.coeff, Rational{1});
+    EXPECT_EQ(pp.factors, (std::vector<Expr const*>{a, b, c}));
+}
+
+TEST(MultiplicativeFlatten, NumericFactorsMultiplyIntoCoeff)
+{
+    // 2 ⊗ (3 ⊗ a)  ->  coeff 6, factor a.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* two = make_scalar(ctx, Rational{2});
+    auto const* three = make_scalar(ctx, Rational{3});
+    auto const* e =
+        make_tensor_product(ctx, two, make_tensor_product(ctx, three, a));
+    auto pp = flat(+1, e);
+    EXPECT_EQ(pp.coeff, Rational{6});
+    EXPECT_EQ(pp.factors, (std::vector<Expr const*>{a}));
+}
+
+TEST(MultiplicativeFlatten, NestedNegateFoldsSign)
+{
+    // a ⊗ (-b)  ->  coeff -1, factors [a, b].
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* e = make_tensor_product(ctx, a, make_negate(ctx, b));
+    auto pp = flat(+1, e);
+    EXPECT_EQ(pp.coeff, Rational{-1});
+    EXPECT_EQ(pp.factors, (std::vector<Expr const*>{a, b}));
+}
+
+TEST(MultiplicativeFlatten, NumericDivisionFolds)
+{
+    // a / 2  ->  coeff 1/2, factor a.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* e = make_scalar_div(ctx, a, make_scalar(ctx, Rational{2}));
+    auto pp = flat(+1, e);
+    EXPECT_EQ(pp.coeff, (Rational{1, 2}));
+    EXPECT_EQ(pp.factors, (std::vector<Expr const*>{a}));
+}
+
+TEST(MultiplicativeFlatten, NonNumericDivisionStaysOpaque)
+{
+    // a / (b·c)  ->  coeff 1, one opaque ScalarDiv factor (no reciprocal yet).
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto const* div = make_scalar_div(ctx, a, make_dot(ctx, b, c));
+    auto pp = flat(+1, div);
+    EXPECT_EQ(pp.coeff, Rational{1});
+    ASSERT_EQ(pp.factors.size(), 1u);
+    EXPECT_EQ(pp.factors[0], div);
+}
+
+TEST(MultiplicativeFlatten, ContractionIsOneFactorNotFlattened)
+{
+    // a ⊗ (b·c)  ->  two factors [a, (b·c)]; only ⊗ flattens, not the dot.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto const* dot = make_dot(ctx, b, c);
+    auto const* e = make_tensor_product(ctx, a, dot);
+    auto pp = flat(+1, e);
+    EXPECT_EQ(pp.factors, (std::vector<Expr const*>{a, dot}));
+}

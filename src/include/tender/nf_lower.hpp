@@ -31,4 +31,26 @@ struct SignedExpr final
 // `collect_signed_addends` for the Nf lowering (vibe 000058 pass 2).
 [[nodiscard]] auto additive_flatten(Expr const* e) -> std::vector<SignedExpr>;
 
+// ---- pass 3a: multiplicative flatten (C4) ------------------------------
+
+// A signed term split into its numeric magnitude and its non-numeric
+// multiplicative factors (region 1 vs the still-undifferentiated regions 2/3).
+struct ProductParts final
+{
+    Rational coeff;                   // sign × all folded literals / divisors
+    std::vector<Expr const*> factors; // positional; still raw `Expr`s
+};
+
+// Flatten the outermost `*` (`TensorProduct`) chain of `term.body`, folding the
+// numeric pieces into `coeff` (seeded by the term's sign):
+//   - a `ScalarLiteral` factor multiplies `coeff`;
+//   - a `Negate` flips `coeff` and is descended;
+//   - a `ScalarDiv` by a `ScalarLiteral` divides `coeff` and its dividend is
+//     descended (a non-numeric divisor stays an opaque factor).
+// Only `TensorProduct` is flattened — a contraction / cross / sum node is a
+// single factor (its encapsulation into an `Nf` `Factor` is C5/C6).  Factor
+// order is preserved (⊗ is non-commutative).
+[[nodiscard]] auto multiplicative_flatten(SignedExpr const& term)
+    -> ProductParts;
+
 } // namespace tender::nf

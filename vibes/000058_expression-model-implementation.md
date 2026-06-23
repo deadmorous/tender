@@ -154,6 +154,12 @@ check.
       collection itself is deferred to C9 (operates on built `Term`s).  Suite
       green (559).
 - C4  multiplicative flatten; `Number`/`/` → `coeff`.
+      **DONE** — `multiplicative_flatten(SignedExpr) -> ProductParts{coeff,
+      factors}` flattens the outermost `*` (`TensorProduct`) chain, folding
+      `ScalarLiteral`, `Negate`, and numeric `ScalarDiv` (`x / literal`) into
+      `coeff` (seeded by sign); a non-numeric divisor and any
+      contraction/cross/sum node stay opaque `Expr` factors (encapsulation is
+      C5/C6).  Factor order preserved.  8 tests.  Suite green (567).
 - C5  contraction encapsulation + rank-based region placement.
 - C6  cross encapsulation + anticommutation sign lift (reuse 000055).
 - C7  scalar floating + scalar sort + interior commutative-operand ordering.
@@ -202,8 +208,9 @@ Algorithms + plan recorded.  **Stage 1 complete** (C1: isolated `Nf` type —
 structs, builders, structural equality + hashing; C2: shared leaf comparators
 in `tensor_order.{hpp,cpp}` + `nf::compare` total orders).  22 Nf unit tests;
 full suite green at 550.  **Stage 2 started**: C3 (additive flatten → signed
-terms) done in `nf_lower.{hpp,cpp}`; suite green at 559.  Next action: Stage 2
-/ C4 (multiplicative flatten; `Number`/`/` → `coeff`).
+terms) and C4 (multiplicative flatten → `ProductParts`) done in
+`nf_lower.{hpp,cpp}`; suite green at 567.  Next action: Stage 2 / C5
+(contraction encapsulation + rank-based region placement).
 Builds on [000057](000057_expression-model.md) (the model),
 [000056](000056_expression-representation-rethink.md) (the motivation),
 [000055](000055_cross-reassociation.md) (cross-fence reuse),
