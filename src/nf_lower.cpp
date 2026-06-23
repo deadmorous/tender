@@ -607,10 +607,13 @@ auto raise_factor(Context& ctx, Factor const& f) -> Expr const*
 }
 
 // Rebuild one term: the ⊗-product of its factors (scalars then tensors), with
-// the coefficient as a leading literal / `Negate`, and the explicit summation
-// overrides as head binders.  A `Default` bound index stays implicit — its
-// repeated slot ids carry the summation, re-detected by the realm rule on
-// lowering.
+// the coefficient as a leading literal / `Negate`, and the bound indices as
+// head binders.  A `Default` (realm-implicit) index is materialized as an
+// `ExplicitSum` exactly like a `Sum` override — the raised `Expr` then carries
+// the same explicit binders the existing `Expr` pipeline (materialize / canon /
+// reassemble / unroll_sums) expects, and lowering re-classifies it back to
+// `Default` (so `canonicalize_nf(raise(nf)) == nf` still holds).  Only a
+// `NoSum` differs, becoming a `NoSum` binder.
 auto raise_term(Context& ctx, Term const& t) -> Expr const*
 {
     Expr const* body = nullptr;
@@ -633,10 +636,10 @@ auto raise_term(Context& ctx, Term const& t) -> Expr const*
 
     for (auto it = t.bound.rbegin(); it != t.bound.rend(); ++it)
     {
-        if (it->mode == SumMode::Sum)
-            body = make_explicit_sum(ctx, it->index, body);
-        else if (it->mode == SumMode::NoSum)
+        if (it->mode == SumMode::NoSum)
             body = make_no_sum(ctx, it->index, body);
+        else // Default or Sum → materialized ExplicitSum binder
+            body = make_explicit_sum(ctx, it->index, body);
     }
     return body;
 }

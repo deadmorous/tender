@@ -160,8 +160,11 @@ struct SignedFactor final
 // `canonicalize_nf` up to canonicalization: `canonicalize_nf(raise(nf)) == nf`
 // for any canonical `nf` (the round-trip / idempotence property that retires
 // the "is canon needed again?" question of 000056).  An empty `Nf` raises to
-// the literal `0`.  A `Default` bound index stays implicit (its repeated slot
-// ids carry the summation); `Sum` / `NoSum` overrides become head binders.
+// the literal `0`.  Every summed bound index is materialized as a head binder —
+// `Default` and `Sum` as `ExplicitSum`, `NoSum` as `NoSum` — so the raised
+// `Expr` carries the explicit binders the existing `Expr` pipeline expects;
+// lowering re-classifies `Default` from the realm rule, so the round-trip
+// still closes.
 [[nodiscard]] auto raise(Context&, Nf const& nf) -> Expr const*;
 
 } // namespace tender::nf
