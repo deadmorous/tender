@@ -48,6 +48,13 @@ auto make_paren(Context& ctx, Nf const* body) -> Factor const*
     return ctx.make<Factor>(Paren{.body = body});
 }
 
+auto make_unary(Context& ctx, UnaryOp op, Factor const* operand) -> Factor const*
+{
+    if (operand == nullptr)
+        throw std::invalid_argument("make_unary: null operand");
+    return ctx.make<Factor>(Unary{.op = op, .operand = operand});
+}
+
 auto make_nf(Context& ctx, std::vector<Term> terms) -> Nf const*
 {
     return ctx.make<Nf>(Nf{.terms = std::move(terms)});
@@ -97,6 +104,11 @@ auto equal(Factor const& a, Factor const& b) -> bool
             },
             [&](Paren const& fa) -> bool
             { return equal(fa.body, std::get<Paren>(b.node).body); },
+            [&](Unary const& fa) -> bool
+            {
+                auto const& fb = std::get<Unary>(b.node);
+                return fa.op == fb.op && equal(fa.operand, fb.operand);
+            },
         },
         a);
 }
@@ -178,6 +190,13 @@ auto compare(Factor const& a, Factor const& b) -> int
             },
             [&](Paren const& fa) -> int
             { return compare(*fa.body, *std::get<Paren>(b.node).body); },
+            [&](Unary const& fa) -> int
+            {
+                auto const& fb = std::get<Unary>(b.node);
+                if (fa.op != fb.op)
+                    return fa.op < fb.op ? -1 : 1;
+                return compare(*fa.operand, *fb.operand);
+            },
         },
         a);
 }
@@ -281,6 +300,12 @@ auto hash(Factor const& f) -> std::size_t
             { return hash_mix(tag, hash_factor_seq(c.factors)); },
             [&](Paren const& p) -> std::size_t
             { return hash_mix(tag, p.body ? hash(*p.body) : 0); },
+            [&](Unary const& u) -> std::size_t
+            {
+                std::size_t h = static_cast<std::size_t>(u.op);
+                h = hash_mix(h, u.operand ? hash(*u.operand) : 0);
+                return hash_mix(tag, h);
+            },
         },
         f);
 }

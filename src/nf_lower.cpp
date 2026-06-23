@@ -200,6 +200,23 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
             make_contraction(ctx, std::move(encapsulated), std::move(ops))};
     }
 
+    // Unary invariants: linear, so the operand's lifted sign passes through.
+    if (auto const* u = std::get_if<Trace>(&factor->node))
+    {
+        auto sf = encapsulate(ctx, u->operand);
+        return {sf.sign, make_unary(ctx, UnaryOp::Trace, sf.factor)};
+    }
+    if (auto const* u = std::get_if<VectorInvariant>(&factor->node))
+    {
+        auto sf = encapsulate(ctx, u->operand);
+        return {sf.sign, make_unary(ctx, UnaryOp::VectorInvariant, sf.factor)};
+    }
+    if (auto const* u = std::get_if<Transpose>(&factor->node))
+    {
+        auto sf = encapsulate(ctx, u->operand);
+        return {sf.sign, make_unary(ctx, UnaryOp::Transpose, sf.factor)};
+    }
+
     if (auto const* c = std::get_if<tender::Cross>(&factor->node))
     {
         // Anticommutation: a rank-1 pair is ordered canonically, lifting the
@@ -223,8 +240,8 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
     }
 
     throw std::invalid_argument(
-        "encapsulate: unsupported factor node (sums / nested products / unary "
-        "invariants await the recursive lower)");
+        "encapsulate: unsupported factor node (sums → Paren and nested ⊗ await "
+        "the recursive lower / fence distribution)");
 }
 
 // ---- pass 4: region placement (C5) -------------------------------------

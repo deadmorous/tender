@@ -73,11 +73,12 @@ struct SignedFactor final
 //     out;
 //   - a `Cross` becomes a `Cross`: a rank-1 pair is ordered canonically with
 //     its anticommutation sign lifted (`a×b = -(b×a)`), and a rank-≥2 fence is
-//     re-associated `(x×M)×z → x×(M×z)` (000055).
+//     re-associated `(x×M)×z → x×(M×z)` (000055);
+//   - a unary invariant (`Trace` / `VectorInvariant` / `Transpose`) becomes a
+//     `Unary` factor over its encapsulated operand (sign passes through).
 // Deferred to later commits (encapsulate throws `std::invalid_argument` until
-// then): sums → `Paren`, nested `⊗`, and the unary invariants (`Trace` /
-// `VectorInvariant` / `Transpose`) — these await the recursive `lower`
-// assembled around C10.
+// then): sums → `Paren` and a `⊗` nested inside an operand — these await the
+// recursive `lower` / fence distribution assembled around C10.
 [[nodiscard]] auto encapsulate(Context&, Expr const* factor) -> SignedFactor;
 
 // ---- pass 4: region placement (C5) -------------------------------------

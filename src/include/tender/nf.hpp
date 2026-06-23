@@ -88,9 +88,25 @@ struct Paren final
     Nf const* body;
 };
 
+// A unary invariant operator applied to a rank-2 factor: `tr(·)` (rank 0),
+// `vec(·)` (rank 1), or `(·)^T` (rank 2).  Region is still decided by result
+// rank, so a `tr(A)` factor lands among the other scalars.
+enum class UnaryOp : uint8_t
+{
+    Trace,           // tr
+    VectorInvariant, // vec
+    Transpose,       // ^T
+};
+
+struct Unary final
+{
+    UnaryOp op;
+    Factor const* operand;
+};
+
 struct Factor final
 {
-    using Node = std::variant<Atom, Contraction, Cross, Paren>;
+    using Node = std::variant<Atom, Contraction, Cross, Paren, Unary>;
 
     Node node;
 
@@ -172,6 +188,9 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
     -> Factor const*;
 
 [[nodiscard]] auto make_paren(Context&, Nf const* body) -> Factor const*;
+
+[[nodiscard]] auto make_unary(Context&, UnaryOp, Factor const* operand)
+    -> Factor const*;
 
 [[nodiscard]] auto make_nf(Context&, std::vector<Term> terms) -> Nf const*;
 

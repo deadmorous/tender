@@ -286,6 +286,50 @@ TEST(Encapsulate, UnsupportedNodeThrows)
         (void)encapsulate(ctx, make_sum(ctx, a, a)), std::invalid_argument);
 }
 
+// ---- unary invariants --------------------------------------------------
+
+TEST(EncapsulateUnary, TraceTransposeVec)
+{
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    struct Case
+    {
+        Expr const* (*make)(Context&, Expr const*);
+        UnaryOp op;
+    };
+    for (auto const& cse:
+         {Case{&make_trace, UnaryOp::Trace},
+          Case{&make_vector_invariant, UnaryOp::VectorInvariant},
+          Case{&make_transpose, UnaryOp::Transpose}})
+    {
+        auto sf = encapsulate(ctx, cse.make(ctx, A));
+        EXPECT_EQ(sf.sign, +1);
+        ASSERT_TRUE(std::holds_alternative<Unary>(sf.factor->node));
+        auto const& u = std::get<Unary>(sf.factor->node);
+        EXPECT_EQ(u.op, cse.op);
+        EXPECT_EQ(std::get<Atom>(u.operand->node).obj.name.v.view(), "A");
+    }
+}
+
+TEST(EncapsulateUnary, TraceIsScalarVecAndTransposeAreTensors)
+{
+    // tr(A) rank 0 → scalars; vec(A) rank 1 and A^T rank 2 → tensors.
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    auto tr =
+        place_factors(ctx, ProductParts{Rational{1}, {make_trace(ctx, A)}});
+    EXPECT_EQ(tr.scalars.size(), 1u);
+    EXPECT_TRUE(tr.tensors.empty());
+
+    auto vt = place_factors(
+        ctx,
+        ProductParts{
+            Rational{1},
+            {make_vector_invariant(ctx, A), make_transpose(ctx, A)}});
+    EXPECT_TRUE(vt.scalars.empty());
+    EXPECT_EQ(vt.tensors.size(), 2u);
+}
+
 // ---- cross encapsulation (C6) ------------------------------------------
 
 TEST(EncapsulateCross, BinaryInCanonicalOrderKeepsSign)

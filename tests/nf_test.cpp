@@ -102,6 +102,37 @@ TEST(NfBuilders, Paren)
     EXPECT_EQ(std::get<Paren>(p->node).body, inner);
 }
 
+TEST(NfBuilders, Unary)
+{
+    Context ctx;
+    auto const* a = abstract_atom(ctx, "A", 2);
+    auto const* tr = make_unary(ctx, UnaryOp::Trace, a);
+    ASSERT_TRUE(std::holds_alternative<Unary>(tr->node));
+    EXPECT_EQ(std::get<Unary>(tr->node).op, UnaryOp::Trace);
+    EXPECT_EQ(std::get<Unary>(tr->node).operand, a);
+    EXPECT_THROW(
+        (void)make_unary(ctx, UnaryOp::Trace, nullptr), std::invalid_argument);
+}
+
+TEST(NfFactor, UnaryEqualityCompareHash)
+{
+    Context ctx;
+    auto const* a = abstract_atom(ctx, "A", 2);
+    auto const* b = abstract_atom(ctx, "B", 2);
+    auto const* tr_a = make_unary(ctx, UnaryOp::Trace, a);
+    auto const* tr_a2 = make_unary(ctx, UnaryOp::Trace, a);
+    auto const* tp_a = make_unary(ctx, UnaryOp::Transpose, a);
+    auto const* tr_b = make_unary(ctx, UnaryOp::Trace, b);
+    EXPECT_TRUE(equal(tr_a, tr_a2));
+    EXPECT_FALSE(equal(tr_a, tp_a)); // different op
+    EXPECT_FALSE(equal(tr_a, tr_b)); // different operand
+    EXPECT_EQ(hash(*tr_a), hash(*tr_a2));
+    // Unary sorts after Atom (later variant tag); consistent with equal.
+    EXPECT_GT(compare(*tr_a, *a), 0);
+    EXPECT_EQ(compare(*tr_a, *tr_a2), 0);
+    EXPECT_NE(compare(*tr_a, *tp_a), 0);
+}
+
 // ---- structural equality -----------------------------------------------
 
 TEST(NfEqual, AtomsByContents)
