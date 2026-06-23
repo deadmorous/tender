@@ -160,6 +160,10 @@ check.
       `coeff` (seeded by sign); a non-numeric divisor and any
       contraction/cross/sum node stay opaque `Expr` factors (encapsulation is
       C5/C6).  Factor order preserved.  8 tests.  Suite green (567).
+      Design follow-up (decisions 1–3 below): `Unary` factors for the unary
+      invariants; `lower_term` adds aggressive ⊗-fence distribution
+      (`distribute_contraction`) so a `⊗` never stays buried in a contraction
+      operand (sums stay sunk).  Suite green (587).
 - C5  contraction encapsulation + rank-based region placement.
       **DONE** — `encapsulate(Expr factor) -> Factor`: a `TensorObject` →
       `Atom`; a `{@ : //}` contraction tree → a flat `Contraction` (operands
@@ -231,12 +235,18 @@ terms) and C4 (multiplicative flatten → `ProductParts`) done in
 Next action: Stage 2 / C7 (scalar floating already done in C5; remaining:
 scalar sort + interior commutative-operand ordering).
 
-Open gap to resolve before C13: the `Factor` model has no variant for the
-unary invariants (`Trace` / `VectorInvariant` / `Transpose`) or a `⊗` nested
-inside a contraction operand (e.g. `A·(b⊗c)`, which canon keeps
-undistributed).  Both currently hit the `encapsulate` throw.  Decide their
-representation (new `Factor` variants vs `Paren`) when assembling the recursive
-`lower` (C8–C10).
+Representation decisions taken at the C6 review (now implemented):
+1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with
+   `op ∈ {Trace, VectorInvariant, Transpose}`.
+2. **Scalar results sit among all scalars** — region by result rank, so `tr(A)`
+   (rank 0) lands in `scalars`; no special case.
+3. **Aggressive ⊗-fence distribution** — `lower_term` runs
+   `distribute_contraction` first, so `A·(b⊗c) → (A·b)⊗c`; a `⊗` never stays
+   buried in a contraction operand.  Distribution is **⊗-only**: a genuine sum
+   operand stays sunk (→ `Paren`) and requires an explicit transform (000057).
+
+Remaining deferred: a `Paren` (genuine sum) factor — its canonical interior
+needs the recursive `lower`, assembled around C8–C10.
 Builds on [000057](000057_expression-model.md) (the model),
 [000056](000056_expression-representation-rethink.md) (the motivation),
 [000055](000055_cross-reassociation.md) (cross-fence reuse),

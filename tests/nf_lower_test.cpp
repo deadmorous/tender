@@ -446,3 +446,73 @@ TEST(PlaceFactors, UnknownRankThrows)
         (void)place_factors(ctx, ProductParts{Rational{1}, {x}}),
         std::invalid_argument);
 }
+
+// ---- per-term lowering (⊗-fence distribution) --------------------------
+
+namespace
+{
+auto term1(Context& ctx, Expr const* body) -> Term
+{
+    return lower_term(ctx, SignedExpr{+1, body});
+}
+} // namespace
+
+TEST(LowerTerm, PlainProduct)
+{
+    // 2·a⊗b  ->  coeff 2, tensors [a, b].
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* e = make_tensor_product(
+        ctx, make_scalar(ctx, Rational{2}), make_tensor_product(ctx, a, b));
+    auto t = term1(ctx, e);
+    EXPECT_EQ(t.coeff, Rational{2});
+    ASSERT_EQ(t.tensors.size(), 2u);
+    EXPECT_EQ(std::get<Atom>(t.tensors[0]->node).obj.name.v.view(), "a");
+    EXPECT_EQ(std::get<Atom>(t.tensors[1]->node).obj.name.v.view(), "b");
+}
+
+TEST(LowerTerm, DotFenceDistributesTensorProductOut)
+{
+    // A·(b⊗c)  ->  (A·b)⊗c  ->  tensors [(A·b), c], no ⊗ buried in a
+    // contraction.
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto t = term1(ctx, make_dot(ctx, A, make_tensor_product(ctx, b, c)));
+    EXPECT_TRUE(t.scalars.empty());
+    ASSERT_EQ(t.tensors.size(), 2u);
+    ASSERT_TRUE(std::holds_alternative<Contraction>(t.tensors[0]->node));
+    auto const& con = std::get<Contraction>(t.tensors[0]->node);
+    ASSERT_EQ(con.factors.size(), 2u);
+    EXPECT_EQ(std::get<Atom>(con.factors[0]->node).obj.name.v.view(), "A");
+    EXPECT_EQ(std::get<Atom>(con.factors[1]->node).obj.name.v.view(), "b");
+    EXPECT_EQ(std::get<Atom>(t.tensors[1]->node).obj.name.v.view(), "c");
+}
+
+TEST(LowerTerm, CrossFenceDistributesTensorProductOut)
+{
+    // a×(b⊗c)  ->  (a×b)⊗c  ->  tensors [(a×b), c].
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto t = term1(ctx, make_cross(ctx, a, make_tensor_product(ctx, b, c)));
+    ASSERT_EQ(t.tensors.size(), 2u);
+    EXPECT_TRUE(std::holds_alternative<nf::Cross>(t.tensors[0]->node));
+    EXPECT_EQ(std::get<Atom>(t.tensors[1]->node).obj.name.v.view(), "c");
+}
+
+TEST(LowerTerm, GenuineSumOperandStaysSunkAndAwaitsLower)
+{
+    // A·(b+c): the sum is NOT distributed (explicit transform only); the sum
+    // operand becomes a Paren that still awaits the recursive lower → throws.
+    Context ctx;
+    auto const* A = atomr(ctx, "A", 2);
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    EXPECT_THROW(
+        (void)term1(ctx, make_dot(ctx, A, make_sum(ctx, b, c))),
+        std::invalid_argument);
+}

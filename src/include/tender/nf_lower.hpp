@@ -92,4 +92,19 @@ struct SignedFactor final
 // passes.
 [[nodiscard]] auto place_factors(Context&, ProductParts const&) -> Term;
 
+// ---- per-term lowering (passes 3+4) ------------------------------------
+
+// Lower one signed term to an `Nf` `Term`, composing the passes above with an
+// aggressive ⊗-fence distribution:
+//   1. `distribute_contraction` pushes every `·` / `×` through its adjacent ⊗
+//      leg to a fixpoint (`A·(b⊗c) → (A·b)⊗c`), floating the ⊗ up so it joins
+//      factors at the top — a ⊗ never stays buried in a contraction operand;
+//   2. `multiplicative_flatten` then splits the exposed ⊗ chain;
+//   3. `place_factors` encapsulates and region-places.
+// Distribution is ⊗-only: a *genuine sum* operand (`A·(b+c)`) is left sunk —
+// distributing over a sum stays an explicit, user-invoked transform (000057).
+// Such a sum becomes a `Paren`, which still awaits the recursive `lower`, so a
+// term carrying a sum factor throws for now.
+[[nodiscard]] auto lower_term(Context&, SignedExpr const& term) -> Term;
+
 } // namespace tender::nf

@@ -266,4 +266,15 @@ auto place_factors(Context& ctx, ProductParts const& pp) -> Term
     return t;
 }
 
+// ---- per-term lowering (passes 3+4) ------------------------------------
+
+auto lower_term(Context& ctx, SignedExpr const& term) -> Term
+{
+    // Push contractions through ⊗ fences (never over sums), then flatten +
+    // place.  distribute_contraction already iterates to a fixpoint.
+    auto const* distributed = steps::distribute_contraction(ctx, term.body);
+    auto pp = multiplicative_flatten(SignedExpr{term.sign, distributed});
+    return place_factors(ctx, pp);
+}
+
 } // namespace tender::nf
