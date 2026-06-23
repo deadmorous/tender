@@ -70,8 +70,10 @@ struct SignedFactor final
 //   - a maximal `{@ : //}` contraction tree becomes a flat `Contraction`, its
 //     operands encapsulated recursively and its bracketing dropped (the
 //     interface theorem of 000057 makes it immaterial); operand signs multiply
-//     out, and a binary *commutative* contraction (`a·b` between rank-1
-//     vectors, `A:B`, `A··B`) gets its two operands in canonical order;
+//     out, and a binary *commutative* contraction gets its two operands in
+//     canonical order — `·` only between two rank-1 vectors, `:` / `··` only
+//     between two rank-2 tensors (higher-rank double contractions like `C:ε`
+//     are directional and keep their order);
 //   - a `Cross` becomes a `Cross`: a rank-1 pair is ordered canonically with
 //     its anticommutation sign lifted (`a×b = -(b×a)`), and a rank-≥2 fence is
 //     re-associated `(x×M)×z → x×(M×z)` (000055);

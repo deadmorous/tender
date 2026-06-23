@@ -419,9 +419,9 @@ TEST(EncapsulateInterior, MatrixVectorDotDoesNotReorder)
     EXPECT_EQ(std::get<Atom>(con.factors[1]->node).obj.name.v.view(), "b");
 }
 
-TEST(EncapsulateInterior, DoubleDotIsOrdered)
+TEST(EncapsulateInterior, DoubleDotOfRankTwoIsOrdered)
 {
-    // B:A → ordered A:B (double dot is symmetric).
+    // B:A with both rank 2 → ordered A:B (scalar, symmetric).
     Context ctx;
     auto const* A = atomr(ctx, "A", 2);
     auto const* B = atomr(ctx, "B", 2);
@@ -430,6 +430,19 @@ TEST(EncapsulateInterior, DoubleDotIsOrdered)
     EXPECT_EQ(con.ops, (std::vector<COp>{COp::DDot}));
     EXPECT_EQ(std::get<Atom>(con.factors[0]->node).obj.name.v.view(), "A");
     EXPECT_EQ(std::get<Atom>(con.factors[1]->node).obj.name.v.view(), "B");
+}
+
+TEST(EncapsulateInterior, HigherRankDoubleDotDoesNotReorder)
+{
+    // C:ε with C rank 4, ε rank 2 (stress = stiffness : strain) is directional:
+    // C:ε ≠ ε:C, so the order is preserved even though "C" sorts after "A".
+    Context ctx;
+    auto const* C = atomr(ctx, "C", 4);
+    auto const* eps = atomr(ctx, "A", 2); // sorts before "C"
+    auto sf = encapsulate(ctx, make_ddot(ctx, C, eps));
+    auto const& con = std::get<Contraction>(sf.factor->node);
+    EXPECT_EQ(std::get<Atom>(con.factors[0]->node).obj.name.v.view(), "C");
+    EXPECT_EQ(std::get<Atom>(con.factors[1]->node).obj.name.v.view(), "A");
 }
 
 // ---- region placement --------------------------------------------------

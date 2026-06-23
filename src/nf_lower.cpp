@@ -153,18 +153,29 @@ auto is_rank1_vector(Expr const* e) -> bool
     return t && t->rank && *t->rank == 1 && t->slots.empty();
 }
 
+auto has_rank(Expr const* e, int n) -> bool
+{
+    return infer_rank(e) == std::optional<int>{n};
+}
+
 // Whether a binary contraction with operator `op` over Expr operands `l`, `r`
-// is commutative, so its two operands may be ordered canonically:
-//   - `·`  commutes only between two rank-1 vectors (`a·b = b·a`); `A·b`, a
-//     matrix-vector product, does not;
-//   - `:` and `··` are symmetric double contractions (`A:B = B:A`).
+// is commutative, so its two operands may be ordered canonically.  A single
+// contraction joins adjacent interface legs; swapping the operands swaps which
+// legs meet, so it is symmetric *only* when both operands have exactly the
+// contracted rank (the result is then a scalar):
+//   - `·` removes one leg from each side, so it commutes only between two
+//     rank-1 vectors (`a·b = b·a`); `A·b`, a matrix-vector product, does not;
+//   - `:` / `··` remove two legs from each side, so they commute only between
+//     two rank-2 tensors (`A:B = B:A`).  Higher-rank double contractions such
+//     as `C:ε` (rank-4 `:` rank-2, e.g. stress = stiffness : strain) are
+//     directional — `C:ε ≠ ε:C` — and must keep their operand order.
 auto contraction_commutes(COp op, Expr const* l, Expr const* r) -> bool
 {
     switch (op)
     {
         case COp::Dot: return is_rank1_vector(l) && is_rank1_vector(r);
         case COp::DDot:
-        case COp::DDotAlt: return true;
+        case COp::DDotAlt: return has_rank(l, 2) && has_rank(r, 2);
     }
     return false;
 }

@@ -187,10 +187,13 @@ check.
       **DONE** — scalar floating already landed in C5; C7 adds: (a) `place_factors`
       **sorts** the commutative `scalars` region by `nf::compare` (tensors stay
       positional); (b) `encapsulate` gives a binary *commutative* contraction
-      canonical operand order — `·` only between two rank-1 vectors (`a·b=b·a`;
-      `A·b` is left as-is), `:` / `··` always (symmetric).  Note: ordering the
-      double-dots is a deliberate improvement over old canon (which left them
-      as-written).  6 tests.  Suite green (591).
+      canonical operand order **only when both operands have the contracted
+      rank** (the result is then a scalar): `·` between two rank-1 vectors
+      (`a·b=b·a`; `A·b` is left as-is), `:` / `··` between two rank-2 tensors.
+      Higher-rank double contractions like `C:ε` (stiffness:strain, rank-4 :
+      rank-2) are directional (`C:ε ≠ ε:C`) and keep their order.  Ordering the
+      rank-2 double-dots is a deliberate improvement over old canon (which left
+      them as-written).  7 tests.  Suite green (592).
 - C8  summation: bound-index inference, mode map, α-renaming (reuse
       `materialize` / `bound_canon_id`).
 - C9  like-term collection (cancellation, coeff merge) + term-set ordering.
