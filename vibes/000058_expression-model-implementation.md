@@ -125,6 +125,13 @@ end-to-end gate; benchmarks (principle 4) guard canon.
 
 **Stage 1 — isolated `Nf` type (purely additive, no consumers).**
 - C1  `Nf`/`Term`/`Factor` structs, builders, hash-cons/equality, unit tests.
+      **DONE** — `src/include/tender/nf.hpp`, `src/nf.cpp`, `tests/nf_test.cpp`
+      (17 tests).  Notes: `bound`/`modes` paired into one `BoundIndex` list
+      (kept in lockstep) rather than parallel arrays; equality is structural
+      and positional (scalar sorting / α-renaming are canon's job, not
+      equality's); "hash-cons/equality" realised as structural `equal` +
+      consistent `hash` (no global cons table — the arena `Context` matches
+      `Expr` and does not dedup), so callers can hash-cons later.
 - C2  total orders (factor order, term order) on top of `expr_cmp`, tests.
 
 **Stage 2 — lowering `Expr → Nf` (the canon algorithm), behind `canonicalize_nf`.**
@@ -175,7 +182,10 @@ are additive or subtractive only.
 
 ## Status
 
-Algorithms + plan recorded; **nothing implemented.**  Next action: Stage 1 / C1.
+Algorithms + plan recorded.  **Stage 1 / C1 implemented** (isolated `Nf` type:
+structs, builders, structural equality + hashing, 17 unit tests; full suite
+green at 545).  Next action: Stage 1 / C2 (total factor/term orders on
+`expr_cmp`).
 Builds on [000057](000057_expression-model.md) (the model),
 [000056](000056_expression-representation-rethink.md) (the motivation),
 [000055](000055_cross-reassociation.md) (cross-fence reuse),
