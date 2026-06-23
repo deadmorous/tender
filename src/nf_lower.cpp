@@ -531,4 +531,114 @@ auto canonicalize_nf(Context& ctx, Expr const* e) -> Nf const*
     return make_nf(ctx, collect_terms(std::move(lowered)));
 }
 
+// ---- raise: Nf → Expr (C12) --------------------------------------------
+
+namespace
+{
+
+// Rebuild an `Expr` from a `Factor`.  Composites recurse; an `Atom` re-wraps
+// its stored `TensorObject` (traits and slots preserved); a `Paren` raises its
+// sub-`Nf`.  Contraction / cross chains are rebuilt left-associated — the
+// interface theorem makes the bracketing immaterial, so re-lowering recovers
+// the same flat factor.
+auto raise_factor(Context& ctx, Factor const& f) -> Expr const*
+{
+    return visit(
+        Overloads{
+            [&](Atom const& a) -> Expr const* { return ctx.make<Expr>(a.obj); },
+            [&](Contraction const& c) -> Expr const*
+            {
+                auto join =
+                    [&](COp op, Expr const* l, Expr const* r) -> Expr const*
+                {
+                    switch (op)
+                    {
+                        case COp::Dot: return make_dot(ctx, l, r);
+                        case COp::DDot: return make_ddot(ctx, l, r);
+                        case COp::DDotAlt: return make_ddot_alt(ctx, l, r);
+                    }
+                    return make_dot(ctx, l, r); // unreachable
+                };
+                Expr const* acc = raise_factor(ctx, *c.factors[0]);
+                for (std::size_t i = 0; i + 1 < c.factors.size(); ++i)
+                    acc = join(
+                        c.ops[i], acc, raise_factor(ctx, *c.factors[i + 1]));
+                return acc;
+            },
+            [&](Cross const& c) -> Expr const*
+            {
+                Expr const* acc = raise_factor(ctx, *c.factors[0]);
+                for (std::size_t i = 1; i < c.factors.size(); ++i)
+                    acc =
+                        make_cross(ctx, acc, raise_factor(ctx, *c.factors[i]));
+                return acc;
+            },
+            [&](Paren const& p) -> Expr const* { return raise(ctx, *p.body); },
+            [&](Unary const& u) -> Expr const*
+            {
+                auto const* operand = raise_factor(ctx, *u.operand);
+                switch (u.op)
+                {
+                    case UnaryOp::Trace: return make_trace(ctx, operand);
+                    case UnaryOp::VectorInvariant:
+                        return make_vector_invariant(ctx, operand);
+                    case UnaryOp::Transpose:
+                        return make_transpose(ctx, operand);
+                }
+                return operand; // unreachable
+            },
+        },
+        f);
+}
+
+// Rebuild one term: the ⊗-product of its factors (scalars then tensors), with
+// the coefficient as a leading literal / `Negate`, and the explicit summation
+// overrides as head binders.  A `Default` bound index stays implicit — its
+// repeated slot ids carry the summation, re-detected by the realm rule on
+// lowering.
+auto raise_term(Context& ctx, Term const& t) -> Expr const*
+{
+    Expr const* body = nullptr;
+    auto append = [&](Expr const* x)
+    { body = body ? make_tensor_product(ctx, body, x) : x; };
+    for (auto const* f: t.scalars)
+        append(raise_factor(ctx, *f));
+    for (auto const* f: t.tensors)
+        append(raise_factor(ctx, *f));
+
+    bool const neg = t.coeff < Rational{0};
+    Rational const mag = neg ? -t.coeff : t.coeff;
+    // Emit the magnitude unless it is a redundant unit factor on a non-empty
+    // product (a bare term keeps its `1` so it survives as `ScalarLiteral{1}`).
+    if (!(mag == Rational{1}) || !body)
+        body = body ? make_tensor_product(ctx, make_scalar(ctx, mag), body) :
+                      make_scalar(ctx, mag);
+    if (neg)
+        body = make_negate(ctx, body);
+
+    for (auto it = t.bound.rbegin(); it != t.bound.rend(); ++it)
+    {
+        if (it->mode == SumMode::Sum)
+            body = make_explicit_sum(ctx, it->index, body);
+        else if (it->mode == SumMode::NoSum)
+            body = make_no_sum(ctx, it->index, body);
+    }
+    return body;
+}
+
+} // namespace
+
+auto raise(Context& ctx, Nf const& nf) -> Expr const*
+{
+    if (nf.terms.empty())
+        return make_scalar(ctx, Rational{0});
+    Expr const* acc = nullptr;
+    for (auto const& t: nf.terms)
+    {
+        auto const* term = raise_term(ctx, t);
+        acc = acc ? make_sum(ctx, acc, term) : term;
+    }
+    return acc;
+}
+
 } // namespace tender::nf

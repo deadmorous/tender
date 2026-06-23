@@ -929,3 +929,78 @@ TEST(CanonicalizeNf, DifferentialVsOldCanon)
         EXPECT_TRUE(equal(*via_raw, *via_canon)) << "corpus #" << n;
     }
 }
+
+// ---- raise round-trip (C12) --------------------------------------------
+
+namespace
+{
+// canonicalize_nf ∘ raise == id on canonical Nfs (the idempotence property).
+auto roundtrips(Context& ctx, Expr const* e) -> bool
+{
+    auto const* nf1 = canonicalize_nf(ctx, e);
+    auto const* nf2 = canonicalize_nf(ctx, raise(ctx, *nf1));
+    return equal(*nf1, *nf2);
+}
+} // namespace
+
+TEST(Raise, EmptyNfIsZero)
+{
+    // a − a → empty Nf → raises to the literal 0.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* nf = canonicalize_nf(ctx, make_difference(ctx, a, a));
+    ASSERT_TRUE(nf->terms.empty());
+    auto const* e = raise(ctx, *nf);
+    ASSERT_TRUE(std::holds_alternative<ScalarLiteral>(e->node));
+    EXPECT_EQ(std::get<ScalarLiteral>(e->node).value, Rational{0});
+}
+
+TEST(Raise, RoundTripCorpus)
+{
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto const* A = atomr(ctx, "A", 2);
+    auto const* B = atomr(ctx, "B", 2);
+    auto const* C = atomr(ctx, "C", 2);
+    CountableIndex i{ctx.alloc_index_id()};
+    auto sc = [&](int n, Expr const* x)
+    { return make_tensor_product(ctx, make_scalar(ctx, Rational{n}), x); };
+
+    std::vector<Expr const*> corpus = {
+        a,                                                // bare atom
+        sc(2, a),                                         // 2a
+        make_negate(ctx, a),                              // −a
+        sc(-2, a),                                        // −2a
+        make_scalar(ctx, Rational{5}),                    // pure scalar term
+        make_difference(ctx, make_sum(ctx, a, b), a),     // a+b−a → b
+        make_dot(ctx, a, b),                              // scalar contraction
+        make_tensor_product(ctx, make_dot(ctx, a, b), C), // wedged scalar
+        make_cross(ctx, a, b),                            // cross
+        make_tensor_product(ctx, make_cross(ctx, a, b), C), // juxtaposed cross
+        make_dot(ctx, A, make_sum(ctx, b, c)),              // Paren
+        make_trace(ctx, A),                                 // unary scalar
+        make_transpose(ctx, A),                             // unary tensor
+        make_vector_invariant(ctx, A),                      // vec
+        make_dot(ctx, make_dot(ctx, A, B), a),              // 3-factor chain
+        make_sum(ctx, a, make_difference(ctx, sc(2, b), make_trace(ctx, A))),
+        make_tensor_product( // a^i b_i (implicit Default)
+            ctx,
+            ivec(ctx, "a", Level::Upper, i),
+            ivec(ctx, "b", Level::Lower, i)),
+        make_explicit_sum( // Σ_i a_i (Sum mode)
+            ctx,
+            i,
+            ivec(ctx, "a", Level::Lower, i)),
+        make_no_sum( // NoSum_i a^i b_i (NoSum mode)
+            ctx,
+            i,
+            make_tensor_product(
+                ctx,
+                ivec(ctx, "a", Level::Upper, i),
+                ivec(ctx, "b", Level::Lower, i))),
+    };
+    for (std::size_t n = 0; n < corpus.size(); ++n)
+        EXPECT_TRUE(roundtrips(ctx, corpus[n])) << "corpus #" << n;
+}

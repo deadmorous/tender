@@ -273,6 +273,19 @@ check.
       at render time.  16 golden tests (`tests/nf_render_test.cpp`).  Suite
       green at 627.
 - C12 `raise` `Nf → Expr`; round-trip tests (`lower ∘ raise = id`).
+      **DONE** — `raise(Context&, Nf const&) -> Expr const*` in nf_lower.cpp:
+      each term becomes the ⊗-product of its raised factors (scalars then
+      tensors) with the coefficient as a leading literal / `Negate` and the
+      `Sum` / `NoSum` overrides as head binders; an `Atom` re-wraps its stored
+      `TensorObject` (traits + slots preserved), composites rebuild left-
+      associated (the interface theorem makes bracketing immaterial), a `Paren`
+      raises its sub-`Nf`; an empty `Nf` → literal `0`.  A `Default` bound index
+      stays **implicit** (its repeated slot ids carry the sum, re-detected by
+      the realm rule on lowering) — no binder emitted, which is exactly what
+      makes the round-trip close.  Verified by `canonicalize_nf(raise(nf)) ==
+      nf` over a 19-entry corpus spanning every factor kind, sign/coeff shape,
+      the three summation modes, a Paren, and a 3-factor contraction chain
+      (`tests/nf_lower_test.cpp` Raise.*).  Suite green at 629.
 
 **Stage 4 — adopt under the public API (the flip; the one non-additive stage).**
 - C13 `canonicalize := raise ∘ lower`; update affected canon-shape assertions in
@@ -324,10 +337,12 @@ canonicalize_nf(canonicalize(e))`) is green over a corpus, and
 `nf_canon_bench` lands.  Suite green at 611.  **Stage 3 started**: C11 done —
 `render_nf_latex` renders the all-`*` form in the existing LaTeX conventions
 (shared leaf helpers extracted; Default bound indices render implicitly,
-Sum/NoSum get `\sum`/`\cancel{\sum}`).  Suite green at 627.  Next action:
-Stage 3 / C12 (`raise` Nf → Expr; round-trip `lower ∘ raise = id`), which
-unlocks a stronger render-level differential and sets up the C13 flip
-(`canonicalize := raise ∘ lower`).
+Sum/NoSum get `\sum`/`\cancel{\sum}`).  **Stage 3 complete**: C12 done —
+`raise` rebuilds an `Expr` from an `Nf` (Default indices stay implicit), and
+`canonicalize_nf(raise(nf)) == nf` is green over a 19-entry corpus.  Suite
+green at 629.  Next action: Stage 4 / C13 — the flip: `canonicalize :=
+raise ∘ lower` under the public API, updating affected canon-shape assertions
+in one focused commit, with the feasibility examples as the acceptance gate.
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with
