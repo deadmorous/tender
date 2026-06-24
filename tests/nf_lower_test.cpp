@@ -1078,3 +1078,19 @@ TEST(NfSymmetry, EpsRepeatedConcreteIndexIsZero)
     auto const* nf = canonicalize_nf(ctx, z);
     EXPECT_TRUE(nf->terms.empty());
 }
+
+// ---- double-dot fence distribution (C13c) ------------------------------
+
+TEST(CanonicalizeNf, DoubleDotOfDyadsExpands)
+{
+    // (a⊗b):(c⊗d) → (a·c)(b·d): two scalar dots, no ⊗ buried in a `:` operand.
+    Context ctx;
+    auto const* e = make_ddot(
+        ctx,
+        make_tensor_product(ctx, atom(ctx, "a"), atom(ctx, "b")),
+        make_tensor_product(ctx, atom(ctx, "c"), atom(ctx, "d")));
+    auto const* nf = canonicalize_nf(ctx, e);
+    ASSERT_EQ(nf->terms.size(), 1u);
+    EXPECT_EQ(nf->terms[0].scalars.size(), 2u); // (a·c) and (b·d)
+    EXPECT_TRUE(nf->terms[0].tensors.empty());
+}

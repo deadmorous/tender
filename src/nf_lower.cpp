@@ -423,10 +423,15 @@ struct Dummy final
 auto lower_term(Context& ctx, SignedExpr const& term) -> Term
 {
     // 1. Strip explicit head binders, then push contractions through ⊗ fences
-    //    (never over sums).  distribute_contraction iterates to a fixpoint.
+    //    so no ⊗ stays buried in a contraction operand (the all-`*` model needs
+    //    flat factors).  A double dot of dyads is expanded by definition
+    //    (`(a⊗b):(c⊗d) → (a·c)(b·d)`), then the single contractions `·` / `×`
+    //    are pushed through their adjacent ⊗ leg; both iterate to a fixpoint
+    //    and never distribute over a genuine sum.
     std::vector<RawBinder> binders;
     auto const* body = strip_binders(term.body, binders);
-    auto const* distributed = steps::distribute_contraction(ctx, body);
+    auto const* distributed =
+        steps::distribute_contraction(ctx, steps::expand_double_dot(ctx, body));
 
     // 2. Census the free index occurrences (for mode classification), and
     //    collect the term's bound indices:
