@@ -59,4 +59,28 @@ struct NfBinding final
 [[nodiscard]] auto match_term(Term const& pat, Term const& tgt, NfBinding& bnd)
     -> bool;
 
+// A successful *partial* match of a pattern term against a target term: the
+// pattern's factors matched a sub-multiset of the target's scalars and a
+// contiguous sub-run of its tensors, and its bound indices bound a subset of
+// the target's bound dummies.  `leftover` is what remains of the target term
+// once the matched pattern instance is removed — the carried-through factors,
+// the surviving bound dummies, and `coeff = tgt.coeff / pat.coeff`. `tensor_at`
+// is the offset in the target's tensor sequence where the matched run sat, i.e.
+// where an instantiated RHS must be spliced back in (⊗ is non-commutative).
+struct PartialMatch final
+{
+    NfBinding binding;
+    Term leftover;
+    std::size_t tensor_at = 0;
+};
+
+// Try to match `pat` as a sub-product of `tgt` (see `PartialMatch`).  Sound
+// with respect to summation: a pattern *bound* index may consume a target dummy
+// only when that dummy occurs in no leftover factor (tearing a live contraction
+// is rejected), and a target dummy a pattern *free* index binds is never
+// consumed (the RHS reintroduces it, so it survives into `leftover.bound`).
+// Returns the match on success, nullopt otherwise.
+[[nodiscard]] auto match_term_partial(Term const& pat, Term const& tgt)
+    -> std::optional<PartialMatch>;
+
 } // namespace tender::nf

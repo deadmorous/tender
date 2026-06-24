@@ -155,6 +155,127 @@ TEST(MatchTerm, DifferentBoundCountFails)
     EXPECT_FALSE(match_term(pat, tgt, bnd));
 }
 
+// ---- partial sub-product matching ------------------------------------------
+
+TEST(MatchTermPartial, ContractionInsideLargerTerm)
+{
+    // Target: Σ_p Σ_q δ^p_m δ^p_n δ^q_r δ^q_s.  The δ-contraction pattern
+    // matches one of the two independent contractions, leaving the other as
+    // leftover.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    CountableIndex r{ctx.alloc_index_id()};
+    CountableIndex s{ctx.alloc_index_id()};
+
+    Term const pat = contraction_term(ctx, sp, a, b);
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex q{ctx.alloc_index_id()};
+    auto const* dbl = make_explicit_sum(
+        ctx,
+        p,
+        make_explicit_sum(
+            ctx,
+            q,
+            make_tensor_product(
+                ctx,
+                make_tensor_product(
+                    ctx, delta_ul(ctx, sp, p, m), delta_ul(ctx, sp, p, n)),
+                make_tensor_product(
+                    ctx, delta_ul(ctx, sp, q, r), delta_ul(ctx, sp, q, s)))));
+    Term const tgt = only_term(to_nf(ctx, dbl));
+    ASSERT_EQ(tgt.scalars.size(), 4u);
+    ASSERT_EQ(tgt.bound.size(), 2u);
+
+    auto pm = match_term_partial(pat, tgt);
+    ASSERT_TRUE(pm.has_value());
+    EXPECT_EQ(pm->leftover.scalars.size(), 2u); // the other contraction
+    EXPECT_EQ(pm->leftover.bound.size(), 1u);   // its dummy survives
+    EXPECT_TRUE(pm->leftover.coeff == Rational{1});
+}
+
+TEST(MatchTermPartial, SharedDummyInLeftoverRejected)
+{
+    // Target: Σ_p δ^p_m δ^p_n δ^p_r — one dummy across three factors. Consuming
+    // p for a two-factor pattern would leave p dangling in the third factor, so
+    // the partial match must be rejected.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    CountableIndex r{ctx.alloc_index_id()};
+
+    Term const pat = contraction_term(ctx, sp, a, b);
+    CountableIndex p{ctx.alloc_index_id()};
+    auto const* triple = make_explicit_sum(
+        ctx,
+        p,
+        make_tensor_product(
+            ctx,
+            make_tensor_product(
+                ctx, delta_ul(ctx, sp, p, m), delta_ul(ctx, sp, p, n)),
+            delta_ul(ctx, sp, p, r)));
+    Term const tgt = only_term(to_nf(ctx, triple));
+    ASSERT_EQ(tgt.bound.size(), 1u);
+
+    EXPECT_FALSE(match_term_partial(pat, tgt).has_value());
+}
+
+TEST(MatchTermPartial, WholeTermLeftoverIsUnit)
+{
+    // When the pattern is the whole term, the leftover is the empty unit.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    Term const pat = contraction_term(ctx, sp, a, b);
+    Term const tgt = contraction_term(ctx, sp, m, n);
+
+    auto pm = match_term_partial(pat, tgt);
+    ASSERT_TRUE(pm.has_value());
+    EXPECT_TRUE(pm->leftover.scalars.empty());
+    EXPECT_TRUE(pm->leftover.tensors.empty());
+    EXPECT_TRUE(pm->leftover.bound.empty());
+    EXPECT_TRUE(pm->leftover.coeff == Rational{1});
+}
+
+TEST(MatchTermPartial, LeftoverCarriesCoeffRatio)
+{
+    // 2 · (δ-contraction): the leftover carries the coefficient 2.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    Term const pat = contraction_term(ctx, sp, a, b);
+    CountableIndex p{ctx.alloc_index_id()};
+    auto const* scaled = make_tensor_product(
+        ctx,
+        make_scalar(ctx, Rational{2}),
+        make_explicit_sum(
+            ctx,
+            p,
+            make_tensor_product(
+                ctx, delta_ul(ctx, sp, p, m), delta_ul(ctx, sp, p, n))));
+    Term const tgt = only_term(to_nf(ctx, scaled));
+    ASSERT_TRUE(tgt.coeff == Rational{2});
+
+    auto pm = match_term_partial(pat, tgt);
+    ASSERT_TRUE(pm.has_value());
+    EXPECT_TRUE(pm->leftover.coeff == Rational{2});
+    EXPECT_TRUE(pm->leftover.scalars.empty());
+}
+
 // ---- factor matching -------------------------------------------------------
 
 TEST(MatchFactor, SubtreeVarBindsAnyFactor)

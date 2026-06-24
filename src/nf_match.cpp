@@ -4,6 +4,7 @@
 #include <tender/expr.hpp> // TensorObject, SlotBinding
 
 #include <functional>
+#include <set>
 
 using namespace mpk::mix;
 
@@ -256,6 +257,195 @@ auto match_nf(Nf const* pat, Nf const* tgt, NfBinding& bnd) -> bool
     return true;
 }
 
+// ---- index occurrence (for partial-match soundness) ------------------------
+
+void collect_nf_ids(Nf const* nf, std::set<int>& out);
+
+void collect_factor_ids(Factor const* f, std::set<int>& out)
+{
+    visit(
+        Overloads{
+            [&](Atom const& a)
+            {
+                for (auto const& s: a.obj.slots)
+                    if (s.index)
+                        if (auto const* ci =
+                                std::get_if<CountableIndex>(&*s.index))
+                            out.insert(ci->id);
+            },
+            [&](Contraction const& c)
+            {
+                for (auto const* x: c.factors)
+                    collect_factor_ids(x, out);
+            },
+            [&](Cross const& c)
+            {
+                for (auto const* x: c.factors)
+                    collect_factor_ids(x, out);
+            },
+            [&](Paren const& p) { collect_nf_ids(p.body, out); },
+            [&](Unary const& u) { collect_factor_ids(u.operand, out); },
+            [&](Div const& d)
+            {
+                collect_nf_ids(d.num, out);
+                collect_nf_ids(d.den, out);
+            },
+        },
+        *f);
+}
+
+void collect_nf_ids(Nf const* nf, std::set<int>& out)
+{
+    if (!nf)
+        return;
+    for (auto const& t: nf->terms)
+    {
+        for (auto const& b: t.bound)
+            out.insert(b.index.id);
+        for (auto const* f: t.scalars)
+            collect_factor_ids(f, out);
+        for (auto const* f: t.tensors)
+            collect_factor_ids(f, out);
+    }
+}
+
+auto factor_ids(std::vector<Factor const*> const& fs) -> std::set<int>
+{
+    std::set<int> out;
+    for (auto const* f: fs)
+        collect_factor_ids(f, out);
+    return out;
+}
+
 } // namespace
+
+auto match_term_partial(Term const& pat, Term const& tgt)
+    -> std::optional<PartialMatch>
+{
+    if (pat.coeff == Rational{0})
+        return std::nullopt;
+    if (pat.tensors.size() > tgt.tensors.size()
+        || pat.scalars.size() > tgt.scalars.size()
+        || pat.bound.size() > tgt.bound.size())
+        return std::nullopt;
+
+    std::set<int> pat_bound_ids;
+    for (auto const& b: pat.bound)
+        pat_bound_ids.insert(b.index.id);
+
+    std::size_t const ptn = pat.tensors.size();
+    std::size_t const ttn = tgt.tensors.size();
+
+    // Reconcile the bound indices and assemble the leftover, given a completed
+    // factor binding (`bnd`), the chosen tensor offset `k`, and which target
+    // scalars the pattern consumed (`used`).  Returns the `PartialMatch` if the
+    // assignment is sound, else nullopt (caller backtracks).
+    auto finalize = [&](std::size_t k,
+                        std::vector<bool> const& used,
+                        NfBinding const& bnd) -> std::optional<PartialMatch>
+    {
+        std::vector<bool> consumed(tgt.bound.size(), false);
+        std::set<int> consumed_ids;
+        for (auto const& pb: pat.bound)
+        {
+            auto a = bnd.find(pb.index.id);
+            if (!a)
+                return std::nullopt;
+            auto const* ci = std::get_if<CountableIndex>(&*a);
+            if (!ci)
+                return std::nullopt;
+            bool found = false;
+            for (std::size_t j = 0; j < tgt.bound.size(); ++j)
+            {
+                if (tgt.bound[j].index.id != ci->id)
+                    continue;
+                if (consumed[j] || tgt.bound[j].mode != pb.mode)
+                    return std::nullopt;
+                consumed[j] = true;
+                consumed_ids.insert(ci->id);
+                found = true;
+                break;
+            }
+            if (!found)
+                return std::nullopt;
+        }
+
+        // A pattern *free* index must not capture a consumed target dummy — the
+        // RHS reintroduces it, so it must survive.
+        for (auto const& [pid, target]: bnd.indices)
+        {
+            if (pat_bound_ids.count(pid))
+                continue;
+            if (auto const* ci = std::get_if<CountableIndex>(&target))
+                if (consumed_ids.count(ci->id))
+                    return std::nullopt;
+        }
+
+        PartialMatch pm;
+        pm.binding = bnd;
+        pm.tensor_at = k;
+        pm.leftover.coeff = tgt.coeff / pat.coeff;
+        for (std::size_t j = 0; j < tgt.scalars.size(); ++j)
+            if (!used[j])
+                pm.leftover.scalars.push_back(tgt.scalars[j]);
+        for (std::size_t j = 0; j < ttn; ++j)
+            if (j < k || j >= k + ptn)
+                pm.leftover.tensors.push_back(tgt.tensors[j]);
+        for (std::size_t j = 0; j < tgt.bound.size(); ++j)
+            if (!consumed[j])
+                pm.leftover.bound.push_back(tgt.bound[j]);
+
+        // A consumed dummy that still occurs in a leftover factor would mean we
+        // tore apart a live contraction — reject.
+        std::set<int> left_ids = factor_ids(pm.leftover.scalars);
+        for (int id: factor_ids(pm.leftover.tensors))
+            left_ids.insert(id);
+        for (int id: consumed_ids)
+            if (left_ids.count(id))
+                return std::nullopt;
+
+        return pm;
+    };
+
+    for (std::size_t k = 0; k + ptn <= ttn; ++k)
+    {
+        NfBinding b0;
+        bool ok = true;
+        for (std::size_t i = 0; i < ptn && ok; ++i)
+            if (!match_factor(pat.tensors[i], tgt.tensors[k + i], b0))
+                ok = false;
+        if (!ok)
+            continue;
+
+        std::vector<bool> used(tgt.scalars.size(), false);
+        std::optional<PartialMatch> result;
+        std::function<bool(std::size_t, NfBinding)> rec =
+            [&](std::size_t i, NfBinding acc) -> bool
+        {
+            if (i == pat.scalars.size())
+            {
+                result = finalize(k, used, acc);
+                return result.has_value();
+            }
+            for (std::size_t j = 0; j < tgt.scalars.size(); ++j)
+            {
+                if (used[j])
+                    continue;
+                NfBinding trial = acc;
+                if (match_factor(pat.scalars[i], tgt.scalars[j], trial))
+                {
+                    used[j] = true;
+                    if (rec(i + 1, std::move(trial)))
+                        return true;
+                    used[j] = false;
+                }
+            }
+            return false;
+        };
+        if (rec(0, b0))
+            return result;
+    }
+    return std::nullopt;
+}
 
 } // namespace tender::nf
