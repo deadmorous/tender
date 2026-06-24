@@ -537,16 +537,94 @@ auto collect_terms(std::vector<Term> terms) -> std::vector<Term>
     return out;
 }
 
+// ---- binder sinking (keep the additive layer above the binders) --------
+
+namespace
+{
+
+// Rebuild a binder of the same kind as `binder` around `body`.
+auto rewrap_binder(Context& ctx, Expr const* binder, Expr const* body)
+    -> Expr const*
+{
+    if (auto const* s = std::get_if<ExplicitSum>(&binder->node))
+        return make_explicit_sum(ctx, s->index, body, s->bound);
+    auto const& s = std::get<NoSum>(binder->node);
+    return make_no_sum(ctx, s.index, body);
+}
+
+// Push a binder over an *additive* body to each addend — summation is linear:
+//   Σ_i(X + Y) → Σ_iX + Σ_iY,  Σ_i(X − Y) → Σ_iX − Σ_iY,  Σ_i(−X) → −Σ_iX.
+// A binder over a non-additive body (a product / contraction / atom) wraps it
+// unchanged.  `binder` carries the kind + index to re-emit.
+auto distribute_binder(Context& ctx, Expr const* binder, Expr const* body)
+    -> Expr const*
+{
+    if (auto const* s = std::get_if<Sum>(&body->node))
+        return make_sum(
+            ctx,
+            distribute_binder(ctx, binder, s->left),
+            distribute_binder(ctx, binder, s->right));
+    if (auto const* d = std::get_if<Difference>(&body->node))
+        return make_difference(
+            ctx,
+            distribute_binder(ctx, binder, d->left),
+            distribute_binder(ctx, binder, d->right));
+    if (auto const* n = std::get_if<Negate>(&body->node))
+        return make_negate(ctx, distribute_binder(ctx, binder, n->operand));
+    return rewrap_binder(ctx, binder, body);
+}
+
+// Sink every summation binder below the additive layer, so the result is a
+// (possibly nested) Sum/Difference/Negate tree of binder-headed *terms* — the
+// shape `additive_flatten` needs to split a `Σ_i(X+Y)` into separate terms.
+// Binders buried inside a product/contraction are left in place (they become a
+// term's bound set or a `Paren`).
+auto sink_binders(Context& ctx, Expr const* e) -> Expr const*
+{
+    return visit(
+        Overloads{
+            [&](Sum const& s) -> Expr const*
+            {
+                return make_sum(
+                    ctx, sink_binders(ctx, s.left), sink_binders(ctx, s.right));
+            },
+            [&](Difference const& d) -> Expr const*
+            {
+                return make_difference(
+                    ctx, sink_binders(ctx, d.left), sink_binders(ctx, d.right));
+            },
+            [&](Negate const& n) -> Expr const*
+            { return make_negate(ctx, sink_binders(ctx, n.operand)); },
+            [&](ExplicitSum const&) -> Expr const*
+            {
+                auto const& s = std::get<ExplicitSum>(e->node);
+                return distribute_binder(ctx, e, sink_binders(ctx, s.body));
+            },
+            [&](NoSum const&) -> Expr const*
+            {
+                auto const& s = std::get<NoSum>(e->node);
+                return distribute_binder(ctx, e, sink_binders(ctx, s.body));
+            },
+            // Products / contractions / atoms: a binder inside stays put.
+            [&](auto const&) -> Expr const* { return e; },
+        },
+        *e);
+}
+
+} // namespace
+
 // ---- entry point: lower `Expr → Nf` (C10) ------------------------------
 
 auto canonicalize_nf(Context& ctx, Expr const* e) -> Nf const*
 {
-    // Expand the outermost additive layer into signed terms, lower each
-    // (multiplicative flatten + encapsulate + region placement + summation
-    // resolution), then collect like terms into the canonical term set.  A
-    // genuine-sum factor recurses back through `encapsulate` → `make_paren`.
+    // Sink summation binders below the additive layer (`Σ_i(X+Y) → Σ_iX +
+    // Σ_iY`), so the outermost layer is a sum of binder-headed terms.  Then
+    // expand that additive layer into signed terms, lower each (multiplicative
+    // flatten + encapsulate + region placement + summation resolution), and
+    // collect like terms.  A genuine-sum factor *inside* a product recurses
+    // back through `encapsulate` → `make_paren`.
     std::vector<Term> lowered;
-    for (auto const& st: additive_flatten(e))
+    for (auto const& st: additive_flatten(sink_binders(ctx, e)))
         lowered.push_back(lower_term(ctx, st));
     return make_nf(ctx, collect_terms(std::move(lowered)));
 }

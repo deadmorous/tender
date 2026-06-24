@@ -1094,3 +1094,22 @@ TEST(CanonicalizeNf, DoubleDotOfDyadsExpands)
     EXPECT_EQ(nf->terms[0].scalars.size(), 2u); // (a·c) and (b·d)
     EXPECT_TRUE(nf->terms[0].tensors.empty());
 }
+
+// ---- binder sinking over the additive layer (C13) ----------------------
+
+TEST(CanonicalizeNf, BinderDistributesOverSum)
+{
+    // Σ_i (a_i + b_i) → Σ_i a_i + Σ_i b_i: two terms, not one Paren-wrapped sum
+    // (summation is linear; the additive layer stays above the binders).
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* e = make_explicit_sum(
+        ctx,
+        i,
+        make_sum(
+            ctx,
+            ivec(ctx, "a", Level::Lower, i),
+            ivec(ctx, "b", Level::Lower, i)));
+    auto const* nf = canonicalize_nf(ctx, e);
+    EXPECT_EQ(nf->terms.size(), 2u);
+}
