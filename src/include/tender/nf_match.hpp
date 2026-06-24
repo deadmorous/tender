@@ -93,4 +93,20 @@ struct PartialMatch final
 [[nodiscard]] auto instantiate_nf(Context&, Nf const* rhs, NfBinding const& bnd)
     -> Nf const*;
 
+// Sub-chain rewrite: when the rule's LHS is a single `Contraction`/`Cross`
+// chain factor (no scalars/bound), try to match its factor sequence as a
+// contiguous sub-run inside one of `tgt`'s tensor chain factors of the same
+// kind, and — on the first match — replace that run in place with the
+// instantiated RHS chain, returning the rewritten term.  This reaches a rewrite
+// *inside* a flat chain (e.g. `I×x = x×I` on the `I×b` of `a×I×b`) that the
+// term-level partial matcher cannot, because the flat `Cross`/`Contraction`
+// drops the bracketing that used to expose the sub-run as its own node.  `rhs`
+// must likewise be a single same-kind chain factor.  Returns nullopt when the
+// rule is not a chain rule or no sub-run matches.
+[[nodiscard]] auto rewrite_subchain(
+    Context&,
+    Term const& lhs_term,
+    Nf const* rhs,
+    Term const& tgt) -> std::optional<Term>;
+
 } // namespace tender::nf

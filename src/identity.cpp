@@ -491,11 +491,20 @@ auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
                 }
                 continue;
             }
+        // A chain rule (single Contraction/Cross factor LHS) can still rewrite
+        // a contiguous sub-run inside one of this term's chain factors.
+        if (!fired)
+            if (auto rt = nf::rewrite_subchain(ctx, lhs_term, rhs, tterm))
+            {
+                fired = true;
+                out.push_back(std::move(*rt));
+                continue;
+            }
         out.push_back(tterm);
     }
 
-    // With no flat-form match, fall back to the binary-tree matcher, which can
-    // still reach a contiguous run inside a `Contraction` / `Cross` factor.  On
+    // With no flat-form match, fall back to the binary-tree matcher (a
+    // multi-term LHS, or a match nested deeper than a term / chain factor).  On
     // a match the spliced `Nf` is raised, re-canonicalized (re-α-renaming the
     // freshened RHS dummies, merging like terms), and implicitized so the
     // explicit binders the normal form carries do not leak into the user's

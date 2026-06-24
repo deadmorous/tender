@@ -276,6 +276,49 @@ TEST(MatchTermPartial, LeftoverCarriesCoeffRatio)
     EXPECT_TRUE(pm->leftover.scalars.empty());
 }
 
+// ---- sub-chain rewrite -----------------------------------------------------
+
+TEST(RewriteSubchain, CommuteInsideCrossChain)
+{
+    // I × x = x × I applied inside a × I × b (a flat Cross chain [a, I, b]):
+    // the I × b sub-run rewrites to b × I, giving a × b × I.
+    Context ctx;
+    auto const* a = vrank1(ctx, "a");
+    auto const* b = vrank1(ctx, "b");
+    auto const* x = vrank1(ctx, "x"); // subtree variable
+    auto const* I = make_identity(ctx);
+
+    Term const pat = only_term(to_nf(ctx, make_cross(ctx, I, x)));
+    Nf const* rhs = to_nf(ctx, make_cross(ctx, x, I));
+    Term const tgt =
+        only_term(to_nf(ctx, make_cross(ctx, make_cross(ctx, a, I), b)));
+
+    auto rt = rewrite_subchain(ctx, pat, rhs, tgt);
+    ASSERT_TRUE(rt.has_value());
+
+    std::vector<Term> one{*rt};
+    auto const* got = raise(ctx, *make_nf(ctx, std::move(one)));
+    auto const* want = make_cross(ctx, a, make_cross(ctx, b, I)); // a × b × I
+    EXPECT_TRUE(algebraic_eq(ctx, got, want));
+}
+
+TEST(RewriteSubchain, NonChainRuleDeclines)
+{
+    // A δ-contraction is not a single chain factor, so it is not a chain rule.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    Term const pat = contraction_term(ctx, sp, a, b);
+    Nf const* rhs = to_nf(ctx, delta_ul(ctx, sp, a, b));
+    Term const tgt = contraction_term(ctx, sp, m, n);
+
+    EXPECT_FALSE(rewrite_subchain(ctx, pat, rhs, tgt).has_value());
+}
+
 // ---- factor matching -------------------------------------------------------
 
 TEST(MatchFactor, SubtreeVarBindsAnyFactor)

@@ -561,4 +561,201 @@ auto instantiate_nf(Context& ctx, Nf const* rhs, NfBinding const& bnd)
     return inst_nf(ctx, rhs, bnd);
 }
 
+// ---- sub-chain rewrite -----------------------------------------------------
+
+namespace
+{
+
+// A view of a `Contraction` / `Cross` factor as a chain: its factor sequence
+// and (for a contraction) its join ops.  `ops` is null for a cross (all `×`).
+struct ChainView final
+{
+    bool is_cross;
+    std::vector<Factor const*> const* factors;
+    std::vector<COp> const* ops;
+};
+
+auto as_chain(Factor const* f) -> std::optional<ChainView>
+{
+    if (auto const* c = std::get_if<Cross>(&f->node))
+        return ChainView{true, &c->factors, nullptr};
+    if (auto const* c = std::get_if<Contraction>(&f->node))
+        return ChainView{false, &c->factors, &c->ops};
+    return std::nullopt;
+}
+
+// A rule side qualifies as a chain rule iff it is a single term with no
+// scalars, no bound indices, and exactly one tensor that is a `Contraction` /
+// `Cross`.
+auto chain_rule_side(Term const& t) -> std::optional<ChainView>
+{
+    if (!t.scalars.empty() || !t.bound.empty() || t.tensors.size() != 1)
+        return std::nullopt;
+    return as_chain(t.tensors.front());
+}
+
+// A resolved chain rule: the pattern and replacement factor/op sequences (the
+// op vectors are null for a cross).
+struct ChainRule final
+{
+    bool is_cross;
+    std::vector<Factor const*> const* pat;
+    std::vector<COp> const* pat_ops;
+    std::vector<Factor const*> const* rep;
+    std::vector<COp> const* rep_ops;
+};
+
+// Splice the instantiated replacement chain into `C` at the run `[k, k+pn)`,
+// preserving the boundary ops that joined the run to the rest of the chain
+// (`CO` is the original ops, null for a cross).
+auto splice_chain(
+    Context& ctx,
+    ChainRule const& cr,
+    std::vector<Factor const*> const& C,
+    std::vector<COp> const* CO,
+    std::size_t k,
+    NfBinding const& b) -> Factor const*
+{
+    std::size_t const pn = cr.pat->size();
+    std::vector<Factor const*> fs;
+    fs.insert(fs.end(), C.begin(), C.begin() + static_cast<std::ptrdiff_t>(k));
+    for (auto const* rf: *cr.rep)
+        fs.push_back(inst_factor(ctx, rf, b, {}));
+    fs.insert(
+        fs.end(), C.begin() + static_cast<std::ptrdiff_t>(k + pn), C.end());
+    if (cr.is_cross)
+        return make_cross(ctx, std::move(fs));
+
+    std::vector<COp> ops;
+    ops.insert(
+        ops.end(), CO->begin(), CO->begin() + static_cast<std::ptrdiff_t>(k));
+    if (cr.rep_ops)
+        ops.insert(ops.end(), cr.rep_ops->begin(), cr.rep_ops->end());
+    ops.insert(
+        ops.end(),
+        CO->begin() + static_cast<std::ptrdiff_t>(k + pn - 1),
+        CO->end());
+    return make_contraction(ctx, std::move(fs), std::move(ops));
+}
+
+// Rewrite the first sub-chain match within factor `f`, recursing into nested
+// chain factors: the encapsulation keeps a `Cross`/`Contraction` chain as
+// nested binary factors, so the `I × b` run hides one level down inside `a × (I
+// × b)`. Returns the rewritten factor, or nullptr if nothing matched.
+auto rewrite_in_factor(Context& ctx, ChainRule const& cr, Factor const* f)
+    -> Factor const*
+{
+    std::size_t const pn = cr.pat->size();
+
+    // Match the pattern as a contiguous run at this chain level.
+    if (auto cv = as_chain(f); cv && cv->is_cross == cr.is_cross)
+    {
+        auto const& C = *cv->factors;
+        for (std::size_t k = 0; pn <= C.size() && k + pn <= C.size(); ++k)
+        {
+            NfBinding b;
+            bool ok = true;
+            for (std::size_t i = 0; i < pn && ok; ++i)
+                if (!match_factor((*cr.pat)[i], C[k + i], b))
+                    ok = false;
+            if (ok && !cr.is_cross)
+                for (std::size_t i = 0; i + 1 < pn && ok; ++i)
+                    if ((*cr.pat_ops)[i] != (*cv->ops)[k + i])
+                        ok = false;
+            if (ok)
+                return splice_chain(ctx, cr, C, cv->ops, k, b);
+        }
+    }
+
+    // Otherwise recurse into the factor's children, rewriting the first hit.
+    return visit(
+        Overloads{
+            [&](Atom const&) -> Factor const* { return nullptr; },
+            [&](Contraction const& c) -> Factor const*
+            {
+                for (std::size_t i = 0; i < c.factors.size(); ++i)
+                    if (auto const* nw =
+                            rewrite_in_factor(ctx, cr, c.factors[i]))
+                    {
+                        auto fs = c.factors;
+                        fs[i] = nw;
+                        return make_contraction(ctx, std::move(fs), c.ops);
+                    }
+                return nullptr;
+            },
+            [&](Cross const& c) -> Factor const*
+            {
+                for (std::size_t i = 0; i < c.factors.size(); ++i)
+                    if (auto const* nw =
+                            rewrite_in_factor(ctx, cr, c.factors[i]))
+                    {
+                        auto fs = c.factors;
+                        fs[i] = nw;
+                        return make_cross(ctx, std::move(fs));
+                    }
+                return nullptr;
+            },
+            [&](Unary const& u) -> Factor const*
+            {
+                if (auto const* nw = rewrite_in_factor(ctx, cr, u.operand))
+                    return make_unary(ctx, u.op, nw);
+                return nullptr;
+            },
+            [&](Paren const&) -> Factor const* { return nullptr; },
+            [&](Div const&) -> Factor const* { return nullptr; },
+        },
+        *f);
+}
+
+} // namespace
+
+auto rewrite_subchain(
+    Context& ctx,
+    Term const& lhs_term,
+    Nf const* rhs,
+    Term const& tgt) -> std::optional<Term>
+{
+    auto pat = chain_rule_side(lhs_term);
+    if (!pat)
+        return std::nullopt;
+    if (!rhs || rhs->terms.size() != 1)
+        return std::nullopt;
+    Term const& rhs_term = rhs->terms.front();
+    auto rep = chain_rule_side(rhs_term);
+    if (!rep || rep->is_cross != pat->is_cross)
+        return std::nullopt;
+
+    ChainRule const cr{
+        pat->is_cross, pat->factors, pat->ops, rep->factors, rep->ops};
+
+    auto try_region = [&](std::vector<Factor const*> const& region,
+                          std::size_t& hit) -> Factor const*
+    {
+        for (std::size_t i = 0; i < region.size(); ++i)
+            if (auto const* nw = rewrite_in_factor(ctx, cr, region[i]))
+            {
+                hit = i;
+                return nw;
+            }
+        return nullptr;
+    };
+
+    std::size_t hit = 0;
+    if (auto const* nw = try_region(tgt.tensors, hit))
+    {
+        Term out = tgt;
+        out.coeff = out.coeff * rhs_term.coeff;
+        out.tensors[hit] = nw;
+        return out;
+    }
+    if (auto const* nw = try_region(tgt.scalars, hit))
+    {
+        Term out = tgt;
+        out.coeff = out.coeff * rhs_term.coeff;
+        out.scalars[hit] = nw;
+        return out;
+    }
+    return std::nullopt;
+}
+
 } // namespace tender::nf

@@ -250,6 +250,26 @@ TEST(ApplyIdentity, RepeatedApplicationReducesEachSubProduct)
     EXPECT_TRUE(algebraic_eq(ctx, twice, expected));
 }
 
+TEST(ApplyIdentity, CommuteFiresInsideCrossChain)
+{
+    // I × x = x × I applied to a × I × b: the flat Cross chain [a, I, b] holds
+    // no `I × b` node, but sub-chain matching rewrites the run in place to
+    // reach a × b × I.  (The same payoff the binary-tree fallback gave, now on
+    // the flat form.)
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* x = make_tensor_object(ctx, make_tensor_name("x"), {}, 1);
+    auto const* I = make_identity(ctx);
+    Identity const commute{
+        "I-commute", make_cross(ctx, I, x), make_cross(ctx, x, I)};
+
+    auto const* target = make_cross(ctx, make_cross(ctx, a, I), b);
+    auto const* result = apply_identity(ctx, target, commute);
+    auto const* expected = make_cross(ctx, a, make_cross(ctx, b, I));
+    EXPECT_TRUE(algebraic_eq(ctx, result, expected));
+}
+
 // ---- a real index identity: two-index eps-delta ----------------------------
 
 TEST(ApplyIdentity, EpsDeltaTwoIndex)
