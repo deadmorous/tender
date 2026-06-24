@@ -1,8 +1,10 @@
 #include <tender/nf_egraph.hpp>
 
+#include <tender/derivation.hpp> // steps::canonicalize
 #include <tender/expr.hpp>
 #include <tender/index_space.hpp>
 #include <tender/name.hpp>
+#include <tender/nf_lower.hpp> // canonicalize_nf
 
 #include <gtest/gtest.h>
 
@@ -15,6 +17,16 @@ namespace
 auto vrank1(Context& ctx, char const* n) -> Expr const*
 {
     return make_tensor_object(ctx, make_tensor_name(n), {}, 1);
+}
+
+auto scalar0(Context& ctx, char const* n) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(n), {}, 0);
+}
+
+auto canon_nf(Context& ctx, Expr const* e) -> Nf const*
+{
+    return canonicalize_nf(ctx, steps::canonicalize(ctx, e));
 }
 
 auto delta_ul(Context& ctx, IndexSpace const* sp, IndexAssoc a, IndexAssoc b)
@@ -82,6 +94,58 @@ TEST(NfEGraphCore, MergeUnifiesClasses)
     ASSERT_NE(g.find(c1), g.find(c2));
     g.merge(c1, c2);
     EXPECT_EQ(g.find(c1), g.find(c2));
+}
+
+TEST(NfEGraphExtract, RoundTripsTheCanonicalNf)
+{
+    Context ctx;
+    auto const* a = vrank1(ctx, "a");
+    auto const* b = vrank1(ctx, "b");
+    NfEGraph g(ctx);
+    auto const* e = make_tensor_product(ctx, a, b);
+    auto c = g.add(e);
+    EXPECT_TRUE(equal(g.extract(c), canon_nf(ctx, e)));
+}
+
+TEST(NfEGraphExtract, PicksCheaperFormAfterMerge)
+{
+    Context ctx;
+    auto const* a = vrank1(ctx, "a");
+    auto const* b = vrank1(ctx, "b");
+    auto const* c = vrank1(ctx, "c");
+    NfEGraph g(ctx);
+    auto big = g.add(
+        make_tensor_product(ctx, make_tensor_product(ctx, a, b), c)); // a⊗b⊗c
+    auto small = g.add(a);
+    g.merge(big, small);
+    g.rebuild();
+    // The cheapest representative of the merged class is `a`.
+    EXPECT_TRUE(equal(g.extract(big), canon_nf(ctx, a)));
+}
+
+TEST(NfEGraphRebuild, CongruenceMergesParents)
+{
+    // x / (a + b) and x / (a + c) hold a `Div` whose denominator is the Sum
+    // class of the bracket.  Merging the two bracket classes must, after
+    // rebuild, merge the two divisions (congruence: equal children → equal
+    // node).
+    Context ctx;
+    auto const* x = scalar0(ctx, "x");
+    auto const* a = scalar0(ctx, "a");
+    auto const* b = scalar0(ctx, "b");
+    auto const* c = scalar0(ctx, "c");
+
+    NfEGraph g(ctx);
+    auto e1 = g.add(make_scalar_div(ctx, x, make_sum(ctx, a, b)));
+    auto e2 = g.add(make_scalar_div(ctx, x, make_sum(ctx, a, c)));
+    ASSERT_NE(g.find(e1), g.find(e2));
+
+    auto ab = g.add(make_sum(ctx, a, b));
+    auto ac = g.add(make_sum(ctx, a, c));
+    g.merge(ab, ac);
+    g.rebuild();
+
+    EXPECT_EQ(g.find(e1), g.find(e2));
 }
 
 TEST(NfEGraphCore, ContractionStructureDedups)

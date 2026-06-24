@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace mpk::mix;
@@ -150,6 +151,7 @@ struct NfEGraph::Impl final
     std::vector<EClassId> parent_;
     std::unordered_map<EClassId, EClass> classes_;
     std::unordered_map<NfENode, EClassId, NodeHash, NodeEq> memo_;
+    std::vector<EClassId> worklist_;
 
     explicit Impl(Context& ctx) : ctx_(&ctx)
     {
@@ -274,7 +276,171 @@ struct NfEGraph::Impl final
         ca.parents.insert(
             ca.parents.end(), cb.parents.begin(), cb.parents.end());
         classes_.erase(b);
+        worklist_.push_back(a);
         return a;
+    }
+
+    // ---- congruence ------------------------------------------------------
+
+    void repair(EClassId cls)
+    {
+        auto parents = classes_[cls].parents; // copy: merges mutate classes_
+
+        for (auto const& [pnode, pclass]: parents)
+        {
+            memo_.erase(pnode);
+            memo_[canon_node(pnode)] = find(pclass);
+        }
+
+        std::unordered_map<NfENode, EClassId, NodeHash, NodeEq> deduped;
+        for (auto const& [pnode, pclass]: parents)
+        {
+            NfENode c = canon_node(pnode);
+            if (auto it = deduped.find(c); it != deduped.end())
+                merge(pclass, it->second);
+            deduped[c] = find(pclass);
+        }
+
+        auto& ec = classes_[cls];
+        ec.parents.clear();
+        for (auto& [pnode, pclass]: deduped)
+            ec.parents.emplace_back(pnode, find(pclass));
+    }
+
+    void rebuild()
+    {
+        while (!worklist_.empty())
+        {
+            std::vector<EClassId> todo;
+            todo.swap(worklist_);
+            std::unordered_set<EClassId> seen;
+            for (EClassId c: todo)
+            {
+                c = find(c);
+                if (seen.insert(c).second)
+                    repair(c);
+            }
+        }
+    }
+
+    // ---- extraction ------------------------------------------------------
+
+    // The cheapest e-node per class by total node count (a fixpoint over the
+    // child costs, so cyclic classes converge).
+    auto compute_best() -> std::unordered_map<EClassId, NfENode>
+    {
+        std::unordered_map<EClassId, std::size_t> cost;
+        std::unordered_map<EClassId, NfENode> best;
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            for (auto const& [id, ec]: classes_)
+                for (NfENode const& n: ec.nodes)
+                {
+                    std::size_t c = 1;
+                    bool ok = true;
+                    for (EClassId ch: n.children)
+                    {
+                        auto it = cost.find(find(ch));
+                        if (it == cost.end())
+                        {
+                            ok = false;
+                            break;
+                        }
+                        c += it->second;
+                    }
+                    if (!ok)
+                        continue;
+                    auto it = cost.find(id);
+                    if (it == cost.end() || c < it->second)
+                    {
+                        cost[id] = c;
+                        best[id] = n;
+                        changed = true;
+                    }
+                }
+        }
+        return best;
+    }
+
+    auto reconstruct_nf(
+        EClassId cls,
+        std::unordered_map<EClassId, NfENode> const& best,
+        std::unordered_map<EClassId, Nf const*>& nfmemo,
+        std::unordered_map<EClassId, Factor const*>& fmemo) -> Nf const*;
+
+    auto reconstruct_factor(
+        EClassId cls,
+        std::unordered_map<EClassId, NfENode> const& best,
+        std::unordered_map<EClassId, Nf const*>& nfmemo,
+        std::unordered_map<EClassId, Factor const*>& fmemo) -> Factor const*
+    {
+        cls = find(cls);
+        if (auto it = fmemo.find(cls); it != fmemo.end())
+            return it->second;
+        NfENode const& n = best.at(cls);
+        Context& ctx = *ctx_;
+        auto fac = [&](std::size_t i)
+        { return reconstruct_factor(n.children[i], best, nfmemo, fmemo); };
+        Factor const* r = nullptr;
+        switch (n.kind)
+        {
+            case NfEKind::Atom: r = n.atom; break;
+            case NfEKind::Contraction:
+            {
+                std::vector<Factor const*> fs;
+                for (std::size_t i = 0; i < n.children.size(); ++i)
+                    fs.push_back(fac(i));
+                r = make_contraction(ctx, std::move(fs), n.ops);
+                break;
+            }
+            case NfEKind::Cross:
+            {
+                std::vector<Factor const*> fs;
+                for (std::size_t i = 0; i < n.children.size(); ++i)
+                    fs.push_back(fac(i));
+                r = make_cross(ctx, std::move(fs));
+                break;
+            }
+            case NfEKind::Paren:
+                r = make_paren(
+                    ctx, reconstruct_nf(n.children[0], best, nfmemo, fmemo));
+                break;
+            case NfEKind::Unary: r = make_unary(ctx, n.uop, fac(0)); break;
+            case NfEKind::Div:
+                r = make_div(
+                    ctx,
+                    reconstruct_nf(n.children[0], best, nfmemo, fmemo),
+                    reconstruct_nf(n.children[1], best, nfmemo, fmemo));
+                break;
+            case NfEKind::Term:
+            case NfEKind::Sum: break; // not a factor sort
+        }
+        fmemo.emplace(cls, r);
+        return r;
+    }
+
+    auto reconstruct_term(
+        EClassId cls,
+        std::unordered_map<EClassId, NfENode> const& best,
+        std::unordered_map<EClassId, Nf const*>& nfmemo,
+        std::unordered_map<EClassId, Factor const*>& fmemo) -> Term
+    {
+        NfENode const& n = best.at(find(cls));
+        Term t;
+        t.coeff = n.coeff;
+        t.bound = n.bound;
+        for (std::size_t i = 0; i < n.children.size(); ++i)
+        {
+            Factor const* f =
+                reconstruct_factor(n.children[i], best, nfmemo, fmemo);
+            if (i < n.scalar_count)
+                t.scalars.push_back(f);
+            else
+                t.tensors.push_back(f);
+        }
+        return t;
     }
 
     auto node_count() const -> std::size_t
@@ -282,6 +448,25 @@ struct NfEGraph::Impl final
         return memo_.size();
     }
 };
+
+auto NfEGraph::Impl::reconstruct_nf(
+    EClassId cls,
+    std::unordered_map<EClassId, NfENode> const& best,
+    std::unordered_map<EClassId, Nf const*>& nfmemo,
+    std::unordered_map<EClassId, Factor const*>& fmemo) -> Nf const*
+{
+    cls = find(cls);
+    if (auto it = nfmemo.find(cls); it != nfmemo.end())
+        return it->second;
+    NfENode const& n = best.at(cls);
+    std::vector<Term> terms;
+    terms.reserve(n.children.size());
+    for (EClassId ch: n.children)
+        terms.push_back(reconstruct_term(ch, best, nfmemo, fmemo));
+    Nf const* r = make_nf(*ctx_, std::move(terms));
+    nfmemo.emplace(cls, r);
+    return r;
+}
 
 NfEGraph::NfEGraph(Context& ctx) : impl_(std::make_unique<Impl>(ctx))
 {
@@ -299,6 +484,19 @@ auto NfEGraph::add(Expr const* e) -> EClassId
 {
     return impl_->add_nf(
         canonicalize_nf(*impl_->ctx_, steps::canonicalize(*impl_->ctx_, e)));
+}
+
+void NfEGraph::rebuild()
+{
+    impl_->rebuild();
+}
+
+auto NfEGraph::extract(EClassId id) -> Nf const*
+{
+    auto best = impl_->compute_best();
+    std::unordered_map<EClassId, Nf const*> nfmemo;
+    std::unordered_map<EClassId, Factor const*> fmemo;
+    return impl_->reconstruct_nf(id, best, nfmemo, fmemo);
 }
 
 auto NfEGraph::merge(EClassId a, EClassId b) -> EClassId

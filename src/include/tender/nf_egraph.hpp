@@ -51,8 +51,15 @@ public:
     // Call rebuild() afterwards to restore congruence before querying.
     auto merge(EClassId a, EClassId b) -> EClassId;
 
+    // Restore the congruence invariant after one or more merges.
+    void rebuild();
+
     // Canonical representative of the class containing id.
     [[nodiscard]] auto find(EClassId id) -> EClassId;
+
+    // Cheapest (smallest node-count) representative `Nf` of a class.  Requires
+    // a `Sum`-sort class (an `add`-returned id, or one merged with such).
+    [[nodiscard]] auto extract(EClassId id) -> Nf const*;
 
     // Number of distinct e-classes / e-nodes (diagnostics / tests).
     [[nodiscard]] auto class_count() -> std::size_t;
