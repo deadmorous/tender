@@ -1,6 +1,7 @@
 #include <tender/derivation.hpp>
 
 #include <mpk/mix/util/overloads.hpp>
+#include <tender/nf_lower.hpp>
 #include <tender/rewrite.hpp>
 #include <tender/summation.hpp>
 #include <tender/tensor_order.hpp>
@@ -1448,7 +1449,17 @@ namespace steps
 
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
 {
-    return canon(ctx, float_sums(ctx, materialize(ctx, e, {})), 0);
+    // The flip (vibe 000058 / C13): canonicalize is now `raise ∘ lower` over
+    // the all-`*` normal form `Nf`, replacing the binary-tree `canon`.  The
+    // prep `materialize` (realm-implicit → explicit `ExplicitSum`) +
+    // `float_sums` (binders to term heads) puts the input in the shape
+    // `canonicalize_nf` expects; lowering re-derives implicit summation and the
+    // all-`*` regions, and `raise` rebuilds an `Expr` carrying the same
+    // explicit binders the rest of the `Expr` pipeline reads.  (`canon` /
+    // `canon_sum_stack` are now dead; pruned at C15.)
+    return nf::raise(
+        ctx,
+        *nf::canonicalize_nf(ctx, float_sums(ctx, materialize(ctx, e, {}))));
 }
 
 auto implicitize(Context& ctx, Expr const* e) -> Expr const*
