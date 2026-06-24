@@ -83,4 +83,14 @@ struct PartialMatch final
 [[nodiscard]] auto match_term_partial(Term const& pat, Term const& tgt)
     -> std::optional<PartialMatch>;
 
+// Instantiate a rule's RHS `Nf` under a match binding: replace each pattern
+// free index by the target index it bound, and each subtree variable by the
+// target `Factor` it bound.  The RHS's own bound dummies are freshened to new
+// ids so that splicing the result beside a leftover term (whose surviving
+// dummies share the canonical negative id space) cannot collide; a final
+// re-canonicalization renames them all back.  Pattern indices/variables absent
+// from the binding are left as they are.
+[[nodiscard]] auto instantiate_nf(Context&, Nf const* rhs, NfBinding const& bnd)
+    -> Nf const*;
+
 } // namespace tender::nf

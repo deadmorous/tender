@@ -4,6 +4,7 @@
 #include <tender/expr.hpp> // TensorObject, SlotBinding
 
 #include <functional>
+#include <map>
 #include <set>
 
 using namespace mpk::mix;
@@ -446,6 +447,118 @@ auto match_term_partial(Term const& pat, Term const& tgt)
             return result;
     }
     return std::nullopt;
+}
+
+// ---- instantiation ---------------------------------------------------------
+
+namespace
+{
+
+using FreshMap = std::map<int, CountableIndex>;
+
+// Map one index assoc under the binding (pattern free index → target) and the
+// per-term freshening of RHS bound dummies.
+auto remap_assoc(IndexAssoc a, NfBinding const& bnd, FreshMap const& fresh)
+    -> IndexAssoc
+{
+    if (auto const* ci = std::get_if<CountableIndex>(&a))
+    {
+        if (auto it = fresh.find(ci->id); it != fresh.end())
+            return IndexAssoc{it->second};
+        if (auto t = bnd.find(ci->id))
+            return *t;
+    }
+    return a;
+}
+
+auto inst_nf(Context& ctx, Nf const* nf, NfBinding const& bnd) -> Nf const*;
+
+auto inst_factor(
+    Context& ctx,
+    Factor const* f,
+    NfBinding const& bnd,
+    FreshMap const& fresh) -> Factor const*
+{
+    return visit(
+        Overloads{
+            [&](Atom const& a) -> Factor const*
+            {
+                if (is_subtree_var(a.obj))
+                    if (auto const* sub = bnd.find_subtree(a.obj.name.v.view()))
+                        return sub;
+                auto slots = a.obj.slots;
+                for (auto& s: slots)
+                    if (s.index)
+                        s.index = remap_assoc(*s.index, bnd, fresh);
+                return make_atom(
+                    ctx,
+                    TensorObject{
+                        a.obj.name, a.obj.rank, a.obj.traits, std::move(slots)});
+            },
+            [&](Contraction const& c) -> Factor const*
+            {
+                std::vector<Factor const*> fs;
+                fs.reserve(c.factors.size());
+                for (auto const* x: c.factors)
+                    fs.push_back(inst_factor(ctx, x, bnd, fresh));
+                return make_contraction(ctx, std::move(fs), c.ops);
+            },
+            [&](Cross const& c) -> Factor const*
+            {
+                std::vector<Factor const*> fs;
+                fs.reserve(c.factors.size());
+                for (auto const* x: c.factors)
+                    fs.push_back(inst_factor(ctx, x, bnd, fresh));
+                return make_cross(ctx, std::move(fs));
+            },
+            [&](Paren const& p) -> Factor const*
+            { return make_paren(ctx, inst_nf(ctx, p.body, bnd)); },
+            [&](Unary const& u) -> Factor const* {
+                return make_unary(
+                    ctx, u.op, inst_factor(ctx, u.operand, bnd, fresh));
+            },
+            [&](Div const& d) -> Factor const* {
+                return make_div(
+                    ctx, inst_nf(ctx, d.num, bnd), inst_nf(ctx, d.den, bnd));
+            },
+        },
+        *f);
+}
+
+auto inst_nf(Context& ctx, Nf const* nf, NfBinding const& bnd) -> Nf const*
+{
+    if (!nf)
+        return nf;
+    std::vector<Term> out;
+    out.reserve(nf->terms.size());
+    for (auto const& t: nf->terms)
+    {
+        // Freshen this term's bound dummies so the spliced result cannot
+        // collide with a leftover term's surviving dummies.
+        FreshMap fresh;
+        Term nt;
+        nt.coeff = t.coeff;
+        for (auto const& b: t.bound)
+        {
+            CountableIndex fid{ctx.alloc_index_id()};
+            fresh.emplace(b.index.id, fid);
+            nt.bound.push_back({fid, b.mode, b.range});
+        }
+        for (auto const* f: t.scalars)
+            nt.scalars.push_back(inst_factor(ctx, f, bnd, fresh));
+        for (auto const* f: t.tensors)
+            nt.tensors.push_back(inst_factor(ctx, f, bnd, fresh));
+        out.push_back(std::move(nt));
+    }
+    return make_nf(ctx, std::move(out));
+}
+
+} // namespace
+
+auto instantiate_nf(Context& ctx, Nf const* rhs, NfBinding const& bnd)
+    -> Nf const*
+{
+    return inst_nf(ctx, rhs, bnd);
 }
 
 } // namespace tender::nf

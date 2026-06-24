@@ -185,6 +185,71 @@ TEST(ApplyIdentity, AsDerivationStep)
     EXPECT_EQ(drv.history().size(), 2u);
 }
 
+// ---- partial sub-product matching (vibe 000058 / C14) ----------------------
+
+TEST(ApplyIdentity, FiresOnSubProductInsideLargerTerm)
+{
+    // The δ-contraction sits among an extra (unrelated) tensor factor A.  The
+    // binary-tree matcher could not fire here — there is no node holding just
+    // Σ_p δ^p_m δ^p_n once the binder floats to the head — but the flat-form
+    // matcher reduces the sub-product, carrying A through.
+    Context ctx;
+    auto const* sp = space_3d();
+    auto id = delta_contraction(ctx, sp);
+
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* target = make_tensor_product(
+        ctx,
+        make_explicit_sum(
+            ctx,
+            p,
+            make_tensor_product(
+                ctx, delta_ul(ctx, sp, p, m), delta_ul(ctx, sp, p, n))),
+        A);
+
+    auto const* result = apply_identity(ctx, target, id);
+    auto const* expected = make_tensor_product(ctx, delta_ll(ctx, sp, m, n), A);
+    EXPECT_TRUE(algebraic_eq(ctx, result, expected));
+}
+
+TEST(ApplyIdentity, RepeatedApplicationReducesEachSubProduct)
+{
+    // Two independent contractions in one term: Σ_p Σ_q δ^p_m δ^p_n δ^q_r
+    // δ^q_s. Each apply fires once, so two applications reduce both to δ_mn
+    // δ_rs.
+    Context ctx;
+    auto const* sp = space_3d();
+    auto id = delta_contraction(ctx, sp);
+
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    CountableIndex r{ctx.alloc_index_id()};
+    CountableIndex s{ctx.alloc_index_id()};
+    auto const* target = make_explicit_sum(
+        ctx,
+        p,
+        make_explicit_sum(
+            ctx,
+            q,
+            make_tensor_product(
+                ctx,
+                make_tensor_product(
+                    ctx, delta_ul(ctx, sp, p, m), delta_ul(ctx, sp, p, n)),
+                make_tensor_product(
+                    ctx, delta_ul(ctx, sp, q, r), delta_ul(ctx, sp, q, s)))));
+
+    auto const* once = apply_identity(ctx, target, id);
+    auto const* twice = apply_identity(ctx, once, id);
+    auto const* expected = make_tensor_product(
+        ctx, delta_ll(ctx, sp, m, n), delta_ll(ctx, sp, r, s));
+    EXPECT_TRUE(algebraic_eq(ctx, twice, expected));
+}
+
 // ---- a real index identity: two-index eps-delta ----------------------------
 
 TEST(ApplyIdentity, EpsDeltaTwoIndex)

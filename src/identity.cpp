@@ -3,8 +3,11 @@
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/context.hpp>
 #include <tender/derivation.hpp> // steps::canonicalize, is_component_valued, infer_rank, structural_eq
+#include <tender/nf_lower.hpp> // canonicalize_nf, raise
+#include <tender/nf_match.hpp> // match_term_partial, instantiate_nf
 #include <tender/rewrite.hpp>
 
+#include <algorithm>
 #include <vector>
 
 using namespace mpk::mix;
@@ -394,7 +397,14 @@ auto instantiate(Context& ctx, Expr const* rhs, MatchBinding const& bnd)
         });
 }
 
-auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
+// The original binary-tree matcher: canonicalize, walk the `Expr` bottom-up,
+// and at the first subtree where the LHS matches, splice in the instantiated
+// RHS. Still the path for sub-*chain* rewrites — an identity matching a
+// contiguous run *inside* a flat `Contraction` / `Cross` factor (e.g. `I × x =
+// x × I` on the `I × b` of `a × I × b`), which the flat `Nf` partial matcher
+// does not yet reach.  apply_identity falls back here when the `Nf` path does
+// not fire.
+auto apply_identity_expr(Context& ctx, Expr const* e, Identity const& id)
     -> Expr const*
 {
     auto const* target = steps::canonicalize(ctx, e);
@@ -416,13 +426,85 @@ auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
             return node;
         });
 
-    // On a match the rewritten tree is returned in canonical form, then
-    // implicitized so the explicit sums the canonical form (and the binder
-    // floating) introduce do not leak out — the user works in implicit
-    // notation. With no match the original input is returned untouched (a true
-    // no-op).
     return done ? steps::implicitize(ctx, steps::canonicalize(ctx, rewritten)) :
                   e;
+}
+
+auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
+    -> Expr const*
+{
+    // Match on the flat normal form (vibe 000058 / C14): the canonical `Nf` of
+    // an expression is `canonicalize_nf(canonicalize(·))` (the C12 round-trip).
+    // The identity's LHS becomes a single pattern term whose factors are
+    // matched as a *sub-product* of a target term — so an identity fires even
+    // when its product sits among extra factors of a larger term, the gap the
+    // binary-tree matcher could not reach.
+    auto const* target = nf::canonicalize_nf(ctx, steps::canonicalize(ctx, e));
+    auto const* lhs =
+        nf::canonicalize_nf(ctx, steps::canonicalize(ctx, id.lhs));
+    auto const* rhs =
+        nf::canonicalize_nf(ctx, steps::canonicalize(ctx, id.rhs));
+
+    // Only single-term LHS rules are matched as sub-products; a multi-term LHS
+    // (matching a sub-sum) is handled by the binary-tree fallback.
+    if (lhs->terms.size() != 1)
+        return apply_identity_expr(ctx, e, id);
+    nf::Term const& lhs_term = lhs->terms.front();
+
+    // Fire at the first target term where the LHS partially matches, splice the
+    // instantiated RHS into the leftover (the RHS tensor block goes back where
+    // the matched run sat — ⊗ is non-commutative), and carry the rest through.
+    bool fired = false;
+    std::vector<nf::Term> out;
+    for (auto const& tterm: target->terms)
+    {
+        if (!fired)
+            if (auto pm = nf::match_term_partial(lhs_term, tterm))
+            {
+                fired = true;
+                auto const* rhs_inst =
+                    nf::instantiate_nf(ctx, rhs, pm->binding);
+                nf::Term const& L = pm->leftover;
+                auto const pos = static_cast<std::ptrdiff_t>(
+                    std::min(pm->tensor_at, L.tensors.size()));
+                for (auto const& r: rhs_inst->terms)
+                {
+                    nf::Term m;
+                    m.coeff = r.coeff * L.coeff;
+                    m.bound = L.bound;
+                    m.bound.insert(
+                        m.bound.end(), r.bound.begin(), r.bound.end());
+                    m.scalars = L.scalars;
+                    m.scalars.insert(
+                        m.scalars.end(), r.scalars.begin(), r.scalars.end());
+                    m.tensors.insert(
+                        m.tensors.end(),
+                        L.tensors.begin(),
+                        L.tensors.begin() + pos);
+                    m.tensors.insert(
+                        m.tensors.end(), r.tensors.begin(), r.tensors.end());
+                    m.tensors.insert(
+                        m.tensors.end(),
+                        L.tensors.begin() + pos,
+                        L.tensors.end());
+                    out.push_back(std::move(m));
+                }
+                continue;
+            }
+        out.push_back(tterm);
+    }
+
+    // With no flat-form match, fall back to the binary-tree matcher, which can
+    // still reach a contiguous run inside a `Contraction` / `Cross` factor.  On
+    // a match the spliced `Nf` is raised, re-canonicalized (re-α-renaming the
+    // freshened RHS dummies, merging like terms), and implicitized so the
+    // explicit binders the normal form carries do not leak into the user's
+    // implicit notation.
+    if (!fired)
+        return apply_identity_expr(ctx, e, id);
+    auto const* result = nf::make_nf(ctx, std::move(out));
+    return steps::implicitize(
+        ctx, steps::canonicalize(ctx, nf::raise(ctx, *result)));
 }
 
 namespace steps
