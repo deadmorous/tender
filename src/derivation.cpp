@@ -5,12 +5,9 @@
 #include <tender/rewrite.hpp>
 #include <tender/summation.hpp>
 #include <tender/tensor_order.hpp>
-#include <tender/tensor_symmetry.hpp>
 
 #include <algorithm>
 #include <functional>
-#include <map>
-#include <numeric>
 #include <set>
 #include <stdexcept>
 
@@ -939,83 +936,18 @@ auto infer_rank(Expr const* e) -> std::optional<int>
 namespace
 {
 
-// ---- the canonicalizer --------------------------------------------------
+// ---- shared canonicalization helpers ------------------------------------
 //
 // Index α-renaming (`substitute_index_id` / `substitute_index_ids`), the
 // canonical dummy id (`bound_canon_id`), and the implicit-summation detection
-// (`is_term` / `collect_term_uses` / `contracted_ids`) now live in
-// tender/summation.hpp, shared with the `Nf` lowering (vibe 000058 / C8).
-
-auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*;
-
-// Canonicalize a stack of consecutive null-bound ExplicitSums (Σ_a Σ_b … body).
-// The binders are interchangeable (Fubini), so this fixes a canonical order:
-// it tries every permutation of the binders onto the depth-numbered canonical
-// ids and keeps the one whose canonicalized body is smallest under expr_cmp.
-// Two Fubini-equivalent stacks therefore produce the identical canonical form.
-// The permutation search is bounded; very tall stacks keep their given order.
-auto canon_sum_stack(Context& ctx, Expr const* e, int depth) -> Expr const*
-{
-    std::vector<int> ids;
-    Expr const* body = e;
-    while (auto const* s = std::get_if<ExplicitSum>(&body->node))
-    {
-        if (s->bound)
-            break; // a symbolic bound is not part of the free stack
-        ids.push_back(s->index.id);
-        body = s->body;
-    }
-    int const n = static_cast<int>(ids.size());
-
-    std::vector<int> order(static_cast<std::size_t>(n));
-    std::iota(order.begin(), order.end(), 0);
-    bool const search = n <= 6; // n! permutations; tall stacks fall back to
-                                // order
-    Expr const* best = nullptr;
-    do
-    {
-        std::map<int, int> remap;
-        for (int pos = 0; pos < n; ++pos)
-            remap[ids[static_cast<std::size_t>(
-                order[static_cast<std::size_t>(pos)])]] =
-                bound_canon_id(depth + pos);
-        auto const* cbody =
-            canon(ctx, substitute_index_ids(ctx, body, remap), depth + n);
-        if (!best || expr_cmp(cbody, best) < 0)
-            best = cbody;
-    } while (search && std::next_permutation(order.begin(), order.end()));
-
-    for (int pos = n - 1; pos >= 0; --pos)
-        best = make_explicit_sum(
-            ctx, CountableIndex{bound_canon_id(depth + pos)}, best, nullptr);
-    return best;
-}
-
-// ---- symmetry orbit canonicalization (vibe 000047) ----------------------
-
-// `slot_seq_cmp` and the orbit search (`canon_symmetry_slots`) now live in
-// tender/tensor_symmetry.hpp, shared with the `Nf` lowering (vibe 000058 /
-// C13).  This wrapper folds the result into an `Expr`.
-//
-// Returns: e unchanged if there are no generators or e is already
-// orbit-minimal, a reordered TensorObject (sign +1), Negate(reordered) (sign
-// −1), or scalar 0 when an arrangement is reachable with both signs (e.g. ε
-// with a repeated index — identically zero).
-auto canon_symmetry(Context& ctx, Expr const* e) -> Expr const*
-{
-    auto const* t = std::get_if<TensorObject>(&e->node);
-    if (!t || !t->traits)
-        return e;
-    auto [slots, sign] = canon_symmetry_slots(*t);
-    if (sign == 0)
-        return make_scalar(ctx, Rational{0}); // identically zero
-    Expr const* canon_t =
-        slot_seq_cmp(slots, t->slots) == 0 ?
-            e :
-            ctx.make<Expr>(
-                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
-    return sign < 0 ? make_negate(ctx, canon_t) : canon_t;
-}
+// (`is_term` / `collect_term_uses` / `contracted_ids`) live in
+// tender/summation.hpp; the symmetry-orbit search (`canon_symmetry_slots`)
+// lives in tender/tensor_symmetry.hpp.  Both are shared with the `Nf` lowering,
+// which the public `canonicalize` (raise ∘ lower) now drives.  The old
+// binary-tree canonicalizer — `canon` / `canon_sum_stack` / `canon_product` /
+// `canon_additive`, the `canon_symmetry` Expr wrapper, and the `build_term` /
+// `is_rank1_vector` / `reassociate_cross_fence` helpers — was pruned at C15
+// (vibe 000058) once the flip made it unreachable.
 
 // Flatten a left/right TensorProduct tree into its factor leaves.
 void flatten_factors(Expr const* e, std::vector<Expr const*>& out)
@@ -1027,242 +959,6 @@ void flatten_factors(Expr const* e, std::vector<Expr const*>& out)
     }
     else
         out.push_back(e);
-}
-
-// Build coeff * (factors folded left-associatively), with identity/zero rules.
-auto build_term(
-    Context& ctx,
-    Rational coeff,
-    std::vector<Expr const*> const& factors) -> Expr const*
-{
-    if (coeff == 0)
-        return make_scalar(ctx, Rational{0});
-    Expr const* prod = nullptr;
-    for (auto const* f: factors)
-        prod = prod ? make_tensor_product(ctx, prod, f) : f;
-    if (!prod)
-        return make_scalar(ctx, coeff);
-    if (coeff == 1)
-        return prod;
-    if (coeff == -1)
-        return make_negate(ctx, prod);
-    return make_tensor_product(ctx, make_scalar(ctx, coeff), prod);
-}
-
-auto canon_product(Context& ctx, Expr const* e, int depth) -> Expr const*
-{
-    std::vector<Expr const*> flat;
-    flatten_factors(e, flat);
-
-    Rational coeff{1};
-    std::vector<Expr const*> comp; // component-valued factors (sortable)
-    std::vector<Expr const*> inv;  // invariant factors (order preserved)
-    for (auto const* f: flat)
-    {
-        auto const* cf = canon(ctx, f, depth);
-        // Pull out a leading numeric coefficient / sign, then re-flatten the
-        // core (a collapsed sub-sum may have become a scaled monomial).
-        auto [c, core] = extract_coeff(cf);
-        coeff *= c;
-        std::vector<Expr const*> sub;
-        flatten_factors(core, sub);
-        for (auto const* g: sub)
-        {
-            if (auto const* sl = std::get_if<ScalarLiteral>(&g->node))
-            {
-                coeff *= sl->value;
-                continue;
-            }
-            if (is_component_valued(g))
-                comp.push_back(g);
-            else
-                inv.push_back(g);
-        }
-    }
-    std::sort(
-        comp.begin(),
-        comp.end(),
-        [](Expr const* x, Expr const* y) { return expr_cmp(x, y) < 0; });
-
-    std::vector<Expr const*> ordered;
-    ordered.reserve(comp.size() + inv.size());
-    ordered.insert(ordered.end(), comp.begin(), comp.end());
-    ordered.insert(ordered.end(), inv.begin(), inv.end());
-    return build_term(ctx, coeff, ordered);
-}
-
-auto canon_additive(Context& ctx, Expr const* e, int depth) -> Expr const*
-{
-    std::vector<std::pair<int, Expr const*>> addends;
-    collect_signed_addends(e, +1, addends);
-
-    Rational constant{0};                                // numeric terms folded
-    std::vector<std::pair<Rational, Expr const*>> terms; // (coeff, core)
-    for (auto const& [sign, sub]: addends)
-    {
-        auto const* cs = canon(ctx, sub, depth);
-        auto [c, core] = extract_coeff(cs);
-        Rational coeff = c * Rational{sign};
-        if (auto const* sl = std::get_if<ScalarLiteral>(&core->node))
-        {
-            constant += coeff * sl->value;
-            continue;
-        }
-        bool merged = false;
-        for (auto& [tc, tcore]: terms)
-            if (structural_eq(core, tcore))
-            {
-                tc += coeff;
-                merged = true;
-                break;
-            }
-        if (!merged)
-            terms.emplace_back(coeff, core);
-    }
-
-    // Drop zero terms.
-    std::vector<std::pair<Rational, Expr const*>> kept;
-    for (auto const& t: terms)
-        if (!(t.first == 0))
-            kept.push_back(t);
-    if (kept.empty())
-        return make_scalar(ctx, constant);
-
-    std::sort(
-        kept.begin(),
-        kept.end(),
-        [](auto const& x, auto const& y)
-        { return expr_cmp(x.second, y.second) < 0; });
-
-    Expr const* result = nullptr;
-    for (auto const& [coeff, core]: kept)
-    {
-        Expr const* term = build_term(ctx, coeff, {core});
-        result = result ? make_sum(ctx, result, term) : term;
-    }
-    // A non-zero numeric constant is appended last (deterministic position).
-    if (!(constant == 0))
-        result = make_sum(ctx, result, make_scalar(ctx, constant));
-    return result;
-}
-
-// Canonicalize a rank-aware invariant binary op (Dot commutes, Cross
-// anticommutes) when both operands are rank-1 invariant vectors.
-auto is_rank1_vector(Expr const* e) -> bool
-{
-    auto const* t = std::get_if<TensorObject>(&e->node);
-    return t && t->rank && *t->rank == 1 && t->slots.empty();
-}
-
-// Re-associate a cross chain around a rank-≥2 fence: (x × M) × z → x × (M × z).
-// When the middle operand M is rank ≥ 2, the ⊗ inside it fences the two crosses
-// onto M's disjoint outer legs (x onto the first, z onto the last), so the
-// bracketing is immaterial — (x×M)×z and x×(M×z) are equal.  We normalize to
-// the right-associated form, which exposes the `M × z` subterm (e.g. `I × b`)
-// for the matcher.  The rank-1 middle case (x×y)×z is the vector triple
-// product, genuinely non-associative (bac-cab), and is deliberately left
-// untouched. Returns the re-associated expr, or nullptr when the pattern does
-// not apply. Operands are assumed already canonicalized.
-auto reassociate_cross_fence(Context& ctx, Expr const* l, Expr const* r)
-    -> Expr const*
-{
-    auto const* inner = std::get_if<Cross>(&l->node);
-    if (!inner)
-        return nullptr;
-    auto const rx = infer_rank(inner->left);
-    auto const rm = infer_rank(inner->right);
-    auto const rz = infer_rank(r);
-    if (rx == std::optional<int>{1} && rm && *rm >= 2
-        && rz == std::optional<int>{1})
-        return make_cross(ctx, inner->left, make_cross(ctx, inner->right, r));
-    return nullptr;
-}
-
-auto canon(Context& ctx, Expr const* e, int depth) -> Expr const*
-{
-    return visit(
-        Overloads{
-            [&](ScalarLiteral const&) -> Expr const* { return e; },
-            [&](TensorObject const&) -> Expr const*
-            { return canon_symmetry(ctx, e); },
-            [&](Negate const&) -> Expr const*
-            { return canon_additive(ctx, e, depth); },
-            [&](Trace const& u) -> Expr const*
-            { return make_trace(ctx, canon(ctx, u.operand, depth)); },
-            [&](VectorInvariant const& u) -> Expr const* {
-                return make_vector_invariant(ctx, canon(ctx, u.operand, depth));
-            },
-            [&](Transpose const& u) -> Expr const*
-            { return make_transpose(ctx, canon(ctx, u.operand, depth)); },
-            [&](Sum const&) -> Expr const*
-            { return canon_additive(ctx, e, depth); },
-            [&](Difference const&) -> Expr const*
-            { return canon_additive(ctx, e, depth); },
-            [&](TensorProduct const&) -> Expr const*
-            { return canon_product(ctx, e, depth); },
-            [&](ScalarDiv const& d) -> Expr const*
-            {
-                auto const* l = canon(ctx, d.left, depth);
-                auto const* r = canon(ctx, d.right, depth);
-                auto const* sl = std::get_if<ScalarLiteral>(&l->node);
-                auto const* sr = std::get_if<ScalarLiteral>(&r->node);
-                if (sl && sr)
-                    return make_scalar(ctx, sl->value / sr->value);
-                return make_scalar_div(ctx, l, r);
-            },
-            [&](Dot const& d) -> Expr const*
-            {
-                auto const* l = canon(ctx, d.left, depth);
-                auto const* r = canon(ctx, d.right, depth);
-                if (is_rank1_vector(l) && is_rank1_vector(r)
-                    && expr_cmp(l, r) > 0)
-                    return make_dot(ctx, r, l); // a·b = b·a
-                return make_dot(ctx, l, r);
-            },
-            [&](Cross const& c) -> Expr const*
-            {
-                auto const* l = canon(ctx, c.left, depth);
-                auto const* r = canon(ctx, c.right, depth);
-                if (is_rank1_vector(l) && is_rank1_vector(r)
-                    && expr_cmp(l, r) > 0)
-                    return make_negate(ctx, make_cross(ctx, r, l)); // a×b =
-                                                                    // -(b×a)
-                if (auto const* ra = reassociate_cross_fence(ctx, l, r))
-                    return ra; // (x×M)×z → x×(M×z) around a rank-≥2 fence
-                return make_cross(ctx, l, r);
-            },
-            [&](DDot const& d) -> Expr const*
-            {
-                return make_ddot(
-                    ctx, canon(ctx, d.left, depth), canon(ctx, d.right, depth));
-            },
-            [&](DDotAlt const& d) -> Expr const*
-            {
-                return make_ddot_alt(
-                    ctx, canon(ctx, d.left, depth), canon(ctx, d.right, depth));
-            },
-            [&](ExplicitSum const& s) -> Expr const*
-            {
-                // α-normalize: relabel the dummy to a canonical id *before*
-                // canonicalizing the body, so the body's sort order does not
-                // depend on the original dummy id.  A null-bound stack of
-                // nested sums is order-normalized too (Fubini), via
-                // canon_sum_stack.
-                if (!s.bound)
-                    return canon_sum_stack(ctx, e, depth);
-                int cid = bound_canon_id(depth);
-                auto const* relabeled =
-                    substitute_index_id(ctx, s.body, s.index.id, cid);
-                auto const* body = canon(ctx, relabeled, depth + 1);
-                return make_explicit_sum(
-                    ctx, CountableIndex{cid}, body, canon(ctx, s.bound, depth));
-            },
-            // NoSum suppresses summation, so its index stays a free reference
-            // (not α-renamed); only its body is canonicalized.
-            [&](NoSum const& s) -> Expr const*
-            { return make_no_sum(ctx, s.index, canon(ctx, s.body, depth)); },
-        },
-        *e);
 }
 
 // ---- implicit Einstein summation (vibe 000028) --------------------------

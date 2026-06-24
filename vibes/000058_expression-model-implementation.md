@@ -333,7 +333,14 @@ check.
       over `tensors`); motivating cases become tests.
 
 **Stage 6 — prune.**
-- C15 remove dead old canon / old render / `Negate`-`Difference` handling.
+- C15 remove the dead old binary-tree canonicalizer.  **Scope correction (done
+  at C15):** only the `canon` cluster is dead — `canon` / `canon_sum_stack` /
+  `canon_product` / `canon_additive`, the `canon_symmetry` Expr wrapper, and the
+  `build_term` / `is_rank1_vector` / `reassociate_cross_fence` helpers.  The old
+  render path and `Negate`/`Difference` are **not** dead: the flip's prep
+  (`materialize` → explicit binders, `float_sums`) still consumes
+  `Negate`/`Difference`, and `raise` emits an `Expr` that the existing Expr
+  renderer prints.  So those stay; pruning them is out of scope.
 
 Risk is concentrated in **C13** (the flip) and **C14** (matcher); C1–C12 and C15
 are additive or subtractive only.
@@ -380,11 +387,18 @@ green at 629.  **Stage 4 / C13 DONE** — `steps::canonicalize` is now
 measurement and prerequisites C13a–f + the `sink_binders` correctness fix +
 constant-last ordering, driving the trial-flip blast radius 56 → 0.  The whole
 suite (matcher, e-graph, basis feasibility examples) passes at **638** with no
-stale assertion rebaselines.  `canon`/`canon_sum_stack` are dead.  Next action:
-Stage 5 / C14 (migrate the `identity.cpp` matcher to the all-`*` flat form),
-then Stage 6 / C15 (prune dead old canon / render / Negate-Difference).  A
-non-blocking follow-up: make `canonicalize_nf` self-contained (fold in the
-materialize/float prep).
+stale assertion rebaselines.  **Stage 6 / C15 DONE** (done before C14 for a
+cleaner base) — pruned the dead binary-tree canonicalizer: `canon` /
+`canon_sum_stack` / `canon_product` / `canon_additive`, the `canon_symmetry`
+Expr wrapper, and the `build_term` / `is_rank1_vector` / `reassociate_cross_fence`
+helpers (the last two survive as live copies in `nf_lower.cpp`), plus the
+now-unused `<map>` / `<numeric>` / `tensor_symmetry.hpp` includes — 313 lines
+out of `derivation.cpp`, suite still green at **638**.  `flatten_factors` /
+`extract_coeff` / `collect_signed_addends` were kept (still used by live code).
+The old render path and `Negate`/`Difference` are deliberately retained (the
+flip prep + Expr renderer still need them).  Next action: Stage 5 / C14 (migrate
+the `identity.cpp` matcher to the all-`*` flat form).  A non-blocking follow-up:
+make `canonicalize_nf` self-contained (fold in the materialize/float prep).
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with
