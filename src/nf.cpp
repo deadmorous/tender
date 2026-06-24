@@ -223,6 +223,12 @@ auto compare(Factor const& a, Factor const& b) -> int
 
 auto compare_term_key(Term const& a, Term const& b) -> int
 {
+    // A bare numeric term (no factors) sorts *after* any term with factors, so
+    // a constant offset reads last: `δ + 5`, `2μD − pI`, `x² + 1`.
+    bool const a_bare = a.scalars.empty() && a.tensors.empty();
+    bool const b_bare = b.scalars.empty() && b.tensors.empty();
+    if (a_bare != b_bare)
+        return a_bare ? 1 : -1;
     if (int c = factor_seq_cmp(a.tensors, b.tensors))
         return c;
     if (int c = factor_seq_cmp(a.scalars, b.scalars))
