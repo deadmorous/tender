@@ -292,34 +292,40 @@ check.
       one focused commit; **feasibility examples must stay green** (acceptance
       gate); the `a×(b×I)` derivation becomes a no-"missing-steps" test.
 
-      **IN PROGRESS.**  A trial flip (`canonicalize := raise ∘ lower`, with the
-      existing `materialize` / `float_sums` prep) measured the real blast radius:
-      it is *not* "one focused commit" — the Nf lowering was not yet feature- or
-      totality-complete vs old canon.  Prerequisites done as their own green
-      commits, each shrinking the trial-flip failures (56 → 31 → 10):
+      **DONE.**  A trial flip first measured the real blast radius — the Nf
+      lowering was not yet feature/totality-complete vs old canon — so the flip
+      was reached through a sequence of prerequisite commits, each shrinking the
+      trial-flip failures **56 → 31 → 10 → 7 → 5 → 4 → 1 → 0**:
         - **C13a** unknown-rank factors → tensor region (rank-less abstract
-          tensors no longer throw; ~110 test sites use them).
+          tensors; ~110 test sites).
         - **C13b** symmetry-orbit canonicalization ported into Nf encapsulation
           (shared `tensor_symmetry.{hpp,cpp}`; δ_ab == δ_ba; ε antisymmetry +
-          identically-zero).
-        - **C13c** `expand_double_dot` wired into `lower_term` so
-          `(a⊗b):(c⊗d) → (a·c)(b·d)` (no ⊗ buried in a `:`/`··` operand).
-        - **C13d** `raise` materializes `Default` bound indices as `ExplicitSum`,
-          so the raised `Expr` carries the binders the existing pipeline
-          (`reassemble` / `unroll_sums` / basis ops walk `ExplicitSum`) expects.
-      **Remaining 10 trial-flip failures**, each root-caused:
-        1. symbolic `ScalarDiv` (`A/B`, non-numeric divisor) has no `Factor`
-           variant — needs an Nf division node (model extension touching
-           nf.hpp/.cpp, render, raise).  (≈ a few of the throws.)
-        2. ranged `ExplicitSum` (symbolic bound `Σ_{i=1}^{n}`) — `strip_binders`
-           throws; needs lowering support (`EGraph.RoundTripsBoundNodes`).
-        3. `Canonicalize.FoldsNumericConstants` — a render/shape assertion to
-           re-baseline (e.g. `5 + δ^i_j`).
-        4. three cross-with-identity feasibility cases (`BacCab`,
-           `CrossIdentityCross`, `…ViaReassembly`) return `algebraic_eq` false —
-           a semantic normalization difference still to investigate.
-      Next: C13e (Nf division node) + C13f (ranged sums), re-measure, then the
-      flip + assertion re-baseline with the feasibility examples as the gate.
+          identically-zero via a `0` `SignedFactor` multiplier).
+        - **C13c** `expand_double_dot` in `lower_term` (`(a⊗b):(c⊗d) →
+          (a·c)(b·d)` — no ⊗ buried in a `:`/`··` operand).
+        - **C13d** `raise` materializes `Default` bound indices as `ExplicitSum`
+          (the raised `Expr` carries the binders `reassemble` / `unroll_sums` /
+          basis ops walk).
+        - **sink_binders** (the key correctness fix, found via #4): a binder
+          over a sum distributes — `Σ_i(X+Y) → Σ_iX + Σ_iY` — keeping the
+          additive layer above the binders (the Nf invariant).  This alone
+          cleared all three cross-with-identity feasibility cases.
+        - **C13e** a `Div { Nf num; Nf den }` factor for symbolic `ScalarDiv`
+          (`A/B`, `A/(b·c)`), threaded through equal/compare/hash/encapsulate/
+          raise/render.
+        - **C13f** ranged `ExplicitSum`: `BoundIndex` gains an optional
+          `Nf const* range`; strip/classify/raise carry it.
+        - **constant-last term order**: a factorless term sorts after any term
+          with factors (`δ + 5`, not `5 + δ`) — the natural convention.
+      The flip itself: `steps::canonicalize := raise ∘ canonicalize_nf` over
+      `float_sums(materialize(e))`.  The **whole suite passes at 638** —
+      matcher, e-graph, and the basis feasibility examples (the acceptance gate:
+      BacCab, CrossIdentityCross, reassembly round-trips) — with **no** stale
+      assertion re-baselines needed (the convention fixes made the old golden
+      strings match).  `canon` / `canon_sum_stack` are now dead → pruned at C15.
+      Follow-up (not blocking): make `canonicalize_nf` self-contained (fold the
+      materialize/float prep in by extracting them like C8a) so callers needn't
+      prep; the `a×(b×I)` no-"missing-steps" test.
 
 **Stage 5 — matcher on `Nf`.**
 - C14 migrate `identity.cpp` matching to the all-`*` flat form (the original
@@ -369,15 +375,16 @@ canonicalize_nf(canonicalize(e))`) is green over a corpus, and
 Sum/NoSum get `\sum`/`\cancel{\sum}`).  **Stage 3 complete**: C12 done —
 `raise` rebuilds an `Expr` from an `Nf` (Default indices stay implicit), and
 `canonicalize_nf(raise(nf)) == nf` is green over a 19-entry corpus.  Suite
-green at 629.  **Stage 4 / C13 IN PROGRESS** — a trial flip showed it is not
-one commit: the Nf lowering needed feature/totality work first.  Prerequisites
-C13a (unknown-rank → tensors), C13b (symmetry-orbit canon), C13c
-(`expand_double_dot`), C13d (`raise` materializes Default) landed green,
-shrinking the trial-flip blast radius 56 → 31 → 10.  Suite green at 634.  The
-remaining 10 are root-caused (see the C13 plan note): a symbolic-`ScalarDiv`
-Factor variant, ranged-`ExplicitSum` lowering, one render-assertion rebaseline,
-and three cross-with-identity semantic cases.  Next action: C13e (Nf division
-node), C13f (ranged sums), re-measure, then the flip + assertion rebaseline.
+green at 629.  **Stage 4 / C13 DONE** — `steps::canonicalize` is now
+`raise ∘ canonicalize_nf` over the Nf normal form.  Reached through a trial-flip
+measurement and prerequisites C13a–f + the `sink_binders` correctness fix +
+constant-last ordering, driving the trial-flip blast radius 56 → 0.  The whole
+suite (matcher, e-graph, basis feasibility examples) passes at **638** with no
+stale assertion rebaselines.  `canon`/`canon_sum_stack` are dead.  Next action:
+Stage 5 / C14 (migrate the `identity.cpp` matcher to the all-`*` flat form),
+then Stage 6 / C15 (prune dead old canon / render / Negate-Difference).  A
+non-blocking follow-up: make `canonicalize_nf` self-contained (fold in the
+materialize/float prep).
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with
