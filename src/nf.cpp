@@ -133,7 +133,8 @@ auto equal(Term const& a, Term const& b) -> bool
         return false;
     for (std::size_t i = 0; i < a.bound.size(); ++i)
         if (a.bound[i].index.id != b.bound[i].index.id
-            || a.bound[i].mode != b.bound[i].mode)
+            || a.bound[i].mode != b.bound[i].mode
+            || !equal(a.bound[i].range, b.bound[i].range))
             return false;
     return factor_seq_eq(a.scalars, b.scalars)
            && factor_seq_eq(a.tensors, b.tensors);
@@ -234,6 +235,13 @@ auto compare_term_key(Term const& a, Term const& b) -> int
             return a.bound[i].index.id < b.bound[i].index.id ? -1 : 1;
         if (a.bound[i].mode != b.bound[i].mode)
             return a.bound[i].mode < b.bound[i].mode ? -1 : 1;
+        auto const* ra = a.bound[i].range;
+        auto const* rb = b.bound[i].range;
+        if ((ra == nullptr) != (rb == nullptr))
+            return ra == nullptr ? -1 : 1; // unranged sorts before ranged
+        if (ra != nullptr)
+            if (int c = compare(*ra, *rb))
+                return c;
     }
     return 0;
 }
@@ -350,6 +358,7 @@ auto hash(Term const& t) -> std::size_t
     {
         h = hash_mix(h, static_cast<std::size_t>(b.index.id));
         h = hash_mix(h, static_cast<std::size_t>(b.mode));
+        h = hash_mix(h, b.range ? hash(*b.range) : 0);
     }
     h = hash_mix(h, hash_factor_seq(t.scalars));
     h = hash_mix(h, hash_factor_seq(t.tensors));

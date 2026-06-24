@@ -136,12 +136,16 @@ struct Factor final
 
 // ---- Term --------------------------------------------------------------
 
-// One inferred dummy index with its summation mode.  (The vibe sketches
-// `bound` and `modes` as parallel lists; pairing them keeps them in lockstep.)
+// One inferred dummy index with its summation mode and optional range.  (The
+// vibe sketches `bound` and `modes` as parallel lists; pairing them keeps them
+// in lockstep.)  `range` is non-null only for an explicit *ranged* sum
+// (`Σ_{i∈N} …`, the surface `ExplicitSum` with a symbolic bound); a null range
+// is the index's natural realm-driven domain.
 struct BoundIndex final
 {
     CountableIndex index;
     SumMode mode = SumMode::Default;
+    Nf const* range = nullptr;
 };
 
 // A signed `*`-term: `coeff · [scalars] · [tensors]`.

@@ -370,26 +370,24 @@ struct RawBinder final
 {
     int id;
     BinderKind kind;
+    Expr const* range = nullptr; // non-null: an explicit `Σ_{i∈range}` bound
 };
 
 // Strip the leading `ExplicitSum` / `NoSum` binder stack off a term, recording
-// each `(id, kind)`.  A ranged `ExplicitSum` (a symbolic summation bound) is
-// not yet supported by the Nf lowering — it awaits a later commit.
+// each `(id, kind, range)`.  A ranged `ExplicitSum` carries its symbolic bound
+// in `range`.
 auto strip_binders(Expr const* e, std::vector<RawBinder>& out) -> Expr const*
 {
     for (;;)
     {
         if (auto const* s = std::get_if<ExplicitSum>(&e->node))
         {
-            if (s->bound)
-                throw std::invalid_argument(
-                    "Nf lowering: a ranged ExplicitSum is not yet supported");
-            out.push_back({s->index.id, BinderKind::Sum});
+            out.push_back({s->index.id, BinderKind::Sum, s->bound});
             e = s->body;
         }
         else if (auto const* n = std::get_if<NoSum>(&e->node))
         {
-            out.push_back({n->index.id, BinderKind::NoSum});
+            out.push_back({n->index.id, BinderKind::NoSum, nullptr});
             e = n->body;
         }
         else
@@ -424,7 +422,8 @@ auto realm_contracts(std::map<int, std::vector<IndexUse>> const& uses, int id)
 struct Dummy final
 {
     int id;
-    SumMode mode; // Default (realm-implicit) or Sum (explicit, non-default)
+    SumMode mode;              // Default (realm-implicit) or Sum (explicit)
+    Nf const* range = nullptr; // explicit symbolic range, else null
 };
 
 } // namespace
@@ -467,7 +466,16 @@ auto lower_term(Context& ctx, SignedExpr const& term) -> Term
     {
         bool const c = realm_contracts(uses, b.id);
         if (b.kind == BinderKind::Sum)
-            dummies.push_back({b.id, c ? SumMode::Default : SumMode::Sum});
+        {
+            // A ranged Σ is always an explicit Sum (its range makes it so);
+            // an unranged Σ is Default when it merely confirms the realm rule.
+            if (b.range)
+                dummies.push_back(
+                    {b.id, SumMode::Sum, canonicalize_nf(ctx, b.range)});
+            else
+                dummies.push_back(
+                    {b.id, c ? SumMode::Default : SumMode::Sum, nullptr});
+        }
         else if (c)
             nosum_free.push_back({CountableIndex{b.id}, SumMode::NoSum});
     }
@@ -504,7 +512,7 @@ auto lower_term(Context& ctx, SignedExpr const& term) -> Term
                 order[static_cast<std::size_t>(p)])];
             int const cid = bound_canon_id(p);
             remap[d.id] = cid;
-            bound.push_back({CountableIndex{cid}, d.mode});
+            bound.push_back({CountableIndex{cid}, d.mode, d.range});
         }
         bound.insert(bound.end(), nosum_free.begin(), nosum_free.end());
 
@@ -737,8 +745,13 @@ auto raise_term(Context& ctx, Term const& t) -> Expr const*
     {
         if (it->mode == SumMode::NoSum)
             body = make_no_sum(ctx, it->index, body);
-        else // Default or Sum → materialized ExplicitSum binder
-            body = make_explicit_sum(ctx, it->index, body);
+        else // Default or Sum → materialized ExplicitSum binder (with its
+             // range)
+            body = make_explicit_sum(
+                ctx,
+                it->index,
+                body,
+                it->range ? raise(ctx, *it->range) : nullptr);
     }
     return body;
 }

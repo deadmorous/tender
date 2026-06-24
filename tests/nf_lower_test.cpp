@@ -733,16 +733,21 @@ TEST(Summation, TwoDummiesAreFubiniInvariant)
     EXPECT_TRUE(equal(t1, t2));
 }
 
-TEST(Summation, RangedExplicitSumIsDeferred)
+TEST(Summation, RangedExplicitSumCarriesRange)
 {
-    // Σ_{i=1}^{n} a_i: a symbolic summation bound is not yet supported.
+    // Σ_{i∈n} a_i: a symbolic-bound sum lowers to a Sum-mode dummy (α-renamed
+    // to -1) carrying the range; the canonical form round-trips.
     Context ctx;
     CountableIndex i{ctx.alloc_index_id()};
     auto const* a = ivec(ctx, "a", Level::Lower, i);
     auto const* n = make_tensor_object(ctx, make_tensor_name("n"));
-    EXPECT_THROW(
-        (void)term1(ctx, make_explicit_sum(ctx, i, a, n)),
-        std::invalid_argument);
+    auto t = term1(ctx, make_explicit_sum(ctx, i, a, n));
+    ASSERT_EQ(t.bound.size(), 1u);
+    EXPECT_EQ(t.bound[0].index.id, -1);
+    EXPECT_EQ(t.bound[0].mode, SumMode::Sum);
+    ASSERT_NE(t.bound[0].range, nullptr);
+    // The range is the canonical Nf of the symbol n (one tensor term).
+    ASSERT_EQ(t.bound[0].range->terms.size(), 1u);
 }
 
 // ---- like-term collection (C9) -----------------------------------------
