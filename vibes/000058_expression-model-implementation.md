@@ -364,10 +364,20 @@ check.
         `bind_pattern_index` (index) + `instantiate` from the identity matcher.
         A literal "match on `Nf`" would require re-representing the whole e-graph
         over `Nf` (union-find / hash-cons / congruence over Nf terms+factors) —
-        an epic on the scale of 000042–000045, not a C14 increment.  The sensible
-        achievable goal is to *decouple* the e-graph from the to-be-pruned Expr
-        identity matcher (give it the small leaf/index/instantiate primitives it
-        needs) so C14e can prune the rest.  Pending a steer.
+        an epic on the scale of 000042–000045, not a C14 increment.  **Review
+        decision: do the full Nf re-architecture anyway.**  Built as a parallel
+        `nf_egraph.{hpp,cpp}` (`NfEGraph`) beside the Expr `EGraph`, mirroring the
+        migration's parallel-IR strategy.  Progress:
+      - **data core DONE** — e-nodes mirror the `Nf` structure (the `Factor`
+            tree + `Term` + additive `Sum`); union-find, hash-consing (`Atom`
+            leaves keyed by `nf::equal`/`hash`), recursive `add(Nf)`/`add(Expr)`,
+            `find`, `merge`.
+      - **congruence + extraction DONE** — `rebuild` (worklist + repair) and
+            `extract` (fixpoint cost → cheapest `Nf`).
+      - **TODO** — `ematch` (e-class matching via the `nf_match` matcher — the
+            unification payoff), `saturate`, then switch consumers
+            (`saturate`/python/basis) onto `NfEGraph` and delete the Expr
+            `EGraph`.
   - **C14e TODO** — prune the Expr identity matcher (`match_node`/`match`/
         `instantiate`/`match_commutative`…) + the `apply_identity` fallback once
         the e-graph is decoupled.
