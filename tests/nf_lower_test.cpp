@@ -1113,3 +1113,20 @@ TEST(CanonicalizeNf, BinderDistributesOverSum)
     auto const* nf = canonicalize_nf(ctx, e);
     EXPECT_EQ(nf->terms.size(), 2u);
 }
+
+// ---- symbolic division (C13) -------------------------------------------
+
+TEST(CanonicalizeNf, SymbolicDivisionBecomesDiv)
+{
+    // A/B (non-numeric divisor) → a Div factor; round-trips.
+    Context ctx;
+    auto const* e =
+        make_scalar_div(ctx, atomr(ctx, "A", 2), atomr(ctx, "B", 2));
+    auto const* nf = canonicalize_nf(ctx, e);
+    ASSERT_EQ(nf->terms.size(), 1u);
+    auto const& t = nf->terms[0];
+    ASSERT_EQ(t.scalars.size() + t.tensors.size(), 1u);
+    auto const* f = t.scalars.empty() ? t.tensors[0] : t.scalars[0];
+    EXPECT_TRUE(std::holds_alternative<Div>(f->node));
+    EXPECT_TRUE(equal(*nf, *canonicalize_nf(ctx, raise(ctx, *nf))));
+}

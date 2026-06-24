@@ -441,6 +441,7 @@ struct NfRenderer
                 [](nf::Paren const&)
                 { return ATOM_PREC; }, // self-parenthesized
                 [](nf::Unary const&) { return ATOM_PREC; }, // self-delimiting
+                [](nf::Div const&) { return ATOM_PREC; },   // \frac is atomic
             },
             f);
     }
@@ -494,6 +495,10 @@ struct NfRenderer
                 },
                 [&](nf::Paren const& p) -> std::string
                 { return "(" + render_nf(*p.body) + ")"; },
+                [&](nf::Div const& d) -> std::string {
+                    return "\\frac{" + render_nf(*d.num) + "}{"
+                           + render_nf(*d.den) + "}";
+                },
                 [&](nf::Unary const& u) -> std::string
                 {
                     switch (u.op)

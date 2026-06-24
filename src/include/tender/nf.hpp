@@ -104,9 +104,19 @@ struct Unary final
     Factor const* operand;
 };
 
+// An opaque division `num / den` (the surface `ScalarDiv`), each side a
+// recursively canonical `Nf` — usually a scalar denominator (`A / (b·c)`), but
+// any non-numeric divisor lands here (a numeric divisor folds into `coeff`).
+// Canon never distributes through it; region is by result rank like any factor.
+struct Div final
+{
+    Nf const* num;
+    Nf const* den;
+};
+
 struct Factor final
 {
-    using Node = std::variant<Atom, Contraction, Cross, Paren, Unary>;
+    using Node = std::variant<Atom, Contraction, Cross, Paren, Unary, Div>;
 
     Node node;
 
@@ -192,6 +202,9 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
 [[nodiscard]] auto make_unary(Context&, UnaryOp, Factor const* operand)
     -> Factor const*;
 
+[[nodiscard]] auto make_div(Context&, Nf const* num, Nf const* den)
+    -> Factor const*;
+
 [[nodiscard]] auto make_nf(Context&, std::vector<Term> terms) -> Nf const*;
 
 // ---- structural equality -----------------------------------------------
@@ -219,10 +232,10 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
 // Total three-way order (strcmp convention: negative / zero / positive),
 // consistent with `equal`: `compare(x, y) == 0` iff `equal(x, y)`.
 //
-//   Factor : by variant tag (Atom < Contraction < Cross < Paren), then by
-//            contents — atoms by `tensor_object_cmp` (the same key as the
-//            `Expr` canonical order), composites by their factor/op sequences,
-//            parens by body.
+//   Factor : by variant tag (Atom < Contraction < Cross < Paren < Unary < Div),
+//            then by contents — atoms by `tensor_object_cmp` (the same key as
+//            the `Expr` canonical order), composites by their factor/op
+//            sequences, parens by body, divs by num then den.
 //   Term   : by tensors, then scalars, then bound (ids + modes), then coeff —
 //            so terms of the same tensor shape sort adjacently.
 //   Nf     : lexicographically by term sequence.

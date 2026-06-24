@@ -186,3 +186,13 @@ TEST(RenderNf, NoSumGetsCancelledSigma)
     EXPECT_EQ(
         rnf(ctx, e), "\\cancel{\\sum}_{i} \\mathbf{a}^{i} \\, \\mathbf{b}_{i}");
 }
+
+TEST(RenderNf, SymbolicDivision)
+{
+    // A/(a·b) → \frac{A}{a · b}: division renders as a fraction.
+    Context ctx;
+    auto const* e = make_scalar_div(
+        ctx, mat(ctx, "A"), make_dot(ctx, vec(ctx, "a"), vec(ctx, "b")));
+    EXPECT_EQ(
+        rnf(ctx, e), "\\frac{\\mathbf{A}}{\\mathbf{a} \\cdot \\mathbf{b}}");
+}

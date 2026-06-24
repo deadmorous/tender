@@ -309,6 +309,17 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
         || std::holds_alternative<Difference>(factor->node))
         return {+1, make_paren(ctx, canonicalize_nf(ctx, factor))};
 
+    // A symbolic division (`A / B`, non-numeric divisor — a numeric one folds
+    // into `coeff` in multiplicative_flatten) becomes a `Div` over recursively
+    // canonical numerator / denominator `Nf`s.
+    if (auto const* d = std::get_if<ScalarDiv>(&factor->node))
+        return {
+            +1,
+            make_div(
+                ctx,
+                canonicalize_nf(ctx, d->left),
+                canonicalize_nf(ctx, d->right))};
+
     throw std::invalid_argument(
         "encapsulate: unsupported factor node (a nested ⊗ inside an operand "
         "awaits fence distribution)");
@@ -672,6 +683,10 @@ auto raise_factor(Context& ctx, Factor const& f) -> Expr const*
                 return acc;
             },
             [&](Paren const& p) -> Expr const* { return raise(ctx, *p.body); },
+            [&](Div const& d) -> Expr const* {
+                return make_scalar_div(
+                    ctx, raise(ctx, *d.num), raise(ctx, *d.den));
+            },
             [&](Unary const& u) -> Expr const*
             {
                 auto const* operand = raise_factor(ctx, *u.operand);

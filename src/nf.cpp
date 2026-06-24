@@ -55,6 +55,13 @@ auto make_unary(Context& ctx, UnaryOp op, Factor const* operand) -> Factor const
     return ctx.make<Factor>(Unary{.op = op, .operand = operand});
 }
 
+auto make_div(Context& ctx, Nf const* num, Nf const* den) -> Factor const*
+{
+    if (num == nullptr || den == nullptr)
+        throw std::invalid_argument("make_div: null num/den");
+    return ctx.make<Factor>(Div{.num = num, .den = den});
+}
+
 auto make_nf(Context& ctx, std::vector<Term> terms) -> Nf const*
 {
     return ctx.make<Nf>(Nf{.terms = std::move(terms)});
@@ -108,6 +115,11 @@ auto equal(Factor const& a, Factor const& b) -> bool
             {
                 auto const& fb = std::get<Unary>(b.node);
                 return fa.op == fb.op && equal(fa.operand, fb.operand);
+            },
+            [&](Div const& fa) -> bool
+            {
+                auto const& fb = std::get<Div>(b.node);
+                return equal(fa.num, fb.num) && equal(fa.den, fb.den);
             },
         },
         a);
@@ -196,6 +208,13 @@ auto compare(Factor const& a, Factor const& b) -> int
                 if (fa.op != fb.op)
                     return fa.op < fb.op ? -1 : 1;
                 return compare(*fa.operand, *fb.operand);
+            },
+            [&](Div const& fa) -> int
+            {
+                auto const& fb = std::get<Div>(b.node);
+                if (int c = compare(*fa.num, *fb.num))
+                    return c;
+                return compare(*fa.den, *fb.den);
             },
         },
         a);
@@ -311,6 +330,12 @@ auto hash(Factor const& f) -> std::size_t
             {
                 std::size_t h = static_cast<std::size_t>(u.op);
                 h = hash_mix(h, u.operand ? hash(*u.operand) : 0);
+                return hash_mix(tag, h);
+            },
+            [&](Div const& d) -> std::size_t
+            {
+                std::size_t h = d.num ? hash(*d.num) : 0;
+                h = hash_mix(h, d.den ? hash(*d.den) : 0);
                 return hash_mix(tag, h);
             },
         },
