@@ -1130,3 +1130,19 @@ TEST(CanonicalizeNf, SymbolicDivisionBecomesDiv)
     EXPECT_TRUE(std::holds_alternative<Div>(f->node));
     EXPECT_TRUE(equal(*nf, *canonicalize_nf(ctx, raise(ctx, *nf))));
 }
+
+// ---- unary-of-dyad fence distribution (C13) ----------------------------
+
+TEST(CanonicalizeNf, TransposeOfDyadExpands)
+{
+    // (a⊗b)^T → b⊗a: a Unary over a ⊗ operand expands; no buried ⊗.
+    Context ctx;
+    auto const* nf = canonicalize_nf(
+        ctx,
+        make_transpose(
+            ctx, make_tensor_product(ctx, atom(ctx, "a"), atom(ctx, "b"))));
+    ASSERT_EQ(nf->terms.size(), 1u);
+    ASSERT_EQ(nf->terms[0].tensors.size(), 2u);
+    EXPECT_EQ(tname(nf->terms[0], 0), "b"); // b⊗a, positional
+    EXPECT_EQ(tname(nf->terms[0], 1), "a");
+}
