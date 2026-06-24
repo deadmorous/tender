@@ -330,7 +330,27 @@ check.
 **Stage 5 — matcher on `Nf`.**
 - C14 migrate `identity.cpp` matching to the all-`*` flat form (the original
       motivation: robust `a%I%b`-style matching, AC over `scalars`, positional
-      over `tensors`); motivating cases become tests.
+      over `tensors`); motivating cases become tests.  Staged:
+  - **C14a DONE** — `nf_match.{hpp,cpp}`: `NfBinding`, `match_factor`,
+        whole-`match_term` (AC scalars, positional tensors, aligned bound).
+  - **C14b DONE** — `match_term_partial`: a single-term LHS matches a
+        sub-multiset of a target term's scalars + a contiguous tensor sub-run +
+        a subset of bound dummies, returning binding + leftover (carried-through
+        factors, surviving dummies, coeff ratio).  Sound over summation: a
+        pattern *bound* index consumes a target dummy only if it occurs in no
+        leftover factor; a dummy a pattern *free* index binds always survives.
+  - **C14c DONE** — `instantiate_nf` + `apply_identity` switched to the flat
+        matcher.  Closes the headline gap (an identity fires on a sub-product
+        inside a larger term).  **Discovered scope:** an identity matching a
+        contiguous run *inside* a flat `Contraction`/`Cross` factor (e.g.
+        `I×x = x×I` on the `I×b` of `a×I×b`) needs Nf *sub-chain* matching, not
+        yet built; `apply_identity` falls back to the retained binary-tree
+        matcher (`apply_identity_expr`) when the flat path does not fire, so all
+        cases stay green.
+  - **C14d TODO** — Nf sub-chain (Contraction/Cross) partial matching, then
+        migrate the e-graph matcher onto the Nf core (per the review decision).
+  - **C14e TODO** — prune the Expr matcher + the fallback once both consumers
+        are off it.
 
 **Stage 6 — prune.**
 - C15 remove the dead old binary-tree canonicalizer.  **Scope correction (done
@@ -396,9 +416,18 @@ now-unused `<map>` / `<numeric>` / `tensor_symmetry.hpp` includes — 313 lines
 out of `derivation.cpp`, suite still green at **638**.  `flatten_factors` /
 `extract_coeff` / `collect_signed_addends` were kept (still used by live code).
 The old render path and `Negate`/`Difference` are deliberately retained (the
-flip prep + Expr renderer still need them).  Next action: Stage 5 / C14 (migrate
-the `identity.cpp` matcher to the all-`*` flat form).  A non-blocking follow-up:
-make `canonicalize_nf` self-contained (fold in the materialize/float prep).
+flip prep + Expr renderer still need them).  **Stage 5 / C14 in progress** —
+C14a/b/c DONE: the flat-form matcher (`nf_match.{hpp,cpp}`) and a Nf-native
+`apply_identity` that does **partial sub-product matching**, closing the headline
+gap (an identity fires on a sub-product inside a larger term, e.g. δ-contraction
+among extra factors), confirmed by a probe that the old matcher failed.  Suite
+green at **651**.  Discovered that sub-*chain* rewrites (a run inside a flat
+`Contraction`/`Cross` factor, e.g. `I×x=x×I` on `a×I×b`) need Nf sub-chain
+matching not yet built, so `apply_identity` falls back to the retained binary-
+tree matcher when the flat path does not fire.  Next: C14d (Nf sub-chain matching
++ migrate the e-graph matcher onto the Nf core), then C14e (prune the Expr
+matcher + fallback).  Non-blocking follow-up still open: make `canonicalize_nf`
+self-contained (fold in the materialize/float prep).
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with
