@@ -347,10 +347,30 @@ check.
         yet built; `apply_identity` falls back to the retained binary-tree
         matcher (`apply_identity_expr`) when the flat path does not fire, so all
         cases stay green.
-  - **C14d TODO** — Nf sub-chain (Contraction/Cross) partial matching, then
-        migrate the e-graph matcher onto the Nf core (per the review decision).
-  - **C14e TODO** — prune the Expr matcher + the fallback once both consumers
-        are off it.
+  - **C14d** — two parts.  **(1) DONE** — Nf sub-chain (Contraction/Cross)
+        partial matching: `rewrite_subchain` matches a chain rule's factor
+        sequence as a contiguous sub-run inside a target chain factor and splices
+        the instantiated RHS in place (preserving boundary join ops), recursing
+        into nested chain factors (the encapsulation keeps a chain as *nested
+        binary* factors, so `I×b` hides one level down in `a×(I×b)`).
+        `apply_identity` is now fully Nf-native for matching — an abort probe on
+        the fallback confirms every *matching* case in the suite goes through the
+        Nf path; the binary-tree fallback is reached only for genuine no-match
+        and unhandled shapes (multi-term LHS, deep nesting).  Suite green at 654.
+        **(2) BLOCKED/RESCOPED** — "migrate the e-graph matcher onto the Nf
+        core": the e-graph is an *Expr-structural* engine — its e-nodes mirror
+        `Expr` node kinds and it matches a pattern `Expr` against them by
+        descending through e-classes, borrowing only `match_into` (Expr leaf) +
+        `bind_pattern_index` (index) + `instantiate` from the identity matcher.
+        A literal "match on `Nf`" would require re-representing the whole e-graph
+        over `Nf` (union-find / hash-cons / congruence over Nf terms+factors) —
+        an epic on the scale of 000042–000045, not a C14 increment.  The sensible
+        achievable goal is to *decouple* the e-graph from the to-be-pruned Expr
+        identity matcher (give it the small leaf/index/instantiate primitives it
+        needs) so C14e can prune the rest.  Pending a steer.
+  - **C14e TODO** — prune the Expr identity matcher (`match_node`/`match`/
+        `instantiate`/`match_commutative`…) + the `apply_identity` fallback once
+        the e-graph is decoupled.
 
 **Stage 6 — prune.**
 - C15 remove the dead old binary-tree canonicalizer.  **Scope correction (done
