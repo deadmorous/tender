@@ -7,7 +7,6 @@
 #include <tender/nf_match.hpp> // match_term_partial, instantiate_nf
 #include <tender/rewrite.hpp>
 
-#include <algorithm>
 #include <vector>
 
 using namespace mpk::mix;
@@ -459,45 +458,11 @@ auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
     for (auto const& tterm: target->terms)
     {
         if (!fired)
-            if (auto pm = nf::match_term_partial(lhs_term, tterm))
+            if (auto rep = nf::fire_identity_on_term(ctx, lhs_term, rhs, tterm))
             {
                 fired = true;
-                auto const* rhs_inst =
-                    nf::instantiate_nf(ctx, rhs, pm->binding);
-                nf::Term const& L = pm->leftover;
-                auto const pos = static_cast<std::ptrdiff_t>(
-                    std::min(pm->tensor_at, L.tensors.size()));
-                for (auto const& r: rhs_inst->terms)
-                {
-                    nf::Term m;
-                    m.coeff = r.coeff * L.coeff;
-                    m.bound = L.bound;
-                    m.bound.insert(
-                        m.bound.end(), r.bound.begin(), r.bound.end());
-                    m.scalars = L.scalars;
-                    m.scalars.insert(
-                        m.scalars.end(), r.scalars.begin(), r.scalars.end());
-                    m.tensors.insert(
-                        m.tensors.end(),
-                        L.tensors.begin(),
-                        L.tensors.begin() + pos);
-                    m.tensors.insert(
-                        m.tensors.end(), r.tensors.begin(), r.tensors.end());
-                    m.tensors.insert(
-                        m.tensors.end(),
-                        L.tensors.begin() + pos,
-                        L.tensors.end());
-                    out.push_back(std::move(m));
-                }
-                continue;
-            }
-        // A chain rule (single Contraction/Cross factor LHS) can still rewrite
-        // a contiguous sub-run inside one of this term's chain factors.
-        if (!fired)
-            if (auto rt = nf::rewrite_subchain(ctx, lhs_term, rhs, tterm))
-            {
-                fired = true;
-                out.push_back(std::move(*rt));
+                for (auto& t: *rep)
+                    out.push_back(std::move(t));
                 continue;
             }
         out.push_back(tterm);

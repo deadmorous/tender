@@ -109,4 +109,20 @@ struct PartialMatch final
     Nf const* rhs,
     Term const& tgt) -> std::optional<Term>;
 
+// Fire a single-term identity (`lhs_term = rhs`) on one target term `tgt`.  If
+// the LHS partially matches a sub-product of `tgt`, return the term(s) that
+// replace it — the leftover with the instantiated RHS spliced back in at the
+// matched tensor offset (one result term per RHS term).  Otherwise, if the LHS
+// is a chain rule matching a contiguous sub-run inside one of `tgt`'s chain
+// factors, return the single rewritten term.  Returns nullopt when the rule
+// does not fire on `tgt`.  The returned terms are *not* re-canonicalized (the
+// RHS dummies are freshened, like terms unmerged); the caller raises and
+// re-canonicalizes.  This is the per-term firing shared by `apply_identity` and
+// the `NfEGraph` saturation loop.
+[[nodiscard]] auto fire_identity_on_term(
+    Context&,
+    Term const& lhs_term,
+    Nf const* rhs,
+    Term const& tgt) -> std::optional<std::vector<Term>>;
+
 } // namespace tender::nf

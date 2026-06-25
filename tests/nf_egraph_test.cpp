@@ -35,6 +35,39 @@ auto delta_ul(Context& ctx, IndexSpace const* sp, IndexAssoc a, IndexAssoc b)
     return make_delta(ctx, Realm::Oblique, sp, Level::Upper, Level::Lower, a, b);
 }
 
+auto delta_ll(Context& ctx, IndexSpace const* sp, IndexAssoc a, IndexAssoc b)
+    -> Expr const*
+{
+    return make_delta(ctx, Realm::Oblique, sp, Level::Lower, Level::Lower, a, b);
+}
+
+// Σ_p δ^p_a δ^p_b
+auto contraction(
+    Context& ctx,
+    IndexSpace const* sp,
+    CountableIndex p,
+    CountableIndex a,
+    CountableIndex b) -> Expr const*
+{
+    return make_explicit_sum(
+        ctx,
+        p,
+        make_tensor_product(
+            ctx, delta_ul(ctx, sp, p, a), delta_ul(ctx, sp, p, b)));
+}
+
+// The delta-contraction identity  Σ_p δ^p_a δ^p_b = δ_{ab}, with fresh ids.
+auto contraction_rule(Context& ctx, IndexSpace const* sp) -> Identity
+{
+    CountableIndex p{ctx.alloc_index_id()};
+    CountableIndex a{ctx.alloc_index_id()};
+    CountableIndex b{ctx.alloc_index_id()};
+    return Identity{
+        "delta-contraction",
+        contraction(ctx, sp, p, a, b),
+        delta_ll(ctx, sp, a, b)};
+}
+
 } // namespace
 
 TEST(NfEGraphCore, EqualExpressionsShareClass)
@@ -146,6 +179,111 @@ TEST(NfEGraphRebuild, CongruenceMergesParents)
     g.rebuild();
 
     EXPECT_EQ(g.find(e1), g.find(e2));
+}
+
+TEST(NfEGraphSaturate, ContractsDelta)
+{
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    NfEGraph g(ctx);
+    auto root = g.add(contraction(ctx, sp, q, m, n));
+    int passes = g.saturate({contraction_rule(ctx, sp)});
+
+    EXPECT_TRUE(
+        equal(g.extract(g.find(root)), canon_nf(ctx, delta_ll(ctx, sp, m, n))));
+    EXPECT_LT(passes, 30); // converged below the cap
+}
+
+TEST(NfEGraphSaturate, FiresOnSubProductOfLargerTerm)
+{
+    // The C14 payoff the Expr e-graph could not reach: the contraction sits
+    // among an extra factor of the term — δ^p_m δ^p_n ⊗ c — yet the rule still
+    // fires on the sub-product, leaving δ_{mn} ⊗ c.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    auto const* c = vrank1(ctx, "c");
+
+    NfEGraph g(ctx);
+    auto root =
+        g.add(make_tensor_product(ctx, contraction(ctx, sp, q, m, n), c));
+    (void)g.saturate({contraction_rule(ctx, sp)});
+
+    auto const* expected = make_tensor_product(ctx, delta_ll(ctx, sp, m, n), c);
+    EXPECT_TRUE(equal(g.extract(g.find(root)), canon_nf(ctx, expected)));
+}
+
+TEST(NfEGraphSaturate, RewritesTermInsideSum)
+{
+    // δ_{rs} + Σ_q δ^q_m δ^q_n  saturates to  δ_{rs} + δ_{mn}: the rule fires
+    // on the second additive term only, the first carried through.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    CountableIndex r{ctx.alloc_index_id()};
+    CountableIndex s{ctx.alloc_index_id()};
+
+    NfEGraph g(ctx);
+    auto root = g.add(
+        make_sum(ctx, delta_ll(ctx, sp, r, s), contraction(ctx, sp, q, m, n)));
+    (void)g.saturate({contraction_rule(ctx, sp)});
+
+    auto const* expected =
+        make_sum(ctx, delta_ll(ctx, sp, r, s), delta_ll(ctx, sp, m, n));
+    EXPECT_TRUE(equal(g.extract(g.find(root)), canon_nf(ctx, expected)));
+}
+
+TEST(NfEGraphSaturate, NoMatchLeavesGraphUnchanged)
+{
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    NfEGraph g(ctx);
+    auto root = g.add(delta_ll(ctx, sp, m, n)); // bare delta, no contraction
+    auto before = g.class_count();
+
+    EXPECT_EQ(g.saturate({contraction_rule(ctx, sp)}), 1); // one no-op pass
+    EXPECT_EQ(g.class_count(), before);
+    EXPECT_TRUE(
+        equal(g.extract(g.find(root)), canon_nf(ctx, delta_ll(ctx, sp, m, n))));
+}
+
+TEST(NfEGraphSaturate, ReachesFixedPointAndIsIdempotent)
+{
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    NfEGraph g(ctx);
+    (void)g.add(contraction(ctx, sp, q, m, n));
+    (void)g.saturate({contraction_rule(ctx, sp)});
+    // A second saturation merges nothing new: one pass, then convergence.
+    EXPECT_EQ(g.saturate({contraction_rule(ctx, sp)}), 1);
+}
+
+TEST(NfEGraphSaturate, RespectsIterationCap)
+{
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    NfEGraph g(ctx);
+    (void)g.add(contraction(ctx, sp, q, m, n));
+    EXPECT_EQ(g.saturate({contraction_rule(ctx, sp)}, 1), 1); // hard stop
 }
 
 TEST(NfEGraphCore, ContractionStructureDedups)

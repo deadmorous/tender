@@ -18,6 +18,7 @@
 // `extract`, `ematch`, and `saturate` arrive in later commits.
 
 #include <tender/expr.hpp>
+#include <tender/identity.hpp> // Identity
 #include <tender/nf.hpp>
 
 #include <cstddef>
@@ -60,6 +61,19 @@ public:
     // Cheapest (smallest node-count) representative `Nf` of a class.  Requires
     // a `Sum`-sort class (an `add`-returned id, or one merged with such).
     [[nodiscard]] auto extract(EClassId id) -> Nf const*;
+
+    // Equality saturation over the `Nf` (vibe 000058 / C14d).  Each
+    // single-term identity `lhs = rhs` is fired — via the `nf_match` matcher —
+    // on every term of every additive (`Sum`) e-node in the graph: a
+    // sub-product match (the LHS sits among extra factors of a term) or a
+    // sub-chain match (the LHS is a contiguous run inside a chain factor).  The
+    // rewritten `Nf` is canonicalized, inserted, and merged into the matched
+    // class.  Passes run to a fixed point (a pass that merges nothing new),
+    // capped at `max_iterations`; multi-term-LHS rules are skipped (no `Nf`
+    // sub-sum matcher yet).  Returns the number of passes run; afterwards
+    // `extract(find(root))` yields the simplified form.
+    auto saturate(std::vector<Identity> const& rules, int max_iterations = 30)
+        -> int;
 
     // Number of distinct e-classes / e-nodes (diagnostics / tests).
     [[nodiscard]] auto class_count() -> std::size_t;

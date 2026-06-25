@@ -3,11 +3,13 @@
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/context.hpp>
 #include <tender/derivation.hpp> // steps::canonicalize
-#include <tender/nf_lower.hpp>   // canonicalize_nf
+#include <tender/nf_lower.hpp>   // canonicalize_nf, raise
+#include <tender/nf_match.hpp>   // fire_identity_on_term
 
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 using namespace mpk::mix;
@@ -447,6 +449,106 @@ struct NfEGraph::Impl final
     {
         return memo_.size();
     }
+
+    // ---- saturation ------------------------------------------------------
+    //
+    // E-class matching is the `nf_match` matcher run over the graph: every
+    // additive (`Sum`) e-node is a candidate rewrite site, its term children
+    // reconstructed at their cheapest form.  A single-term rule fires on a term
+    // (sub-product or sub-chain) exactly as in `apply_identity`; the resulting
+    // term(s) replace that one term, leaving the rest of the sum intact, to
+    // form the rewritten `Nf`.  Splitting read (collect) and write (insert +
+    // merge) phases keeps matching off a half-mutated graph, mirroring the Expr
+    // `EGraph::saturate`.
+
+    // Read phase: every (Sum class, rewritten Nf) a compiled rule produces over
+    // a stable graph.  The rewritten Nf is raw (freshened RHS dummies, unmerged
+    // terms); the caller canonicalizes it before insertion.
+    auto collect_rewrites(
+        std::vector<std::pair<Term, Nf const*>> const& compiled)
+        -> std::vector<std::pair<EClassId, Nf const*>>
+    {
+        auto best = compute_best();
+        std::unordered_map<EClassId, Nf const*> nfmemo;
+        std::unordered_map<EClassId, Factor const*> fmemo;
+        std::vector<std::pair<EClassId, Nf const*>> out;
+
+        for (auto const& [id, ec]: classes_)
+            for (NfENode const& sumnode: ec.nodes)
+            {
+                if (sumnode.kind != NfEKind::Sum)
+                    continue;
+                std::vector<Term> terms;
+                terms.reserve(sumnode.children.size());
+                for (EClassId tc: sumnode.children)
+                    terms.push_back(reconstruct_term(tc, best, nfmemo, fmemo));
+
+                for (auto const& [lhs_term, rhs]: compiled)
+                    for (std::size_t i = 0; i < terms.size(); ++i)
+                        if (auto rep = fire_identity_on_term(
+                                *ctx_, lhs_term, rhs, terms[i]))
+                        {
+                            std::vector<Term> nt;
+                            nt.reserve(terms.size() + rep->size());
+                            for (std::size_t k = 0; k < terms.size(); ++k)
+                                if (k == i)
+                                    nt.insert(
+                                        nt.end(), rep->begin(), rep->end());
+                                else
+                                    nt.push_back(terms[k]);
+                            out.emplace_back(id, make_nf(*ctx_, std::move(nt)));
+                        }
+            }
+        return out;
+    }
+
+    auto saturate(std::vector<Identity> const& rules, int max_iterations) -> int
+    {
+        Context& ctx = *ctx_;
+
+        // Compile once: each rule's LHS / RHS canonicalized to `Nf`.  Only a
+        // single-term LHS is matched as a sub-product / sub-chain; a multi-term
+        // LHS (a sub-sum pattern) has no Nf matcher yet and is skipped.
+        std::vector<std::pair<Term, Nf const*>> compiled;
+        compiled.reserve(rules.size());
+        for (auto const& r: rules)
+        {
+            auto const* lhs =
+                canonicalize_nf(ctx, steps::canonicalize(ctx, r.lhs));
+            auto const* rhs =
+                canonicalize_nf(ctx, steps::canonicalize(ctx, r.rhs));
+            if (lhs->terms.size() != 1)
+                continue;
+            compiled.emplace_back(lhs->terms.front(), rhs);
+        }
+
+        int passes = 0;
+        while (passes < max_iterations)
+        {
+            ++passes;
+
+            auto rewrites = collect_rewrites(compiled);
+
+            bool changed = false;
+            for (auto const& [cls, raw]: rewrites)
+            {
+                // Re-canonicalize the spliced Nf (re-α-rename freshened RHS
+                // dummies, merge like terms) before hash-consing it in.
+                auto const* canon = canonicalize_nf(
+                    ctx, steps::canonicalize(ctx, raise(ctx, *raw)));
+                EClassId const rcls = add_nf(canon);
+                if (find(cls) != find(rcls))
+                {
+                    merge(cls, rcls);
+                    changed = true;
+                }
+            }
+            rebuild();
+            if (!changed)
+                break;
+        }
+        return passes;
+    }
 };
 
 auto NfEGraph::Impl::reconstruct_nf(
@@ -497,6 +599,12 @@ auto NfEGraph::extract(EClassId id) -> Nf const*
     std::unordered_map<EClassId, Nf const*> nfmemo;
     std::unordered_map<EClassId, Factor const*> fmemo;
     return impl_->reconstruct_nf(id, best, nfmemo, fmemo);
+}
+
+auto NfEGraph::saturate(std::vector<Identity> const& rules, int max_iterations)
+    -> int
+{
+    return impl_->saturate(rules, max_iterations);
 }
 
 auto NfEGraph::merge(EClassId a, EClassId b) -> EClassId

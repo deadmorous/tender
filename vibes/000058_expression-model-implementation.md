@@ -374,10 +374,24 @@ check.
             `find`, `merge`.
       - **congruence + extraction DONE** — `rebuild` (worklist + repair) and
             `extract` (fixpoint cost → cheapest `Nf`).
-      - **TODO** — `ematch` (e-class matching via the `nf_match` matcher — the
-            unification payoff), `saturate`, then switch consumers
-            (`saturate`/python/basis) onto `NfEGraph` and delete the Expr
-            `EGraph`.
+      - **ematch + saturate DONE** — the unification payoff: e-class matching
+            *is* the `nf_match` matcher, not a second structural descent.  Every
+            additive (`Sum`) e-node is a rewrite site; its term children are
+            reconstructed at cheapest form and a single-term identity fires on
+            each term via the new shared `nf::fire_identity_on_term` (the
+            sub-product + sub-chain firing factored out of `apply_identity`, so
+            the two share one path — DRY).  The matched term is replaced in place
+            (the rest of the sum carried through), the rewritten `Nf` raised +
+            re-canonicalized, inserted, and merged into the class; read/write
+            phases split, fixpoint with an iteration cap.  Multi-term-LHS rules
+            are skipped (no Nf sub-sum matcher yet).  6 saturate tests incl. the
+            sub-product-of-a-larger-term payoff the Expr e-graph could not reach;
+            suite 669 green.
+      - **TODO** — switch consumers (`EGraph::saturate` callers: python
+            `_saturate`, `basis.cpp`) onto `NfEGraph`, then delete the Expr
+            `EGraph`.  Note python `_saturate`/`extract` returns an `Expr`, so the
+            switch must `raise` the extracted `Nf` back through
+            `implicitize(canonicalize(...))`.
   - **C14e TODO** — prune the Expr identity matcher (`match_node`/`match`/
         `instantiate`/`match_commutative`…) + the `apply_identity` fallback once
         the e-graph is decoupled.
@@ -454,10 +468,18 @@ among extra factors), confirmed by a probe that the old matcher failed.  Suite
 green at **651**.  Discovered that sub-*chain* rewrites (a run inside a flat
 `Contraction`/`Cross` factor, e.g. `I×x=x×I` on `a×I×b`) need Nf sub-chain
 matching not yet built, so `apply_identity` falls back to the retained binary-
-tree matcher when the flat path does not fire.  Next: C14d (Nf sub-chain matching
-+ migrate the e-graph matcher onto the Nf core), then C14e (prune the Expr
-matcher + fallback).  Non-blocking follow-up still open: make `canonicalize_nf`
-self-contained (fold in the materialize/float prep).
+tree matcher when the flat path does not fire.  **C14d DONE** — Nf sub-chain
+matching (`rewrite_subchain`, recursing into nested chain factors) plus the full
+Nf e-graph re-architecture: `NfEGraph` (`nf_egraph.{hpp,cpp}`) with e-nodes
+mirroring the `Nf` structure, union-find / hash-cons / congruence `rebuild` /
+cost `extract`, and now **`saturate` whose e-class matcher is the `nf_match`
+matcher itself** — the per-term firing (sub-product + sub-chain) is the shared
+`nf::fire_identity_on_term`, factored out of `apply_identity` so both run one
+path.  6 saturate tests incl. the sub-product-of-a-larger-term payoff; suite
+green at **669**.  Next: switch the `EGraph::saturate` consumers (python
+`_saturate`, `basis.cpp`) onto `NfEGraph` and delete the Expr `EGraph`, then
+C14e (prune the Expr matcher + fallback).  Non-blocking follow-up still open:
+make `canonicalize_nf` self-contained (fold in the materialize/float prep).
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with

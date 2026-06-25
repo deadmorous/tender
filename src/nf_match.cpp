@@ -3,6 +3,7 @@
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/expr.hpp> // TensorObject, SlotBinding
 
+#include <algorithm>
 #include <functional>
 #include <map>
 #include <set>
@@ -755,6 +756,51 @@ auto rewrite_subchain(
         out.scalars[hit] = nw;
         return out;
     }
+    return std::nullopt;
+}
+
+auto fire_identity_on_term(
+    Context& ctx,
+    Term const& lhs_term,
+    Nf const* rhs,
+    Term const& tgt) -> std::optional<std::vector<Term>>
+{
+    // Sub-product path: the LHS matches a sub-multiset of the target's factors;
+    // splice the instantiated RHS into the leftover where the matched run sat
+    // (⊗ is non-commutative), one result term per RHS term.
+    if (auto pm = match_term_partial(lhs_term, tgt))
+    {
+        auto const* rhs_inst = instantiate_nf(ctx, rhs, pm->binding);
+        Term const& L = pm->leftover;
+        auto const pos = static_cast<std::ptrdiff_t>(
+            std::min(pm->tensor_at, L.tensors.size()));
+        std::vector<Term> out;
+        out.reserve(rhs_inst->terms.size());
+        for (auto const& r: rhs_inst->terms)
+        {
+            Term m;
+            m.coeff = r.coeff * L.coeff;
+            m.bound = L.bound;
+            m.bound.insert(m.bound.end(), r.bound.begin(), r.bound.end());
+            m.scalars = L.scalars;
+            m.scalars.insert(
+                m.scalars.end(), r.scalars.begin(), r.scalars.end());
+            m.tensors.insert(
+                m.tensors.end(), L.tensors.begin(), L.tensors.begin() + pos);
+            m.tensors.insert(
+                m.tensors.end(), r.tensors.begin(), r.tensors.end());
+            m.tensors.insert(
+                m.tensors.end(), L.tensors.begin() + pos, L.tensors.end());
+            out.push_back(std::move(m));
+        }
+        return out;
+    }
+
+    // Chain path: a single Contraction/Cross-factor LHS rewrites a contiguous
+    // sub-run inside one of this term's chain factors.
+    if (auto rt = rewrite_subchain(ctx, lhs_term, rhs, tgt))
+        return std::vector<Term>{std::move(*rt)};
+
     return std::nullopt;
 }
 
