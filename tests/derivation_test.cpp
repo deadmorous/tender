@@ -396,10 +396,13 @@ TEST(ContractDelta, SumOfSquaredDeltas)
         || (c0->id == l.id && c1->id == k.id));
 }
 
-TEST(ContractDelta, NoContractWithMismatchedLevels)
+TEST(ContractDelta, ContractsMixedLevelDeltas)
 {
-    // Σ_m δ^m_k δ_m^l  — the summation slot has different levels in each
-    // delta → contraction rule does not fire.
+    // Σ_m δ^m_k δ_m^l  →  δ^l_k.  The summation index sits at opposite levels
+    // in the two deltas (Upper m vs Lower m), which is exactly a valid oblique
+    // Einstein contraction: δ^m_k identifies m with k, so substituting
+    // collapses the sum to a single Kronecker over the surviving indices k and
+    // l.
     Context ctx;
     auto const* sp = space_3d();
     CountableIndex m{ctx.alloc_index_id()};
@@ -421,12 +424,24 @@ TEST(ContractDelta, NoContractWithMismatchedLevels)
         Level::Lower,
         Level::Upper,
         IndexAssoc{m},
-        IndexAssoc{l}); // Lower m  (different level)
+        IndexAssoc{l}); // Lower m  (opposite level — valid contraction)
     auto* prod = make_tensor_product(ctx, d1, d2);
     auto* expr = make_explicit_sum(ctx, m, prod);
 
     auto const* after = steps::contract_delta(ctx, expr);
-    EXPECT_EQ(after, expr); // unchanged — levels don't match
+    auto const* res = std::get_if<TensorObject>(&after->node);
+    ASSERT_NE(res, nullptr);
+    ASSERT_TRUE(res->traits.has_value());
+    EXPECT_EQ(res->traits->well_known, WellKnownKind::Delta);
+    ASSERT_EQ(res->slots.size(), 2u);
+    auto const* c0 = std::get_if<CountableIndex>(&*res->slots[0].index);
+    auto const* c1 = std::get_if<CountableIndex>(&*res->slots[1].index);
+    ASSERT_NE(c0, nullptr);
+    ASSERT_NE(c1, nullptr);
+    // The fresh summation index m is gone; the survivors are k and l.
+    EXPECT_TRUE(
+        (c0->id == k.id && c1->id == l.id)
+        || (c0->id == l.id && c1->id == k.id));
 }
 
 // ---- contract_eps_pair -----------------------------------------------------
@@ -3202,6 +3217,38 @@ TEST(ContractDelta, ResultStaysImplicit)
         ctx, make_tensor_product(ctx, delta(i, j), delta(i, j)));
     // A single Kronecker delta (the trace δ_ii), no ExplicitSum wrapper.
     EXPECT_TRUE(std::holds_alternative<TensorObject>(res->node));
+}
+
+TEST(ContractDelta, ContractsDeltaAgainstTensor)
+{
+    // a_i δ_ij  →  a_j: the δ contracts a dummy index carried by an arbitrary
+    // (non-δ) factor — the general case beyond δ·δ → δ.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto slot = [&](CountableIndex x)
+    {
+        return SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, sp}, IndexAssoc{x}};
+    };
+    auto const* a =
+        make_tensor_object(ctx, make_tensor_name("a"), {slot(i)}, 1);
+    auto const* d = make_delta(
+        ctx,
+        Realm::Orthonormal,
+        sp,
+        Level::Lower,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+
+    auto const* res =
+        steps::contract_delta(ctx, make_tensor_product(ctx, a, d));
+    // Expected: a_j — a single rank-1 object carrying j, the δ gone.
+    auto const* expected =
+        make_tensor_object(ctx, make_tensor_name("a"), {slot(j)}, 1);
+    EXPECT_TRUE(algebraic_eq(ctx, res, expected));
 }
 
 TEST(UnrollSums, FiresOnImplicitTrace)

@@ -136,6 +136,41 @@ auto substitute(Context& ctx, Expr const* e, int idx_id, ConcreteIndex val)
         });
 }
 
+// Replace every CountableIndex with id `from_id` by the index assoc `to`,
+// throughout the tensor-object slots of `e`.  The index→index sibling of
+// `substitute` (which maps an index to a concrete value); used by
+// `contract_delta` to identify a Kronecker δ's two indices.
+auto substitute_index(Context& ctx, Expr const* e, int from_id, IndexAssoc to)
+    -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [from_id, &to](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&e->node);
+            if (!t)
+                return e;
+            auto slots = t->slots;
+            bool changed = false;
+            for (auto& sb: slots)
+            {
+                if (!sb.index)
+                    continue;
+                if (auto const* ci = std::get_if<CountableIndex>(&*sb.index))
+                    if (ci->id == from_id)
+                    {
+                        sb.index = to;
+                        changed = true;
+                    }
+            }
+            if (!changed)
+                return e;
+            return ctx.make<Expr>(
+                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+        });
+}
+
 // Collect all addends of a left/right Sum tree into a flat vector.
 void collect_addends(Expr const* e, std::vector<Expr const*>& out)
 {
@@ -1946,70 +1981,234 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
         m,
         [&fired](Context& ctx, Expr const* e) -> Expr const*
         {
+            // Fire at a summation binder Σ_m whose body carries a Kronecker δ
+            // with m in one slot: δ identifies m with its other index n, so the
+            // sum collapses — drop δ, substitute m := n in the rest, and shed
+            // the Σ_m binder.  This generalizes the old δ·δ → δ rule (which is
+            // the case where the "rest" is itself a single δ) to contracting a
+            // δ against *any* factor: a_i δ_ij → a_j, δ_ij e_i ⊗ e_j → I, etc.
             auto const* s = std::get_if<ExplicitSum>(&e->node);
             if (!s || s->bound)
                 return e;
+            int const m = s->index.id;
 
-            auto const* prod = std::get_if<TensorProduct>(&s->body->node);
-            if (!prod)
-                return e;
-
-            auto const* d1 = std::get_if<TensorObject>(&prod->left->node);
-            auto const* d2 = std::get_if<TensorObject>(&prod->right->node);
-            if (!d1 || !d2)
-                return e;
-            if (!d1->traits || d1->traits->well_known != WellKnownKind::Delta)
-                return e;
-            if (!d2->traits || d2->traits->well_known != WellKnownKind::Delta)
-                return e;
-            if (d1->slots.size() != 2 || d2->slots.size() != 2)
-                return e;
-
-            int sum_id = s->index.id;
-
-            // Find which slot carries the summation index (returns slot index,
-            // or -1 when not found).
-            auto find_sum_slot = [sum_id](TensorObject const& d) -> int
+            // Locate the first δ in the body that carries index m, returning
+            // the δ node and the partner index n in its other slot (n must
+            // differ from m — a δ_mm self-trace is a dimension count, not a
+            // contraction).
+            Expr const* delta = nullptr;
+            IndexAssoc partner;
+            IndexSlot m_slot{}; // descriptor of the δ slot carrying m
+            std::function<void(Expr const*)> find = [&](Expr const* node)
             {
-                for (int i = 0; i < 2; ++i)
-                {
-                    if (!d.slots[i].index)
-                        continue;
-                    if (auto const* ci =
-                            std::get_if<CountableIndex>(&*d.slots[i].index))
-                        if (ci->id == sum_id)
-                            return i;
-                }
-                return -1;
+                if (delta)
+                    return;
+                visit(
+                    Overloads{
+                        [&](TensorObject const& t)
+                        {
+                            if (!t.traits
+                                || t.traits->well_known != WellKnownKind::Delta
+                                || t.slots.size() != 2)
+                                return;
+                            auto const& s0 = t.slots[0];
+                            auto const& s1 = t.slots[1];
+                            if (!s0.index || !s1.index)
+                                return;
+                            // δ joins its two slots, so they must share realm
+                            // and space (always true for a make_delta δ).
+                            if (s0.slot.realm != s1.slot.realm
+                                || s0.slot.space != s1.slot.space)
+                                return;
+                            // It must be a genuine Kronecker, not an oblique
+                            // same-level "δ" (which is really the metric g): in
+                            // an Oblique realm the two slots must straddle the
+                            // upper/lower divide; Orthonormal makes them
+                            // interchangeable, so any pairing is a Kronecker.
+                            if (s0.slot.realm != Realm::Orthonormal
+                                && s0.slot.level == s1.slot.level)
+                                return;
+                            auto carries = [&](IndexAssoc const& a) -> bool
+                            {
+                                auto const* ci =
+                                    std::get_if<CountableIndex>(&a);
+                                return ci && ci->id == m;
+                            };
+                            if (carries(*s0.index) && !carries(*s1.index))
+                            {
+                                delta = node;
+                                partner = *s1.index;
+                                m_slot = s0.slot;
+                            }
+                            else if (carries(*s1.index) && !carries(*s0.index))
+                            {
+                                delta = node;
+                                partner = *s0.index;
+                                m_slot = s1.slot;
+                            }
+                        },
+                        [&](Negate const& n) { find(n.operand); },
+                        [&](Trace const& u) { find(u.operand); },
+                        [&](VectorInvariant const& u) { find(u.operand); },
+                        [&](Transpose const& u) { find(u.operand); },
+                        [&](Sum const& x)
+                        {
+                            find(x.left);
+                            find(x.right);
+                        },
+                        [&](Difference const& x)
+                        {
+                            find(x.left);
+                            find(x.right);
+                        },
+                        [&](TensorProduct const& x)
+                        {
+                            find(x.left);
+                            find(x.right);
+                        },
+                        [&](Dot const& x)
+                        {
+                            find(x.left);
+                            find(x.right);
+                        },
+                        [&](DDot const& x)
+                        {
+                            find(x.left);
+                            find(x.right);
+                        },
+                        [&](DDotAlt const& x)
+                        {
+                            find(x.left);
+                            find(x.right);
+                        },
+                        [&](Cross const& x)
+                        {
+                            find(x.left);
+                            find(x.right);
+                        },
+                        [&](ScalarDiv const& x)
+                        {
+                            find(x.left);
+                            find(x.right);
+                        },
+                        [&](ExplicitSum const& x) { find(x.body); },
+                        [&](NoSum const& x) { find(x.body); },
+                        [&](ScalarLiteral const&) {}},
+                    *node);
             };
-
-            int s1 = find_sum_slot(*d1);
-            int s2 = find_sum_slot(*d2);
-            if (s1 < 0 || s2 < 0)
+            find(s->body);
+            if (!delta)
                 return e;
 
-            // The contracted slots must share level, realm, and space.
-            if (d1->slots[s1].slot.level != d2->slots[s2].slot.level)
-                return e;
-            if (d1->slots[s1].slot.realm != d2->slots[s2].slot.realm)
-                return e;
-            if (d1->slots[s1].slot.space != d2->slots[s2].slot.space)
+            // Drop the located δ from a multiplicative position (it is rank 0,
+            // so removing it leaves the surrounding tensor product intact).
+            std::function<Expr const*(Expr const*)> drop =
+                [&](Expr const* node) -> Expr const*
+            {
+                if (node == delta)
+                    return nullptr; // signal: this leg was the δ
+                auto const* p = std::get_if<TensorProduct>(&node->node);
+                if (p)
+                {
+                    auto const* l = drop(p->left);
+                    auto const* r = drop(p->right);
+                    if (l == p->left && r == p->right)
+                        return node;
+                    if (!l)
+                        return r;
+                    if (!r)
+                        return l;
+                    return make_tensor_product(ctx, l, r);
+                }
+                if (auto const* es = std::get_if<ExplicitSum>(&node->node))
+                {
+                    auto const* b = drop(es->body);
+                    return b == es->body ?
+                               node :
+                               make_explicit_sum(ctx, es->index, b, es->bound);
+                }
+                if (auto const* ns = std::get_if<NoSum>(&node->node))
+                {
+                    auto const* b = drop(ns->body);
+                    return b == ns->body ? node :
+                                           make_no_sum(ctx, ns->index, b);
+                }
+                if (auto const* ng = std::get_if<Negate>(&node->node))
+                {
+                    auto const* b = drop(ng->operand);
+                    if (b == ng->operand)
+                        return node;
+                    return b ? make_negate(ctx, b) : nullptr;
+                }
+                return node;
+            };
+            auto const* without = drop(s->body);
+            // The δ was the sole factor (e.g. Σ_m δ_mn with n free) —
+            // degenerate; leave it for another step.
+            if (!without)
                 return e;
 
-            auto const& sur1 = d1->slots[1 - s1]; // surviving slot in d1
-            auto const& sur2 = d2->slots[1 - s2]; // surviving slot in d2
-            if (!sur1.index || !sur2.index)
+            // The contraction is genuine only if m has a partner occurrence in
+            // the rest, at a matching realm and space (Σ_m δ^m_k = 1 with no
+            // partner, and contractions across mismatched realms, are not ours
+            // to collapse).  Levels need not match — δ identifies its indices
+            // regardless of which slot is up or down.
+            IndexSlot partner_slot{};
+            bool partner_found = false;
+            std::function<void(Expr const*)> find_m = [&](Expr const* node)
+            {
+                if (partner_found)
+                    return;
+                if (auto const* t = std::get_if<TensorObject>(&node->node))
+                {
+                    for (auto const& sb: t->slots)
+                    {
+                        if (!sb.index)
+                            continue;
+                        auto const* ci =
+                            std::get_if<CountableIndex>(&*sb.index);
+                        if (ci && ci->id == m)
+                        {
+                            partner_slot = sb.slot;
+                            partner_found = true;
+                            return;
+                        }
+                    }
+                    return;
+                }
+                visit(
+                    Overloads{
+                        [&](Negate const& n) { find_m(n.operand); },
+                        [&](Trace const& u) { find_m(u.operand); },
+                        [&](VectorInvariant const& u) { find_m(u.operand); },
+                        [&](Transpose const& u) { find_m(u.operand); },
+                        [&](Sum const& x) { find_m(x.left), find_m(x.right); },
+                        [&](Difference const& x)
+                        { find_m(x.left), find_m(x.right); },
+                        [&](TensorProduct const& x)
+                        { find_m(x.left), find_m(x.right); },
+                        [&](Dot const& x) { find_m(x.left), find_m(x.right); },
+                        [&](DDot const& x) { find_m(x.left), find_m(x.right); },
+                        [&](DDotAlt const& x)
+                        { find_m(x.left), find_m(x.right); },
+                        [&](Cross const& x)
+                        { find_m(x.left), find_m(x.right); },
+                        [&](ScalarDiv const& x)
+                        { find_m(x.left), find_m(x.right); },
+                        [&](ExplicitSum const& x) { find_m(x.body); },
+                        [&](NoSum const& x) { find_m(x.body); },
+                        [&](TensorObject const&) {},
+                        [&](ScalarLiteral const&) {}},
+                    *node);
+            };
+            find_m(without);
+            if (!partner_found || partner_slot.realm != m_slot.realm
+                || partner_slot.space != m_slot.space)
                 return e;
 
             fired = true;
-            return make_delta(
-                ctx,
-                sur1.slot.realm,
-                sur1.slot.space,
-                sur1.slot.level,
-                sur2.slot.level,
-                *sur1.index,
-                *sur2.index);
+            // Identify m with n in what remains, and shed the now-spent Σ_m.
+            return substitute_index(ctx, without, m, partner);
         });
     // No contraction fired — return the original input, untouched.  When it
     // did, strip any explicit sums materialization added but the contraction

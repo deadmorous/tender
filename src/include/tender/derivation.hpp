@@ -88,11 +88,14 @@ auto expand_eps(Context& ctx, Expr const* e) -> Expr const*;
 // Addends that do not form such a pattern are left unchanged.
 auto fold_sums(Context& ctx, Expr const* e) -> Expr const*;
 
-// Contract ExplicitSum{m, δ^m_a · δ^m_b} → δ_{ab}.
-// Recognises a Sum body that is a TensorProduct of exactly two delta objects
-// both carrying the summation CountableIndex m in the same-level slot, and
-// replaces the whole ExplicitSum with a single delta over the remaining
-// indices.
+// Contract a Kronecker δ against the summation index it carries.  At a binder
+// Σ_m whose body holds a δ with m in one slot and partner index n in the other,
+// δ identifies m with n: the δ is dropped, m := n is substituted through the
+// rest, and the Σ_m binder is shed.  Generalises the δ·δ → δ rule (where the
+// "rest" is itself a δ: δ^m_a δ^m_b → δ_{ab}) to contracting a δ against any
+// factor — a_i δ_{ij} → a_j, δ_{ij} (e_i ⊗ e_j) → e_i ⊗ e_i, etc.  Implicit
+// Einstein sums are materialised first, so it fires on pre-canonical input too;
+// a genuine no-op returns the original expression untouched.
 auto contract_delta(Context& ctx, Expr const* e) -> Expr const*;
 
 // Contract the identity tensor against a dot product: I · x → x and x · I → x
