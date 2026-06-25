@@ -30,9 +30,18 @@ pattern `Atom`'s declared rank is known and differs.  Add a focused matcher unit
 test mirroring the deleted one.  Open question: is a robust `Factor` rank
 available cheaply, or does this want a small `nf::infer_rank`?
 
-**Status — TODO.**  User flagged this one as "not sure" whether it is needed;
-decide when an actual rank-ambiguous identity shows up, or fold it in
-opportunistically.
+**Status — DONE.**  A concrete rank-ambiguous case surfaced while the user was
+exercising the system: `a × I × b` (Python `%`) canonicalizes via the rank-≥2
+fence rule (vibe 000055) to `a × (I × b)`, which is structurally the bac-cab
+pattern `a × (b × c)` — so `bac_cab` (declared with rank-1 vars a,b,c) *fired*
+on the rank-2 `I` and produced a rank-inconsistent, mathematically wrong
+expansion.  Fixed in `nf_match.cpp`: added a structural `factor_rank` /
+`nf_rank` (no Context needed — mirrors the Expr `infer_rank` arithmetic over the
+Nf factor variant), and gated the `match_factor` Atom subtree-variable branch:
+when the pattern `Atom` has a declared rank and the target factor's rank is
+known and differs, reject the bind.  Unknown ranks stay permissive (matching the
+old Expr behaviour).  Test: `SubtreeVars.RankCheckRejectsMismatch` in
+`tests/identity_test.cpp`.  Suite green (630 C++, 141 py).
 
 ## (2) Make `canonicalize_nf` self-contained
 
@@ -56,3 +65,27 @@ materialize/float step, not a re-entrant call to `steps::canonicalize`.  Keep
 the round-trip property `canonicalize_nf(raise(nf)) == nf` green.
 
 **Status — TODO.**  User flagged this one as safe to do independently of (1).
+
+## (3) Redundant cross-chain parentheses in rendering
+
+**What.** `render.cpp` (Expr `Cross`/`Dot` arms, ~l.392) deliberately wraps
+*both* operands of every non-associative contraction, so a left-associated cross
+chain renders with a redundant-looking bracket: `a × I × b` (parsed `(a×I)×b`)
+displays as `(\mathbf{a} \times \mathbf{I}) \times \mathbf{b}`.
+
+**The precise rule (user's insight).**  The outer parens in `a × B × c` are
+redundant **only when `rank(B) ≥ 2`** — that is exactly the fence rule (vibe
+000055): `(a×B)×c = a×(B×c)` when B is rank ≥ 2, so the bracketing is immaterial
+and need not be shown.  For a rank-1 middle, `(a×b)×c` is the genuine vector
+triple product and the parens are *essential* — they must stay.  So this is **not**
+a blanket "drop parens on a same-operator left child"; it must be gated on the
+middle operand's rank.
+
+**Bigger picture / why deferred.**  The user wants rendering segregated from
+`Expr` and `Nf` first — it is a different concern and deserves its own careful
+design (a single renderer over a shared display IR, rather than the current
+parallel Expr/Nf render arms in `render.cpp`).  The paren rule above should fall
+out of that redesign rather than be bolted onto the current code.
+
+**Status — TODO (deferred).**  Lower priority; do after the rendering
+segregation design.

@@ -337,6 +337,34 @@ TEST(SubtreeVars, ConsistencyAcrossOccurrences)
     EXPECT_TRUE(algebraic_eq(ctx, apply_identity(ctx, xy, id), xy));
 }
 
+TEST(SubtreeVars, RankCheckRejectsMismatch)
+{
+    // bac-cab — a×(b×c) = b(a·c) − c(a·b) — declares a,b,c as rank-1 subtree
+    // variables.  The fenced chain a×(I×b) (identity I is rank 2) is
+    // structurally a×(Y×Z), but the triple-product expansion is invalid there:
+    // a rank-1 variable must not capture the rank-2 I.  So the identity must
+    // NOT fire and the target is returned unchanged (vibe 000059 follow-up 1).
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* I = make_identity(ctx);
+    Identity id{
+        "bac-cab",
+        make_cross(ctx, a, make_cross(ctx, b, c)),
+        make_difference(
+            ctx,
+            make_tensor_product(ctx, b, make_dot(ctx, a, c)),
+            make_tensor_product(ctx, c, make_dot(ctx, a, b)))};
+
+    auto const* x = v("x");
+    auto const* y = v("y");
+    auto const* target = make_cross(ctx, x, make_cross(ctx, I, y));
+    EXPECT_TRUE(algebraic_eq(ctx, apply_identity(ctx, target, id), target));
+}
+
 TEST(ApplyIdentity, SubtreeVarFiresUnderFloatedBinders)
 {
     // The (a⊗b):(c⊗d) = (a·c)(b·d) identity fires on a target whose dyads carry

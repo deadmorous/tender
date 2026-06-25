@@ -91,6 +91,86 @@ auto match_slot(SlotBinding const& pat, SlotBinding const& tgt, NfBinding& bnd)
     return match_index(*pat.index, *tgt.index, bnd);
 }
 
+// ---- structural rank ----------------------------------------------------
+
+// The invariant rank of a factor, inferred structurally (no Context, so the
+// matcher need not thread one): mirrors the Expr-side `infer_rank` arithmetic —
+// Dot subtracts 2, a double-dot subtracts 4, an n-way Cross subtracts n-1, a
+// `⊗` (term juxtaposition) adds ranks.  Returns nullopt when a leaf rank is
+// unknown, so callers can stay permissive on undeclared tensors.
+auto nf_rank(Nf const* nf) -> std::optional<int>;
+
+auto factor_rank(Factor const* f) -> std::optional<int>
+{
+    return visit(
+        Overloads{
+            [](Atom const& a) -> std::optional<int> { return a.obj.rank; },
+            [](Contraction const& c) -> std::optional<int>
+            {
+                int r = 0;
+                for (auto const* g: c.factors)
+                {
+                    auto gr = factor_rank(g);
+                    if (!gr)
+                        return std::nullopt;
+                    r += *gr;
+                }
+                for (COp op: c.ops)
+                    r -= (op == COp::Dot) ? 2 : 4;
+                return r;
+            },
+            [](Cross const& c) -> std::optional<int>
+            {
+                int r = 0;
+                for (auto const* g: c.factors)
+                {
+                    auto gr = factor_rank(g);
+                    if (!gr)
+                        return std::nullopt;
+                    r += *gr;
+                }
+                return r - (static_cast<int>(c.factors.size()) - 1);
+            },
+            [](Paren const& p) -> std::optional<int>
+            { return nf_rank(p.body); },
+            [](Unary const& u) -> std::optional<int>
+            {
+                switch (u.op)
+                {
+                    case UnaryOp::Trace: return 0;
+                    case UnaryOp::VectorInvariant: return 1;
+                    case UnaryOp::Transpose: return factor_rank(u.operand);
+                }
+                return std::nullopt;
+            },
+            [](Div const& d) -> std::optional<int> { return nf_rank(d.num); }},
+        *f);
+}
+
+auto nf_rank(Nf const* nf) -> std::optional<int>
+{
+    // Every term shares the same rank; read it off the first.
+    if (nf->terms.empty())
+        return std::nullopt;
+    auto const& t = nf->terms.front();
+    int r = 0;
+    for (auto const* g: t.scalars)
+    {
+        auto gr = factor_rank(g);
+        if (!gr)
+            return std::nullopt;
+        r += *gr;
+    }
+    for (auto const* g: t.tensors)
+    {
+        auto gr = factor_rank(g);
+        if (!gr)
+            return std::nullopt;
+        r += *gr;
+    }
+    return r;
+}
+
 // ---- subtree variables ------------------------------------------------------
 
 // A slot-less, non-well-known named tensor in the LHS is a subtree variable: it
@@ -159,7 +239,19 @@ auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
             {
                 // Subtree variable: bind the whole target factor, consistently.
                 if (is_subtree_var(p.obj))
+                {
+                    // Rank-gate the bind: a variable with a declared rank must
+                    // not capture a target factor of a different (known) rank.
+                    // This stops the rank-1 vars of bac-cab (a×(b×c)) from
+                    // binding the rank-2 identity in the fenced chain a×(I×b),
+                    // where the triple-product expansion is invalid (000059).
+                    // Unknown ranks stay permissive.
+                    if (p.obj.rank)
+                        if (auto tr = factor_rank(tgt);
+                            tr && *tr != *p.obj.rank)
+                            return false;
                     return try_bind_subtree(bnd, p.obj.name.v.view(), tgt);
+                }
                 auto const* t = std::get_if<Atom>(&tgt->node);
                 if (!t)
                     return false;
