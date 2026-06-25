@@ -387,11 +387,16 @@ check.
             are skipped (no Nf sub-sum matcher yet).  6 saturate tests incl. the
             sub-product-of-a-larger-term payoff the Expr e-graph could not reach;
             suite 669 green.
-      - **TODO** — switch consumers (`EGraph::saturate` callers: python
-            `_saturate`, `basis.cpp`) onto `NfEGraph`, then delete the Expr
-            `EGraph`.  Note python `_saturate`/`extract` returns an `Expr`, so the
-            switch must `raise` the extracted `Nf` back through
-            `implicitize(canonicalize(...))`.
+      - **consumer switch + Expr `EGraph` deletion DONE** — every
+            `EGraph::saturate` user (python `_saturate`, `identities_test`, the
+            saturate benchmark) now runs through `NfEGraph`; the python binding
+            raises the extracted `Nf` back through `implicitize(canonicalize(…))`.
+            The Expr e-graph's lexicographic Levi-Civita extraction weight is
+            ported into the Nf `compute_best` so eps-delta still extracts the
+            δ-expansion.  `egraph.{hpp,cpp}` + `egraph_test.cpp` deleted (−37
+            tests); suite green at **632**, 141 python tests green.  The 7
+            identity-library tests are the regression guard that `NfEGraph`
+            saturate handles the real rule set (eps-delta, delta-trace, realm).
   - **C14e TODO** — prune the Expr identity matcher (`match_node`/`match`/
         `instantiate`/`match_commutative`…) + the `apply_identity` fallback once
         the e-graph is decoupled.
