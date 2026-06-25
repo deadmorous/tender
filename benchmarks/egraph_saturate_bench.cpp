@@ -8,11 +8,11 @@
 // no benchmark framework.
 
 #include <tender/context.hpp>
-#include <tender/egraph.hpp>
 #include <tender/expr.hpp>
 #include <tender/identity.hpp>
 #include <tender/index_space.hpp>
 #include <tender/name.hpp>
+#include <tender/nf_egraph.hpp>
 
 #include <chrono>
 #include <cstdio>
@@ -97,7 +97,7 @@ struct Case final
 void run(Context& ctx, Case const& c, int reps)
 {
     // Deterministic shape: one cold run.
-    EGraph eg{ctx};
+    nf::NfEGraph eg{ctx};
     auto const root = eg.add(c.target);
     int const passes = eg.saturate({c.rule});
     auto const nodes = eg.node_count();
@@ -108,7 +108,7 @@ void run(Context& ctx, Case const& c, int reps)
         reps,
         [&]
         {
-            EGraph e{ctx};
+            nf::NfEGraph e{ctx};
             auto r = e.add(c.target);
             (void)e.saturate({c.rule});
             (void)e.extract(e.find(r));

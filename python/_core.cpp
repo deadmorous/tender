@@ -7,12 +7,13 @@
 #include <tender/context.hpp>
 #include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>
-#include <tender/egraph.hpp>
 #include <tender/expr.hpp>
 #include <tender/identity.hpp>
 #include <tender/index.hpp>
 #include <tender/index_space.hpp>
 #include <tender/name.hpp>
+#include <tender/nf_egraph.hpp>
+#include <tender/nf_lower.hpp> // nf::raise
 #include <tender/rational.hpp>
 #include <tender/render.hpp>
 
@@ -713,14 +714,20 @@ NB_MODULE(_core, m)
            std::vector<PyExpr> const& rhss,
            int max_iterations) -> PyExpr
         {
-            EGraph eg{*expr.ctx};
-            EClassId const root = eg.add(expr.expr);
+            Context& ctx = *expr.ctx;
+            nf::NfEGraph eg{ctx};
+            auto const root = eg.add(expr.expr);
             std::vector<Identity> rules;
             rules.reserve(lhss.size());
             for (std::size_t i = 0; i < lhss.size(); ++i)
                 rules.push_back(Identity{"", lhss[i].expr, rhss[i].expr});
             eg.saturate(rules, max_iterations);
-            return derive(expr, eg.extract(eg.find(root)));
+            // Raise the cheapest extracted `Nf` back to the user-facing
+            // implicit form (the same final shape `apply_identity` returns).
+            auto const* nf = eg.extract(eg.find(root));
+            auto const* out = steps::implicitize(
+                ctx, steps::canonicalize(ctx, nf::raise(ctx, *nf)));
+            return derive(expr, out);
         },
         "expr"_a,
         "lhss"_a,

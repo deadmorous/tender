@@ -1,10 +1,11 @@
 #include <gtest/gtest.h>
 #include <tender/context.hpp>
 #include <tender/derivation.hpp> // contract_eps_pair / contract_delta oracles
-#include <tender/egraph.hpp>
 #include <tender/expr.hpp>
 #include <tender/identities.hpp>
 #include <tender/index_space.hpp>
+#include <tender/nf_egraph.hpp>
+#include <tender/nf_lower.hpp> // nf::raise
 
 using namespace tender;
 
@@ -34,13 +35,14 @@ auto d(Context& ctx, Level la, Level lb, CountableIndex a, CountableIndex b)
     return make_delta(ctx, Realm::Oblique, space_3d(), la, lb, a, b);
 }
 
-// Saturate `target` with one identity and return the extracted result.
+// Saturate `target` with one identity and return the extracted result, raised
+// back to a surface `Expr`.
 auto run(Context& ctx, Expr const* target, Identity rule) -> Expr const*
 {
-    EGraph eg{ctx};
+    nf::NfEGraph eg{ctx};
     auto const root = eg.add(target);
     eg.saturate({std::move(rule)});
-    return eg.extract(eg.find(root));
+    return nf::raise(ctx, *eg.extract(eg.find(root)));
 }
 } // namespace
 
