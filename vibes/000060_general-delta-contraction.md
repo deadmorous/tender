@@ -71,6 +71,40 @@ contract_delta:  -a_i b_i (e_j ⊗ e_j)  +  a_i b_j (e_j ⊗ e_i)
   `SumIndexNotInEitherDeltaUnchanged` still pass unchanged (guard 2 / no δ
   carrying `m`).
 
+## Single-term confinement (correctness)
+
+The substitution `m := n` must stay inside **one multiplicative term**.  The
+ε-pair contraction leaves the generalized-Kronecker determinant as a *distributed*
+sum under shared binders:
+
+```
+Σ_k Σ_j Σ_i Σ_l  -a_i b_l e_k e_j (δ_kj δ_il − δ_kl δ_ij)
+```
+
+Here `k` pairs with `j` in the first addend but with `l` in the second.  A naive
+"find a δ carrying k, drop it, substitute k everywhere" crosses the `−` and
+identifies indices across addends — collapsing everything to a single index with
+`δ_ii` self-traces (it briefly did exactly that).  The old narrow rule was immune
+only because it required the body to be a single `TensorProduct`.
+
+Guard: peel the binders and sign to the multiplicative core, `flatten_factors`,
+and if any factor is a `Sum`/`Difference`, **bail** — leave it for a distribution
+step.  Regression test `ContractDelta.DistributedSumUnchanged`.  So the recipe
+for the ε route is: contract the ε-pair, **distribute** (`expand_products` then
+`canonicalize` to float binders per-term), *then* `contract_delta`.
+
+## Sums must be explicit
+
+`contract_delta` materialises implicit Einstein sums itself, but its **siblings
+do not**: `reassemble_completeness` (via `fold_completeness`) and
+`contract_eps_pair` (via `try_contract_eps_pair`) only recognise their patterns
+under explicit `ExplicitSum` binders — they peel binders and bail when none are
+present.  The basis steps (`expand_in_basis`, `simplify_basis_*`) and
+`contract_delta` all emit *implicit* form, so a bare hand-off no-ops.  Insert a
+`canonicalize` (which materialises) before those two steps, exactly as the C++
+tests do (`reassemble_completeness(ctx, steps::canonicalize(ctx, term), b)`).
+Folding implicit sums into them is a separate follow-up.
+
 ## Implementation note
 
 Added `substitute_index(ctx, e, from_id, IndexAssoc to)` — the index→index

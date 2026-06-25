@@ -3251,6 +3251,40 @@ TEST(ContractDelta, ContractsDeltaAgainstTensor)
     EXPECT_TRUE(algebraic_eq(ctx, res, expected));
 }
 
+TEST(ContractDelta, DistributedSumUnchanged)
+{
+    // Σ_i (a_i δ_ij − c_i δ_ij): the binder sits *outside* a distributed sum,
+    // so contracting i would have to substitute it into both addends at once —
+    // wrong when each addend pairs i differently.  contract_delta must leave it
+    // for a distribution step (expand_products), not fire across the ±.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto slot = [&](CountableIndex x)
+    {
+        return SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, sp}, IndexAssoc{x}};
+    };
+    auto vec = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {slot(i)}, 1); };
+    auto const* d = make_delta(
+        ctx,
+        Realm::Orthonormal,
+        sp,
+        Level::Lower,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto const* body = make_difference(
+        ctx,
+        make_tensor_product(ctx, vec("a"), d),
+        make_tensor_product(ctx, vec("c"), d));
+    auto const* expr = make_explicit_sum(ctx, i, body);
+
+    EXPECT_EQ(steps::contract_delta(ctx, expr), expr); // no-op, not corrupted
+}
+
 TEST(UnrollSums, FiresOnImplicitTrace)
 {
     // Implicit δ_ii (trace) unrolls to δ_11 + δ_22 + δ_33.

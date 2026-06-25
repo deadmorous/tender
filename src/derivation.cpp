@@ -1992,6 +1992,34 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
                 return e;
             int const m = s->index.id;
 
+            // Only contract within a single multiplicative term.  If the body
+            // is a distributed sum (e.g. the δ-determinant the ε-pair leaves
+            // behind, Σ_m … (δ_ab δ_cd − δ_ad δ_cb)), substituting m across the
+            // ± would wrongly identify one addend's indices in another.  Peel
+            // the remaining binders and sign to the multiplicative core and
+            // bail on a distributed sum; let expand_products split the term
+            // first.
+            {
+                Expr const* core = s->body;
+                for (bool peeled = true; peeled;)
+                {
+                    peeled = false;
+                    if (auto const* es = std::get_if<ExplicitSum>(&core->node);
+                        es && !es->bound)
+                        core = es->body, peeled = true;
+                    else if (auto const* ns = std::get_if<NoSum>(&core->node))
+                        core = ns->body, peeled = true;
+                    else if (auto const* ng = std::get_if<Negate>(&core->node))
+                        core = ng->operand, peeled = true;
+                }
+                std::vector<Expr const*> facs;
+                flatten_factors(core, facs);
+                for (auto const* f: facs)
+                    if (std::holds_alternative<Sum>(f->node)
+                        || std::holds_alternative<Difference>(f->node))
+                        return e;
+            }
+
             // Locate the first δ in the body that carries index m, returning
             // the δ node and the partner index n in its other slot (n must
             // differ from m — a δ_mm self-trace is a dimension count, not a
