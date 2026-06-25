@@ -3,11 +3,7 @@
 #include <tender/expr.hpp>
 
 #include <functional>
-#include <optional>
 #include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
 
 namespace tender
 {
@@ -36,53 +32,16 @@ struct Identity final
     Expr const* rhs;
 };
 
-// The result of a successful match: pattern index ids paired with the target
-// indices they bound, and pattern subtree-variable names paired with the target
-// subtrees they bound.
-struct MatchBinding final
-{
-    std::vector<std::pair<int, IndexAssoc>> indices;
-    std::vector<std::pair<std::string, Expr const*>> subtrees;
-
-    // The target index bound to pattern index `id`, or nullopt if unbound.
-    [[nodiscard]] auto find(int id) const -> std::optional<IndexAssoc>;
-    // The target subtree bound to pattern variable `name`, or nullptr.
-    [[nodiscard]] auto find_subtree(std::string_view name) const -> Expr const*;
-};
-
-// Try to match `pattern` against `target` at the root (no descent into the
-// target tree).  Commutative sums and component products are matched modulo
-// addend/factor order (bounded backtracking); every other node is matched
-// structurally.  Returns the binding on success, nullopt on failure.
-//
-// For robust matching both `pattern` and `target` should be in canonical form
-// (apply_identity arranges this); alpha-normalized ExplicitSum binders then
-// line up automatically.
-[[nodiscard]] auto match(Expr const* pattern, Expr const* target)
-    -> std::optional<MatchBinding>;
-
-// Lower-level matching primitives, exposed for the e-graph matcher (vibe
-// 000034).  match() is the fresh-binding wrapper around match_into.
-//
-// match_into threads an existing binding (extending it in place) and returns
-// whether `pattern` matches `target`.  bind_pattern_index binds a pattern index
-// id to a target index, or requires consistency with an existing binding — used
-// when matching an ExplicitSum/NoSum binder against an e-node's binder id.
-[[nodiscard]] auto match_into(
-    Expr const* pattern, Expr const* target, MatchBinding& bnd) -> bool;
-[[nodiscard]] auto bind_pattern_index(
-    MatchBinding& bnd, int pattern_id, IndexAssoc const& target) -> bool;
-
-// Instantiate `rhs` under `binding`: replace each pattern index by the target
-// index it was bound to.  Pattern indices absent from the binding are left as
-// they are.
-[[nodiscard]] auto instantiate(Context&, Expr const* rhs, MatchBinding const&)
-    -> Expr const*;
-
-// Canonicalize `e`, walk it bottom-up (deepest first), and at the first subtree
-// where `id.lhs` matches, replace that subtree with the instantiated `id.rhs`;
-// the result is re-canonicalized.  The return value is always canonical: if
-// nothing matched it equals canonicalize(e).
+// Apply `id.lhs = id.rhs` to `e` on the flat normal form `Nf` (vibe 000058 /
+// C14): `e` is canonicalized and lowered to `Nf`, the identity's LHS becomes a
+// single pattern term, and it fires at the first target term where the LHS
+// matches as a *sub-product* (its factors sit among extra factors of a larger
+// term) or as a *sub-chain* (a contiguous run inside a `Contraction`/`Cross`
+// factor).  The instantiated RHS replaces the matched part, the rest of the
+// term and the other additive terms are carried through, and the result is
+// raised back and re-canonicalized.  The return value is always canonical: if
+// nothing matched (including a multi-term LHS, which has no Nf sub-sum matcher
+// yet) it equals canonicalize(e).  The matching engine is `nf_match`.
 [[nodiscard]] auto apply_identity(Context&, Expr const* e, Identity const& id)
     -> Expr const*;
 

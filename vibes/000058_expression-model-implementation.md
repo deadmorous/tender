@@ -397,9 +397,21 @@ check.
             tests); suite green at **632**, 141 python tests green.  The 7
             identity-library tests are the regression guard that `NfEGraph`
             saturate handles the real rule set (eps-delta, delta-trace, realm).
-  - **C14e TODO** — prune the Expr identity matcher (`match_node`/`match`/
-        `instantiate`/`match_commutative`…) + the `apply_identity` fallback once
-        the e-graph is decoupled.
+  - **C14e DONE** — pruned the Expr identity matcher and the binary-tree
+        fallback.  Removed `apply_identity_expr`, the public `match` /
+        `match_into` / `bind_pattern_index` / `instantiate` + the `MatchBinding`
+        type, and the whole anon-namespace Expr matcher
+        (`match_node`/`match_commutative`/`match_slot`/`flatten`/…).
+        `apply_identity` is now purely Nf: a single-term LHS fires via
+        `fire_identity_on_term`; a multi-term LHS or a no-match returns the
+        target unchanged through one uniform `finish` (raise → canonicalize →
+        implicitize), so fired and unfired results share one canonical shape.
+        `identity.cpp` 496 → 84 lines; deleted the 13 Expr-matcher unit tests
+        (`Match`/`MatchNodeKinds`/`Instantiate` + the two `SubtreeVars` that
+        drove `match` directly), keeping the `apply_identity`-driven coverage.
+        Suite green at **619**, 141 python green.  (Follow-up noted: the Nf
+        subtree-var matcher does not yet rank-check like the deleted Expr one
+        did — a soundness nicety to port into `nf_match` if needed.)
 
 **Stage 6 — prune.**
 - C15 remove the dead old binary-tree canonicalizer.  **Scope correction (done
@@ -477,14 +489,20 @@ tree matcher when the flat path does not fire.  **C14d DONE** — Nf sub-chain
 matching (`rewrite_subchain`, recursing into nested chain factors) plus the full
 Nf e-graph re-architecture: `NfEGraph` (`nf_egraph.{hpp,cpp}`) with e-nodes
 mirroring the `Nf` structure, union-find / hash-cons / congruence `rebuild` /
-cost `extract`, and now **`saturate` whose e-class matcher is the `nf_match`
-matcher itself** — the per-term firing (sub-product + sub-chain) is the shared
+cost `extract`, and **`saturate` whose e-class matcher is the `nf_match` matcher
+itself** — the per-term firing (sub-product + sub-chain) is the shared
 `nf::fire_identity_on_term`, factored out of `apply_identity` so both run one
-path.  6 saturate tests incl. the sub-product-of-a-larger-term payoff; suite
-green at **669**.  Next: switch the `EGraph::saturate` consumers (python
-`_saturate`, `basis.cpp`) onto `NfEGraph` and delete the Expr `EGraph`, then
-C14e (prune the Expr matcher + fallback).  Non-blocking follow-up still open:
-make `canonicalize_nf` self-contained (fold in the materialize/float prep).
+path.  Then every `EGraph::saturate` consumer (python `_saturate`,
+`identities_test`, the benchmark) was switched onto `NfEGraph` (porting the
+Levi-Civita extraction weight), and the Expr `EGraph` (`egraph.{hpp,cpp}` +
+`egraph_test.cpp`) deleted.  **C14e DONE** — pruned the Expr identity matcher and
+the binary-tree fallback (`apply_identity_expr`, `match`/`match_into`/
+`bind_pattern_index`/`instantiate`, `MatchBinding`, the anon-namespace matcher);
+`apply_identity` is now purely Nf, `identity.cpp` 496 → 84 lines, 13 Expr-matcher
+unit tests removed.  **Stage 5 (C14) COMPLETE.**  Suite green at **619**, 141
+python green.  Non-blocking follow-ups still open: make `canonicalize_nf`
+self-contained (fold in the materialize/float prep); port subtree-var
+rank-checking into `nf_match`.
 
 Representation decisions taken at the C6 review (now implemented):
 1. **Unary invariants are `Factor`s** — a `Unary{op, operand}` variant, with
