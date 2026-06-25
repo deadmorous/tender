@@ -181,6 +181,35 @@ TEST(NfEGraphRebuild, CongruenceMergesParents)
     EXPECT_EQ(g.find(e1), g.find(e2));
 }
 
+TEST(NfEGraphExtract, RoundTripsEveryFactorKind)
+{
+    // A term carrying one of every Factor kind (Contraction / Cross / Unary /
+    // Paren / Div, plus an Atom) round-trips through add + extract — exercising
+    // every add_factor / reconstruct_factor arm and their hash/eq branches.
+    Context ctx;
+    auto atomf = [&](char const* n) -> Factor const*
+    { return canon_nf(ctx, vrank1(ctx, n))->terms.front().tensors.front(); };
+    auto const* fa = atomf("a");
+    auto const* fb = atomf("b");
+    auto const* sum =
+        canon_nf(ctx, make_sum(ctx, scalar0(ctx, "p"), scalar0(ctx, "q")));
+    auto const* xnf = canon_nf(ctx, scalar0(ctx, "x"));
+
+    Term t;
+    t.coeff = Rational{1};
+    t.scalars = {make_div(ctx, xnf, sum)};
+    t.tensors = {
+        make_contraction(ctx, {fa, fb}, {COp::Dot}),
+        make_cross(ctx, {fa, fb}),
+        make_unary(ctx, UnaryOp::Transpose, fa),
+        make_paren(ctx, sum)};
+    auto const* nf = make_nf(ctx, {t});
+
+    NfEGraph g(ctx);
+    auto c = g.add(nf);
+    EXPECT_TRUE(equal(g.extract(c), nf));
+}
+
 TEST(NfEGraphSaturate, ContractsDelta)
 {
     Context ctx;
