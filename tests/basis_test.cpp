@@ -750,6 +750,42 @@ TEST(Reassemble, Rank2RoundTrip)
     EXPECT_TRUE(structural_eq(back, A));
 }
 
+TEST(Reassemble, TwoVectorsFoldIndividuallyIntoDyad)
+{
+    // u ⊗ v expands to u_i v_j e_i e_j (two distinct coordinate vectors).  Each
+    // coordinate vector reassembles on its own, so the dyad reappears without
+    // any special dyad-assembly — the same mechanism would handle u⊗v⊗w.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto const* dyad = make_tensor_product(ctx, u, v);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, dyad, b, Variance::Covariant));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), dyad));
+}
+
+TEST(Reassemble, ContractedCoordsFoldToDot)
+{
+    // Two coordinate components sharing a summed index, with no basis vector,
+    // reassemble to the invariant dot: Σ_i u_i v_i → u · v.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+
+    // u · v expanded and reduced to component form u_i v_i.
+    auto const* comp = steps::contract_delta(
+        ctx,
+        simplify_basis_dot(
+            ctx,
+            expand_in_basis(ctx, make_dot(ctx, u, v), b, Variance::Covariant),
+            b));
+    auto const* back = reassemble(ctx, steps::canonicalize(ctx, comp), b);
+    EXPECT_TRUE(algebraic_eq(ctx, back, make_dot(ctx, u, v)));
+}
+
 TEST(Reassemble, ContravariantRoundTrip)
 {
     Context ctx;

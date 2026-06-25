@@ -4,7 +4,9 @@
 #include <tender/rewrite.hpp>
 
 #include <algorithm>
+#include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -679,6 +681,111 @@ auto fold_completeness(Context& ctx, Expr const* node, Basis const& basis)
     return more ? more : folded;
 }
 
+// A bare coordinate component: a non-basis, non-well-known tensor with exactly
+// one CountableIndex slot.  Its name + the index id are returned; the
+// whole-term reassembly (below) handles higher-rank single coordinates, while
+// this drives the per-vector folding that recognizes *each* coordinate vector
+// individually (so a_i b_j e_j e_i reassembles to b ⊗ a without ever assembling
+// a dyad as a special case — triads and beyond fall out the same way).
+auto as_coord_vector(Expr const* e, Basis const& basis)
+    -> std::optional<std::pair<TensorObject const*, int>>
+{
+    if (as_basis_vector(e, basis))
+        return std::nullopt;
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    // A coordinate component is rank 0 (a scalar, the way expand_in_basis emits
+    // it); requiring that excludes a rank-1 basis vector — including a
+    // *foreign* basis's vector, which this basis would not otherwise recognize.
+    if (!t || (t->traits && t->traits->well_known) || t->rank != 0
+        || t->slots.size() != 1 || !t->slots[0].index)
+        return std::nullopt;
+    auto const* ci = std::get_if<CountableIndex>(&*t->slots[0].index);
+    if (!ci)
+        return std::nullopt;
+    return std::pair{t, ci->id};
+}
+
+// Fold the recognizable single-index groups of one basis-expanded term, each
+// summed index independently:
+//   vector  c_i e_i           → c           (replace the basis vector in place)
+//   dot     c_i d_i           → c · d        (a scalar invariant)
+//   ident.  e_i e_i           → I            (resolution of identity)
+// Indices whose two occurrences do not form one of these clean shapes are left
+// bound (e.g. a slot of a higher-rank coordinate, handled by the whole-term
+// path).  Returns nullptr when nothing folds, so the caller can fall through.
+auto fold_reassembly_groups(
+    Context& ctx,
+    std::vector<int> const& summed,
+    std::vector<Expr const*> const& factors,
+    Basis const& basis) -> Expr const*
+{
+    auto invariant = [&](TensorObject const* c)
+    { return make_tensor_object(ctx, c->name, {}, 1); };
+
+    std::set<std::size_t> drop; // factor positions removed outright
+    std::map<std::size_t, Expr const*> replace; // basis-vec position →
+                                                // invariant/I
+    std::vector<Expr const*> scalars; // folded dot products, emitted first
+    std::set<int> folded;
+
+    for (int id: summed)
+    {
+        std::vector<std::size_t> bpos, cpos;
+        bool foreign = false;
+        for (std::size_t p = 0; p < factors.size(); ++p)
+        {
+            if (auto bv = as_basis_vector(factors[p], basis);
+                bv && bv->first.id == id)
+                bpos.push_back(p);
+            else if (auto cv = as_coord_vector(factors[p], basis);
+                     cv && cv->second == id)
+                cpos.push_back(p);
+            else if (mentions_index(ctx, factors[p], id))
+                foreign = true; // a higher-rank coord or other carrier of id
+        }
+        if (foreign)
+            continue;
+        if (bpos.size() == 1 && cpos.size() == 1) // vector
+        {
+            auto const* c = std::get_if<TensorObject>(&factors[cpos[0]]->node);
+            replace[bpos[0]] = invariant(c);
+            drop.insert(cpos[0]);
+            folded.insert(id);
+        }
+        else if (bpos.empty() && cpos.size() == 2) // dot
+        {
+            auto const* c0 = std::get_if<TensorObject>(&factors[cpos[0]]->node);
+            auto const* c1 = std::get_if<TensorObject>(&factors[cpos[1]]->node);
+            scalars.push_back(make_dot(ctx, invariant(c0), invariant(c1)));
+            drop.insert(cpos[0]);
+            drop.insert(cpos[1]);
+            folded.insert(id);
+        }
+        else if (bpos.size() == 2 && cpos.empty()) // resolution of identity
+        {
+            replace[bpos[0]] = make_identity(ctx);
+            drop.insert(bpos[1]);
+            folded.insert(id);
+        }
+    }
+    if (folded.empty())
+        return nullptr;
+
+    std::vector<Expr const*> out = scalars;
+    for (std::size_t p = 0; p < factors.size(); ++p)
+    {
+        if (drop.count(p))
+            continue;
+        auto it = replace.find(p);
+        out.push_back(it != replace.end() ? it->second : factors[p]);
+    }
+    std::vector<int> rest;
+    for (int id: summed)
+        if (!folded.count(id))
+            rest.push_back(id);
+    return wrap_sums(ctx, rest, product_of(ctx, out));
+}
+
 } // namespace
 
 auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
@@ -701,10 +808,29 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
             if (summed.empty())
                 return node;
 
-            // The body is one coordinate tensor times a polyad of basis
-            // vectors.  Partition the flattened factors accordingly.
+            // Peel one leading sign (a subtracted term carries it as a Negate);
+            // re-apply it to whatever the body reassembles to.
+            bool negated = false;
+            if (auto const* n = std::get_if<Negate>(&body->node))
+            {
+                negated = true;
+                body = n->operand;
+            }
+            auto signed_ = [&](Expr const* r)
+            { return negated ? make_negate(c, r) : r; };
+
             std::vector<Expr const*> factors;
             flatten_product(body, factors);
+
+            // First fold each coordinate vector / dot / identity group on its
+            // own (handles a term with several coordinate factors).  Falls
+            // through when nothing matches, leaving the single higher-rank
+            // coordinate to the whole-term path below.
+            if (auto* g = fold_reassembly_groups(c, summed, factors, basis))
+                return signed_(g);
+
+            // The body is one coordinate tensor times a polyad of basis
+            // vectors.  Partition the flattened factors accordingly.
             std::vector<int> vec_ids;
             TensorObject const* coord = nullptr;
             for (auto const* f: factors)
@@ -727,7 +853,7 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
                 auto const s = sorted(summed);
                 if (vec_ids.size() == 2 && s.size() == 1 && vec_ids[0] == s[0]
                     && vec_ids[1] == s[0])
-                    return make_identity(c);
+                    return signed_(make_identity(c));
                 return node;
             }
             auto const coord_ids = countable_slot_ids(*coord);
@@ -742,8 +868,8 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
             if (sorted(vec_ids) != s || sorted(*coord_ids) != s)
                 return node;
 
-            return make_tensor_object(
-                c, coord->name, {}, static_cast<int>(s.size()));
+            return signed_(make_tensor_object(
+                c, coord->name, {}, static_cast<int>(s.size())));
         });
 }
 
