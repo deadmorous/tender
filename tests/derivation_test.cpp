@@ -3496,3 +3496,49 @@ TEST(ContractEpsPair, FiresInsideProduct)
     auto const tex = render_latex(*res, map);
     EXPECT_EQ(tex.find("varepsilon"), std::string::npos);
 }
+
+TEST(ContractEpsPair, ContractsFourEpsilonsPairByPair)
+{
+    // Σ_{i,l} ε_{ijk} ε_{ipq} ε_{lrs} ε_{lmn}: two independent ε-pairs sharing
+    // the summed dummies i and l.  The driver iterates, contracting one pair
+    // per pass, until no ε remains (vibe 000063, gap 1).
+    Context ctx;
+    auto const* sp = space_3d();
+    std::vector<Level> const lll{Level::Lower, Level::Lower, Level::Lower};
+    auto idx = [&] { return CountableIndex{ctx.alloc_index_id()}; };
+    auto i = idx();
+    auto j = idx();
+    auto k = idx();
+    auto p = idx();
+    auto q = idx();
+    auto l = idx();
+    auto r = idx();
+    auto s = idx();
+    auto m = idx();
+    auto n = idx();
+    auto eps = [&](CountableIndex x, CountableIndex y, CountableIndex z)
+    {
+        return make_levi_civita(
+            ctx,
+            Realm::Orthonormal,
+            sp,
+            lll,
+            {IndexAssoc{x}, IndexAssoc{y}, IndexAssoc{z}});
+    };
+    auto const* prod = make_tensor_product(
+        ctx,
+        make_tensor_product(
+            ctx,
+            make_tensor_product(ctx, eps(i, j, k), eps(i, p, q)),
+            eps(l, r, s)),
+        eps(l, m, n));
+    auto const* summed =
+        make_explicit_sum(ctx, l, make_explicit_sum(ctx, i, prod));
+
+    auto const* res = steps::contract_eps_pair(ctx, summed);
+    EXPECT_NE(res, summed);
+    IndexNameMap map;
+    auto const tex = render_latex(*res, map);
+    // Both pairs contracted: no Levi-Civita symbol survives.
+    EXPECT_EQ(tex.find("varepsilon"), std::string::npos);
+}

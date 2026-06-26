@@ -2360,11 +2360,13 @@ auto map_children(Context& ctx, Expr const* e, Rec const& rec) -> Expr const*
 
 // Attempt the ε-pair contraction anchored at node `e`: peel every nested
 // null-bound ExplicitSum (and a leading −1 sign), then look inside the product
-// body for exactly two rank-3 Levi-Civita symbols.  Contract them over the
-// indices they *share* (summed in both), via the generalized-Kronecker formula,
-// keeping any other factors and re-wrapping the non-contracted sums.  So it
-// fires on a bare Σ ε ε *and* on Σ ε ε buried in a coordinate product (e.g.
-// bac-cab's Σ −ε ε a b c e).  Returns nullptr on no match.
+// body for rank-3 Levi-Civita symbols.  Pick the first pair (in factor order)
+// that share a summed index and contract them over those shared indices, via
+// the generalized-Kronecker formula, keeping every other factor — including any
+// further ε's — and re-wrapping the non-contracted sums.  So it fires on a bare
+// Σ ε ε, on Σ ε ε buried in a coordinate product (bac-cab's Σ −ε ε a b c e),
+// and on products of more than two ε's (the driver iterates pass-by-pass until
+// no ε-pair shares a summed index; vibe 000063).  Returns nullptr on no match.
 auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
 {
     // Peel nested null-bound ExplicitSum nodes; collect dummy ids.
@@ -2400,24 +2402,13 @@ auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
                    t :
                    nullptr;
     };
-    TensorObject const* ea = nullptr;
-    TensorObject const* eb = nullptr;
-    std::vector<Expr const*> others;
-    for (auto const* f: factors)
-    {
-        if (auto const* t = as_eps(f))
-        {
-            if (!ea)
-                ea = t;
-            else if (!eb)
-                eb = t;
-            else
-                return nullptr; // more than two ε's — not handled
-        }
-        else
-            others.push_back(f);
-    }
-    if (!ea || !eb)
+    // Collect the positions of every ε factor (a product may hold more than two
+    // — e.g. after the dyad-identity insertion in a × B × c; vibe 000063).
+    std::vector<int> eps_pos;
+    for (int i = 0; i < static_cast<int>(factors.size()); ++i)
+        if (as_eps(factors[i]))
+            eps_pos.push_back(i);
+    if (eps_pos.size() < 2)
         return nullptr;
 
     // All ε slots must be CountableIndex; gather each ε's id set.
@@ -2434,18 +2425,51 @@ auto try_contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
         }
         return true;
     };
-    std::set<int> ida, idb;
-    if (!eps_ids(*ea, ida) || !eps_ids(*eb, idb))
+
+    // Pick the first pair of ε's (in factor order) that share a summed index;
+    // that pair is the one we contract this pass.  Any remaining ε's are left
+    // as ordinary factors and contracted on a later pass once the driver
+    // iterates.
+    std::set<int> const summed_set(summed.begin(), summed.end());
+    int pa = -1;
+    int pb = -1;
+    std::set<int> shared;
+    for (std::size_t i = 0; i < eps_pos.size() && pa < 0; ++i)
+    {
+        std::set<int> ida;
+        if (!eps_ids(*as_eps(factors[eps_pos[i]]), ida))
+            continue;
+        for (std::size_t j = i + 1; j < eps_pos.size(); ++j)
+        {
+            std::set<int> idb;
+            if (!eps_ids(*as_eps(factors[eps_pos[j]]), idb))
+                continue;
+            std::set<int> sh;
+            for (int id: ida)
+                if (idb.count(id) && summed_set.count(id))
+                    sh.insert(id);
+            if (!sh.empty())
+            {
+                pa = eps_pos[i];
+                pb = eps_pos[j];
+                shared = std::move(sh);
+                break;
+            }
+        }
+    }
+    if (pa < 0)
         return nullptr;
 
-    // The ε-pair contracts over the indices shared by both ε's that are summed.
-    std::set<int> const summed_set(summed.begin(), summed.end());
-    std::set<int> shared;
-    for (int id: ida)
-        if (idb.count(id) && summed_set.count(id))
-            shared.insert(id);
-    if (shared.empty())
-        return nullptr;
+    TensorObject const* ea = as_eps(factors[pa]);
+    TensorObject const* eb = as_eps(factors[pb]);
+
+    // Every other factor (non-ε factors *and* the un-contracted ε's) is kept in
+    // its original left-to-right order — basis vectors of a dyad do not
+    // commute.
+    std::vector<Expr const*> others;
+    for (int i = 0; i < static_cast<int>(factors.size()); ++i)
+        if (i != pa && i != pb)
+            others.push_back(factors[i]);
 
     // Split each ε into contracted (shared) ids and free slots, in slot order.
     auto split = [&](TensorObject const& eps,
@@ -2552,8 +2576,18 @@ auto contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
     {
         prepped = e;
     }
-    auto const* out = contract_eps_pair_walk(ctx, prepped);
-    return out == prepped ? e : implicitize(ctx, out);
+    // Iterate the walk to a fixpoint: each pass contracts one ε-pair, so a
+    // product of N ε's (vibe 000063) is reduced pair-by-pair until no two ε's
+    // share a summed index.
+    Expr const* cur = prepped;
+    for (;;)
+    {
+        Expr const* const next = contract_eps_pair_walk(ctx, cur);
+        if (next == cur)
+            break;
+        cur = next;
+    }
+    return cur == prepped ? e : implicitize(ctx, cur);
 }
 
 auto unroll_sums_for(

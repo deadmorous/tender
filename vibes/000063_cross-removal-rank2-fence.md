@@ -71,6 +71,16 @@ notation.
    route; it sidesteps gap 1 by keeping every contraction at two ε's, but needs
    a new structural rule (a canonicalisation, like the fence re-association).
 
+   **Gap 2 wants sub-expression addressing (vibe 000054).**  The regroup is not a
+   global canon — it must hit *one* chosen contraction in a larger expression
+   (`a × (X · Y) × c`, picking *this* `·` to fence), not every `·` in the tree.
+   That is exactly the positional / targeted-rewrite primitive vibe 000054 is
+   about (`rewrite_at` / `find_occurrences`, or a targeted `apply_identity`).
+   Without it, gap 2 as a blunt whole-tree rule would fence every contraction it
+   sees.  So gap 2 is best deferred until 000054's sub-expression selection
+   lands, at which point it becomes a clean targeted rewrite the user invokes by
+   address.  Gap 1 needs none of this and stands alone.
+
 Either gap, closed, completes the derivation.  Gap 1 is the more general fix and
 makes the *existing* basis route handle `a×B×c` directly after the dyad
 identity; gap 2 is the more "structured" route and is reusable wherever a cross
@@ -95,3 +105,63 @@ end-to-end and generalises to deeper cross chains.  Keep gap 2 (the
 fence-over-contraction regroup) as a follow-up — it is the cleaner "by hand"
 story and reusable, but strictly optional once gap 1 lands.  See
 [[steps-self-prepare]]; both new capabilities should self-prepare per vibe 000062.
+
+## Gap 1 done — and what the full run revealed (a third gap)
+
+`contract_eps_pair` now picks the **first ε-pair (in factor order) sharing a
+summed index** instead of demanding exactly two ε's, and the public step
+**iterates the walk to a fixpoint** so a product of N ε's collapses pair-by-pair.
+The 4-ε product the dyad identity produces is contracted directly.
+
+Driven end-to-end on `a × B × c` (orthonormal frame), the reduction is:
+
+```
+e = a % B % c
+e = expand_in_basis(e, frame)            # B → B_ij e_i e_j
+e = apply_identity(dyad)(e)              # e_i e_j → e_j×I×e_i + (e_i·e_j) I
+e = expand_in_basis(e, frame)            # expand the inserted I's
+e = simplify_basis_cross(e, frame)       # crosses → ε's  (a 2-ε and a 4-ε term)
+e = simplify_basis_dot(e, frame)         # basis dots → δ's
+repeat until ε-free:                     # TWO rounds here
+    e = contract_eps_pair(e)             #   N-ε contraction (this gap)
+    e = simplify_basis_dot(e, frame)
+    e = contract_delta(e)                #   collapses δ's AND redistributes the
+                                         #   binders per-term, so the next
+                                         #   contract_eps_pair sees local sums
+e = fold_arithmetic(e)
+e = reassemble(e, frame)                 # folds the pure-vector parts only
+```
+
+The **iteration is essential, not incidental**: after one ε-pair fires it leaves
+a δ-determinant *Sum* under the summation binders; only `contract_delta`'s
+`expand_products`+`canonicalize` floats those binders into each term so the
+*next* `contract_eps_pair` finds two ε's sharing a *local* summed index.  One
+pass can't see across an undistributed Sum.
+
+The ε-free coordinate result was checked numerically against direct `(a×B)×c`
+and matches exactly:
+
+```
+a×B×c = (a·c) Bᵀ + tr(B) c⊗a − c⊗(B·a) − (Bᵀ·c)⊗a
+        + [ c·B·a − tr(B)(a·c) ] I
+```
+
+**Gap 3 — `reassemble` cannot yet recognise the invariants buried in the
+B-bearing coordinates.**  It folds the pure-vector parts (`a_i c_i → a·c`,
+`c_i a_j e_i e_j → c⊗a`, `e_i e_i → I`) but stalls on every term carrying `B`'s
+components.  Four missing folds, all "recognise the invariant inside the
+coordinates" (the rank-2 generalisation of vibe 000061's *recognise a and b
+individually*):
+
+1. **Trace** — `B_kk → tr(B)`.
+2. **Bilinear contraction** — `B_ij a_i c_j → a·B·c` (a named rank-2 saturated by
+   two coordinate vectors).
+3. **Named rank-2 reassembly** — `B_ij e_i e_j → B`, `B_ij e_j e_i → Bᵀ`.
+4. **Composite dyad legs** — a coordinate vector that is itself a contraction,
+   `(B·a)_k e_k → B·a`, so `c_? (B·a)_k … → c ⊗ (B·a)`.  Today `reassemble`'s
+   vector-fold only recognises a *bare* component `a_i e_i`, not `B_ij a_j e_i`.
+
+So `a×B×c` reaches **correct ε-free coordinate form automatically**, but the
+last mile to the boxed invariant needs these `reassemble` extensions.  That is
+the next implementation chunk; gaps 1 (done) and 3 (open) are independent of
+gap 2 (the targeted regroup, deferred behind vibe 000054).
