@@ -790,9 +790,23 @@ auto fold_reassembly_groups(
 
 auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
 {
-    return rewrite_tree(
+    // Self-prepare: the fold reads the summation binders off explicit
+    // ExplicitSum nodes, so materialize the implicit Einstein sums first (via
+    // canonicalize) — the caller never has to.  canonicalize throws on an
+    // ill-formed implicit sum; that just means "nothing to reassemble".  A
+    // genuine no-op returns the original expression untouched.
+    Expr const* prepped = e;
+    try
+    {
+        prepped = steps::canonicalize(ctx, e);
+    }
+    catch (std::invalid_argument const&)
+    {
+        prepped = e;
+    }
+    auto const* out = rewrite_tree(
         ctx,
-        e,
+        prepped,
         [&](Context& c, Expr const* node) -> Expr const*
         {
             // Peel nested ExplicitSums, collecting the summed indices.
@@ -871,19 +885,30 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
             return signed_(make_tensor_object(
                 c, coord->name, {}, static_cast<int>(s.size())));
         });
+    return out == prepped ? e : out;
 }
 
 auto reassemble_completeness(Context& ctx, Expr const* e, Basis const& basis)
     -> Expr const*
 {
-    return rewrite_tree(
+    Expr const* prepped = e;
+    try
+    {
+        prepped = steps::canonicalize(ctx, e);
+    }
+    catch (std::invalid_argument const&)
+    {
+        prepped = e;
+    }
+    auto const* out = rewrite_tree(
         ctx,
-        e,
+        prepped,
         [&](Context& c, Expr const* node) -> Expr const*
         {
             auto* f = fold_completeness(c, node, basis);
             return f ? f : node;
         });
+    return out == prepped ? e : out;
 }
 
 } // namespace tender

@@ -1957,12 +1957,16 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*
 
 auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
 {
-    // Expose implicit Einstein sums first, so the step fires on a pre-canonical
-    // δ_ij δ_ij (sums still implicit) the same as on an explicit Σ form.  Track
-    // whether any contraction actually fired, so a genuine no-op returns the
-    // original input untouched (no materialized sums leak out).
+    // Self-prepare so the caller never has to: distribute products over sums
+    // (expand_products) and materialize the implicit Einstein sums with
+    // per-term binders (canonicalize).  Distribution matters because the ε-pair
+    // contraction leaves a δ-determinant Σ_m … (δ_ab δ_cd − δ_ad δ_cb);
+    // expanding it into separate terms lets each contract (a single distributed
+    // sum under a binder is otherwise left alone — see the guard below).  Track
+    // whether any contraction fired, so a genuine no-op returns the original
+    // input untouched (no materialized sums leak out).
     //
-    // materialize throws on ill-formed implicit sums (e.g. an Oblique
+    // canonicalize throws on an ill-formed implicit sum (e.g. an Oblique
     // same-level pair); for this step that just means "nothing to contract", so
     // we fall back to the original expression rather than propagating the
     // error.
@@ -1970,7 +1974,7 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
     Expr const* m = e;
     try
     {
-        m = materialize(ctx, e, {});
+        m = canonicalize(ctx, expand_products(ctx, e));
     }
     catch (std::invalid_argument const&)
     {
@@ -2605,7 +2609,22 @@ auto contract_eps_pair_walk(Context& ctx, Expr const* e) -> Expr const*
 
 auto contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
 {
-    return contract_eps_pair_walk(ctx, e);
+    // Self-prepare: the contraction reads the summation binders off explicit
+    // ExplicitSum nodes, so materialize the implicit Einstein sums first (via
+    // canonicalize) — the caller never has to.  canonicalize throws on an
+    // ill-formed implicit sum; that just means "nothing to prepare", so fall
+    // back to the original.  A genuine no-op returns the input untouched.
+    Expr const* prepped = e;
+    try
+    {
+        prepped = canonicalize(ctx, e);
+    }
+    catch (std::invalid_argument const&)
+    {
+        prepped = e;
+    }
+    auto const* out = contract_eps_pair_walk(ctx, prepped);
+    return out == prepped ? e : implicitize(ctx, out);
 }
 
 auto unroll_sums_for(

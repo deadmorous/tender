@@ -3251,12 +3251,13 @@ TEST(ContractDelta, ContractsDeltaAgainstTensor)
     EXPECT_TRUE(algebraic_eq(ctx, res, expected));
 }
 
-TEST(ContractDelta, DistributedSumUnchanged)
+TEST(ContractDelta, DistributesSumThenContracts)
 {
-    // Σ_i (a_i δ_ij − c_i δ_ij): the binder sits *outside* a distributed sum,
-    // so contracting i would have to substitute it into both addends at once —
-    // wrong when each addend pairs i differently.  contract_delta must leave it
-    // for a distribution step (expand_products), not fire across the ±.
+    // Σ_i (a_i δ_ij − c_i δ_ij): the binder sits outside a distributed sum.
+    // Substituting i across the ± at once would be wrong, so contract_delta
+    // self-prepares — distributes the term and floats the binder per addend —
+    // then contracts each: → a_j − c_j.  (The caller need not run
+    // expand_products first.)
     Context ctx;
     auto const* sp = space_3d();
     CountableIndex i{ctx.alloc_index_id()};
@@ -3266,8 +3267,8 @@ TEST(ContractDelta, DistributedSumUnchanged)
         return SlotBinding{
             IndexSlot{Level::Lower, Realm::Orthonormal, sp}, IndexAssoc{x}};
     };
-    auto vec = [&](char const* n)
-    { return make_tensor_object(ctx, make_tensor_name(n), {slot(i)}, 1); };
+    auto vec = [&](char const* n, CountableIndex x)
+    { return make_tensor_object(ctx, make_tensor_name(n), {slot(x)}, 1); };
     auto const* d = make_delta(
         ctx,
         Realm::Orthonormal,
@@ -3278,11 +3279,13 @@ TEST(ContractDelta, DistributedSumUnchanged)
         IndexAssoc{j});
     auto const* body = make_difference(
         ctx,
-        make_tensor_product(ctx, vec("a"), d),
-        make_tensor_product(ctx, vec("c"), d));
+        make_tensor_product(ctx, vec("a", i), d),
+        make_tensor_product(ctx, vec("c", i), d));
     auto const* expr = make_explicit_sum(ctx, i, body);
 
-    EXPECT_EQ(steps::contract_delta(ctx, expr), expr); // no-op, not corrupted
+    auto const* expected =
+        make_difference(ctx, vec("a", j), vec("c", j)); // a_j − c_j
+    EXPECT_TRUE(algebraic_eq(ctx, steps::contract_delta(ctx, expr), expected));
 }
 
 TEST(UnrollSums, FiresOnImplicitTrace)
