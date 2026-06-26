@@ -2972,6 +2972,34 @@ TEST(DistributeContraction, PlainContractionUnchanged)
     EXPECT_EQ(steps::distribute_contraction(ctx, dot), dot);
 }
 
+TEST(DistributeContraction, SelfPreparesOverUndistributedSum)
+{
+    // a · (u⊗v + p⊗q): the contraction is hidden behind an un-distributed sum.
+    // The step self-prepares (distributes the products over the sum) and then
+    // contracts each dyad — without the caller running expand_products first:
+    // → (a·u) v + (a·p) q.
+    Context ctx;
+    auto const* a = rank1(ctx, "a");
+    auto const* u = rank1(ctx, "u");
+    auto const* v = rank1(ctx, "v");
+    auto const* p = rank1(ctx, "p");
+    auto const* q = rank1(ctx, "q");
+    auto const* e = make_dot(
+        ctx,
+        a,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, u, v),
+            make_tensor_product(ctx, p, q)));
+
+    auto const* res = steps::distribute_contraction(ctx, e);
+    auto const* expected = make_sum(
+        ctx,
+        make_tensor_product(ctx, make_dot(ctx, a, u), v),
+        make_tensor_product(ctx, make_dot(ctx, a, p), q));
+    EXPECT_TRUE(algebraic_eq(ctx, res, expected));
+}
+
 TEST(Canonicalize, DyadLegsDoNotCommute)
 {
     // A dyad of two basis vectors is ordered: e_i ⊗ e_j ≠ e_j ⊗ e_i.  A basis

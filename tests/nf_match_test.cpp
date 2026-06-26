@@ -463,6 +463,42 @@ TEST(MatchFactor, CompoundKindsMatchThemselves)
     }
 }
 
+TEST(MatchFactor, SubtreeVarRankGateOverFactorKinds)
+{
+    // A rank-1 subtree variable binds a target factor only when that factor's
+    // inferred rank is 1 (or unknown).  This exercises factor_rank / nf_rank
+    // over every Factor kind: Atom, Contraction, Cross, Paren, Unary (all three
+    // ops), and Div (both the scalar- and tensor-region nf_rank loops).
+    Context ctx;
+    auto const* var = only_tensor(ctx, vrank1(ctx, "a")); // rank-1 subtree var
+    auto const* fa = only_tensor(ctx, vrank1(ctx, "u"));
+    auto const* fb = only_tensor(ctx, vrank1(ctx, "v"));
+    auto const* m2 = only_tensor(ctx, rank2(ctx, "M"));
+    auto const* scalarsum =
+        to_nf(ctx, make_sum(ctx, scalar0(ctx, "p"), scalar0(ctx, "q")));
+    auto const* vecnf = to_nf(ctx, vrank1(ctx, "w"));
+    auto const* den = to_nf(ctx, scalar0(ctx, "d"));
+
+    auto rank_of = [&](Factor const* tgt)
+    {
+        NfBinding bnd;
+        return match_factor(var, tgt, bnd); // true ⇔ inferred rank 1 (or
+                                            // unknown)
+    };
+
+    // Rank ≠ 1 → the gate rejects the bind.
+    EXPECT_FALSE(rank_of(only_tensor(ctx, rank2(ctx, "X")))); // Atom (2)
+    EXPECT_FALSE(rank_of(make_contraction(ctx, {fa, fb}, {COp::Dot}))); // 0
+    EXPECT_FALSE(rank_of(make_paren(ctx, scalarsum)));                  // 0
+    EXPECT_FALSE(rank_of(make_unary(ctx, UnaryOp::Trace, m2)));         // 0
+
+    // Rank == 1 → the gate passes and the variable binds.
+    EXPECT_TRUE(rank_of(make_cross(ctx, {fa, fb})));                     // 1
+    EXPECT_TRUE(rank_of(make_unary(ctx, UnaryOp::Transpose, fa)));       // 1
+    EXPECT_TRUE(rank_of(make_unary(ctx, UnaryOp::VectorInvariant, m2))); // 1
+    EXPECT_TRUE(rank_of(make_div(ctx, vecnf, den)));                     // 1
+}
+
 TEST(MatchFactor, DistinctKindsDoNotMatch)
 {
     Context ctx;

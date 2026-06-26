@@ -1286,15 +1286,23 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
                 return node;
             });
     };
+    // Self-prepare: distribute products over sums first, so a contraction
+    // hidden behind an un-distributed sum — op(L, A⊗B + C⊗D) — becomes
+    // reachable (the caller need not run expand_products).  If no contraction
+    // actually distributes, undo the prep and return the original (no-op
+    // identity).
+    Expr const* const prepped = expand_products(ctx, e);
     // Distribute one level per pass; iterate to a fixpoint (rewrite_tree reuses
     // the pointer when nothing changes).
-    for (Expr const* cur = e;;)
+    Expr const* cur = prepped;
+    for (;;)
     {
         Expr const* next = one_pass(cur);
         if (next == cur)
-            return cur;
+            break;
         cur = next;
     }
+    return cur == prepped ? e : cur;
 }
 
 namespace
@@ -2027,108 +2035,51 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             // Locate the first δ in the body that carries index m, returning
             // the δ node and the partner index n in its other slot (n must
             // differ from m — a δ_mm self-trace is a dimension count, not a
-            // contraction).
+            // contraction).  rewrite_tree drives the (read-only) traversal, so
+            // every node kind is descended without a per-kind arm here.
             Expr const* delta = nullptr;
             IndexAssoc partner;
             IndexSlot m_slot{}; // descriptor of the δ slot carrying m
-            std::function<void(Expr const*)> find = [&](Expr const* node)
-            {
-                if (delta)
-                    return;
-                visit(
-                    Overloads{
-                        [&](TensorObject const& t)
-                        {
-                            if (!t.traits
-                                || t.traits->well_known != WellKnownKind::Delta
-                                || t.slots.size() != 2)
-                                return;
-                            auto const& s0 = t.slots[0];
-                            auto const& s1 = t.slots[1];
-                            if (!s0.index || !s1.index)
-                                return;
-                            // δ joins its two slots, so they must share realm
-                            // and space (always true for a make_delta δ).
-                            if (s0.slot.realm != s1.slot.realm
-                                || s0.slot.space != s1.slot.space)
-                                return;
-                            // It must be a genuine Kronecker, not an oblique
-                            // same-level "δ" (which is really the metric g): in
-                            // an Oblique realm the two slots must straddle the
-                            // upper/lower divide; Orthonormal makes them
-                            // interchangeable, so any pairing is a Kronecker.
-                            if (s0.slot.realm != Realm::Orthonormal
-                                && s0.slot.level == s1.slot.level)
-                                return;
-                            auto carries = [&](IndexAssoc const& a) -> bool
-                            {
-                                auto const* ci =
-                                    std::get_if<CountableIndex>(&a);
-                                return ci && ci->id == m;
-                            };
-                            if (carries(*s0.index) && !carries(*s1.index))
-                            {
-                                delta = node;
-                                partner = *s1.index;
-                                m_slot = s0.slot;
-                            }
-                            else if (carries(*s1.index) && !carries(*s0.index))
-                            {
-                                delta = node;
-                                partner = *s0.index;
-                                m_slot = s1.slot;
-                            }
-                        },
-                        [&](Negate const& n) { find(n.operand); },
-                        [&](Trace const& u) { find(u.operand); },
-                        [&](VectorInvariant const& u) { find(u.operand); },
-                        [&](Transpose const& u) { find(u.operand); },
-                        [&](Sum const& x)
-                        {
-                            find(x.left);
-                            find(x.right);
-                        },
-                        [&](Difference const& x)
-                        {
-                            find(x.left);
-                            find(x.right);
-                        },
-                        [&](TensorProduct const& x)
-                        {
-                            find(x.left);
-                            find(x.right);
-                        },
-                        [&](Dot const& x)
-                        {
-                            find(x.left);
-                            find(x.right);
-                        },
-                        [&](DDot const& x)
-                        {
-                            find(x.left);
-                            find(x.right);
-                        },
-                        [&](DDotAlt const& x)
-                        {
-                            find(x.left);
-                            find(x.right);
-                        },
-                        [&](Cross const& x)
-                        {
-                            find(x.left);
-                            find(x.right);
-                        },
-                        [&](ScalarDiv const& x)
-                        {
-                            find(x.left);
-                            find(x.right);
-                        },
-                        [&](ExplicitSum const& x) { find(x.body); },
-                        [&](NoSum const& x) { find(x.body); },
-                        [&](ScalarLiteral const&) {}},
-                    *node);
-            };
-            find(s->body);
+            rewrite_tree(
+                ctx,
+                s->body,
+                [&](Context&, Expr const* node) -> Expr const*
+                {
+                    if (delta)
+                        return node;
+                    auto const* t = std::get_if<TensorObject>(&node->node);
+                    if (!t || !t->traits
+                        || t->traits->well_known != WellKnownKind::Delta
+                        || t->slots.size() != 2)
+                        return node;
+                    auto const& s0 = t->slots[0];
+                    auto const& s1 = t->slots[1];
+                    if (!s0.index || !s1.index)
+                        return node;
+                    // δ joins its two slots, so they must share realm and space
+                    // (always true for a make_delta δ).
+                    if (s0.slot.realm != s1.slot.realm
+                        || s0.slot.space != s1.slot.space)
+                        return node;
+                    // It must be a genuine Kronecker, not an oblique same-level
+                    // "δ" (really the metric g): in an Oblique realm the two
+                    // slots must straddle the upper/lower divide; Orthonormal
+                    // makes them interchangeable, so any pairing is a
+                    // Kronecker.
+                    if (s0.slot.realm != Realm::Orthonormal
+                        && s0.slot.level == s1.slot.level)
+                        return node;
+                    auto carries = [&](IndexAssoc const& a) -> bool
+                    {
+                        auto const* ci = std::get_if<CountableIndex>(&a);
+                        return ci && ci->id == m;
+                    };
+                    if (carries(*s0.index) && !carries(*s1.index))
+                        delta = node, partner = *s1.index, m_slot = s0.slot;
+                    else if (carries(*s1.index) && !carries(*s0.index))
+                        delta = node, partner = *s0.index, m_slot = s1.slot;
+                    return node;
+                });
             if (!delta)
                 return e;
 
@@ -2187,12 +2138,16 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             // regardless of which slot is up or down.
             IndexSlot partner_slot{};
             bool partner_found = false;
-            std::function<void(Expr const*)> find_m = [&](Expr const* node)
-            {
-                if (partner_found)
-                    return;
-                if (auto const* t = std::get_if<TensorObject>(&node->node))
+            rewrite_tree(
+                ctx,
+                without,
+                [&](Context&, Expr const* node) -> Expr const*
                 {
+                    if (partner_found)
+                        return node;
+                    auto const* t = std::get_if<TensorObject>(&node->node);
+                    if (!t)
+                        return node;
                     for (auto const& sb: t->slots)
                     {
                         if (!sb.index)
@@ -2203,37 +2158,11 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
                         {
                             partner_slot = sb.slot;
                             partner_found = true;
-                            return;
+                            return node;
                         }
                     }
-                    return;
-                }
-                visit(
-                    Overloads{
-                        [&](Negate const& n) { find_m(n.operand); },
-                        [&](Trace const& u) { find_m(u.operand); },
-                        [&](VectorInvariant const& u) { find_m(u.operand); },
-                        [&](Transpose const& u) { find_m(u.operand); },
-                        [&](Sum const& x) { find_m(x.left), find_m(x.right); },
-                        [&](Difference const& x)
-                        { find_m(x.left), find_m(x.right); },
-                        [&](TensorProduct const& x)
-                        { find_m(x.left), find_m(x.right); },
-                        [&](Dot const& x) { find_m(x.left), find_m(x.right); },
-                        [&](DDot const& x) { find_m(x.left), find_m(x.right); },
-                        [&](DDotAlt const& x)
-                        { find_m(x.left), find_m(x.right); },
-                        [&](Cross const& x)
-                        { find_m(x.left), find_m(x.right); },
-                        [&](ScalarDiv const& x)
-                        { find_m(x.left), find_m(x.right); },
-                        [&](ExplicitSum const& x) { find_m(x.body); },
-                        [&](NoSum const& x) { find_m(x.body); },
-                        [&](TensorObject const&) {},
-                        [&](ScalarLiteral const&) {}},
-                    *node);
-            };
-            find_m(without);
+                    return node;
+                });
             if (!partner_found || partner_slot.realm != m_slot.realm
                 || partner_slot.space != m_slot.space)
                 return e;

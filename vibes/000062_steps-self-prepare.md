@@ -41,12 +41,28 @@ Two invariants this preserves:
   the core's output against `prepped` and return the original `e` when nothing
   fired.  (`contract_delta` already returned `e` on no-fire, so this fell out.)
 
-## Done in this pass
+## Full step audit
 
-`contract_eps_pair`, `contract_delta` (now `canonicalize ∘ expand_products`),
-`reassemble`, `reassemble_completeness`.  Both worked routes for `(a×I)×b` now
-run with **no** `canonicalize`/`expand_products` between steps and converge to
-`−(a·b) I + b ⊗ a`:
+Every public step was checked.  Three categories:
+
+- **Prep added** (pattern-match binders or need distribution to reach the
+  pattern): `contract_eps_pair`, `contract_delta` (now
+  `canonicalize ∘ expand_products`), `reassemble`, `reassemble_completeness`,
+  and `distribute_contraction` (now `expand_products` prep, so it sees a
+  contraction hidden behind an un-distributed sum `a·(B⊗C + D⊗F)`).
+- **Already self-preparing:** `unroll_sums` (materialises internally + no-op
+  guard, the original model); `expand_double_dot`, `expand_dyad_ops`,
+  `contract_identity` (already distribute over / see through sums).
+- **Form-agnostic, no prep needed** (surface-node rewrites or numeric/concrete
+  evaluators — their pattern is never hidden by implicit summation or
+  un-distributed products): `fold_arithmetic`, `fold_equal_addends`,
+  `eval_delta_concrete`, `eval_eps_concrete`, `expand_eps`, `fold_sums`.
+- **Prep primitives, excluded by definition:** `canonicalize`, `implicitize`,
+  `expand_products` (the tools the others prepare *with*; self-prepping them is
+  circular or meaningless).
+
+Both worked routes for `(a×I)×b` now run with **no** `canonicalize`/
+`expand_products` between steps and converge to `−(a·b) I + b ⊗ a`:
 
 ```
 A: expand_in_basis → apply_identity(bac_cab) → simplify_basis_dot
@@ -65,7 +81,5 @@ B: expand_in_basis → simplify_basis_cross → contract_eps_pair
   repeatedly.  Accepted for intuitiveness over micro-performance; revisit if a
   tight loop needs it (a cheaper `materialize`-only prep would suffice for the
   group-(1) steps, but `materialize` is currently file-local to derivation.cpp).
-- Not yet audited for the principle: other binder/​sum-sensitive steps
-  (`fold_sums`, `unroll_sums`, `contract_identity`, `distribute_contraction`,
-  `expand_double_dot`, …).  Extend the same pattern as they come up.  See
-  [[steps-self-prepare]].
+- Audit complete (see the categories above); revisit only if a new step is
+  added that reads binders or needs distribution.  See [[steps-self-prepare]].
