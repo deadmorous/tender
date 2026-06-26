@@ -165,3 +165,46 @@ So `a×B×c` reaches **correct ε-free coordinate form automatically**, but the
 last mile to the boxed invariant needs these `reassemble` extensions.  That is
 the next implementation chunk; gaps 1 (done) and 3 (open) are independent of
 gap 2 (the targeted regroup, deferred behind vibe 000054).
+
+## Gap 3 done — a general coordinate→invariant reassembly engine
+
+`reassemble`'s per-term fold was rebuilt as a small **contraction engine** that
+folds each recognisable invariant independently, *leaving every unrelated factor
+in place* — so the folds fire even when the pattern is one factor of a larger
+product (the key requirement: applicable inside bigger terms).  The design rests
+on one structural fact: **coordinate components are rank-0 scalars and commute
+freely, while basis vectors carry the non-commuting tensor order** — so a
+reassembled invariant lands at the *position of the basis vector(s)* it pairs
+with, and the order of those basis vectors fixes the result's slot order (hence
+the transpose).
+
+Each summed index is classified by where its two occurrences sit, and carriers
+(an invariant value + the index riding each slot) are contracted within a blob:
+
+| index occurrences | fold |
+|---|---|
+| carrier–basis | leg realization: `c_i e_i → c`, `B_ij e_i e_j → B`, `B_ij e_j e_i → Bᵀ` |
+| carrier–carrier | contraction: `u_i v_i → u·v`, `B_ij a_j → B·a`, `B_ij D_jk → B·D` |
+| same carrier twice | trace: `B_ii → tr B` |
+| basis–basis | resolution of identity `e_i e_i → I` |
+
+Chained within a blob these compose: `B_ki a_i c_k → c·(Bᵀ·a)` (a bilinear
+scalar), `c (B·a)_k e_k → c ⊗ (B·a)` (a composite dyad leg).  A blob that cannot
+be fully expressed (rank ≥ 3 leg ordering, a partial trace, a middle-slot
+contraction, an index also carried by a foreign factor) is left **entirely
+untouched**, its indices still bound — never a wrong fold.
+
+The whole `a×B×c` derivation now runs end-to-end to the boxed invariant
+(integration test `BasisFeasibility.CrossTensorCross`, checked against the closed
+form at the coordinate level; numerically equal to direct `(a×B)×c`).  Unit
+tests pin each new fold, including inside bigger terms (`Reassemble.TraceFold`,
+`TraceFoldInBiggerTerm`, `BilinearFold`, `Rank2TransposeRoundTrip`,
+`CompositeDyadLegFold`, `TensorTensorContraction`).
+
+Note the engine handles `tr` arising as a *coordinate* repeated index (`B_kk`,
+which is how the ε-contraction leaves it); expanding an explicit `tr(B)` leaves a
+basis-dot `e_j·e_i` that `simplify_basis_dot` does not currently reduce — a
+separate, pre-existing trace-expansion gap, not part of this work.
+
+Remaining: rank ≥ 3 leg-ordering (needs a permutation operator) and gap 2 (the
+targeted regroup, behind vibe 000054).  See [[steps-self-prepare]].

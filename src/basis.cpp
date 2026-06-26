@@ -681,93 +681,391 @@ auto fold_completeness(Context& ctx, Expr const* node, Basis const& basis)
     return more ? more : folded;
 }
 
-// A bare coordinate component: a non-basis, non-well-known tensor with exactly
-// one CountableIndex slot.  Its name + the index id are returned; the
-// whole-term reassembly (below) handles higher-rank single coordinates, while
-// this drives the per-vector folding that recognizes *each* coordinate vector
-// individually (so a_i b_j e_j e_i reassembles to b ⊗ a without ever assembling
-// a dyad as a special case — triads and beyond fall out the same way).
-auto as_coord_vector(Expr const* e, Basis const& basis)
-    -> std::optional<std::pair<TensorObject const*, int>>
+// A coordinate component of any rank: a non-basis, non-well-known tensor whose
+// slots all carry CountableIndex ids and which expand_in_basis emitted at rank
+// 0 (so a rank-1 basis vector — including a *foreign* basis's vector — is
+// excluded by the rank-0 test).  Returns the tensor and its slot ids, in slot
+// order.
+auto as_coord_component(Expr const* e, Basis const& basis)
+    -> std::optional<std::pair<TensorObject const*, std::vector<int>>>
 {
     if (as_basis_vector(e, basis))
         return std::nullopt;
     auto const* t = std::get_if<TensorObject>(&e->node);
-    // A coordinate component is rank 0 (a scalar, the way expand_in_basis emits
-    // it); requiring that excludes a rank-1 basis vector — including a
-    // *foreign* basis's vector, which this basis would not otherwise recognize.
     if (!t || (t->traits && t->traits->well_known) || t->rank != 0
-        || t->slots.size() != 1 || !t->slots[0].index)
+        || t->slots.empty())
         return std::nullopt;
-    auto const* ci = std::get_if<CountableIndex>(&*t->slots[0].index);
-    if (!ci)
-        return std::nullopt;
-    return std::pair{t, ci->id};
+    std::vector<int> ids;
+    ids.reserve(t->slots.size());
+    for (auto const& sb: t->slots)
+    {
+        if (!sb.index)
+            return std::nullopt;
+        auto const* ci = std::get_if<CountableIndex>(&*sb.index);
+        if (!ci)
+            return std::nullopt;
+        ids.push_back(ci->id);
+    }
+    return std::pair{t, std::move(ids)};
 }
 
-// Fold the recognizable single-index groups of one basis-expanded term, each
-// summed index independently:
-//   vector  c_i e_i           → c           (replace the basis vector in place)
-//   dot     c_i d_i           → c · d        (a scalar invariant)
-//   ident.  e_i e_i           → I            (resolution of identity)
-// Indices whose two occurrences do not form one of these clean shapes are left
-// bound (e.g. a slot of a higher-rank coordinate, handled by the whole-term
-// path).  Returns nullptr when nothing folds, so the caller can fall through.
+// A coordinate carrier: an invariant value (the named tensor itself, or a
+// contraction/trace of several) and the summed-index id riding on each of its
+// slots, in slot order.  `origins` remembers which coordinate-component factor
+// positions were absorbed, so they can be dropped once the carrier is realized.
+// A rank-0 carrier (`legs` empty) is a scalar invariant (a dot, a trace, a
+// bilinear form); rank ≥ 1 carriers are realized against the basis vectors that
+// share their leg ids.
+struct Carrier final
+{
+    Expr const* value;
+    std::vector<int> legs;
+    std::vector<int> origins;
+};
+
+auto slot_of(std::vector<int> const& legs, int id) -> int
+{
+    for (int s = 0; s < static_cast<int>(legs.size()); ++s)
+        if (legs[s] == id)
+            return s;
+    return -1;
+}
+
+// Re-orient a carrier (rank ≤ 2) so that the slot carrying `id` is its *last*
+// slot, transposing a rank-2 value when needed.  Returns false if it cannot
+// (rank ≥ 3): the contraction is then left unfolded.
+auto expose_last(Context& ctx, Carrier& c, int id) -> bool
+{
+    int const r = static_cast<int>(c.legs.size());
+    int const s = slot_of(c.legs, id);
+    if (s == r - 1)
+        return true;
+    if (r == 2 && s == 0)
+    {
+        c.value = make_transpose(ctx, c.value);
+        std::swap(c.legs[0], c.legs[1]);
+        return true;
+    }
+    return false;
+}
+
+// Symmetric to expose_last: bring the slot carrying `id` to the *first* slot.
+auto expose_first(Context& ctx, Carrier& c, int id) -> bool
+{
+    int const r = static_cast<int>(c.legs.size());
+    int const s = slot_of(c.legs, id);
+    if (s == 0)
+        return true;
+    if (r == 2 && s == r - 1)
+    {
+        c.value = make_transpose(ctx, c.value);
+        std::swap(c.legs[0], c.legs[1]);
+        return true;
+    }
+    return false;
+}
+
+// Contract two carriers over the shared summed `id`, exposing it on X's last
+// slot and Y's first so the result is the dot X·Y (X·Y always contracts X's
+// last with Y's first).  The surviving legs are X's (minus last) then Y's
+// (minus first).  nullopt when either carrier is rank ≥ 3.
+auto contract_carriers(Context& ctx, Carrier X, Carrier Y, int id)
+    -> std::optional<Carrier>
+{
+    if (X.legs.size() > 2 || Y.legs.size() > 2)
+        return std::nullopt;
+    if (!expose_last(ctx, X, id) || !expose_first(ctx, Y, id))
+        return std::nullopt;
+    Carrier r;
+    r.value = make_dot(ctx, X.value, Y.value);
+    for (int s = 0; s + 1 < static_cast<int>(X.legs.size()); ++s)
+        r.legs.push_back(X.legs[s]);
+    for (int s = 1; s < static_cast<int>(Y.legs.size()); ++s)
+        r.legs.push_back(Y.legs[s]);
+    r.origins = std::move(X.origins);
+    r.origins.insert(r.origins.end(), Y.origins.begin(), Y.origins.end());
+    return r;
+}
+
+// Self-contract a carrier over a summed `id` appearing on two of its slots (a
+// trace).  Only the full rank-2 trace tr(B) is expressible here; a partial
+// trace of a rank ≥ 3 tensor is left unfolded (nullopt).
+auto trace_carrier(Context& ctx, Carrier c, int id) -> std::optional<Carrier>
+{
+    if (c.legs.size() != 2 || c.legs[0] != id || c.legs[1] != id)
+        return std::nullopt;
+    Carrier r;
+    r.value = make_trace(ctx, c.value);
+    r.origins = std::move(c.origins);
+    return r;
+}
+
+// A minimal union-find over carrier indices, to group carriers connected by
+// shared (carrier-to-carrier) summed indices into independent contraction
+// blobs.
+struct UnionFind final
+{
+    std::vector<int> parent;
+    explicit UnionFind(int n) : parent(n)
+    {
+        for (int i = 0; i < n; ++i)
+            parent[i] = i;
+    }
+    auto find(int x) -> int
+    {
+        while (parent[x] != x)
+            x = parent[x] = parent[parent[x]];
+        return x;
+    }
+    void unite(int a, int b)
+    {
+        parent[find(a)] = find(b);
+    }
+};
+
+// Reassemble the recognizable invariants buried in one basis-expanded product
+// term, folding each *independently* and leaving every unrelated factor in
+// place — so the folds apply even as parts of a larger term.  Coordinate
+// components (rank-0 scalars, freely commuting) become carriers; basis vectors
+// carry the non-commuting tensor order, so a realized invariant lands at the
+// position of the basis vector(s) it pairs with.  Per summed index:
+//   • carrier–basis        → leg realization (c_i e_i → c, B_ij e_i e_j → B,
+//                            B_ij e_j e_i → Bᵀ);
+//   • carrier–carrier      → contraction (u_i v_i → u·v, B_ij a_j → B·a,
+//                            B_ij D_jk → B·D), chained within a blob so
+//                            B_ki a_i c_k → c·B·a (a bilinear scalar);
+//   • carrier self (twice) → trace (B_ii → tr B);
+//   • basis–basis          → resolution of identity e_i e_i → I.
+// A blob that cannot be fully expressed (rank ≥ 3 ordering/partial trace, a
+// middle-slot contraction, or an index also carried by a foreign factor) is
+// left entirely untouched, its indices still bound.  nullptr if nothing folds.
 auto fold_reassembly_groups(
     Context& ctx,
     std::vector<int> const& summed,
     std::vector<Expr const*> const& factors,
     Basis const& basis) -> Expr const*
 {
-    auto invariant = [&](TensorObject const* c)
-    { return make_tensor_object(ctx, c->name, {}, 1); };
+    auto coord_invariant = [&](TensorObject const* c, int rank)
+    { return make_tensor_object(ctx, c->name, {}, rank); };
 
-    std::set<std::size_t> drop; // factor positions removed outright
-    std::map<std::size_t, Expr const*> replace; // basis-vec position →
-                                                // invariant/I
-    std::vector<Expr const*> scalars; // folded dot products, emitted first
-    std::set<int> folded;
+    // Classify the factors: basis vectors (by summed id), coordinate carriers,
+    // and the summed ids blocked by some other (foreign) factor.
+    std::vector<Carrier> carriers;
+    std::map<int, std::vector<std::pair<int, int>>> in_carrier; // id→[(car,slot)]
+    std::map<int, std::vector<std::size_t>> in_basis; // id→[positions]
+    std::set<int> const summed_set(summed.begin(), summed.end());
+    std::set<int> blocked;
+    for (std::size_t p = 0; p < factors.size(); ++p)
+    {
+        if (auto bv = as_basis_vector(factors[p], basis);
+            bv && summed_set.count(bv->first.id))
+        {
+            in_basis[bv->first.id].push_back(p);
+            continue;
+        }
+        if (auto cc = as_coord_component(factors[p], basis))
+        {
+            int const ci = static_cast<int>(carriers.size());
+            Carrier c;
+            c.value =
+                coord_invariant(cc->first, static_cast<int>(cc->second.size()));
+            c.legs = cc->second;
+            c.origins = {static_cast<int>(p)};
+            for (int s = 0; s < static_cast<int>(cc->second.size()); ++s)
+                in_carrier[cc->second[s]].push_back({ci, s});
+            carriers.push_back(std::move(c));
+            continue;
+        }
+        for (int id: summed)
+            if (mentions_index(ctx, factors[p], id))
+                blocked.insert(id);
+    }
 
+    // Per summed id: internal (carrier↔carrier or self), leg (carrier↔basis),
+    // identity (basis↔basis), or unfoldable.
+    enum class Kind
+    {
+        None,
+        Internal,
+        Leg,
+        Identity
+    };
+    std::map<int, Kind> kind;
     for (int id: summed)
     {
-        std::vector<std::size_t> bpos, cpos;
-        bool foreign = false;
-        for (std::size_t p = 0; p < factors.size(); ++p)
-        {
-            if (auto bv = as_basis_vector(factors[p], basis);
-                bv && bv->first.id == id)
-                bpos.push_back(p);
-            else if (auto cv = as_coord_vector(factors[p], basis);
-                     cv && cv->second == id)
-                cpos.push_back(p);
-            else if (mentions_index(ctx, factors[p], id))
-                foreign = true; // a higher-rank coord or other carrier of id
-        }
-        if (foreign)
-            continue;
-        if (bpos.size() == 1 && cpos.size() == 1) // vector
-        {
-            auto const* c = std::get_if<TensorObject>(&factors[cpos[0]]->node);
-            replace[bpos[0]] = invariant(c);
-            drop.insert(cpos[0]);
-            folded.insert(id);
-        }
-        else if (bpos.empty() && cpos.size() == 2) // dot
-        {
-            auto const* c0 = std::get_if<TensorObject>(&factors[cpos[0]]->node);
-            auto const* c1 = std::get_if<TensorObject>(&factors[cpos[1]]->node);
-            scalars.push_back(make_dot(ctx, invariant(c0), invariant(c1)));
-            drop.insert(cpos[0]);
-            drop.insert(cpos[1]);
-            folded.insert(id);
-        }
-        else if (bpos.size() == 2 && cpos.empty()) // resolution of identity
-        {
-            replace[bpos[0]] = make_identity(ctx);
-            drop.insert(bpos[1]);
-            folded.insert(id);
-        }
+        int const nc = static_cast<int>(in_carrier[id].size());
+        int const nb = static_cast<int>(in_basis[id].size());
+        if (blocked.count(id))
+            kind[id] = Kind::None;
+        else if (nc == 2 && nb == 0)
+            kind[id] = Kind::Internal;
+        else if (nc == 1 && nb == 1)
+            kind[id] = Kind::Leg;
+        else if (nc == 0 && nb == 2)
+            kind[id] = Kind::Identity;
+        else
+            kind[id] = Kind::None;
     }
+
+    // Group carriers into blobs joined by Internal (carrier-to-carrier) ids.
+    UnionFind uf(static_cast<int>(carriers.size()));
+    for (int id: summed)
+        if (kind[id] == Kind::Internal)
+        {
+            auto const& occ = in_carrier[id];
+            if (occ[0].first != occ[1].first)
+                uf.unite(occ[0].first, occ[1].first);
+        }
+
+    std::set<std::size_t> drop;                 // factor positions removed
+    std::map<std::size_t, Expr const*> replace; // basis position → invariant
+    std::vector<Expr const*> scalars;           // scalar folds, emitted first
+    std::set<int> folded;
+
+    // ---- carrier blobs: contract internally, then realize remaining legs ----
+    std::map<int, std::vector<int>> blob; // root → carrier indices
+    for (int c = 0; c < static_cast<int>(carriers.size()); ++c)
+        blob[uf.find(c)].push_back(c);
+
+    for (auto const& [root, members]: blob)
+    {
+        // Internal ids whose both occurrences lie in this blob.
+        std::set<int> internal;
+        std::set<int> mem(members.begin(), members.end());
+        for (int id: summed)
+            if (kind[id] == Kind::Internal
+                && mem.count(in_carrier[id][0].first))
+                internal.insert(id);
+
+        std::vector<Carrier> active;
+        for (int c: members)
+            active.push_back(carriers[c]);
+
+        bool ok = true;
+        while (ok && !internal.empty())
+        {
+            int const id = *internal.begin();
+            internal.erase(internal.begin());
+            std::vector<std::pair<int, int>> occ; // (active idx, slot)
+            for (int a = 0; a < static_cast<int>(active.size()); ++a)
+                for (int s = 0; s < static_cast<int>(active[a].legs.size());
+                     ++s)
+                    if (active[a].legs[s] == id)
+                        occ.push_back({a, s});
+            if (occ.size() != 2)
+            {
+                ok = false;
+                break;
+            }
+            if (occ[0].first == occ[1].first)
+            {
+                auto t = trace_carrier(ctx, active[occ[0].first], id);
+                if (!t)
+                {
+                    ok = false;
+                    break;
+                }
+                active[occ[0].first] = std::move(*t);
+            }
+            else
+            {
+                int const a = occ[0].first;
+                int const b = occ[1].first;
+                auto m = contract_carriers(ctx, active[a], active[b], id);
+                if (!m)
+                {
+                    ok = false;
+                    break;
+                }
+                int const hi = std::max(a, b);
+                int const lo = std::min(a, b);
+                active.erase(active.begin() + hi);
+                active.erase(active.begin() + lo);
+                active.push_back(std::move(*m));
+            }
+        }
+
+        // Realize each surviving carrier; accumulate into blob-local changes so
+        // a failure leaves the whole blob untouched.
+        std::set<std::size_t> ldrop;
+        std::map<std::size_t, Expr const*> lreplace;
+        std::vector<Expr const*> lscalars;
+        std::set<int> lfolded;
+        for (Carrier& c: active)
+        {
+            if (!ok)
+                break;
+            if (c.legs.empty()) // scalar invariant (dot / trace / bilinear)
+            {
+                lscalars.push_back(c.value);
+                for (int o: c.origins)
+                    ldrop.insert(static_cast<std::size_t>(o));
+            }
+            else if (c.legs.size() == 1) // vector leg → place at its basis vec
+            {
+                auto const& bp = in_basis[c.legs[0]];
+                if (bp.size() != 1)
+                {
+                    ok = false;
+                    break;
+                }
+                lreplace[bp[0]] = c.value;
+                lfolded.insert(c.legs[0]);
+                for (int o: c.origins)
+                    ldrop.insert(static_cast<std::size_t>(o));
+            }
+            else if (c.legs.size() == 2) // tensor → place at the leftmost basis
+            {
+                auto const& b0 = in_basis[c.legs[0]];
+                auto const& b1 = in_basis[c.legs[1]];
+                if (b0.size() != 1 || b1.size() != 1)
+                {
+                    ok = false;
+                    break;
+                }
+                std::size_t const p0 = b0[0];
+                std::size_t const p1 = b1[0];
+                // The leftmost basis vector fixes the first tensor slot: in
+                // slot order → value; reversed → its transpose.
+                Expr const* tens =
+                    (p0 < p1) ? c.value : make_transpose(ctx, c.value);
+                lreplace[std::min(p0, p1)] = tens;
+                ldrop.insert(std::max(p0, p1));
+                lfolded.insert(c.legs[0]);
+                lfolded.insert(c.legs[1]);
+                for (int o: c.origins)
+                    ldrop.insert(static_cast<std::size_t>(o));
+            }
+            else // rank ≥ 3 leg realization: ordering not expressible here
+            {
+                ok = false;
+                break;
+            }
+        }
+        if (!ok)
+            continue; // leave this blob and its indices alone
+        drop.insert(ldrop.begin(), ldrop.end());
+        for (auto const& [pos, e]: lreplace)
+            replace[pos] = e;
+        scalars.insert(scalars.end(), lscalars.begin(), lscalars.end());
+        // The internal ids of a fully-realized blob are consumed too.
+        for (int id: summed)
+            if (kind[id] == Kind::Internal
+                && mem.count(in_carrier[id][0].first))
+                folded.insert(id);
+        folded.insert(lfolded.begin(), lfolded.end());
+    }
+
+    // ---- basis↔basis: resolution of identity e_i e_i → I ----
+    for (int id: summed)
+        if (kind[id] == Kind::Identity)
+        {
+            auto const& bp = in_basis[id];
+            replace[bp[0]] = make_identity(ctx);
+            drop.insert(bp[1]);
+            folded.insert(id);
+        }
+
     if (folded.empty())
         return nullptr;
 

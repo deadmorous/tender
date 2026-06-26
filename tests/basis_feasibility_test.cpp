@@ -351,6 +351,94 @@ TEST(BasisFeasibility, CrossIdentityCross)
     EXPECT_FALSE(algebraic_eq(ctx, lhs, transposed));
 }
 
+// Cross removal for a × B × c with B a rank-2 tensor (vibe 000063).  The
+// Levi-Civita route alone dead-ends (the two ε's share no index); the
+// unblocking move is the dyad identity p⊗q = q×I×p + (p·q)I applied to B's
+// basis dyads, which inserts the missing shared dummy.  That produces a FOUR-ε
+// term, handled by the N-ε contract_eps_pair; the contraction/δ loop iterates
+// to ε-free coordinate form, and the generalized reassembly folds the B-bearing
+// coordinates (trace, bilinear, rank-2 with transpose, composite dyad legs)
+// back to direct notation.  Verified against the closed form at the coordinate
+// level.
+TEST(BasisFeasibility, CrossTensorCross)
+{
+    Context ctx;
+    auto b3 = wcs(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto const* I = make_identity(ctx);
+
+    // Dyad identity p⊗q = (q×I)×p + (p·q) I, as a reusable Identity.
+    auto const* p = make_tensor_object(ctx, make_tensor_name("p"), {}, 1);
+    auto const* q = make_tensor_object(ctx, make_tensor_name("q"), {}, 1);
+    Identity const dyad{
+        "dyad",
+        make_tensor_product(ctx, p, q),
+        make_sum(
+            ctx,
+            make_cross(ctx, make_cross(ctx, q, I), p),
+            make_tensor_product(ctx, make_dot(ctx, p, q), I))};
+
+    auto const* e = make_cross(ctx, make_cross(ctx, a, B), c);
+    e = expand_in_basis(ctx, e, b3, Variance::Covariant); // B → B_ij e_i e_j
+    e = apply_identity(ctx, e, dyad);                     // insert the I's
+    e = expand_in_basis(ctx, e, b3, Variance::Covariant); // expand them
+    e = simplify_basis_cross(ctx, e, b3);                 // crosses → ε's
+    e = simplify_basis_dot(ctx, e, b3);
+    for (int pass = 0; pass < 4; ++pass) // iterate: N-ε pair, δ, redistribute
+    {
+        e = steps::contract_eps_pair(ctx, e);
+        e = simplify_basis_dot(ctx, e, b3);
+        e = steps::contract_delta(ctx, e);
+    }
+    e = steps::fold_arithmetic(ctx, e);
+    e = reassemble(ctx, e, b3); // fold the B-bearing coordinates to invariants
+    auto const* lhs = steps::canonicalize(ctx, e);
+
+    // The result is fully invariant: no summation binder survives at the top.
+    EXPECT_FALSE(std::holds_alternative<ExplicitSum>(lhs->node));
+
+    // Closed form: (a·c) Bᵀ + tr(B) c⊗a − c⊗(B·a) − (Bᵀ·c)⊗a
+    //              + [ (a·Bᵀ)·c − tr(B)(a·c) ] I.
+    auto const* Bt = make_transpose(ctx, B);
+    auto const* trB = make_trace(ctx, B);
+    auto const* ac = make_dot(ctx, a, c);
+    auto const* scal = make_difference(
+        ctx,
+        make_dot(ctx, make_dot(ctx, a, Bt), c),
+        make_tensor_product(ctx, trB, ac));
+    auto const* rhs = make_sum(
+        ctx,
+        make_sum(
+            ctx,
+            make_sum(
+                ctx,
+                make_tensor_product(ctx, ac, Bt),
+                make_tensor_product(ctx, trB, make_tensor_product(ctx, c, a))),
+            make_negate(ctx, make_tensor_product(ctx, c, make_dot(ctx, B, a)))),
+        make_sum(
+            ctx,
+            make_negate(ctx, make_tensor_product(ctx, make_dot(ctx, Bt, c), a)),
+            make_tensor_product(ctx, scal, I)));
+
+    // Compare at the symbolic coordinate level: expand both sides and contract
+    // their basis dots to Kronecker deltas, so tr(B), Bᵀ and the dyads all
+    // reduce to component sums whose dummy indices canonicalize to a common
+    // form.
+    auto to_components = [&](Expr const* x)
+    {
+        x = expand_in_basis(ctx, x, b3, Variance::Covariant);
+        for (int i = 0; i < 4; ++i)
+        {
+            x = simplify_basis_dot(ctx, x, b3);
+            x = steps::contract_delta(ctx, x);
+        }
+        return steps::canonicalize(ctx, x);
+    };
+    EXPECT_TRUE(algebraic_eq(ctx, to_components(lhs), to_components(rhs)));
+}
+
 // The same theorem proved a second way, to stress the pattern matcher and the
 // completeness reassembly instead of the ε-pair contraction:
 //   a × (b × I), expand ONLY I, distribute the cross over the dyad, apply

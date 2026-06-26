@@ -38,6 +38,32 @@ auto idx_of(SlotBinding const& sb) -> int
     return std::get<CountableIndex>(*sb.index).id;
 }
 
+// A rank-0 coordinate component name_{ids…} (the way expand_in_basis emits
+// one): orthonormal lower slots carrying the given countable indices.
+auto coord(Context& ctx, char const* name, std::vector<CountableIndex> ids)
+    -> Expr const*
+{
+    std::vector<SlotBinding> slots;
+    for (auto id: ids)
+        slots.push_back(SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexAssoc{id}});
+    return make_tensor_object(ctx, make_tensor_name(name), std::move(slots), 0);
+}
+
+// Expand to symbolic coordinate components and contract the basis dots to
+// deltas — grounds tr(B), Bᵀ and dyads to comparable component sums.
+auto to_components(Context& ctx, Basis const& b, Expr const* x) -> Expr const*
+{
+    x = expand_in_basis(ctx, x, b, Variance::Covariant);
+    for (int i = 0; i < 4; ++i)
+    {
+        x = simplify_basis_dot(ctx, x, b);
+        x = steps::contract_delta(ctx, x);
+    }
+    return steps::canonicalize(ctx, x);
+}
+
 } // namespace
 
 TEST(Basis, OrthonormalWcsAccessors)
@@ -784,6 +810,145 @@ TEST(Reassemble, ContractedCoordsFoldToDot)
             b));
     auto const* back = reassemble(ctx, steps::canonicalize(ctx, comp), b);
     EXPECT_TRUE(algebraic_eq(ctx, back, make_dot(ctx, u, v)));
+}
+
+TEST(Reassemble, TraceFold)
+{
+    // Σ_k B_{kk} (a coordinate component with a repeated summed index) → tr(B),
+    // the way the index appears after an ε-pair contraction collapses two
+    // slots.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_explicit_sum(ctx, k, coord(ctx, "B", {k, k}));
+
+    auto const* back = steps::canonicalize(ctx, reassemble(ctx, term, b));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    EXPECT_TRUE(structural_eq(back, make_trace(ctx, B)));
+}
+
+TEST(Reassemble, TraceFoldInBiggerTerm)
+{
+    // The trace folds even as one factor of a larger product: Σ_k B_{kk} u ⊗ v
+    // → tr(B) u ⊗ v (the dyad u ⊗ v is carried through untouched).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = vec(ctx, "u");
+    auto const* v = vec(ctx, "v");
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_explicit_sum(
+        ctx,
+        k,
+        make_tensor_product(
+            ctx, coord(ctx, "B", {k, k}), make_tensor_product(ctx, u, v)));
+
+    auto const* back = steps::canonicalize(ctx, reassemble(ctx, term, b));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto const* want = steps::canonicalize(
+        ctx,
+        make_tensor_product(
+            ctx, make_trace(ctx, B), make_tensor_product(ctx, u, v)));
+    EXPECT_TRUE(structural_eq(back, want));
+}
+
+TEST(Reassemble, BilinearFold)
+{
+    // Σ_{ij} B_{ij} a_i c_j → a contraction of B by two coordinate vectors on
+    // both legs, a scalar invariant (a·B·c, here read out as (Bᵀ·a)·c).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_explicit_sum(
+            ctx,
+            j,
+            make_tensor_product(
+                ctx,
+                coord(ctx, "B", {i, j}),
+                make_tensor_product(
+                    ctx, coord(ctx, "a", {i}), coord(ctx, "c", {j})))));
+
+    // Contracting i (B's first leg, with a) transposes B, then contracting j
+    // with c gives the scalar c·(Bᵀ·a) — numerically B_ij a_i c_j = a·B·c.
+    auto const* back = steps::canonicalize(ctx, reassemble(ctx, term, b));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto const* want = steps::canonicalize(
+        ctx,
+        make_dot(
+            ctx,
+            vec(ctx, "c"),
+            make_dot(ctx, make_transpose(ctx, B), vec(ctx, "a"))));
+    EXPECT_TRUE(structural_eq(back, want));
+}
+
+TEST(Reassemble, TensorTensorContraction)
+{
+    // Σ_{ijk} B_{ij} D_{jk} e_i e_k → B·D: two rank-2 coordinate tensors share
+    // a summed index and contract into one, whose two free legs reassemble (in
+    // basis order) to the rank-2 invariant B·D.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_explicit_sum(
+            ctx,
+            j,
+            make_explicit_sum(
+                ctx,
+                k,
+                make_tensor_product(
+                    ctx,
+                    make_tensor_product(
+                        ctx, coord(ctx, "B", {i, j}), coord(ctx, "D", {j, k})),
+                    make_tensor_product(
+                        ctx,
+                        b.covariant_vector(ctx, i),
+                        b.covariant_vector(ctx, k))))));
+
+    auto const* back = steps::canonicalize(ctx, reassemble(ctx, term, b));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto const* D = make_tensor_object(ctx, make_tensor_name("D"), {}, 2);
+    EXPECT_TRUE(
+        structural_eq(back, steps::canonicalize(ctx, make_dot(ctx, B, D))));
+}
+
+TEST(Reassemble, Rank2TransposeRoundTrip)
+{
+    // Bᵀ expands to B_{ij} e_j e_i (basis order reversed against the slots),
+    // and the leg-order/basis-order mismatch folds back to the transpose, not
+    // B.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* Bt = make_transpose(
+        ctx, make_tensor_object(ctx, make_tensor_name("B"), {}, 2));
+
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, Bt, b, Variance::Covariant));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), Bt));
+}
+
+TEST(Reassemble, CompositeDyadLegFold)
+{
+    // c ⊗ (B·a): one dyad leg is itself a tensor·vector contraction.  Its
+    // coordinate (B·a)_k pairs with a basis vector and reassembles to the
+    // invariant B·a, sitting beside the already-invariant c.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = vec(ctx, "a");
+    auto const* c = vec(ctx, "c");
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto const* dyad = make_tensor_product(ctx, c, make_dot(ctx, B, a));
+
+    auto const* back = steps::canonicalize(
+        ctx, reassemble(ctx, to_components(ctx, b, dyad), b));
+    EXPECT_TRUE(structural_eq(back, steps::canonicalize(ctx, dyad)));
 }
 
 TEST(Reassemble, ContravariantRoundTrip)
