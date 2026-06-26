@@ -26,6 +26,19 @@ Tensor algebra library for computational mechanics, using direct (coordinate-fre
   Use `examples/strip_notebooks.sh` (or `nbstripout <file>`) before staging
   any `.ipynb`.  The CI `notebooks-clean` job enforces this.
 
+## Committing and other git operations
+
+Commit to current branch naturally, when a change is consistent
+and next one should belong to a different commit.
+
+Never create or switch branches without my approval, unless explicitly
+asked to do so. Commit to current branch, even though it is the main one.
+
+Never do remote operations (push, fetch, pull) without my approval,
+unless explicitly asked for any of these.
+
+Feel free to do any read operations on the repository when necessary.
+
 ## Conversation log
 
 All notable design discussions and decisions are recorded in `vibes/` as Markdown files.
