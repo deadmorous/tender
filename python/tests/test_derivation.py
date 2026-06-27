@@ -726,3 +726,34 @@ def test_subtree_variable_identity():
     w = tender.tensor("w", rank=1, ctx=ctx)
     res = td.apply_identity(ddot)((x * y).ddot(u * w))
     assert td.algebraic_eq(res, (x @ u) * (y @ w))
+
+
+# ---- implicitize / simplify (vibe 000064 #4) -------------------------------
+
+
+def test_implicitize_strips_einstein_sum():
+    """canonicalize materializes Σ; implicitize strips it back to implicit."""
+    import tender.basis as tb
+
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    expanded = tb.expand_in_basis(a, frame, tb.Variance.Covariant)
+
+    canon = td.canonicalize(expanded)
+    assert "\\sum" in canon.latex()  # binder materialized
+    implicit = td.implicitize(canon)
+    assert "\\sum" not in implicit.latex()  # and stripped back
+
+
+def test_simplify_is_canonicalize_then_implicitize():
+    import tender.basis as tb
+
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    expanded = tb.expand_in_basis(a, frame, tb.Variance.Covariant)
+
+    assert td.structural_eq(
+        td.simplify(expanded), td.implicitize(td.canonicalize(expanded))
+    )

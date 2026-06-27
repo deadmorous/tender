@@ -691,6 +691,15 @@ NB_MODULE(_core, m)
         "like terms combined; no distribution).");
 
     md.def(
+        "_implicitize",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::implicitize(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Inverse of the implicit-sum convention: drop ExplicitSum binders whose "
+        "index is repeated within a single multiplicative term, leaving the "
+        "summation implicit (Einstein convention).");
+
+    md.def(
         "_apply_identity",
         [](PyExpr const& target,
            PyExpr const& lhs,

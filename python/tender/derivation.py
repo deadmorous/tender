@@ -39,6 +39,8 @@ __all__ = [
     "contract_eps_pair",
     "fold_equal_addends",
     "canonicalize",
+    "implicitize",
+    "simplify",
     "Identity",
     "apply_identity",
     "saturate",
@@ -218,6 +220,30 @@ def canonicalize(expr):
     equal under the normal-form theory T0 produce structurally identical results.
     """
     return _d._canonicalize(expr)
+
+
+def implicitize(expr):
+    """Inverse of the implicit-sum convention (vibe 000028/000064 #4).
+
+    Drops each ``explicit_sum`` binder whose index is repeated within a single
+    multiplicative term, leaving the contraction implicit (Einstein
+    convention) — the user-facing form the derivation steps emit.  An index
+    that straddles a ``+`` (a Sum scope boundary, vibe 000052) cannot be left
+    implicit and keeps its binder.
+    """
+    return _d._implicitize(expr)
+
+
+def simplify(expr):
+    """Canonicalize, then strip the materialized sums back to implicit form.
+
+    ``canonicalize`` combines like terms and cancels equal-and-opposite ones
+    but materializes every implicit Einstein sum into an ``explicit_sum``;
+    ``implicitize`` reverses that last part.  Together they *finish* a
+    derivation: a single clean, canonical, implicit-summation result (vibe
+    000064 #4).
+    """
+    return implicitize(canonicalize(expr))
 
 
 class Identity:
