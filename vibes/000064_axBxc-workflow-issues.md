@@ -446,3 +446,53 @@ would also paper over it, but fixing the peel is the right move.)
 | 8a | one `reassemble` leaves a `Σ_j −Σ_i …` term unfolded | **bug** — peel loop stops at a sign between binders | peel `ExplicitSum`/`Negate` interleaved (basis.cpp:1110) |
 | 8b | `Σ_j −Σ_i …` renders as a confusing "difference" | **render bug** — negated sub-sum not disambiguated | parenthesise `Negate(ExplicitSum …)` / hoist sign (render.cpp) |
 | 9 | need a *second* `reassemble` to finish | workaround for 8a (2nd pass's canonicalize repairs nesting) | fixing 8a makes one pass enough |
+
+## Resolution (implemented)
+
+All four real code defects are fixed; #1/#2/#7 stay as documented (not bugs).
+Commits, in order:
+
+1. **#8a — interleaved peel** (`Fix reassemble peel: sign between sum
+   binders`).  `reassemble`'s peel loop now walks `ExplicitSum`/`Negate`
+   interleaved, tracking a running sign.  Subtlety found while testing: a
+   *standalone* `Σ_j −Σ_i …` is adjacency-normalised by reassemble's self-prep
+   `canonicalize` (→ `Σ_j Σ_i −…`), so it folded even before the fix.  The bug
+   only bites when the term is an addend **inside a larger Sum**: `rewrite_tree`
+   is bottom-up, so the fold callback first sees the *inner* `Σ_i …` (with `j`
+   still free, can't fold), then the full `Σ_j −(Σ_i …)` — where the interleaved
+   peel is what collects both binders past the sign.  Guards:
+   `Reassemble.SignBetweenSumBinders` (fold shape) and the integration test
+   `BasisFeasibility.CrossTensorCrossOnePass` (one reassemble ⇒ no `ExplicitSum`
+   ⇒ closed form; fails without the fix).
+
+2. **#3/#4/#6 — reassemble output** (`Reassemble surfaces prep + strips
+   materialized Σ`).  Both `reassemble` and `reassemble_completeness` now return
+   `steps::implicitize(ctx, out)`, reporting a no-op (returning the original `e`)
+   only when the fold did not fire (`out == prepped`) **and**
+   `structural_eq(prepped, e)`.  Note: the planned `prepped == e` *pointer* guard
+   was wrong — `canonicalize` is not pointer-idempotent (it rebuilds even an
+   already-canonical `a`), so a `structural_eq` test is required.  The two
+   `Σ_i δ_ii` no-op tests now assert equality to the self-prep
+   (`implicitize(canonicalize(·))`) rather than pointer-identity, since
+   reassemble legitimately canonicalises a non-pattern;
+   `Reassemble.SurfacesPrepCancellation` guards the #6 prep-surfacing directly.
+
+3. **#4 — Python API** (`Expose implicitize and simplify to Python`).
+   `td.implicitize` (binds `steps::implicitize`) and `td.simplify` =
+   `implicitize(canonicalize(·))`, the "finish the derivation" composite.
+
+4. **#8b — render** (`Parenthesize negated sub-sum in render`).  `sum_str` now
+   wraps a `Negate` body whose operand is itself a sum, so `Σ_j −Σ_i …` prints as
+   `Σ_j (−Σ_i …)`.
+
+5. **#5 — index names** (`Unbounded dummy index names via subscript overflow`).
+   `dummy_name(n)` wraps `schema[n % S]` with subscript `⌊n / S⌋`; only a
+   negative index throws.
+
+**Combined effect on the user's workflow:** with #7's recipe (expand the inserted
+`I` before `simplify_basis_cross`), a **single** `reassemble` now yields a clean,
+fully-implicit invariant directly — no leftover `Σ`, no manual `canonicalize`,
+and re-expanding/rendering the result no longer hits the name limit.  One minor
+residual (not one of the logged issues, not fixed): `reassemble` is not
+idempotent — a second pass reassociates dots via `canonicalize`
+(`a·(Bᵀ·c) → (a·Bᵀ)·c`); the forms are algebraically equal.
