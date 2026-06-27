@@ -453,6 +453,28 @@ TEST(RenderAnnotation, ExplicitSumBodyIsSum)
         render_latex(*e, map), "\\sum_{i} (\\mathbf{a}^{i} + \\mathbf{b}^{i})");
 }
 
+TEST(RenderAnnotation, ExplicitSumBodyIsNegatedSubSum)
+{
+    // Σ_j -(Σ_i v^i): the inner sum is negated.  Without parens this renders as
+    // "\sum_{j} -\sum_{i} …", which reads like the difference "Σ_j - Σ_i …"
+    // (an empty outer body); the negated sub-sum must be parenthesised
+    // (vibe 000064 #8b).
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    std::vector<SlotBinding> slots = {
+        SlotBinding{IndexSlot{Level::Upper, Realm::Orthonormal, space_3d()}, i}};
+    auto* v =
+        make_tensor_object(ctx, make_tensor_name("v"), std::move(slots), 1);
+    auto* inner = make_explicit_sum(ctx, i, v);
+    auto* e = make_explicit_sum(ctx, j, make_negate(ctx, inner));
+
+    IndexNameMap map;
+    map.assign(i, make_index_name("i"));
+    map.assign(j, make_index_name("j"));
+    EXPECT_EQ(render_latex(*e, map), "\\sum_{j} (-\\sum_{i} \\mathbf{v}^{i})");
+}
+
 TEST(RenderAnnotation, NoSum)
 {
     Context ctx;

@@ -317,7 +317,15 @@ struct Renderer
         -> std::string
     {
         auto body_s = render(*body);
-        if (prec(*body) == ADD_PREC)
+        // Wrap a Sum/Difference body (so "Σ_i a + b" is not read as
+        // "(Σ_i a) + b"), and also a negated sub-sum: "Σ_j -Σ_i …" reads like a
+        // difference "Σ_j - (Σ_i …)" with an empty outer body, so render it as
+        // "Σ_j (-Σ_i …)" instead (vibe 000064 #8b).
+        bool wrap = prec(*body) == ADD_PREC;
+        if (auto const* n = std::get_if<Negate>(&body->node))
+            wrap = wrap || std::holds_alternative<ExplicitSum>(n->operand->node)
+                   || std::holds_alternative<NoSum>(n->operand->node);
+        if (wrap)
             body_s = "(" + body_s + ")";
 
         auto name = map.lookup(idx);
