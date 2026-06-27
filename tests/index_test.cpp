@@ -77,13 +77,26 @@ TEST(IndexSpace, DummyNameReturnsCorrectEntry)
     EXPECT_EQ(sp->dummy_name(2).v.view(), "k");
 }
 
-TEST(IndexSpace, DummyNameOutOfRangeThrows)
+TEST(IndexSpace, DummyNameNegativeThrows)
 {
     Context ctx;
     auto* sp = make_index_space(
         ctx, {1, 2}, {make_index_name("i"), make_index_name("j")});
     EXPECT_THROW(sp->dummy_name(-1), std::out_of_range);
-    EXPECT_THROW(sp->dummy_name(2), std::out_of_range);
+}
+
+TEST(IndexSpace, DummyNameOverflowGeneratesSubscripted)
+{
+    // Past the schema, names wrap with a numeric subscript instead of throwing
+    // (vibe 000064 #5): i, j, then i_{1}, j_{1}, i_{2}, …  — unbounded.
+    Context ctx;
+    auto* sp = make_index_space(
+        ctx, {1, 2}, {make_index_name("i"), make_index_name("j")});
+    EXPECT_EQ(sp->dummy_name(2).v.view(), "i_{1}");
+    EXPECT_EQ(sp->dummy_name(3).v.view(), "j_{1}");
+    EXPECT_EQ(sp->dummy_name(4).v.view(), "i_{2}");
+    // Per-space alphabet is preserved for the Greek schemas.
+    EXPECT_EQ(space_2d()->dummy_name(8).v.view(), "\\alpha_{1}");
 }
 
 // ---- Well-known singletons ---------------------------------------------

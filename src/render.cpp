@@ -42,8 +42,8 @@ auto IndexNameMap::name_for(CountableIndex ci, IndexSpace const* space)
     auto& pos = next_schema_pos_[space];
     while (true)
     {
-        auto name = space->dummy_name(pos++); // throws std::out_of_range if
-                                              // exhausted
+        auto name = space->dummy_name(pos++); // unbounded: subscripts past the
+                                              // base schema (vibe 000064 #5)
         auto key = std::string{name.v.view()};
         if (name_to_id_.find(key) == name_to_id_.end())
         {

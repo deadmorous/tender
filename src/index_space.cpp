@@ -1,6 +1,8 @@
 #include <tender/index_space.hpp>
 
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace tender
 {
@@ -17,9 +19,19 @@ IndexSpace::IndexSpace(std::vector<int> values, std::vector<IndexName> schema) :
 
 auto IndexSpace::dummy_name(int n) const -> IndexName
 {
-    if (n < 0 || n >= static_cast<int>(schema_.size()))
-        throw std::out_of_range("IndexSpace::dummy_name: index out of range");
-    return schema_[n];
+    if (n < 0)
+        throw std::out_of_range("IndexSpace::dummy_name: negative index");
+    int const size = static_cast<int>(schema_.size());
+    IndexName const& base = schema_[n % size];
+    int const tier = n / size;
+    if (tier == 0)
+        return base;
+    // Past the base schema, append a numeric subscript so the names stay
+    // distinct and unbounded (vibe 000064 #5): i … z, then i_{1} … z_{1},
+    // i_{2} …  — per-space, so 3D stays Latin and 2D/4D stay Greek.
+    std::string const name =
+        std::string{base.v.view()} + "_{" + std::to_string(tier) + "}";
+    return IndexName{NameStr{std::string_view{name}}};
 }
 
 // ---- Well-known index spaces -------------------------------------------
