@@ -2587,7 +2587,16 @@ auto contract_eps_pair(Context& ctx, Expr const* e) -> Expr const*
             break;
         cur = next;
     }
-    return cur == prepped ? e : implicitize(ctx, cur);
+    if (cur == prepped)
+        return e; // genuine no-op: no ε-pair contracted
+    // The contraction emits a Kronecker determinant (δδ − δδ), a Sum factor.
+    // Its summation binders straddle that Sum (a scope boundary, vibe 000052),
+    // so implicitize cannot strip them and they leak as explicit Σ (vibe 000064
+    // #2).  Distribute the determinant so each emitted term is a single product
+    // — re-canonicalize to settle the freed binders at each term head — then
+    // the implicit-summation convention applies and implicitize clears them.
+    // The δ's remain for the next contract_delta.
+    return implicitize(ctx, canonicalize(ctx, expand_products(ctx, cur)));
 }
 
 auto unroll_sums_for(

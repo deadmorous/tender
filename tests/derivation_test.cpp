@@ -3497,6 +3497,47 @@ TEST(ContractEpsPair, FiresInsideProduct)
     EXPECT_EQ(tex.find("varepsilon"), std::string::npos);
 }
 
+TEST(ContractEpsPair, LeavesNoExplicitSumAfterDeterminant)
+{
+    // Same Σ_m ε_{mjk} ε_{mpq} x_j as above: the freed index j sits both on x_j
+    // and inside the emitted Kronecker determinant (δ_{jp}δ_{kq} −
+    // δ_{jq}δ_{kp}), a Sum factor.  Without distributing the determinant, j
+    // straddles that Sum and leaks as an explicit Σ (vibe 000064 #2).
+    // contract_eps_pair must distribute and re-implicitize, so the result
+    // carries no Σ binder.
+    Context ctx;
+    auto const* sp = space_3d();
+    std::vector<Level> const lll{Level::Lower, Level::Lower, Level::Lower};
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto p = CountableIndex{ctx.alloc_index_id()};
+    auto q = CountableIndex{ctx.alloc_index_id()};
+    auto eps = [&](CountableIndex x, CountableIndex y, CountableIndex z)
+    {
+        return make_levi_civita(
+            ctx,
+            Realm::Orthonormal,
+            sp,
+            lll,
+            {IndexAssoc{x}, IndexAssoc{y}, IndexAssoc{z}});
+    };
+    auto const* x_j = make_tensor_object(
+        ctx,
+        make_tensor_name("x"),
+        {SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, sp}, IndexAssoc{j}}},
+        0);
+    auto const* body = make_tensor_product(
+        ctx, make_tensor_product(ctx, eps(m, j, k), eps(m, p, q)), x_j);
+    auto const* summed = make_explicit_sum(ctx, m, body);
+
+    auto const* res = steps::contract_eps_pair(ctx, summed);
+    IndexNameMap map;
+    auto const tex = render_latex(*res, map);
+    EXPECT_EQ(tex.find("\\sum"), std::string::npos);
+}
+
 TEST(ContractEpsPair, ContractsFourEpsilonsPairByPair)
 {
     // Σ_{i,l} ε_{ijk} ε_{ipq} ε_{lrs} ε_{lmn}: two independent ε-pairs sharing
