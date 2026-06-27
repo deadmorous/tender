@@ -437,7 +437,7 @@ would also paper over it, but fixing the peel is the right move.)
 | # | symptom | verdict | fix |
 |---|---|---|---|
 | 1 | two terms → one after final identity | correct (I-terms cancel by design) | none |
-| 2 | explicit `Σ` after `contract_eps_pair` | forced by Sum-scope boundary (vibe 052) | distribute-then-implicitize, or document |
+| 2 | explicit `Σ` after `contract_eps_pair` | Sum-scope boundary (vibe 052) — **FIXED** | `contract_eps_pair` distributes its determinant, then implicitizes |
 | 3 | explicit `Σ` on terms `reassemble` can't fold | **bug** — missing `implicitize` on return | reassemble-output fix (below) |
 | 4 | opposite terms uncancelled; can't finish clean | raw output + no Python `implicitize` | reassemble-output fix + expose `implicitize`/`simplify` |
 | 5 | render `dummy_name` out of range | **display limit** — fixed 17-name schema | generate subscripted overflow names; (also selective expand, vibe 054) |
@@ -488,6 +488,20 @@ Commits, in order:
 5. **#5 — index names** (`Unbounded dummy index names via subscript overflow`).
    `dummy_name(n)` wraps `schema[n % S]` with subscript `⌊n / S⌋`; only a
    negative index throws.
+
+6. **#2 — explicit `Σ` after `contract_eps_pair`** (`contract_eps_pair
+   distributes its determinant`).  Originally classified "not a bug, forced by
+   the Sum-scope boundary"; the user still wanted it clean, and vibe candidate
+   fix 1 was the right call.  After the contraction fixpoint, `contract_eps_pair`
+   now `expand_products` (distributes the δ-determinant it just built so each
+   term is a single product) → `canonicalize` (settles the freed binders at each
+   term head) → `implicitize`.  The result is implicit-clean; the δ's remain for
+   the next `contract_delta`.  Guarded by the no-op check so a pass that
+   contracts nothing returns the input untouched.  Test
+   `ContractEpsPair.LeavesNoExplicitSumAfterDeterminant`.  General lesson: a step
+   that *introduces* a Sum factor (here the determinant) whose siblings carry the
+   summed indices must distribute it before implicitizing, or those binders leak
+   — the same shape as the reassemble-output cluster, one layer up.
 
 **Combined effect on the user's workflow:** with #7's recipe (expand the inserted
 `I` before `simplify_basis_cross`), a **single** `reassemble` now yields a clean,
