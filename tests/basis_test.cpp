@@ -951,6 +951,48 @@ TEST(Reassemble, CompositeDyadLegFold)
     EXPECT_TRUE(structural_eq(back, steps::canonicalize(ctx, dyad)));
 }
 
+TEST(Reassemble, SignBetweenSumBinders)
+{
+    // A subtracted term may carry its sign as a Negate sitting *between* its
+    // two summation binders: Σ_j −(Σ_i B_{ji} c_j e_i ⊗ a).  The interleaved
+    // ExplicitSum/Negate peel collects both binders past the sign, so this
+    // folds to −(Bᵀ·c)⊗a (B_{ji} c_j is the i-th component of Bᵀ·c; e_i
+    // realizes that leg).  Note: standalone, reassemble's self-prep
+    // canonicalize already adjacency-normalizes Σ_j −Σ_i → Σ_j Σ_i −, so this
+    // shape folds with or without the interleaved peel; the peel is what
+    // matters when the term is an addend inside a larger Sum (see
+    // BasisFeasibility.CrossTensorCrossOnePass).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* a = vec(ctx, "a");
+    auto const* term = make_explicit_sum(
+        ctx,
+        j,
+        make_negate(
+            ctx,
+            make_explicit_sum(
+                ctx,
+                i,
+                make_tensor_product(
+                    ctx,
+                    make_tensor_product(
+                        ctx,
+                        make_tensor_product(
+                            ctx, coord(ctx, "B", {j, i}), coord(ctx, "c", {j})),
+                        b.covariant_vector(ctx, i)),
+                    a))));
+
+    auto const* back = steps::canonicalize(ctx, reassemble(ctx, term, b));
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    auto const* want = make_negate(
+        ctx,
+        make_tensor_product(ctx, make_dot(ctx, make_transpose(ctx, B), c), a));
+    EXPECT_TRUE(structural_eq(back, steps::canonicalize(ctx, want)));
+}
+
 TEST(Reassemble, ContravariantRoundTrip)
 {
     Context ctx;

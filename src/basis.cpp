@@ -1107,27 +1107,35 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
         prepped,
         [&](Context& c, Expr const* node) -> Expr const*
         {
-            // Peel nested ExplicitSums, collecting the summed indices.
+            // Peel nested ExplicitSums (collecting the summed indices) and
+            // signs, interleaved.  A subtracted term carries its sign as a
+            // Negate, which canonicalize may leave *between* two binders, e.g.
+            // Σ_j −(Σ_i …).  Peeling all sums first then one sign would trap
+            // the inner i-binder behind the Negate, so walk the chain in order
+            // and track the running sign (an even number of Negates cancels).
             std::vector<int> summed;
+            bool negated = false;
             Expr const* body = node;
-            while (auto const* es = std::get_if<ExplicitSum>(&body->node))
+            for (;;)
             {
-                if (es->bound)
-                    return node; // symbolic bound: not a basis expansion
-                summed.push_back(es->index.id);
-                body = es->body;
+                if (auto const* es = std::get_if<ExplicitSum>(&body->node))
+                {
+                    if (es->bound)
+                        return node; // symbolic bound: not a basis expansion
+                    summed.push_back(es->index.id);
+                    body = es->body;
+                    continue;
+                }
+                if (auto const* n = std::get_if<Negate>(&body->node))
+                {
+                    negated = !negated;
+                    body = n->operand;
+                    continue;
+                }
+                break;
             }
             if (summed.empty())
                 return node;
-
-            // Peel one leading sign (a subtracted term carries it as a Negate);
-            // re-apply it to whatever the body reassembles to.
-            bool negated = false;
-            if (auto const* n = std::get_if<Negate>(&body->node))
-            {
-                negated = true;
-                body = n->operand;
-            }
             auto signed_ = [&](Expr const* r)
             { return negated ? make_negate(c, r) : r; };
 

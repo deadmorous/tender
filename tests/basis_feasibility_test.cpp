@@ -8,9 +8,11 @@
 #include <tender/expr.hpp>
 #include <tender/identity.hpp>
 #include <tender/index_space.hpp>
+#include <tender/rewrite.hpp>
 
 #include <gtest/gtest.h>
 
+#include <variant>
 #include <vector>
 
 using namespace tender;
@@ -21,6 +23,23 @@ namespace
 auto invariant_vec(Context& ctx, char const* name) -> Expr const*
 {
     return make_tensor_object(ctx, make_tensor_name(name), {}, 1);
+}
+
+// True if any node anywhere in the tree is an ExplicitSum binder — a fully
+// reassembled invariant expression carries none.
+auto contains_explicit_sum(Context& ctx, Expr const* e) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (std::holds_alternative<ExplicitSum>(n->node))
+                found = true;
+            return n;
+        });
+    return found;
 }
 
 // Reduce an invariant expression to its scalar coordinate form in WCS:
@@ -437,6 +456,86 @@ TEST(BasisFeasibility, CrossTensorCross)
         return steps::canonicalize(ctx, x);
     };
     EXPECT_TRUE(algebraic_eq(ctx, to_components(lhs), to_components(rhs)));
+}
+
+// Regression for vibe 000064 #8a: a *single* reassemble must finish the a×B×c
+// reduction — no leftover ExplicitSum binders.  One of the addends reaches
+// reassemble as Σ_j −(Σ_i B_{ji} c_j e_i ⊗ a): a sign sitting *between* the two
+// binders.  The interleaved ExplicitSum/Negate peel collects both binders past
+// the sign and folds it to −(Bᵀ·c)⊗a in this one pass.  Before the fix that
+// addend stayed raw, forcing a second reassemble (#9).  Unlike the standalone
+// Reassemble.SignBetweenSumBinders, here the term is an addend inside a larger
+// Sum, so reassemble's self-prep canonicalize does *not* adjacency-normalize it
+// first — this is what actually exercises the interleaved peel.
+TEST(BasisFeasibility, CrossTensorCrossOnePass)
+{
+    Context ctx;
+    auto b3 = wcs(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto const* I = make_identity(ctx);
+
+    auto const* p = make_tensor_object(ctx, make_tensor_name("p"), {}, 1);
+    auto const* q = make_tensor_object(ctx, make_tensor_name("q"), {}, 1);
+    Identity const dyad{
+        "dyad",
+        make_tensor_product(ctx, p, q),
+        make_sum(
+            ctx,
+            make_cross(ctx, make_cross(ctx, q, I), p),
+            make_tensor_product(ctx, make_dot(ctx, p, q), I))};
+
+    auto const* e = make_cross(ctx, make_cross(ctx, a, B), c);
+    e = expand_in_basis(ctx, e, b3, Variance::Covariant);
+    e = apply_identity(ctx, e, dyad);
+    e = expand_in_basis(ctx, e, b3, Variance::Covariant);
+    e = simplify_basis_cross(ctx, e, b3);
+    e = simplify_basis_dot(ctx, e, b3);
+    for (int pass = 0; pass < 4; ++pass)
+    {
+        e = steps::contract_eps_pair(ctx, e);
+        e = simplify_basis_dot(ctx, e, b3);
+        e = steps::contract_delta(ctx, e);
+    }
+    e = reassemble(ctx, e, b3); // a single pass must clear every binder
+
+    EXPECT_FALSE(contains_explicit_sum(ctx, e));
+
+    // And it is the right invariant: (a·c) Bᵀ + tr(B) c⊗a − c⊗(B·a) −
+    // (Bᵀ·c)⊗a + [ (a·Bᵀ)·c − tr(B)(a·c) ] I.
+    auto const* Bt = make_transpose(ctx, B);
+    auto const* trB = make_trace(ctx, B);
+    auto const* ac = make_dot(ctx, a, c);
+    auto const* scal = make_difference(
+        ctx,
+        make_dot(ctx, make_dot(ctx, a, Bt), c),
+        make_tensor_product(ctx, trB, ac));
+    auto const* rhs = make_sum(
+        ctx,
+        make_sum(
+            ctx,
+            make_sum(
+                ctx,
+                make_tensor_product(ctx, ac, Bt),
+                make_tensor_product(ctx, trB, make_tensor_product(ctx, c, a))),
+            make_negate(ctx, make_tensor_product(ctx, c, make_dot(ctx, B, a)))),
+        make_sum(
+            ctx,
+            make_negate(ctx, make_tensor_product(ctx, make_dot(ctx, Bt, c), a)),
+            make_tensor_product(ctx, scal, I)));
+    auto to_components = [&](Expr const* x)
+    {
+        x = expand_in_basis(ctx, x, b3, Variance::Covariant);
+        for (int i = 0; i < 4; ++i)
+        {
+            x = simplify_basis_dot(ctx, x, b3);
+            x = steps::contract_delta(ctx, x);
+        }
+        return steps::canonicalize(ctx, x);
+    };
+    EXPECT_TRUE(algebraic_eq(
+        ctx, to_components(steps::canonicalize(ctx, e)), to_components(rhs)));
 }
 
 // The same theorem proved a second way, to stress the pattern matcher and the
