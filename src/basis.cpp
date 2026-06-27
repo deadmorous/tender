@@ -1191,7 +1191,18 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
             return signed_(make_tensor_object(
                 c, coord->name, {}, static_cast<int>(s.size())));
         });
-    return out == prepped ? e : out;
+    // Surface the prepared result, not the raw input (vibe 000064 #3/#4/#6).
+    // The self-prep canonicalize may simplify the input on its own — cancelling
+    // equal-and-opposite terms, collapsing a sum — even when no fold then fires
+    // (#6); and a partial fold leaves the unfolded terms carrying the Σ binders
+    // canonicalize materialized, which must be stripped back to implicit (#3).
+    // So implicitize the output, and report a no-op (returning the original
+    // `e`) only when the fold did not fire (`out == prepped`, rewrite_tree
+    // reuses the pointer) *and* the prep left the expression structurally
+    // unchanged.
+    if (out == prepped && structural_eq(prepped, e))
+        return e;
+    return steps::implicitize(ctx, out);
 }
 
 auto reassemble_completeness(Context& ctx, Expr const* e, Basis const& basis)
@@ -1214,7 +1225,11 @@ auto reassemble_completeness(Context& ctx, Expr const* e, Basis const& basis)
             auto* f = fold_completeness(c, node, basis);
             return f ? f : node;
         });
-    return out == prepped ? e : out;
+    // Same as reassemble: surface prep + strip materialized Σ (vibe 000064
+    // #3/#4/#6); a genuine no-op still returns the original `e`.
+    if (out == prepped && structural_eq(prepped, e))
+        return e;
+    return steps::implicitize(ctx, out);
 }
 
 } // namespace tender

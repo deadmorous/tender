@@ -1006,7 +1006,10 @@ TEST(Reassemble, ContravariantRoundTrip)
 
 TEST(Reassemble, NonExpansionUnchanged)
 {
-    // A lone Kronecker trace Σ_i δ_{ii} is not a basis expansion.
+    // A lone Kronecker trace Σ_i δ_{ii} is not a basis expansion: no reassembly
+    // fold fires.  reassemble still self-preps (canonicalize) and strips the
+    // materialized Σ on return (vibe 000064 #3/#6), so the result is exactly
+    // the prepared input — not folded into any invariant.
     Context ctx;
     auto b = wcs_basis(ctx);
     auto i = CountableIndex{ctx.alloc_index_id()};
@@ -1021,7 +1024,26 @@ TEST(Reassemble, NonExpansionUnchanged)
             Level::Lower,
             IndexAssoc{i},
             IndexAssoc{i}));
-    EXPECT_EQ(reassemble(ctx, trace, b), trace);
+    auto const* prepped =
+        steps::implicitize(ctx, steps::canonicalize(ctx, trace));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, trace, b), prepped));
+}
+
+TEST(Reassemble, SurfacesPrepCancellation)
+{
+    // vibe 000064 #6: reassemble's self-prep canonicalize can simplify the
+    // input (here cancel Y − Y) even when no reassembly fold then fires.  The
+    // old no-op guard discarded that and returned the raw input; reassemble
+    // must surface the prepared (simplified) result instead.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* X = make_tensor_product(ctx, vec(ctx, "b"), vec(ctx, "c"));
+    auto const* Y = make_tensor_product(ctx, vec(ctx, "a"), vec(ctx, "a"));
+    auto const* e = make_difference(ctx, make_sum(ctx, X, Y), Y);
+
+    auto const* got = reassemble(ctx, e, b);
+    EXPECT_TRUE(structural_eq(got, steps::canonicalize(ctx, X)));
+    EXPECT_FALSE(structural_eq(got, e)); // really simplified, not the raw input
 }
 
 TEST(Reassemble, NoSumUnchanged)
@@ -1209,7 +1231,8 @@ TEST(ReassembleCompleteness, PlainResolutionUnchanged)
         reassemble_completeness(ctx, term, b), make_identity(ctx)));
 }
 
-// A genuine non-pattern (Kronecker trace) is a no-op.
+// A genuine non-pattern (Kronecker trace): no completeness fold fires, so the
+// result is just the self-prep (canonicalize + implicitize) of the input.
 TEST(ReassembleCompleteness, NonPatternUnchanged)
 {
     Context ctx;
@@ -1226,5 +1249,7 @@ TEST(ReassembleCompleteness, NonPatternUnchanged)
             Level::Lower,
             IndexAssoc{i},
             IndexAssoc{i}));
-    EXPECT_EQ(reassemble_completeness(ctx, trace, b), trace);
+    auto const* prepped =
+        steps::implicitize(ctx, steps::canonicalize(ctx, trace));
+    EXPECT_TRUE(structural_eq(reassemble_completeness(ctx, trace, b), prepped));
 }
