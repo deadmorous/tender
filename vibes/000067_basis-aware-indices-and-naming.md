@@ -96,9 +96,15 @@ reaches all of this via `slot.basis_id → ctx.basis(id)`.
 1. `IndexSlot.basis_id` (default 0) threaded through slot construction,
    `structural_eq`, canonical ordering, hashing, matcher (0 = don't-care);
    summation ignores it. All existing tests pass unchanged (nothing sets it).
-2. `Context` basis registry; `make_*_basis` registers + returns `Basis const*`
-   + stamps emitted vectors; `expand_in_basis` stamps coordinate indices.
-   Behavior unchanged (steps not yet filtering).
+   **DONE** (commit ef18cb1).
+2. `Context` basis registry; `make_*_basis` registers + stamps emitted vectors;
+   `expand_in_basis` stamps coordinate indices. Behavior unchanged (steps not
+   yet filtering). **DONE** (commit 94a9b70). Deviation from the plan below:
+   `make_*_basis` kept its **by-value** return (`-> Basis`) rather than switching
+   to `Basis const*`; instead `intern_basis()` stores a context-owned copy in the
+   registry and stamps the same id on the returned value. This realizes the id
+   handle with no API ripple (coord_system / Python `PyBasis` unchanged); the
+   registry copy keeps a slot's `basis_id` resolvable.
 3. Basis-aware steps filter by `basis_id`. Add multi-basis tests: rotation
    `e_i ⊗ e'_i` (must sum), overlap `e_i^A·e_j^B` (must NOT become δ),
    two-point `F_{iJ}`.
@@ -111,7 +117,9 @@ reaches all of this via `slot.basis_id → ctx.basis(id)`.
 Settled: approach B (per-index `basis_id`); interned id with the registry in
 `Context`; `basis_id 0` = basis-unaware; summation basis-blind, rewrites
 basis-aware; Basis owns label + `value_names` + optional vector symbols; two
-naming tracks; the slicing above.
+naming tracks; the slicing above.  Implementation refinement (increment 2):
+`make_*_basis` returns `Basis` by value + a registered context-owned copy,
+rather than `Basis const*` — same id-handle semantics, no API ripple.
 
 Open / deferred: exact matcher don't-care policy for partially-basis-tagged
 patterns; whether `make_*_basis` returning `Basis const*` warrants a thin
