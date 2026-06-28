@@ -53,7 +53,7 @@ symbols, `√g`, built on Stage 3's basis machinery.
 
 ## Stage 5 — Differential operators
 
-grad / div / curl, the covariant derivative, expressed in direct notation and
+grad / div / rot, the covariant derivative, expressed in direct notation and
 evaluated through the coordinate systems of Stage 4. The domain payoff for
 computational mechanics.
 

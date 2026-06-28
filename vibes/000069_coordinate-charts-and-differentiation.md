@@ -5,7 +5,7 @@ Planning the layer that must exist *before* differential operators (roadmap
 (vibes 000049, 000067), but **nothing** for: scalar fields (coordinate
 variables, elementary functions), taking derivatives, specifying a coordinate
 mapping, or deriving the geometry (metric, scale factors, ∂ of basis vectors)
-from that mapping.  Without these, ∇ / div / curl / Laplacian can only be
+from that mapping.  Without these, ∇ / div / rot / Laplacian can only be
 hand-typed, not derived, and won't compose with the rest.
 
 This vibe is a **plan only** — no implementation yet.
@@ -31,7 +31,7 @@ mapping:
    - `∂_r e_r = 0`, `∂_r e_φ = 0`
    - `∂_φ e_r = −sin φ · i + cos φ · j = e_φ`
    - `∂_φ e_φ = −cos φ · i − sin φ · j = −e_r`
-7. **∇ (and later Δ):** `∇ = e_i (1/h_i) ∂_{q^i}`, then div/curl/Laplacian follow,
+7. **∇ (and later Δ):** `∇ = e_i (1/h_i) ∂_{q^i}`, then div/rot/Laplacian follow,
    the curvilinear `1/r` factors and the `∂e` formulas falling out of 3–6.
 
 ## What we have vs what's missing
@@ -56,7 +56,7 @@ Missing (in dependency order):
    a tender `Basis` (carrying the chart's coordinate names from vibe 000067).
 6. **Field specification**: a convention for "field over a chart" (scalar
    `f(q)`, vector `v = v^i(q) e_i`) so operators know what they act on.
-7. **Differential operators**: `∇`, grad, div, curl, Laplacian on 1–6.
+7. **Differential operators**: `∇`, grad, div, rot, Laplacian on 1–6.
 
 ## Proposed building blocks (representations — proposals, open to change)
 
@@ -85,9 +85,10 @@ Missing (in dependency order):
 - **M2 — Differentiation `∂_q`.** All rules + derivative table; `∂` of
   coordinates and of constant reference vectors.  *Alive:* `∂_r R`, `∂_φ R` give
   the step-3 tangent vectors.
-- **M3 — Scalar simplification for geometry.** Pythagorean / `√(square)` /
-  powers, plus a positivity/assumptions convention (`r ≥ 0`, `h_i > 0`).  Decide
-  build vs reuse e-graph identities.  *Alive:* `cos²+sin² → 1`, `√(r²) → r`.
+- **M3 — Targeted scalar simplifier + per-coordinate domains.** The specific
+  trig/`√(square)`/power identities the geometry needs, using the chart's
+  coordinate domains where required (`r ≥ 0` ⇒ `√(r²) → r`).  *Alive:*
+  `cos²+sin² → 1`, `√(r²) → r`.
 - **M4 — Chart + tangent basis + metric + physical basis.** Chart spec → `g_i`,
   `g_{ij}`, `h_i`, orthonormal `e_i`/`e^i`; bridge to `Basis`.  *Alive:* build
   polar/cylindrical/spherical from their mappings; validate the derived `Basis`
@@ -95,29 +96,34 @@ Missing (in dependency order):
 - **M5 — `∂_j e_i` / Christoffel.** Differentiate `e_i`, re-express in the local
   basis.  *Alive:* reproduce the step-6 polar formulas (and cylindrical/
   spherical).
-- **M6 — Differential operators.** `∇`, grad, div, curl, Laplacian using the
+- **M6 — Differential operators.** `∇`, grad, div, rot, Laplacian using the
   chart's `∂`, scale factors, and `∂e` table.  *Alive:* the cylindrical
   `∇ = e_r ∂_r + (1/r) e_φ ∂_φ + e_z ∂_z` and the curvilinear div/Laplacian.
 
-## Hard parts & decisions to settle first
+## Decisions (settled)
 
-- **Scalar-CAS depth (the crux).** The pipeline needs real trig/sqrt/power
-  simplification, not just AC-normalisation.  Options: (a) a small *targeted*
-  scalar simplifier covering orthogonal-curvilinear needs; (b) push it through
-  the existing e-graph + an identity library (trig identities as rules);
-  (c) require the user to supply a simplified metric/scale factors.  Leaning
-  (a)+(b): targeted rules now, e-graph rules as they generalise; never (c) — the
-  user wants derivation "for any concrete mapping".
-- **Assumptions / positivity.** `√(r²) = r` needs `r ≥ 0`; scale factors are
-  positive.  Need a lightweight assumptions mechanism or per-coordinate domain
-  convention.
-- **Holonomic vs physical basis.** Support both; the worked example normalises to
-  the physical orthonormal frame, but the metric/Christoffel are natural on the
-  holonomic one.  Decide which the operators use by default (physical, to match
-  textbook curvilinear formulas).
+0. **Naming: `rot`, not `curl`.**  The rotation operator is `rot` everywhere
+   (more familiar); `curl` is not used.  (No code exists yet — this is the
+   forward convention; the archived `attic/` is left as-is.)
+1. **Scalar simplification = a targeted scalar simplifier**, starting small:
+   the specific identities the orthogonal-curvilinear pipeline needs
+   (Pythagorean `cos²+sin² → 1`, `√(square) → value`, power/product folding),
+   extended on demand.  Promote rules into the e-graph/identity library later if
+   they generalise.  Never require the user to hand-supply a simplified metric.
+2. **Assumptions = per-coordinate domains, carried on the chart.**  Each
+   coordinate has a known domain (e.g. cylindrical `r ≥ 0`, `φ ∈ (−π, π]`,
+   `z ∈ ℝ`), and the simplifier *relies on the domain when needed* — e.g.
+   `√(r²) → r` because `r ≥ 0`, scale factors taken positive.  Well-known charts
+   ship with their domains; a custom chart supplies them.
+3. **Physical (orthonormal) basis is the default** the operators use (matches
+   textbook curvilinear ∇/div/rot/Δ); the holonomic `g_i` and the metric live
+   underneath and are available.
+
+## Remaining notes
+
 - **IR footprint.** Keep new nodes minimal and additive (coordinate atom +
-  `ScalarFn`/`Pow`); make sure canonicalize/structural_eq/hash/render learn them
-  uniformly (as `basis_id` was threaded in vibe 000067).
+  `ScalarFn`/`Pow`); thread them uniformly through canonicalize / structural_eq /
+  hash / render (as `basis_id` was threaded in vibe 000067).
 - **Reuse vs new.** The embedding targets an existing orthonormal reference
   `Basis` (e.g. `wcs`); `partial` of vectors leans on the existing dot/reassemble
   for the "re-express in local basis" step.
@@ -130,5 +136,5 @@ coordinate mapping", which needs the scalar-field + differentiation foundations
 above.  Stage 5 (operators) then sits on M6.  Builds on [[basis-aware-indices-plan]]
 (vibe 000067) for the frame + naming and on the basis layer (vibe 000049).
 
-Status: **plan; awaiting scope confirmation** — especially the scalar-CAS depth
-(M3) and the assumptions mechanism, which gate everything downstream.
+Status: **plan; scope confirmed** (decisions 0–3 settled).  Ready to start at
+**M1** (scalar fields).
