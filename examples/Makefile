@@ -22,7 +22,8 @@ OUTDIR   := out
 
 PYTHONPATH_VAR := PYTHONPATH=$(ROOT)/python
 
-EXAMPLES := kronecker_delta delta_trace eps_delta basis_dot_product cross_identity
+EXAMPLES := kronecker_delta delta_trace eps_delta basis_dot_product cross_identity \
+            basis_aware_coordinates
 
 .PHONY: all clean
 

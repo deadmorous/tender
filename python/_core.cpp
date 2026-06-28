@@ -75,6 +75,23 @@ static auto to_index_assoc(nb::object const& v) -> IndexAssoc
     throw nb::type_error("index must be CountableIndex, int, or str");
 }
 
+// Assemble a BasisNaming from Python lists/strings (vibe 000067): value_names
+// and vector_symbols are per-direction display strings; label is a free-form
+// LaTeX suffix appended to the basis's indices.
+static auto make_basis_naming(
+    std::vector<std::string> const& value_names,
+    std::vector<std::string> const& vector_symbols,
+    std::optional<std::string> const& label) -> BasisNaming
+{
+    BasisNaming n;
+    for (auto const& v: value_names)
+        n.value_names.push_back(make_index_name(v));
+    for (auto const& s: vector_symbols)
+        n.vector_symbols.push_back(make_tensor_name(s));
+    n.label = label;
+    return n;
+}
+
 // Convert int or Rational Python value to a scalar Expr const*.
 static auto py_to_scalar(nb::object const& v, Context& ctx) -> Expr const*
 {
@@ -796,6 +813,11 @@ NB_MODULE(_core, m)
             nb::rv_policy::reference)
         .def_prop_ro("dim", [](PyBasis const& b) { return b.basis.dim(); })
         .def_prop_ro(
+            "basis_id",
+            [](PyBasis const& b) { return b.basis.basis_id(); },
+            "The slot tag stamped on every index this basis emits (vibe "
+            "000067); 0 means unregistered.")
+        .def_prop_ro(
             "is_orthonormal",
             [](PyBasis const& b) { return b.basis.is_orthonormal(); })
         .def_prop_ro(
@@ -847,7 +869,10 @@ NB_MODULE(_core, m)
         [](std::vector<PyExpr> const& vectors,
            IndexSpace const* space,
            std::string const& symbol,
-           Handedness handedness) -> PyBasis
+           Handedness handedness,
+           std::vector<std::string> const& value_names,
+           std::vector<std::string> const& vector_symbols,
+           std::optional<std::string> const& label) -> PyBasis
         {
             // The basis vectors' Expr pointers live in their own context; that
             // is the context the basis (and its emissions) must use.
@@ -867,20 +892,28 @@ NB_MODULE(_core, m)
                     space,
                     std::move(vs),
                     make_tensor_name(symbol),
-                    handedness)};
+                    handedness,
+                    make_basis_naming(value_names, vector_symbols, label))};
         },
         "vectors"_a,
         "space"_a,
         "symbol"_a = "e",
         "handedness"_a = Handedness::Right,
+        "value_names"_a = std::vector<std::string>{},
+        "vector_symbols"_a = std::vector<std::string>{},
+        "label"_a = nb::none(),
         "Build an orthonormal basis from rank-1 vectors (cobasis = basis); "
-        "handedness fixes √g = ±1.");
+        "handedness fixes √g = ±1.  value_names/vector_symbols/label control "
+        "how concrete indices and vectors print (vibe 000067).");
 
     mb.def(
         "make_oblique_basis",
         [](std::vector<PyExpr> const& vectors,
            IndexSpace const* space,
-           std::string const& symbol) -> PyBasis
+           std::string const& symbol,
+           std::vector<std::string> const& value_names,
+           std::vector<std::string> const& vector_symbols,
+           std::optional<std::string> const& label) -> PyBasis
         {
             Context* ctx =
                 vectors.empty() ? &g_default_ctx : vectors.front().ctx;
@@ -894,13 +927,21 @@ NB_MODULE(_core, m)
                 keep,
                 ctx,
                 make_oblique_basis(
-                    *ctx, space, std::move(vs), make_tensor_name(symbol))};
+                    *ctx,
+                    space,
+                    std::move(vs),
+                    make_tensor_name(symbol),
+                    make_basis_naming(value_names, vector_symbols, label))};
         },
         "vectors"_a,
         "space"_a,
         "symbol"_a = "e",
+        "value_names"_a = std::vector<std::string>{},
+        "vector_symbols"_a = std::vector<std::string>{},
+        "label"_a = nb::none(),
         "Build a 3D oblique basis from its covariant vectors; the contravariant "
-        "cobasis is derived via the reciprocal (cross-product) formula.");
+        "cobasis is derived via the reciprocal (cross-product) formula.  "
+        "value_names/vector_symbols/label control rendering (vibe 000067).");
 
     auto bind_cs =
         [&mb](char const* name, Basis (*fn)(Context&), char const* doc)
