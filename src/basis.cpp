@@ -326,7 +326,7 @@ namespace
 struct VecSide final
 {
     Expr const* scalar; // component-valued factor, or nullptr
-    CountableIndex index;
+    IndexAssoc index;   // dummy or concrete (vibe 000068)
     Level level;
 };
 
@@ -348,6 +348,41 @@ auto as_basis_vector(Expr const* e, Basis const& b)
     return std::pair{*ci, t->slots[0].slot.level};
 }
 
+// Like as_basis_vector but for the contraction steps (vibe 000068): recognises
+// the three forms of a basis direction and returns the index *association*
+// (dummy or concrete) so a dot/cross can emit a δ/ε with a concrete leg.
+//   (1)/(2) the `e`-form — `b`'s vector symbol, one slot tagged with `b`,
+//           carrying a CountableIndex (dummy) OR a ConcreteIndex;
+//   (3)     a frame vector `b.basis(k)` / `b.cobasis(k)` matched structurally
+//           (so `cs.basis(0)` is read as the concrete direction-0 vector).
+// Reverse-lookup is by structural identity with *this* basis's vectors, so it
+// is inherently single-frame.
+auto as_basis_dir(Expr const* e, Basis const& b)
+    -> std::optional<std::pair<IndexAssoc, Level>>
+{
+    if (auto const* t = std::get_if<TensorObject>(&e->node);
+        t && t->name.v.view() == b.vector_symbol().v.view()
+        && t->slots.size() == 1 && t->slots[0].index
+        && t->slots[0].slot.basis_id == b.basis_id())
+    {
+        auto const& a = *t->slots[0].index;
+        if (std::holds_alternative<CountableIndex>(a)
+            || std::holds_alternative<ConcreteIndex>(a))
+            return std::pair{a, t->slots[0].slot.level};
+    }
+    auto const vals = b.space()->values();
+    for (int k = 0; k < b.dim(); ++k)
+    {
+        if (structural_eq(e, b.basis(k)))
+            return std::pair{IndexAssoc{ConcreteIndex{vals[k]}}, Level::Lower};
+        if (structural_eq(e, b.cobasis(k)))
+            return std::pair{
+                IndexAssoc{ConcreteIndex{vals[k]}},
+                b.is_orthonormal() ? Level::Lower : Level::Upper};
+    }
+    return std::nullopt;
+}
+
 auto is_scalar_one(Expr const* e) -> bool
 {
     auto const* s = std::get_if<ScalarLiteral>(&e->node);
@@ -367,15 +402,15 @@ auto is_scalar_coefficient(Expr const* e) -> bool
 // contraction distributed over the ⊗ first (steps::distribute_contraction).
 auto as_vec_side(Expr const* e, Basis const& b) -> std::optional<VecSide>
 {
-    if (auto bv = as_basis_vector(e, b))
+    if (auto bv = as_basis_dir(e, b))
         return VecSide{nullptr, bv->first, bv->second};
     auto const* tp = std::get_if<TensorProduct>(&e->node);
     if (!tp)
         return std::nullopt;
-    if (auto bv = as_basis_vector(tp->right, b);
+    if (auto bv = as_basis_dir(tp->right, b);
         bv && is_scalar_coefficient(tp->left))
         return VecSide{tp->left, bv->first, bv->second};
-    if (auto bv = as_basis_vector(tp->left, b);
+    if (auto bv = as_basis_dir(tp->left, b);
         bv && is_scalar_coefficient(tp->right))
         return VecSide{tp->right, bv->first, bv->second};
     return std::nullopt;
@@ -415,8 +450,8 @@ auto simplify_basis_dot(Context& ctx, Expr const* e, Basis const& basis)
                 basis.space(),
                 l->level,
                 r->level,
-                IndexAssoc{l->index},
-                IndexAssoc{r->index});
+                l->index,
+                r->index);
             if (r->scalar)
                 result = make_tensor_product(c, r->scalar, result);
             if (l->scalar)
@@ -455,7 +490,7 @@ auto simplify_basis_cross(Context& ctx, Expr const* e, Basis const& basis)
                 basis.realm(),
                 basis.space(),
                 {Level::Lower, Level::Lower, Level::Lower},
-                {IndexAssoc{l->index}, IndexAssoc{r->index}, IndexAssoc{k}});
+                {l->index, r->index, IndexAssoc{k}});
             Expr const* result =
                 make_tensor_product(c, eps, basis.contravariant_vector(c, k));
             // √g weight; the right-handed orthonormal case (√g = 1) needs no

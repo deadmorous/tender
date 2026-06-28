@@ -1476,3 +1476,75 @@ TEST(Reassemble, AlsoDoesCompletenessFold)
         ctx, expand_in_basis(ctx, I, b, Variance::Covariant), b.basis(0));
     EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), b.basis(0)));
 }
+
+// ---- concrete-direction basis dots (vibe 000068 P1/P3) --------------------
+
+namespace
+{
+// The symbolic-concrete basis vector e_value — `e` + ConcreteIndex tagged with
+// b — which is what a contracted concrete dot reduces to (it renders as the
+// frame letter via vector_symbols, but is structurally distinct from the frame
+// vector b.basis(k)).
+auto e_dir(Context& ctx, Basis const& b, int value) -> Expr const*
+{
+    return make_tensor_object(
+        ctx,
+        make_tensor_name("e"),
+        {SlotBinding{
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
+            ConcreteIndex{value}}},
+        1);
+}
+} // namespace
+
+TEST(BasisConcreteDot, DotWithFrameVectorContractsToDelta)
+{
+    // P1: (e_i ⊗ e_i)·e_1 now contracts — simplify_basis_dot yields e_i δ_{i1}
+    // (the frame vector b.basis(0) is recognised as the concrete direction 1),
+    // and contract_delta finishes it to the direction-1 vector e_1.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* I = make_identity(ctx);
+    auto const* term = make_dot(
+        ctx, expand_in_basis(ctx, I, b, Variance::Covariant), b.basis(0));
+    auto const* done =
+        steps::contract_delta(ctx, simplify_basis_dot(ctx, term, b));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, done),
+        steps::canonicalize(ctx, e_dir(ctx, b, 1))));
+}
+
+TEST(BasisConcreteDot, UnrolledDotEvaluatesConcretely)
+{
+    // P3: after unrolling, simplify_basis_dot turns each e_k·e_1 into δ_{k1},
+    // which eval_delta_concrete reduces (1/0), leaving the direction-1 vector.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* I = make_identity(ctx);
+    auto const* term = steps::unroll_sums(
+        ctx,
+        make_dot(
+            ctx, expand_in_basis(ctx, I, b, Variance::Covariant), b.basis(0)));
+    auto const* done = steps::fold_arithmetic(
+        ctx, steps::eval_delta_concrete(ctx, simplify_basis_dot(ctx, term, b)));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, done),
+        steps::canonicalize(ctx, e_dir(ctx, b, 1))));
+}
+
+TEST(BasisConcreteDot, FrameVectorSelfAndCrossDots)
+{
+    // The reverse-looked-up frame vectors contract among themselves: e_1·e_1 =
+    // 1 and e_1·e_2 = 0 (concrete–concrete δ via eval_delta_concrete).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* one = steps::eval_delta_concrete(
+        ctx, simplify_basis_dot(ctx, make_dot(ctx, b.basis(0), b.basis(0)), b));
+    auto const* zero = steps::eval_delta_concrete(
+        ctx, simplify_basis_dot(ctx, make_dot(ctx, b.basis(0), b.basis(1)), b));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, one), make_scalar(ctx, Rational{1})));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, zero), make_scalar(ctx, Rational{0})));
+}

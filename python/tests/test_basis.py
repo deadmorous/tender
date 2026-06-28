@@ -126,6 +126,31 @@ class TestBasisIdentity:
             r"a_{x} \, \mathbf{i} + a_{y} \, \mathbf{j} + a_{z} \, \mathbf{k}"
         )
 
+    def test_dot_with_frame_vector_contracts(self):
+        # vibe 000068 P1/P3: dotting an expansion with a concrete frame vector
+        # cs.basis(0) now contracts; contract_delta (or unroll + eval) finishes
+        # I·e_1 = e_1.
+        ctx = tender.Context()
+        cs = tb.wcs(ctx)
+        I = tender.identity(ctx=ctx)
+        term = tb.expand_in_basis(I, cs, tb.Variance.Covariant) @ cs.basis(0)
+
+        # The result is the direction-1 vector e_1, which renders as the frame
+        # letter "i" (it is the symbolic-concrete form, not the frame vector
+        # object, so we compare the rendered result).
+        want = cs.basis(0).latex()  # "\mathbf{i}"
+
+        # P1: symbolic δ_{i1}, then contract_delta.
+        p1 = td.contract_delta(tb.simplify_basis_dot(term, cs))
+        assert td.canonicalize(p1).latex() == want
+
+        # P3: unroll first, concrete δ, then eval_delta_concrete.
+        unrolled = td.unroll_sums(term)
+        p3 = td.fold_arithmetic(
+            td.eval_delta_concrete(tb.simplify_basis_dot(unrolled, cs))
+        )
+        assert td.canonicalize(p3).latex() == want
+
     def test_reassemble_also_does_completeness(self):
         # vibe 000068 P2: reassemble finishes I·e_1 = e_1 in one call, without
         # the caller reaching for reassemble_completeness.
