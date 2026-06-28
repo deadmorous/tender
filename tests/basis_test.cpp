@@ -41,14 +41,19 @@ auto idx_of(SlotBinding const& sb) -> int
 }
 
 // A rank-0 coordinate component name_{ids…} (the way expand_in_basis emits
-// one): orthonormal lower slots carrying the given countable indices.
-auto coord(Context& ctx, char const* name, std::vector<CountableIndex> ids)
-    -> Expr const*
+// one): orthonormal lower slots carrying the given countable indices, tagged
+// with the basis id so reassemble recognizes them as `b`'s (vibe 000067).
+auto coord(
+    Context& ctx,
+    Basis const& b,
+    char const* name,
+    std::vector<CountableIndex> ids) -> Expr const*
 {
     std::vector<SlotBinding> slots;
     for (auto id: ids)
         slots.push_back(SlotBinding{
-            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
             IndexAssoc{id}});
     return make_tensor_object(ctx, make_tensor_name(name), std::move(slots), 0);
 }
@@ -595,6 +600,142 @@ TEST(BasisRegistry, DifferentBasesProduceDistinctExpansions)
     EXPECT_FALSE(algebraic_eq(ctx, e1, e2));
 }
 
+// ---- basis-aware step filtering (vibe 000067, increment 3) -----------------
+
+namespace
+{
+// A second 3D orthonormal basis (p, q, r), distinct from wcs_basis.
+auto other_basis(Context& ctx) -> Basis
+{
+    return make_orthonormal_basis(
+        ctx, space_3d(), {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")});
+}
+
+// True if a tensor named `name` appears anywhere in the tree.
+auto contains_named(Context& ctx, Expr const* e, char const* name) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node))
+                if (t->name.v.view() == name)
+                    found = true;
+            return n;
+        });
+    return found;
+}
+} // namespace
+
+TEST(BasisFilter, DotContractsOnlyWithinOneBasis)
+{
+    // e_i^A · e_j^A → δ, but e_i^A · e_j^B (the overlap of two frames) is left
+    // untouched by simplify_basis_dot(A) (vibe 000067).
+    Context ctx;
+    auto a = wcs_basis(ctx);
+    auto b = other_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+
+    // Same basis: contracts to a δ (top node no longer a Dot).
+    auto const* same = simplify_basis_dot(
+        ctx,
+        make_dot(ctx, a.covariant_vector(ctx, i), a.covariant_vector(ctx, j)),
+        a);
+    EXPECT_FALSE(std::holds_alternative<Dot>(same->node));
+
+    // Cross basis: the overlap is left as the dot (no δ produced).
+    auto const* cross = simplify_basis_dot(
+        ctx,
+        make_dot(ctx, a.covariant_vector(ctx, i), b.covariant_vector(ctx, j)),
+        a);
+    EXPECT_TRUE(std::holds_alternative<Dot>(cross->node));
+}
+
+TEST(BasisFilter, CrossReducesOnlyWithinOneBasis)
+{
+    // e_i^A × e_j^B is left as a Cross by simplify_basis_cross(A).
+    Context ctx;
+    auto a = wcs_basis(ctx);
+    auto b = other_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+
+    auto const* same = simplify_basis_cross(
+        ctx,
+        make_cross(ctx, a.covariant_vector(ctx, i), a.covariant_vector(ctx, j)),
+        a);
+    EXPECT_FALSE(std::holds_alternative<Cross>(same->node));
+
+    auto const* cross = simplify_basis_cross(
+        ctx,
+        make_cross(ctx, a.covariant_vector(ctx, i), b.covariant_vector(ctx, j)),
+        a);
+    EXPECT_TRUE(std::holds_alternative<Cross>(cross->node));
+}
+
+TEST(BasisFilter, ReassembleIgnoresForeignBasis)
+{
+    // An expansion in basis B is not reassembled by basis A; the correct basis
+    // does fold it back (vibe 000067).
+    Context ctx;
+    auto a = wcs_basis(ctx);
+    auto b = other_basis(ctx);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto const* expB = steps::canonicalize(
+        ctx, expand_in_basis(ctx, v, b, Variance::Covariant));
+
+    // Foreign basis: no fold (still carries the basis vector "e").
+    auto const* wrong = reassemble(ctx, expB, a);
+    EXPECT_TRUE(contains_named(ctx, wrong, "e"));
+    EXPECT_FALSE(structural_eq(steps::canonicalize(ctx, wrong), v));
+
+    // Right basis: folds back to the invariant v.
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expB, b), v));
+}
+
+TEST(BasisFilter, TwoPointCoordinateNotReassembled)
+{
+    // F_{iJ} with i in A and J in B is a two-point coordinate, not a clean A
+    // reassembly: reassemble(A) leaves the basis vectors unfolded.
+    Context ctx;
+    auto a = wcs_basis(ctx);
+    auto b = other_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* F = make_tensor_object(
+        ctx,
+        make_tensor_name("F"),
+        {SlotBinding{
+             IndexSlot{
+                 Level::Lower, Realm::Orthonormal, space_3d(), a.basis_id()},
+             IndexAssoc{i}},
+         SlotBinding{
+             IndexSlot{
+                 Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
+             IndexAssoc{j}}},
+        0);
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_explicit_sum(
+            ctx,
+            j,
+            make_tensor_product(
+                ctx,
+                F,
+                make_tensor_product(
+                    ctx,
+                    a.covariant_vector(ctx, i),
+                    a.covariant_vector(ctx, j)))));
+
+    // F is not an A coordinate (its J slot is B), so the A vectors stay.
+    auto const* res = steps::canonicalize(ctx, reassemble(ctx, term, a));
+    EXPECT_TRUE(contains_named(ctx, res, "e"));
+}
+
 TEST(SimplifyBasisDot, NonBasisDotUnchanged)
 {
     // Invariant vectors that are not this basis's vectors: left alone.
@@ -884,7 +1025,7 @@ TEST(Reassemble, TraceFold)
     Context ctx;
     auto b = wcs_basis(ctx);
     auto k = CountableIndex{ctx.alloc_index_id()};
-    auto const* term = make_explicit_sum(ctx, k, coord(ctx, "B", {k, k}));
+    auto const* term = make_explicit_sum(ctx, k, coord(ctx, b, "B", {k, k}));
 
     auto const* back = steps::canonicalize(ctx, reassemble(ctx, term, b));
     auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
@@ -904,7 +1045,7 @@ TEST(Reassemble, TraceFoldInBiggerTerm)
         ctx,
         k,
         make_tensor_product(
-            ctx, coord(ctx, "B", {k, k}), make_tensor_product(ctx, u, v)));
+            ctx, coord(ctx, b, "B", {k, k}), make_tensor_product(ctx, u, v)));
 
     auto const* back = steps::canonicalize(ctx, reassemble(ctx, term, b));
     auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
@@ -931,9 +1072,9 @@ TEST(Reassemble, BilinearFold)
             j,
             make_tensor_product(
                 ctx,
-                coord(ctx, "B", {i, j}),
+                coord(ctx, b, "B", {i, j}),
                 make_tensor_product(
-                    ctx, coord(ctx, "a", {i}), coord(ctx, "c", {j})))));
+                    ctx, coord(ctx, b, "a", {i}), coord(ctx, b, "c", {j})))));
 
     // Contracting i (B's first leg, with a) transposes B, then contracting j
     // with c gives the scalar c·(Bᵀ·a) — numerically B_ij a_i c_j = a·B·c.
@@ -970,7 +1111,9 @@ TEST(Reassemble, TensorTensorContraction)
                 make_tensor_product(
                     ctx,
                     make_tensor_product(
-                        ctx, coord(ctx, "B", {i, j}), coord(ctx, "D", {j, k})),
+                        ctx,
+                        coord(ctx, b, "B", {i, j}),
+                        coord(ctx, b, "D", {j, k})),
                     make_tensor_product(
                         ctx,
                         b.covariant_vector(ctx, i),
@@ -1044,7 +1187,9 @@ TEST(Reassemble, SignBetweenSumBinders)
                     make_tensor_product(
                         ctx,
                         make_tensor_product(
-                            ctx, coord(ctx, "B", {j, i}), coord(ctx, "c", {j})),
+                            ctx,
+                            coord(ctx, b, "B", {j, i}),
+                            coord(ctx, b, "c", {j})),
                         b.covariant_vector(ctx, i)),
                     a))));
 

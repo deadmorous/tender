@@ -100,6 +100,20 @@ class TestBasisIdentity:
         assert not td.algebraic_eq(e1, e2)
         assert td.algebraic_eq(e1, e1)
 
+    def test_reassemble_ignores_foreign_basis(self):
+        # vibe 000067 increment 3: a step keyed to one basis only acts on that
+        # basis's coordinates/vectors.  An expansion in cylindrical is not
+        # reassembled by WCS; the matching basis does fold it back.
+        ctx = tender.Context()
+        wcs = tb.wcs(ctx)
+        cyl = tb.cylindrical(ctx)
+        v = tender.tensor("v", rank=1, ctx=ctx)
+        exp = td.canonicalize(tb.expand_in_basis(v, cyl, tb.Variance.Covariant))
+        assert not td.structural_eq(
+            td.canonicalize(tb.reassemble(exp, wcs)), v
+        )
+        assert td.structural_eq(tb.reassemble(exp, cyl), v)
+
 
 class TestBasisSteps:
     def test_expand_reassemble_round_trip(self):

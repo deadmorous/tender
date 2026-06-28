@@ -296,13 +296,16 @@ struct VecSide final
 };
 
 // Is e a symbolic basis vector of b — its vector symbol, rank 1, one slot
-// carrying a CountableIndex?  Returns the index and its level.
+// carrying a CountableIndex *tagged with b's basis id*?  A foreign basis's
+// vector (same symbol "e", different basis_id) is rejected, so a step keyed to
+// b acts only on b's own vectors (vibe 000067).  Returns the index and level.
 auto as_basis_vector(Expr const* e, Basis const& b)
     -> std::optional<std::pair<CountableIndex, Level>>
 {
     auto const* t = std::get_if<TensorObject>(&e->node);
     if (!t || t->name.v.view() != b.vector_symbol().v.view()
-        || t->slots.size() != 1 || !t->slots[0].index)
+        || t->slots.size() != 1 || !t->slots[0].index
+        || t->slots[0].slot.basis_id != b.basis_id())
         return std::nullopt;
     auto const* ci = std::get_if<CountableIndex>(&*t->slots[0].index);
     if (!ci)
@@ -714,6 +717,11 @@ auto as_coord_component(Expr const* e, Basis const& basis)
     for (auto const& sb: t->slots)
     {
         if (!sb.index)
+            return std::nullopt;
+        // Every slot must belong to this basis (vibe 000067): a coordinate of a
+        // foreign basis, or a two-point coordinate F_{iJ} whose slots straddle
+        // two bases, is not a clean reassembly target in `basis`.
+        if (sb.slot.basis_id != basis.basis_id())
             return std::nullopt;
         auto const* ci = std::get_if<CountableIndex>(&*sb.index);
         if (!ci)
@@ -1177,6 +1185,12 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
                 auto const* t = std::get_if<TensorObject>(&f->node);
                 if (!t || coord)
                     return node; // a non-coordinate factor, or a second one
+                // The coordinate must belong to this basis (vibe 000067): a
+                // foreign or two-point coordinate (slots straddling two bases)
+                // is not a clean reassembly target, so leave the term unfolded.
+                for (auto const& sb: t->slots)
+                    if (sb.slot.basis_id != basis.basis_id())
+                        return node;
                 coord = t;
             }
             if (!coord)
