@@ -115,6 +115,16 @@ reaches all of this via `slot.basis_id → ctx.basis(id)`.
 4. Gap-2 rendering: `value_names` + concrete-index rendering via
    `basis_id→value_name`; vector-symbol override; display label. Coordinate
    systems populate `value_names` (and optionally the WCS `i,j,k` symbols).
+   **DONE for value_names** (commit 8436828): `Basis` carries `value_names`
+   (set by the coord systems — wcs x,y,z; cylindrical r,θ,z; spherical r,θ,φ;
+   polar r,θ), baked in before `intern_basis` copies; `render_latex`/
+   `render_nf_latex` gained an optional `Context*` that resolves
+   `slot.basis_id → Basis → value_name` for a `ConcreteIndex` (numeric fallback
+   when absent, so existing ctx-less callers are unchanged); Python `latex()`
+   passes `e.ctx`.  An unrolled cylindrical expansion now reads
+   `a_r e_r + a_θ e_θ + a_z e_z`.  **Deferred to 4b:** the standalone
+   vector-symbol override (`i,j,k` instead of `e_x`) and the multi-basis display
+   label.
 
 ## Settled vs open
 
