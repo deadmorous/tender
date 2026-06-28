@@ -191,3 +191,30 @@ The three example sequences must then reach their expected results
   "reassemble everything" entry point (user's note).
 - Broad concrete-index support across the other basis steps if more cases need
   it.
+
+## Resolution (implemented)
+
+All three problems fixed; 673 C++ / 150 Python pass.
+
+- **P2** (commit 233ec1c): `reassemble`'s rewrite now tries the completeness
+  fold `Σ_i (X·e_i) e_i → X` before its coordinate folds, so one `reassemble`
+  call reduces `I·e_1` to `e_1`.  `reassemble_completeness` stays as the focused
+  primitive.
+- **P1 + P3** (commit 8bdc90b): added `as_basis_dir` (used by `as_vec_side`,
+  hence both `simplify_basis_dot` and `_cross`), leaving `as_basis_vector` for
+  reassemble's dummy-id pairing.  `as_basis_dir` accepts a `ConcreteIndex` on
+  the `e`-form (the unrolled `e_1`) and reverse-looks-up a frame vector
+  `b.basis(k)`/`b.cobasis(k)` by structural identity as the concrete direction.
+  `VecSide.index` became an `IndexAssoc`, so the dot emits `e^i·e_1 → δ^i_1` and
+  `e_1·e_1 → δ_{11}`.
+- **Step 3 needed no new code:** the emitted deltas close with existing steps —
+  `contract_delta` reduces the mixed `δ^i_1` (P1 → `e_1`), `eval_delta_concrete`
+  the concrete `δ_{11}` (P3 → `e_1`).
+
+**Note on the "three representations".** A contracted concrete dot reduces to the
+*symbolic-concrete* `e_1` (`e` + `ConcreteIndex`, renders `𝐢` via
+`vector_symbols`), which is **structurally distinct** from the frame vector
+`b.basis(0)` even though they render identically.  No bridge between those two
+representations was added — tests compare against the symbolic-concrete form (or
+the rendered string).  Unifying them (or evaluating `e_1` to the actual frame
+vector) is left for the deferred items.
