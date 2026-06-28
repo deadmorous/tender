@@ -113,6 +113,19 @@ class TestBasisIdentity:
             r" + a_{z} \, \mathbf{e}_{z}"
         )
 
+    def test_wcs_unrolls_to_ijk_vectors(self):
+        # vibe 000067 4b: WCS frame vectors print as the classic standalone
+        # i, j, k, with x, y, z coordinate components.
+        ctx = tender.Context()
+        wcs = tb.wcs(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        exp = td.unroll_sums(
+            td.canonicalize(tb.expand_in_basis(a, wcs, tb.Variance.Covariant))
+        )
+        assert exp.latex() == (
+            r"a_{x} \, \mathbf{i} + a_{y} \, \mathbf{j} + a_{z} \, \mathbf{k}"
+        )
+
     def test_reassemble_ignores_foreign_basis(self):
         # vibe 000067 increment 3: a step keyed to one basis only acts on that
         # basis's coordinates/vectors.  An expansion in cylindrical is not

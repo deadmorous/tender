@@ -16,13 +16,23 @@ auto frame_vector(Context& ctx, std::string_view name) -> Expr const*
 
 auto wcs(Context& ctx) -> Basis
 {
+    // Coordinates read x, y, z; the frame vectors print as the classic
+    // standalone i, j, k (vibe 000067).
     return make_orthonormal_basis(
         ctx,
         space_3d(),
         {frame_vector(ctx, "i"), frame_vector(ctx, "j"), frame_vector(ctx, "k")},
         make_tensor_name("e"),
         Handedness::Right,
-        {make_index_name("x"), make_index_name("y"), make_index_name("z")});
+        BasisNaming{
+            .value_names =
+                {make_index_name("x"),
+                 make_index_name("y"),
+                 make_index_name("z")},
+            .vector_symbols = {
+                make_tensor_name("i"),
+                make_tensor_name("j"),
+                make_tensor_name("k")}});
 }
 
 auto cylindrical(Context& ctx) -> Basis
@@ -35,9 +45,11 @@ auto cylindrical(Context& ctx) -> Basis
          frame_vector(ctx, "z")},
         make_tensor_name("e"),
         Handedness::Right,
-        {make_index_name("r"),
-         make_index_name("\\theta"),
-         make_index_name("z")});
+        BasisNaming{
+            .value_names = {
+                make_index_name("r"),
+                make_index_name("\\theta"),
+                make_index_name("z")}});
 }
 
 auto spherical(Context& ctx) -> Basis
@@ -50,9 +62,11 @@ auto spherical(Context& ctx) -> Basis
          frame_vector(ctx, "\\phi")},
         make_tensor_name("e"),
         Handedness::Right,
-        {make_index_name("r"),
-         make_index_name("\\theta"),
-         make_index_name("\\phi")});
+        BasisNaming{
+            .value_names = {
+                make_index_name("r"),
+                make_index_name("\\theta"),
+                make_index_name("\\phi")}});
 }
 
 auto polar_2d(Context& ctx) -> Basis
@@ -63,7 +77,8 @@ auto polar_2d(Context& ctx) -> Basis
         {frame_vector(ctx, "r"), frame_vector(ctx, "\\theta")},
         make_tensor_name("e"),
         Handedness::Right,
-        {make_index_name("r"), make_index_name("\\theta")});
+        BasisNaming{
+            .value_names = {make_index_name("r"), make_index_name("\\theta")}});
 }
 
 } // namespace tender

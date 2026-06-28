@@ -694,3 +694,61 @@ TEST(RenderBasisNames, UntaggedConcreteIndexStaysNumeric)
     IndexNameMap m;
     EXPECT_EQ(render_latex(*a, m, &ctx), "a_{1}");
 }
+
+// ---- basis vector-symbol override & display label (vibe 000067, 4b) -------
+
+TEST(RenderBasisNames, WcsVectorSymbolsAndCoordinateLetters)
+{
+    // WCS frame vectors print as standalone i, j, k; coordinates as x, y, z.
+    Context ctx;
+    auto b = wcs(ctx);
+    auto vec_k = make_tensor_object(
+        ctx,
+        make_tensor_name("e"),
+        {SlotBinding{
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
+            ConcreteIndex{3}}},
+        1);
+    IndexNameMap m1;
+    EXPECT_EQ(render_latex(*vec_k, m1, &ctx), "\\mathbf{k}");
+    // A coordinate keeps the e_x-style letter naming (override is vector-only).
+    auto coord_x = make_tensor_object(
+        ctx,
+        make_tensor_name("a"),
+        {SlotBinding{
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
+            ConcreteIndex{1}}},
+        0);
+    IndexNameMap m2;
+    EXPECT_EQ(render_latex(*coord_x, m2, &ctx), "a_{x}");
+}
+
+TEST(RenderBasisNames, DisplayLabelMarksIndices)
+{
+    // A labelled basis appends its frame marker to every index (primed-index
+    // convention), so two frames are distinguishable in one term.
+    Context ctx;
+    auto b = make_orthonormal_basis(
+        ctx,
+        space_3d(),
+        {make_tensor_object(ctx, make_tensor_name("p"), {}, 1),
+         make_tensor_object(ctx, make_tensor_name("q"), {}, 1),
+         make_tensor_object(ctx, make_tensor_name("s"), {}, 1)},
+        make_tensor_name("e"),
+        Handedness::Right,
+        BasisNaming{.label = std::string{"'"}});
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto e_i = make_tensor_object(
+        ctx,
+        make_tensor_name("e"),
+        {SlotBinding{
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
+            i}},
+        1);
+    IndexNameMap m;
+    m.assign(i, make_index_name("i"));
+    EXPECT_EQ(render_latex(*e_i, m, &ctx), "\\mathbf{e}_{i'}");
+}

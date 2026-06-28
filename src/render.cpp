@@ -129,7 +129,7 @@ auto index_str(
 {
     if (!assoc)
         return "\\bullet";
-    return std::visit(
+    std::string base = std::visit(
         mpk::mix::Overloads{
             [&](CountableIndex const& ci) -> std::string
             { return std::string{map.name_for(ci, slot.space).v.view()}; },
@@ -147,6 +147,13 @@ auto index_str(
             [](LabelIndex const& li) -> std::string
             { return std::string{li.name.v.view()}; }},
         *assoc);
+    // A labelled basis marks every one of its indices (vibe 000067), so two
+    // frames in one term are distinguishable: the primed index in e_{i'} ⊗ e_i.
+    if (ctx && slot.basis_id != 0)
+        if (auto const* b = ctx->basis(slot.basis_id))
+            if (auto const& lab = b->label())
+                base += *lab;
+    return base;
 }
 
 // Bold for rank >= 1 or rank nullopt (treated as tensor); plain for rank == 0.
@@ -158,6 +165,29 @@ auto name_str(TensorName const& name, std::optional<int> rank) -> std::string
         return n;
     bool is_cmd = (n.size() > 1 && n[0] == '\\');
     return is_cmd ? "\\boldsymbol{" + n + "}" : "\\mathbf{" + n + "}";
+}
+
+// If `t` is a basis vector with a concrete index whose basis supplies a
+// standalone direction symbol (vibe 000067, e.g. WCS i, j, k), render that
+// symbol on its own — replacing the e_x form, index and all.  nullopt
+// otherwise, so the caller falls back to name + slots.
+auto basis_vector_override(TensorObject const& t, Context const* ctx)
+    -> std::optional<std::string>
+{
+    if (!ctx || t.slots.size() != 1 || !t.slots[0].index)
+        return std::nullopt;
+    auto const& sb = t.slots[0];
+    if (sb.slot.basis_id == 0)
+        return std::nullopt;
+    auto const* ci = std::get_if<ConcreteIndex>(&*sb.index);
+    if (!ci)
+        return std::nullopt;
+    auto const* b = ctx->basis(sb.slot.basis_id);
+    if (!b || t.name.v.view() != b->vector_symbol().v.view())
+        return std::nullopt;
+    if (auto sym = b->vector_symbol_for(ci->value))
+        return name_str(*sym, t.rank);
+    return std::nullopt;
 }
 
 // Render index slots.
@@ -355,6 +385,8 @@ struct Renderer
             mpk::mix::Overloads{
                 [&](TensorObject const& t) -> std::string
                 {
+                    if (auto ov = basis_vector_override(t, ctx))
+                        return *ov;
                     mpk::mix::EnumFlags<RenderHint> hints;
                     if (t.traits)
                         hints = t.traits->render_hints;
@@ -493,6 +525,8 @@ struct NfRenderer
             mpk::mix::Overloads{
                 [&](nf::Atom const& a) -> std::string
                 {
+                    if (auto ov = basis_vector_override(a.obj, ctx))
+                        return *ov;
                     mpk::mix::EnumFlags<RenderHint> hints;
                     if (a.obj.traits)
                         hints = a.obj.traits->render_hints;
