@@ -2742,7 +2742,7 @@ auto has_explicit_sum_for(
     return found;
 }
 
-auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*
+auto fold_equal_addends_structural(Context& ctx, Expr const* e) -> Expr const*
 {
     return rewrite_tree(
         ctx,
@@ -2804,6 +2804,28 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*
             }
             return result ? result : make_scalar(ctx, Rational{0});
         });
+}
+
+auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*
+{
+    // Self-prepare (vibe 000065): the structural fold only merges addends that
+    // are written identically, so two terms equal merely up to dummy-index
+    // renaming or factor/sign ordering (e.g. the I×a playthrough's
+    // a_k e_j ε_{jki} e_i vs a_k ε_{kij} e_j e_i) escape it.  Canonicalize
+    // first so equal terms collapse to one normal form, then fold, then restore
+    // the implicit-sum convention.  canonicalize throws on an ill-formed
+    // implicit sum; that just means "nothing to prepare", so fall back to the
+    // input.
+    Expr const* prepped = e;
+    try
+    {
+        prepped = canonicalize(ctx, e);
+    }
+    catch (std::invalid_argument const&)
+    {
+        prepped = e;
+    }
+    return implicitize(ctx, fold_equal_addends_structural(ctx, prepped));
 }
 
 } // namespace steps

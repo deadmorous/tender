@@ -166,6 +166,18 @@ auto has_explicit_sum_for(
 // expression (extracted coefficient-core pairs).  Groups with total
 // coefficient n > 1 are folded into n·core; n == -1 becomes -core;
 // n == 0 is dropped.  No-op if no merging occurs.
+//
+// This is the bare *structural* fold: it matches addends exactly as written,
+// so two terms that are equal only up to dummy-index renaming or factor/sign
+// ordering are NOT merged.  Use it when you have already put the addends in a
+// common frame (e.g. right after canonicalize) and want a pure structural pass.
+auto fold_equal_addends_structural(Context& ctx, Expr const* e) -> Expr const*;
+
+// Self-preparing fold (vibe 000065): canonicalize first so terms equal only up
+// to dummy-index renaming / factor-sign ordering share a normal form, fold the
+// equal addends, then restore implicit-sum form.  This is the form a caller
+// almost always wants — e.g. `x1 - x2` for algebraically-equal `x1`, `x2`
+// reduces to 0 without the caller having to canonicalize by hand.
 auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*;
 
 // Rewrite an expression into algebraic normal form (vibe 000037): the local

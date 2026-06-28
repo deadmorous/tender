@@ -680,7 +680,19 @@ NB_MODULE(_core, m)
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::fold_equal_addends(*e.ctx, e.expr)); },
         "expr"_a,
-        "Group identical addends: X + X → 2X, n*X + X → (n+1)*X.");
+        "Self-preparing fold: canonicalize, group identical addends "
+        "(X + X → 2X, n*X + X → (n+1)*X, X − X → 0 even up to dummy-index "
+        "renaming), then restore implicit-sum form.");
+
+    md.def(
+        "_fold_equal_addends_structural",
+        [](PyExpr const& e) -> PyExpr {
+            return derive(
+                e, steps::fold_equal_addends_structural(*e.ctx, e.expr));
+        },
+        "expr"_a,
+        "Bare structural fold: merge addends written identically only; does NOT "
+        "rename dummies or normalize factor/sign order.");
 
     md.def(
         "_canonicalize",

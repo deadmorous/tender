@@ -2004,7 +2004,8 @@ TEST(FoldArithmetic, ProductLeftNegateBecomesNegateProduct)
     EXPECT_EQ(tp->right, B);
 }
 
-// ---- fold_equal_addends ---------------------------------------------------
+// ---- fold_equal_addends_structural ----------------------------------------
+// The bare structural fold merges addends written identically only.
 
 TEST(FoldEqualAddends, DuplicateBecomesScalarMultiple)
 {
@@ -2012,7 +2013,7 @@ TEST(FoldEqualAddends, DuplicateBecomesScalarMultiple)
     Context ctx;
     auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
     auto const* expr = make_sum(ctx, A, A);
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     auto const* tp = std::get_if<TensorProduct>(&after->node);
     ASSERT_NE(tp, nullptr);
     auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node);
@@ -2028,7 +2029,7 @@ TEST(FoldEqualAddends, ExistingCoefficientAccumulates)
     auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
     auto const* two = make_scalar(ctx, Rational{2});
     auto const* expr = make_sum(ctx, make_tensor_product(ctx, two, A), A);
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     auto const* tp = std::get_if<TensorProduct>(&after->node);
     ASSERT_NE(tp, nullptr);
     auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node);
@@ -2044,7 +2045,7 @@ TEST(FoldEqualAddends, DifferentAddendsUnchanged)
     auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
     auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
     auto const* expr = make_sum(ctx, A, B);
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     EXPECT_EQ(after, expr);
 }
 
@@ -2056,7 +2057,7 @@ TEST(FoldEqualAddends, NegatedCoefficientMerges)
     auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
     auto const* neg_a = make_negate(ctx, A);
     auto const* expr = make_sum(ctx, neg_a, A);
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     auto const* sl = std::get_if<ScalarLiteral>(&after->node);
     ASSERT_NE(sl, nullptr);
     EXPECT_EQ(sl->value, Rational{0});
@@ -2068,7 +2069,7 @@ TEST(FoldEqualAddends, DifferenceOfEqualIsZero)
     Context ctx;
     auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
     auto const* expr = make_difference(ctx, A, A);
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     auto const* sl = std::get_if<ScalarLiteral>(&after->node);
     ASSERT_NE(sl, nullptr);
     EXPECT_EQ(sl->value, Rational{0});
@@ -2082,7 +2083,7 @@ TEST(FoldEqualAddends, DifferenceAccumulates)
     auto const* two = make_scalar(ctx, Rational{2});
     auto const* expr =
         make_difference(ctx, make_tensor_product(ctx, two, A), A);
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     EXPECT_EQ(after, A);
 }
 
@@ -2093,7 +2094,7 @@ TEST(FoldEqualAddends, SubtractionInSumMerges)
     auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
     auto const* B = make_tensor_object(ctx, make_tensor_name("B"));
     auto const* expr = make_difference(ctx, make_sum(ctx, A, B), A);
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     EXPECT_EQ(after, B);
 }
 
@@ -2104,7 +2105,7 @@ TEST(FoldEqualAddends, RightScalarCoefficient)
     auto const* A = make_tensor_object(ctx, make_tensor_name("A"));
     auto const* two = make_scalar(ctx, Rational{2});
     auto const* expr = make_sum(ctx, make_tensor_product(ctx, A, two), A);
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     auto const* tp = std::get_if<TensorProduct>(&after->node);
     ASSERT_NE(tp, nullptr);
     auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node);
@@ -2123,8 +2124,36 @@ TEST(FoldEqualAddends, RationalCoefficientsCollect)
         ctx,
         make_tensor_product(ctx, half, A),
         make_tensor_product(ctx, half, A));
-    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* after = steps::fold_equal_addends_structural(ctx, expr);
     EXPECT_EQ(after, A);
+}
+
+// ---- fold_equal_addends (self-preparing, vibe 000065) ---------------------
+
+TEST(FoldEqualAddends, SelfPreparingCancelsAcrossDummyRenaming)
+{
+    // δ^i_i − δ^j_j : two traces, equal only up to the name of the summed
+    // dummy.  The bare structural fold cannot see it (distinct index ids), but
+    // the self-preparing fold canonicalizes first and cancels to 0.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    CountableIndex j{ctx.alloc_index_id()};
+    auto const* trace_i =
+        make_delta(ctx, Realm::Oblique, sp, Level::Upper, Level::Lower, i, i);
+    auto const* trace_j =
+        make_delta(ctx, Realm::Oblique, sp, Level::Upper, Level::Lower, j, j);
+    auto const* expr = make_difference(ctx, trace_i, trace_j);
+
+    // Structural fold leaves the difference standing.
+    auto const* structural = steps::fold_equal_addends_structural(ctx, expr);
+    EXPECT_EQ(structural, expr);
+
+    // Self-preparing fold reduces it to the scalar 0.
+    auto const* after = steps::fold_equal_addends(ctx, expr);
+    auto const* sl = std::get_if<ScalarLiteral>(&after->node);
+    ASSERT_NE(sl, nullptr);
+    EXPECT_EQ(sl->value, Rational{0});
 }
 
 // ---- canonicalize (algebraic normal form, vibe 000037) --------------------

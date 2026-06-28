@@ -329,6 +329,39 @@ def test_fold_equal_addends_right_scalar_coefficient():
     assert td.fold_equal_addends(d * two + d).latex(imap) == r"3 \, \delta^{i}_{j}"
 
 
+def test_fold_equal_addends_self_prepares_across_dummy_renaming():
+    """x1 - x2 cancels to 0 when x1, x2 are equal only up to dummy renaming.
+
+    This is the I×a playthrough: ``I×a`` and ``a×I`` expand to the same tensor
+    written with differently-named summed indices and permuted ε.  The bare
+    structural fold cannot merge them; the self-preparing fold canonicalizes
+    first and reduces the difference to 0 (vibe 000065).
+    """
+    import tender.basis as tb
+
+    ctx = tender.Context()
+    basis = tb.wcs(ctx)
+    co = tb.Variance.Covariant
+    I = tender.identity(ctx)
+    a = tender.tensor("a", 1, ctx)
+
+    def transform(x):
+        x = tb.expand_in_basis(x, basis, co)
+        x = tb.simplify_basis_cross(x, basis)
+        return x
+
+    x1 = transform(I % a)
+    x2 = transform(a % I)
+    assert td.algebraic_eq(x1, x2)
+
+    # Structural fold leaves the difference standing (different dummy names).
+    dx_structural = td.fold_equal_addends_structural(x1 - x2)
+    assert dx_structural.latex() != "0"
+
+    # Self-preparing fold cancels it outright.
+    assert td.fold_equal_addends(x1 - x2).latex() == "0"
+
+
 # ---- canonicalize (algebraic normal form) ----------------------------------
 
 def test_canonicalize_sum_and_product_commute():

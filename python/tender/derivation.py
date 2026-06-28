@@ -38,6 +38,7 @@ __all__ = [
     "expand_dyad_ops",
     "contract_eps_pair",
     "fold_equal_addends",
+    "fold_equal_addends_structural",
     "canonicalize",
     "implicitize",
     "simplify",
@@ -204,8 +205,26 @@ def contract_eps_pair(expr):
 
 
 def fold_equal_addends(expr):
-    """Group identical addends: ``X + X → 2X``, ``n·X + X → (n+1)·X``, etc."""
+    """Self-preparing fold of equal addends (vibe 000065).
+
+    Canonicalizes first, so terms that are equal only up to dummy-index
+    renaming or factor/sign ordering collapse to one normal form, then groups
+    identical addends (``X + X → 2X``, ``n·X + X → (n+1)·X``, ``X − X → 0``),
+    then restores implicit-sum form.  In particular ``x1 - x2`` reduces to ``0``
+    for any algebraically equal ``x1``, ``x2`` — no manual canonicalize needed.
+    For the bare structural pass use :func:`fold_equal_addends_structural`.
+    """
     return _d._fold_equal_addends(expr)
+
+
+def fold_equal_addends_structural(expr):
+    """Bare structural fold: merge addends written identically only.
+
+    Does NOT rename dummy indices or normalize factor/sign order, so two terms
+    equal only after canonicalization are left separate.  Use when the addends
+    are already in a common frame; otherwise prefer :func:`fold_equal_addends`.
+    """
+    return _d._fold_equal_addends_structural(expr)
 
 
 def canonicalize(expr):
