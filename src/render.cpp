@@ -2,6 +2,8 @@
 
 #include <mpk/mix/enum_flags.hpp>
 #include <mpk/mix/util/overloads.hpp>
+#include <tender/basis.hpp>      // Basis::value_name
+#include <tender/context.hpp>    // Context::basis
 #include <tender/derivation.hpp> // infer_rank
 #include <tender/nf.hpp>
 
@@ -122,16 +124,26 @@ static bool is_scalar_expr(Expr const& e)
 auto index_str(
     IndexNameMap& map,
     std::optional<IndexAssoc> const& assoc,
-    IndexSpace const* space) -> std::string
+    IndexSlot const& slot,
+    Context const* ctx) -> std::string
 {
     if (!assoc)
         return "\\bullet";
     return std::visit(
         mpk::mix::Overloads{
             [&](CountableIndex const& ci) -> std::string
-            { return std::string{map.name_for(ci, space).v.view()}; },
-            [](ConcreteIndex const& ci) -> std::string
-            { return std::to_string(ci.value); },
+            { return std::string{map.name_for(ci, slot.space).v.view()}; },
+            [&](ConcreteIndex const& ci) -> std::string
+            {
+                // A concrete index in a basis prints with that basis's
+                // coordinate letter when it has one (vibe 000067): value 1 in a
+                // cylindrical frame reads "r", not "1".  Falls back to numeric.
+                if (ctx && slot.basis_id != 0)
+                    if (auto const* b = ctx->basis(slot.basis_id))
+                        if (auto nm = b->value_name(ci.value))
+                            return std::string{nm->v.view()};
+                return std::to_string(ci.value);
+            },
             [](LabelIndex const& li) -> std::string
             { return std::string{li.name.v.view()}; }},
         *assoc);
@@ -162,7 +174,8 @@ auto name_str(TensorName const& name, std::optional<int> rank) -> std::string
 auto slots_str(
     IndexNameMap& map,
     std::vector<SlotBinding> const& slots,
-    mpk::mix::EnumFlags<RenderHint> hints) -> std::string
+    mpk::mix::EnumFlags<RenderHint> hints,
+    Context const* ctx) -> std::string
 {
     if (slots.empty())
         return {};
@@ -183,7 +196,7 @@ auto slots_str(
         std::string upper, lower;
         for (auto const& sb: slots)
         {
-            auto s = index_str(map, sb.index, sb.slot.space);
+            auto s = index_str(map, sb.index, sb.slot, ctx);
             if (sb.slot.level == Level::Upper)
                 upper += s;
             else
@@ -203,7 +216,7 @@ auto slots_str(
     std::string upper, lower;
     for (auto const& sb: slots)
     {
-        auto s = index_str(map, sb.index, sb.slot.space);
+        auto s = index_str(map, sb.index, sb.slot, ctx);
         if (sb.slot.level == Level::Upper)
         {
             upper += s;
@@ -233,6 +246,7 @@ auto rational_str(Rational const& r) -> std::string
 struct Renderer
 {
     IndexNameMap& map;
+    Context const* ctx = nullptr; // resolves basis_id for coordinate naming
 
     // ---- precedence ----------------------------------------------------
 
@@ -345,7 +359,7 @@ struct Renderer
                     if (t.traits)
                         hints = t.traits->render_hints;
                     return name_str(t.name, t.rank)
-                           + slots_str(map, t.slots, hints);
+                           + slots_str(map, t.slots, hints, ctx);
                 },
                 [&](ScalarLiteral const& s) -> std::string
                 { return rational_str(s.value); },
@@ -438,6 +452,7 @@ struct Renderer
 struct NfRenderer
 {
     IndexNameMap& map;
+    Context const* ctx = nullptr; // resolves basis_id for coordinate naming
 
     static auto prec(nf::Factor const& f) -> int
     {
@@ -482,7 +497,7 @@ struct NfRenderer
                     if (a.obj.traits)
                         hints = a.obj.traits->render_hints;
                     return name_str(a.obj.name, a.obj.rank)
-                           + slots_str(map, a.obj.slots, hints);
+                           + slots_str(map, a.obj.slots, hints, ctx);
                 },
                 // Flat contraction chain: f0 op0 f1 op1 …  Each operand wraps a
                 // nested contraction / cross (prec < TENSOR_PREC).
@@ -597,14 +612,16 @@ struct NfRenderer
 
 } // anonymous namespace
 
-auto render_latex(Expr const& e, IndexNameMap& map) -> std::string
+auto render_latex(Expr const& e, IndexNameMap& map, Context const* ctx)
+    -> std::string
 {
-    return Renderer{map}.render(e);
+    return Renderer{map, ctx}.render(e);
 }
 
-auto render_nf_latex(nf::Nf const& value, IndexNameMap& map) -> std::string
+auto render_nf_latex(nf::Nf const& value, IndexNameMap& map, Context const* ctx)
+    -> std::string
 {
-    return NfRenderer{map}.render_nf(value);
+    return NfRenderer{map, ctx}.render_nf(value);
 }
 
 } // namespace tender

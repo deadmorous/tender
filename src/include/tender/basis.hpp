@@ -5,6 +5,7 @@
 #include <tender/index_space.hpp>
 #include <tender/name.hpp>
 
+#include <optional>
 #include <vector>
 
 namespace tender
@@ -50,6 +51,11 @@ public:
     {
         return id_;
     }
+    // The coordinate letter for a concrete index `value` (vibe 000067), e.g.
+    // value 1 → "r" in a cylindrical frame.  nullopt when this basis has no
+    // value names (then a concrete index prints numerically) or `value` is not
+    // one of the space's values.  Set by coordinate systems.
+    auto value_name(int value) const -> std::optional<IndexName>;
     // Number of basis vectors.
     auto dim() const noexcept -> int
     {
@@ -107,19 +113,22 @@ private:
         TensorName symbol,
         std::vector<Expr const*> vectors,
         std::vector<Expr const*> covectors,
-        Expr const* volume);
+        Expr const* volume,
+        std::vector<IndexName> value_names = {});
 
     friend auto make_orthonormal_basis(
         Context&,
         IndexSpace const*,
         std::vector<Expr const*>,
         TensorName,
-        Handedness) -> Basis;
+        Handedness,
+        std::vector<IndexName>) -> Basis;
     friend auto make_oblique_basis(
         Context&,
         IndexSpace const*,
         std::vector<Expr const*>,
-        TensorName) -> Basis;
+        TensorName,
+        std::vector<IndexName>) -> Basis;
 
     // Internal (vibe 000067): copy `b` into ctx, register it for an id, stamp
     // that id, and return the id-carrying value.  Friend so it can set id_.
@@ -132,6 +141,8 @@ private:
     std::vector<Expr const*> covectors_; // contravariant e^i
     Expr const* volume_; // signed √g (scalar ±1, or triple prod)
     int id_ = 0;         // slot tag; set when registered (vibe 000067)
+    std::vector<IndexName> value_names_; // concrete-index letters (parallel to
+                                         // space values); empty = numeric
 };
 
 // Build an orthonormal basis from rank-1 vectors.  The realm is Orthonormal and
@@ -143,12 +154,16 @@ private:
 // Preconditions (else std::invalid_argument): space is non-null; at least one
 // vector; vectors.size() == space->values().size(); every vector is non-null
 // and rank 1 (where its rank is known).
+// value_names (optional) are the per-direction coordinate letters used to print
+// concrete indices in this basis (vibe 000067), one per space value; empty
+// leaves concrete indices numeric.
 [[nodiscard]] auto make_orthonormal_basis(
     Context& ctx,
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
     TensorName vector_symbol = make_tensor_name("e"),
-    Handedness handedness = Handedness::Right) -> Basis;
+    Handedness handedness = Handedness::Right,
+    std::vector<IndexName> value_names = {}) -> Basis;
 
 // Build an oblique basis from its covariant vectors.  The realm is Oblique and
 // the contravariant cobasis e^i is derived via the reciprocal (cross-product)
@@ -160,7 +175,8 @@ private:
     Context& ctx,
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
-    TensorName vector_symbol = make_tensor_name("e")) -> Basis;
+    TensorName vector_symbol = make_tensor_name("e"),
+    std::vector<IndexName> value_names = {}) -> Basis;
 
 // ---- basis-parameterized steps -----------------------------------------
 

@@ -333,7 +333,7 @@ NB_MODULE(_core, m)
             [](PyExpr const& e) -> std::string
             {
                 IndexNameMap map;
-                return "$" + render_latex(*e.expr, map) + "$";
+                return "$" + render_latex(*e.expr, map, e.ctx) + "$";
             },
             "Return LaTeX string for Jupyter rich display.")
         .def(
@@ -341,9 +341,9 @@ NB_MODULE(_core, m)
             [](PyExpr const& e, IndexNameMap* map_ptr) -> std::string
             {
                 if (map_ptr)
-                    return render_latex(*e.expr, *map_ptr);
+                    return render_latex(*e.expr, *map_ptr, e.ctx);
                 IndexNameMap fresh;
-                return render_latex(*e.expr, fresh);
+                return render_latex(*e.expr, fresh, e.ctx);
             },
             "map"_a = nb::none(),
             "Render to a LaTeX math string (no surrounding $).")
@@ -359,7 +359,7 @@ NB_MODULE(_core, m)
             [](PyExpr const& e) -> std::string
             {
                 IndexNameMap map;
-                return render_latex(*e.expr, map);
+                return render_latex(*e.expr, map, e.ctx);
             });
 
     // ------------------------------------------------------------------ //
@@ -527,9 +527,9 @@ NB_MODULE(_core, m)
         [](PyExpr const& e, IndexNameMap* map_ptr) -> std::string
         {
             if (map_ptr)
-                return render_latex(*e.expr, *map_ptr);
+                return render_latex(*e.expr, *map_ptr, e.ctx);
             IndexNameMap fresh;
-            return render_latex(*e.expr, fresh);
+            return render_latex(*e.expr, fresh, e.ctx);
         },
         "expr"_a,
         "map"_a = nb::none(),

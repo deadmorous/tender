@@ -100,6 +100,19 @@ class TestBasisIdentity:
         assert not td.algebraic_eq(e1, e2)
         assert td.algebraic_eq(e1, e1)
 
+    def test_concrete_indices_render_with_coordinate_letters(self):
+        # vibe 000067 increment 4: once unrolled to concrete directions, a
+        # cylindrical expansion reads in r, θ, z rather than 1, 2, 3.
+        ctx = tender.Context()
+        cyl = tb.cylindrical(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        exp = td.canonicalize(tb.expand_in_basis(a, cyl, tb.Variance.Covariant))
+        unrolled = td.unroll_sums(exp)
+        assert unrolled.latex() == (
+            r"a_{r} \, \mathbf{e}_{r} + a_{\theta} \, \mathbf{e}_{\theta}"
+            r" + a_{z} \, \mathbf{e}_{z}"
+        )
+
     def test_reassemble_ignores_foreign_basis(self):
         # vibe 000067 increment 3: a step keyed to one basis only acts on that
         # basis's coordinates/vectors.  An expansion in cylindrical is not

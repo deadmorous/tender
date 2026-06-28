@@ -43,12 +43,18 @@ private:
 
 // Render expr to a LaTeX math string (no surrounding $..$ delimiters).
 // map is updated in-place as new dummy-index names are allocated.
-[[nodiscard]] auto render_latex(Expr const&, IndexNameMap&) -> std::string;
+//
+// When `ctx` is given, a concrete index carrying a basis tag (IndexSlot::
+// basis_id) prints with that basis's coordinate letter (vibe 000067) — e.g. a
+// cylindrical "r" instead of "1"; without it, concrete indices stay numeric.
+[[nodiscard]] auto render_latex(
+    Expr const&, IndexNameMap&, Context const* ctx = nullptr) -> std::string;
 
 // Render the normal form `Nf` (nf.hpp) to a LaTeX math string, in the same
 // conventions as `render_latex` (vibe 000058 / C11).  A `Default` bound index
 // renders implicitly (Einstein form); `Sum` / `NoSum` overrides get a `\sum` /
 // `\cancel{\sum}` prefix.  `map` is updated in-place as for `render_latex`.
-[[nodiscard]] auto render_nf_latex(nf::Nf const&, IndexNameMap&) -> std::string;
+[[nodiscard]] auto render_nf_latex(
+    nf::Nf const&, IndexNameMap&, Context const* ctx = nullptr) -> std::string;
 
 } // namespace tender

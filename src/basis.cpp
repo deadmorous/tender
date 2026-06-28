@@ -22,14 +22,27 @@ Basis::Basis(
     TensorName symbol,
     std::vector<Expr const*> vectors,
     std::vector<Expr const*> covectors,
-    Expr const* volume) :
+    Expr const* volume,
+    std::vector<IndexName> value_names) :
   realm_(realm),
   space_(space),
   symbol_(symbol),
   vectors_(std::move(vectors)),
   covectors_(std::move(covectors)),
-  volume_(volume)
+  volume_(volume),
+  value_names_(std::move(value_names))
 {
+}
+
+auto Basis::value_name(int value) const -> std::optional<IndexName>
+{
+    if (value_names_.empty())
+        return std::nullopt;
+    auto const vals = space_->values();
+    for (std::size_t k = 0; k < vals.size(); ++k)
+        if (vals[k] == value && k < value_names_.size())
+            return value_names_[k];
+    return std::nullopt;
 }
 
 auto Basis::basis(int i) const -> Expr const*
@@ -118,7 +131,8 @@ auto make_orthonormal_basis(
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
     TensorName vector_symbol,
-    Handedness handedness) -> Basis
+    Handedness handedness,
+    std::vector<IndexName> value_names) -> Basis
 {
     validate_basis_vectors("make_orthonormal_basis", space, vectors);
 
@@ -133,7 +147,8 @@ auto make_orthonormal_basis(
         vector_symbol,
         std::move(vectors),
         std::move(covectors),
-        vol};
+        vol,
+        std::move(value_names)};
     return intern_basis(ctx, std::move(b));
 }
 
@@ -141,7 +156,8 @@ auto make_oblique_basis(
     Context& ctx,
     IndexSpace const* space,
     std::vector<Expr const*> vectors,
-    TensorName vector_symbol) -> Basis
+    TensorName vector_symbol,
+    std::vector<IndexName> value_names) -> Basis
 {
     validate_basis_vectors("make_oblique_basis", space, vectors);
     if (vectors.size() != 3)
@@ -166,7 +182,8 @@ auto make_oblique_basis(
         vector_symbol,
         std::move(vectors),
         std::move(covectors),
-        vol};
+        vol,
+        std::move(value_names)};
     return intern_basis(ctx, std::move(b));
 }
 

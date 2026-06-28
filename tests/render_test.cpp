@@ -1,3 +1,6 @@
+#include <tender/basis.hpp>
+#include <tender/coord_system.hpp>
+#include <tender/index_space.hpp>
 #include <tender/render.hpp>
 
 #include <gtest/gtest.h>
@@ -618,4 +621,76 @@ TEST(RenderUnary, TraceVecTranspose)
     EXPECT_EQ(
         latex(*make_transpose(ctx, dyad)),
         "(\\mathbf{a} \\, \\mathbf{b})^{\\mathsf{T}}");
+}
+
+// ---- basis coordinate-letter naming (vibe 000067, increment 4) ------------
+
+namespace
+{
+// A rank-0 coordinate "a" with one lower concrete-index slot, value v, tagged
+// with basis b.
+auto concrete_coord(Context& ctx, Basis const& b, int v) -> Expr const*
+{
+    return make_tensor_object(
+        ctx,
+        make_tensor_name("a"),
+        {SlotBinding{
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
+            ConcreteIndex{v}}},
+        0);
+}
+} // namespace
+
+TEST(RenderBasisNames, ConcreteIndexUsesCoordinateLetterWithContext)
+{
+    Context ctx;
+    auto b = cylindrical(ctx); // value names r, \theta, z
+    IndexNameMap m1, m2, m3;
+    EXPECT_EQ(render_latex(*concrete_coord(ctx, b, 1), m1, &ctx), "a_{r}");
+    EXPECT_EQ(render_latex(*concrete_coord(ctx, b, 2), m2, &ctx), "a_{\\theta}");
+    EXPECT_EQ(render_latex(*concrete_coord(ctx, b, 3), m3, &ctx), "a_{z}");
+}
+
+TEST(RenderBasisNames, NumericFallbackWithoutContext)
+{
+    // Without a Context the renderer cannot resolve basis_id, so a concrete
+    // index stays numeric.
+    Context ctx;
+    auto b = cylindrical(ctx);
+    IndexNameMap m;
+    EXPECT_EQ(render_latex(*concrete_coord(ctx, b, 1), m), "a_{1}");
+}
+
+TEST(RenderBasisNames, BasisVectorReadsAsCoordinateLetter)
+{
+    // The cylindrical basis vector e with a concrete index renders e_{\theta}.
+    Context ctx;
+    auto b = cylindrical(ctx);
+    auto const* e = make_tensor_object(
+        ctx,
+        make_tensor_name("e"),
+        {SlotBinding{
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
+            ConcreteIndex{2}}},
+        1);
+    IndexNameMap m;
+    EXPECT_EQ(render_latex(*e, m, &ctx), "\\mathbf{e}_{\\theta}");
+}
+
+TEST(RenderBasisNames, UntaggedConcreteIndexStaysNumeric)
+{
+    // A basis-unaware (basis_id 0) concrete index is numeric even with a ctx.
+    Context ctx;
+    (void)cylindrical(ctx);
+    auto const* a = make_tensor_object(
+        ctx,
+        make_tensor_name("a"),
+        {SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            ConcreteIndex{1}}},
+        0);
+    IndexNameMap m;
+    EXPECT_EQ(render_latex(*a, m, &ctx), "a_{1}");
 }
