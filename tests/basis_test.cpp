@@ -1,6 +1,7 @@
 #include <tender/basis.hpp>
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
+#include <tender/identity.hpp>
 #include <tender/index_space.hpp>
 #include <tender/rewrite.hpp>
 
@@ -1461,4 +1462,17 @@ TEST(ReassembleCompleteness, NonPatternUnchanged)
     auto const* prepped =
         steps::implicitize(ctx, steps::canonicalize(ctx, trace));
     EXPECT_TRUE(structural_eq(reassemble_completeness(ctx, trace, b), prepped));
+}
+
+TEST(Reassemble, AlsoDoesCompletenessFold)
+{
+    // vibe 000068 P2: reassemble now finishes the resolution-of-identity-with-
+    // contraction on its own.  I·e_1 = (e_i ⊗ e_i)·e_1 reassembles straight to
+    // e_1 (= basis(0)) — previously only reassemble_completeness did this.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* I = make_identity(ctx);
+    auto const* term = make_dot(
+        ctx, expand_in_basis(ctx, I, b, Variance::Covariant), b.basis(0));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), b.basis(0)));
 }

@@ -1164,6 +1164,15 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
         prepped,
         [&](Context& c, Expr const* node) -> Expr const*
         {
+            // First try the resolution-of-identity-with-contraction fold
+            // Σ_i (X·e_i) e_i → X (vibe 000068 P2): reassemble should finish on
+            // its own, so it runs the completeness fold (which self-distributes
+            // over sums/signs) before the coordinate-carrier folds below.  The
+            // focused `reassemble_completeness` remains for callers who want
+            // only this.
+            if (auto* fc = fold_completeness(c, node, basis))
+                return fc;
+
             // Peel nested ExplicitSums (collecting the summed indices) and
             // signs, interleaved.  A subtracted term carries its sign as a
             // Negate, which canonicalize may leave *between* two binders, e.g.

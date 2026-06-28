@@ -126,6 +126,15 @@ class TestBasisIdentity:
             r"a_{x} \, \mathbf{i} + a_{y} \, \mathbf{j} + a_{z} \, \mathbf{k}"
         )
 
+    def test_reassemble_also_does_completeness(self):
+        # vibe 000068 P2: reassemble finishes I·e_1 = e_1 in one call, without
+        # the caller reaching for reassemble_completeness.
+        ctx = tender.Context()
+        cs = tb.wcs(ctx)
+        I = tender.identity(ctx=ctx)
+        term = tb.expand_in_basis(I, cs, tb.Variance.Covariant) @ cs.basis(0)
+        assert td.structural_eq(tb.reassemble(term, cs), cs.basis(0))
+
     def test_reassemble_ignores_foreign_basis(self):
         # vibe 000067 increment 3: a step keyed to one basis only acts on that
         # basis's coordinates/vectors.  An expansion in cylindrical is not
