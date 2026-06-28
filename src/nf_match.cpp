@@ -84,6 +84,11 @@ auto match_slot(SlotBinding const& pat, SlotBinding const& tgt, NfBinding& bnd)
         return false;
     if (pat.slot.space != tgt.slot.space)
         return false;
+    // basis_id is a don't-care when the pattern leaves it unset (0): a
+    // basis-generic identity matches a basis-tagged term (vibe 000067).  A
+    // pattern that pins a basis must match it exactly.
+    if (pat.slot.basis_id != 0 && pat.slot.basis_id != tgt.slot.basis_id)
+        return false;
     if (pat.index.has_value() != tgt.index.has_value())
         return false;
     if (!pat.index)

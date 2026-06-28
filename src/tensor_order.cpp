@@ -81,6 +81,8 @@ auto tensor_object_cmp(TensorObject const& a, TensorObject const& b) -> int
             return sa.slot.realm < sb.slot.realm ? -1 : 1;
         if (int c = space_cmp(sa.slot.space, sb.slot.space))
             return c;
+        if (sa.slot.basis_id != sb.slot.basis_id)
+            return sa.slot.basis_id < sb.slot.basis_id ? -1 : 1;
         if (int c = index_assoc_cmp(sa.index, sb.index))
             return c;
     }

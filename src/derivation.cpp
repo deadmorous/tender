@@ -441,6 +441,8 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                         return false;
                     if (sa.slot.space != sb.slot.space)
                         return false;
+                    if (sa.slot.basis_id != sb.slot.basis_id)
+                        return false;
                     if (!index_assoc_eq(sa.index, sb.index))
                         return false;
                 }

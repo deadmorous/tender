@@ -28,11 +28,21 @@ enum class Level
 // A positional cell that carries a level, realm, and (for all realms
 // except Label) a pointer to the index space it ranges over.
 // Null space is valid only for the Label realm.
+//
+// basis_id identifies which Basis this index belongs to (vibe 000067): 0 means
+// "no basis / basis-unaware" — the default for δ, ε, and every hand-written
+// tensor — while a positive id is a handle into the Context's basis registry.
+// It is a contraction-NEUTRAL label: Einstein summation ignores it (so a shared
+// index may sum across two bases, e.g. the rotation tensor e_i ⊗ e'_i), but
+// structural equality, canonical ordering, hashing, and the matcher all honour
+// it, so e_i^A and e_i^B are distinct.  basis_id is the LAST member so existing
+// aggregate initialisers IndexSlot{level, realm, space} keep compiling.
 struct IndexSlot final
 {
     Level level;
     Realm realm;
     IndexSpace const* space;
+    int basis_id = 0;
 };
 
 // ---- Index association types -------------------------------------------

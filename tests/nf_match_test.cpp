@@ -569,6 +569,39 @@ TEST(MatchFactor, SlotDescriptorMismatches)
         match_factor(base, t(Realm::Oblique, Level::Upper, sp3, false), bnd));
 }
 
+TEST(MatchFactor, BasisIdDontCareWhenPatternUnset)
+{
+    // basis_id (vibe 000067): a pattern that leaves basis_id unset (0) is
+    // basis-generic and matches any tagged target; a pattern that pins a basis
+    // matches only that basis.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+
+    auto vec = [&](int basis_id)
+    {
+        return only_tensor(
+            ctx,
+            make_tensor_object(
+                ctx,
+                make_tensor_name("e"),
+                {SlotBinding{
+                    IndexSlot{Level::Lower, Realm::Orthonormal, sp, basis_id},
+                    IndexAssoc{i}}},
+                1));
+    };
+
+    NfBinding bnd;
+    // Unset (0) pattern is don't-care: matches both untagged and tagged.
+    EXPECT_TRUE(match_factor(vec(0), vec(0), bnd));
+    EXPECT_TRUE(match_factor(vec(0), vec(5), bnd));
+    // A pinned pattern matches its own basis only.
+    EXPECT_TRUE(match_factor(vec(5), vec(5), bnd));
+    EXPECT_FALSE(match_factor(vec(5), vec(6), bnd));
+    // A pinned pattern does not match an untagged target.
+    EXPECT_FALSE(match_factor(vec(5), vec(0), bnd));
+}
+
 TEST(MatchFactor, ConcreteAndLabelSlotIndices)
 {
     // A concrete (numeric) and a label index in a slot match by value/name and

@@ -307,6 +307,7 @@ auto hash_tensor_object(TensorObject const& t) -> std::size_t
         h = hash_mix(h, static_cast<std::size_t>(s.slot.level));
         h = hash_mix(h, static_cast<std::size_t>(s.slot.realm));
         h = hash_mix(h, std::hash<IndexSpace const*>{}(s.slot.space));
+        h = hash_mix(h, static_cast<std::size_t>(s.slot.basis_id));
         h = hash_mix(h, hash_index_assoc(s.index));
     }
     return h;

@@ -2156,6 +2156,70 @@ TEST(FoldEqualAddends, SelfPreparingCancelsAcrossDummyRenaming)
     EXPECT_EQ(sl->value, Rational{0});
 }
 
+// ---- basis_id on index slots (vibe 000067, increment 1) -------------------
+
+namespace
+{
+// A rank-1 vector "e" with one lower Orthonormal slot carrying index `i`,
+// tagged with `basis_id` (0 = basis-unaware).
+auto basis_vec(Context& ctx, CountableIndex i, int basis_id) -> Expr const*
+{
+    return make_tensor_object(
+        ctx,
+        make_tensor_name("e"),
+        {SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d(), basis_id},
+            IndexAssoc{i}}},
+        1);
+}
+} // namespace
+
+TEST(BasisId, StructuralEqDistinguishesBases)
+{
+    // e_i tagged with different bases are structurally distinct; same tag
+    // (incl. the untagged 0) compares equal.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    EXPECT_TRUE(structural_eq(basis_vec(ctx, i, 0), basis_vec(ctx, i, 0)));
+    EXPECT_TRUE(structural_eq(basis_vec(ctx, i, 1), basis_vec(ctx, i, 1)));
+    EXPECT_FALSE(structural_eq(basis_vec(ctx, i, 1), basis_vec(ctx, i, 2)));
+    EXPECT_FALSE(structural_eq(basis_vec(ctx, i, 0), basis_vec(ctx, i, 1)));
+}
+
+TEST(BasisId, CanonicalizeKeepsDifferentBasesDistinct)
+{
+    // Same basis folds (e_i + e_i → 2 e_i); different bases do not.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* two = make_scalar(ctx, Rational{2});
+
+    auto const* same = steps::canonicalize(
+        ctx, make_sum(ctx, basis_vec(ctx, i, 1), basis_vec(ctx, i, 1)));
+    auto const* twice = steps::canonicalize(
+        ctx, make_tensor_product(ctx, two, basis_vec(ctx, i, 1)));
+    EXPECT_TRUE(structural_eq(same, twice));
+
+    auto const* mixed = steps::canonicalize(
+        ctx, make_sum(ctx, basis_vec(ctx, i, 1), basis_vec(ctx, i, 2)));
+    EXPECT_FALSE(structural_eq(mixed, twice));
+}
+
+TEST(BasisId, SummationIgnoresBasisId)
+{
+    // The rotation tensor e_i ⊗ e'_i: the shared index sums over its range even
+    // though the two vectors are from different bases (basis_id is contraction-
+    // neutral).  canonicalize must materialize Σ_i, not throw.
+    Context ctx;
+    CountableIndex i{ctx.alloc_index_id()};
+    auto const* prod =
+        make_tensor_product(ctx, basis_vec(ctx, i, 1), basis_vec(ctx, i, 2));
+    // canonicalize renames the dummy, so just assert a sum was materialized
+    // (the shared index contracted) over the two basis vectors.
+    auto const* canon = steps::canonicalize(ctx, prod);
+    auto const s = render_with_names(canon, {});
+    EXPECT_NE(s.find("\\sum"), std::string::npos);
+}
+
 // ---- canonicalize (algebraic normal form, vibe 000037) --------------------
 
 namespace
