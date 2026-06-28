@@ -3,9 +3,14 @@
 #include <mpk/mix/util/resource_list.hpp>
 
 #include <memory>
+#include <vector>
 
 namespace tender
 {
+
+// Forward declaration: the Context owns a registry of bases (vibe 000067) but
+// only stores pointers, so it need not see the full Basis definition.
+class Basis;
 
 // Context is the single argument passed to every factory function. It owns:
 //   - a ResourceList (arena-style lifetime for all allocated objects)
@@ -21,7 +26,9 @@ namespace tender
 class Context final
 {
 public:
-    Context() : id_factory_{std::make_shared<IdFactory>()}
+    Context() :
+      id_factory_{std::make_shared<IdFactory>()},
+      basis_registry_{std::make_shared<std::vector<Basis const*>>()}
     {
     }
 
@@ -44,6 +51,24 @@ public:
         return id_factory_->next++;
     }
 
+    // Register a basis and return its id (vibe 000067).  The id is the slot
+    // tag (IndexSlot::basis_id); 1-based, unique within the sharing group, so 0
+    // stays reserved for "basis-unaware".  The registry stores the pointer only
+    // (the Basis must outlive the expressions that reference its id).
+    auto register_basis(Basis const* b) -> int
+    {
+        basis_registry_->push_back(b);
+        return static_cast<int>(basis_registry_->size());
+    }
+
+    // Resolve a basis id back to its Basis, or nullptr for 0 / out-of-range.
+    auto basis(int id) const -> Basis const*
+    {
+        if (id < 1 || id > static_cast<int>(basis_registry_->size()))
+            return nullptr;
+        return (*basis_registry_)[static_cast<std::size_t>(id - 1)];
+    }
+
     // Create a child context: shares the id factory (ids remain contiguous)
     // but starts with an empty resource list (independent allocation scope).
     auto new_context() -> Context
@@ -59,10 +84,15 @@ private:
 
     mpk::mix::ResourceList rl_;
     std::shared_ptr<IdFactory> id_factory_;
+    // Basis registry, shared across the sharing group like the id factory so a
+    // child context resolves bases registered by its parent (vibe 000067).
+    std::shared_ptr<std::vector<Basis const*>> basis_registry_;
 
-    // Private copy constructor: shares id factory, fresh empty resource list.
-    // ResourceList is non-copyable so rl_ is default-initialised here.
-    explicit Context(Context const& other) : id_factory_{other.id_factory_}
+    // Private copy constructor: shares id factory and basis registry, fresh
+    // empty resource list.  ResourceList is non-copyable so rl_ is
+    // default-initialised here.
+    explicit Context(Context const& other) :
+      id_factory_{other.id_factory_}, basis_registry_{other.basis_registry_}
     {
     }
 };

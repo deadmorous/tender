@@ -49,7 +49,7 @@ auto Basis::covariant_vector(Context& ctx, CountableIndex index) const
         ctx,
         symbol_,
         {SlotBinding{
-            IndexSlot{Level::Lower, realm_, space_}, IndexAssoc{index}}},
+            IndexSlot{Level::Lower, realm_, space_, id_}, IndexAssoc{index}}},
         1);
 }
 
@@ -60,7 +60,7 @@ auto Basis::contravariant_vector(Context& ctx, CountableIndex index) const
     return make_tensor_object(
         ctx,
         symbol_,
-        {SlotBinding{IndexSlot{level, realm_, space_}, IndexAssoc{index}}},
+        {SlotBinding{IndexSlot{level, realm_, space_, id_}, IndexAssoc{index}}},
         1);
 }
 
@@ -104,6 +104,15 @@ void validate_basis_vectors(
 
 } // namespace
 
+auto intern_basis(Context& ctx, Basis b) -> Basis
+{
+    // Keep a context-owned copy so a slot's basis_id always resolves to a live
+    // Basis (vibe 000067), and stamp the same id on the value we hand back.
+    Basis* owned = ctx.make<Basis>(std::move(b));
+    owned->id_ = ctx.register_basis(owned);
+    return *owned;
+}
+
 auto make_orthonormal_basis(
     Context& ctx,
     IndexSpace const* space,
@@ -118,13 +127,14 @@ auto make_orthonormal_basis(
     auto covectors = vectors;
     Expr const* const vol =
         make_scalar(ctx, Rational{handedness == Handedness::Right ? 1 : -1});
-    return Basis{
+    Basis b{
         Realm::Orthonormal,
         space,
         vector_symbol,
         std::move(vectors),
         std::move(covectors),
         vol};
+    return intern_basis(ctx, std::move(b));
 }
 
 auto make_oblique_basis(
@@ -150,13 +160,14 @@ auto make_oblique_basis(
         cob(vectors[2], vectors[0]),
         cob(vectors[0], vectors[1])};
 
-    return Basis{
+    Basis b{
         Realm::Oblique,
         space,
         vector_symbol,
         std::move(vectors),
         std::move(covectors),
         vol};
+    return intern_basis(ctx, std::move(b));
 }
 
 namespace
@@ -247,7 +258,10 @@ auto expand_in_basis(
                 CountableIndex const idx{c.alloc_index_id()};
                 coord_slots.push_back(SlotBinding{
                     IndexSlot{
-                        coord_level_for(v, ortho), basis.realm(), basis.space()},
+                        coord_level_for(v, ortho),
+                        basis.realm(),
+                        basis.space(),
+                        basis.basis_id()},
                     IndexAssoc{idx}});
                 Expr const* const vec = v == Variance::Covariant ?
                                             basis.covariant_vector(c, idx) :

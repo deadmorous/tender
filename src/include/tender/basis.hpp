@@ -43,6 +43,13 @@ public:
     {
         return space_;
     }
+    // This basis's slot tag (vibe 000067): the IndexSlot::basis_id stamped on
+    // every index this basis emits (vectors and coordinates).  0 means the
+    // basis was constructed but not registered with a Context.
+    auto basis_id() const noexcept -> int
+    {
+        return id_;
+    }
     // Number of basis vectors.
     auto dim() const noexcept -> int
     {
@@ -114,12 +121,17 @@ private:
         std::vector<Expr const*>,
         TensorName) -> Basis;
 
+    // Internal (vibe 000067): copy `b` into ctx, register it for an id, stamp
+    // that id, and return the id-carrying value.  Friend so it can set id_.
+    friend auto intern_basis(Context& ctx, Basis b) -> Basis;
+
     Realm realm_;
     IndexSpace const* space_;
     TensorName symbol_;
     std::vector<Expr const*> vectors_;   // covariant   e_i
     std::vector<Expr const*> covectors_; // contravariant e^i
     Expr const* volume_; // signed √g (scalar ±1, or triple prod)
+    int id_ = 0;         // slot tag; set when registered (vibe 000067)
 };
 
 // Build an orthonormal basis from rank-1 vectors.  The realm is Orthonormal and

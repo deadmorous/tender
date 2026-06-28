@@ -85,6 +85,22 @@ class TestCoordSystems:
 # ---------------------------------------------------------------------------
 
 
+class TestBasisIdentity:
+    def test_same_invariant_in_two_bases_is_distinct(self):
+        # vibe 000067: expanding the same vector in two different bases yields
+        # results that look identical but are algebraically distinct (the
+        # coordinates/vectors carry different basis ids).
+        ctx = tender.Context()
+        b1 = tb.wcs(ctx)
+        b2 = tb.cylindrical(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        e1 = tb.expand_in_basis(a, b1, tb.Variance.Covariant)
+        e2 = tb.expand_in_basis(a, b2, tb.Variance.Covariant)
+        assert e1.latex() == e2.latex()  # rendering of the tag is increment 4
+        assert not td.algebraic_eq(e1, e2)
+        assert td.algebraic_eq(e1, e1)
+
+
 class TestBasisSteps:
     def test_expand_reassemble_round_trip(self):
         ctx = tender.Context()

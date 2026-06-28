@@ -134,20 +134,23 @@ TEST(BasisFeasibility, DotReducesToCoordinateContraction)
 
     auto const* reduced = reduce_in_wcs(ctx, b, make_dot(ctx, a, c));
 
-    // Expected: Σ_i a_i b_i.
+    // Expected: Σ_i a_i b_i, the coordinates carrying the basis tag (vibe
+    // 000067).
     auto i = CountableIndex{ctx.alloc_index_id()};
     auto const* a_i = make_tensor_object(
         ctx,
         make_tensor_name("a"),
         {SlotBinding{
-            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
             IndexAssoc{i}}},
         0);
     auto const* b_i = make_tensor_object(
         ctx,
         make_tensor_name("b"),
         {SlotBinding{
-            IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+            IndexSlot{
+                Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
             IndexAssoc{i}}},
         0);
     auto const* expected =

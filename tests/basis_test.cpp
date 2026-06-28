@@ -2,9 +2,11 @@
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/index_space.hpp>
+#include <tender/rewrite.hpp>
 
 #include <gtest/gtest.h>
 
+#include <set>
 #include <stdexcept>
 #include <variant>
 
@@ -506,11 +508,13 @@ TEST(SimplifyBasisDot, PullsCoordinatesOutOfContraction)
     auto j = CountableIndex{ctx.alloc_index_id()};
     auto coord = [&](char const* nm, CountableIndex idx)
     {
+        // Coordinates carry the basis tag (vibe 000067); the δ stays neutral.
         return make_tensor_object(
             ctx,
             make_tensor_name(nm),
             {SlotBinding{
-                IndexSlot{Level::Lower, Realm::Orthonormal, space_3d()},
+                IndexSlot{
+                    Level::Lower, Realm::Orthonormal, space_3d(), b.basis_id()},
                 IndexAssoc{idx}}},
             0);
     };
@@ -529,6 +533,66 @@ TEST(SimplifyBasisDot, PullsCoordinatesOutOfContraction)
                 IndexAssoc{i},
                 IndexAssoc{j})));
     EXPECT_TRUE(algebraic_eq(ctx, res, expected));
+}
+
+// ---- basis registry + id stamping (vibe 000067, increment 2) --------------
+
+TEST(BasisRegistry, FactoriesAssignDistinctIdsAndResolve)
+{
+    Context ctx;
+    auto b1 = wcs_basis(ctx);
+    auto b2 = oblique_basis(ctx);
+    EXPECT_GT(b1.basis_id(), 0);
+    EXPECT_GT(b2.basis_id(), 0);
+    EXPECT_NE(b1.basis_id(), b2.basis_id());
+    ASSERT_NE(ctx.basis(b1.basis_id()), nullptr);
+    EXPECT_EQ(ctx.basis(b1.basis_id())->basis_id(), b1.basis_id());
+    // 0 (basis-unaware) and out-of-range resolve to nullptr.
+    EXPECT_EQ(ctx.basis(0), nullptr);
+    EXPECT_EQ(ctx.basis(9999), nullptr);
+}
+
+TEST(BasisRegistry, EmissionsAndExpansionCarryBasisId)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+
+    // A symbolic basis vector is stamped with the basis id.
+    CountableIndex const i{ctx.alloc_index_id()};
+    auto const& cov = std::get<TensorObject>(b.covariant_vector(ctx, i)->node);
+    EXPECT_EQ(cov.slots.at(0).slot.basis_id, b.basis_id());
+
+    // expand_in_basis stamps every emitted slot (coordinate and vector) with
+    // it.
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* exp = expand_in_basis(ctx, a, b, Variance::Covariant);
+    std::set<int> ids;
+    rewrite_tree(
+        ctx,
+        exp,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* to = std::get_if<TensorObject>(&n->node))
+                for (auto const& sb: to->slots)
+                    ids.insert(sb.slot.basis_id);
+            return n;
+        });
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_EQ(*ids.begin(), b.basis_id());
+}
+
+TEST(BasisRegistry, DifferentBasesProduceDistinctExpansions)
+{
+    // The same invariant expanded in two bases differs only by basis_id, so the
+    // two coordinate forms are not algebraically equal (vibe 000067).
+    Context ctx;
+    auto b1 = wcs_basis(ctx);
+    auto b2 = make_orthonormal_basis(
+        ctx, space_3d(), {vec(ctx, "p"), vec(ctx, "q"), vec(ctx, "r")});
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* e1 = expand_in_basis(ctx, a, b1, Variance::Covariant);
+    auto const* e2 = expand_in_basis(ctx, a, b2, Variance::Covariant);
+    EXPECT_FALSE(algebraic_eq(ctx, e1, e2));
 }
 
 TEST(SimplifyBasisDot, NonBasisDotUnchanged)
