@@ -122,9 +122,14 @@ reaches all of this via `slot.basis_id → ctx.basis(id)`.
    `slot.basis_id → Basis → value_name` for a `ConcreteIndex` (numeric fallback
    when absent, so existing ctx-less callers are unchanged); Python `latex()`
    passes `e.ctx`.  An unrolled cylindrical expansion now reads
-   `a_r e_r + a_θ e_θ + a_z e_z`.  **Deferred to 4b:** the standalone
-   vector-symbol override (`i,j,k` instead of `e_x`) and the multi-basis display
-   label.
+   `a_r e_r + a_θ e_θ + a_z e_z`.
+   **4b DONE** (commit 91a1ee9): the three naming controls are bundled in a
+   `BasisNaming` struct.  `vector_symbols` give each direction a standalone
+   symbol (WCS now renders `i,j,k` via a `basis_vector_override` render helper,
+   with `x,y,z` components → `a_x i + a_y j + a_z k`).  `label` is a free-form
+   LaTeX suffix appended to every index of a basis (primed-index convention
+   `e_{i'}`), so two frames in one term are distinguishable.  Vibe 000067
+   (gaps 1 + 2) is complete.
 
 ## Settled vs open
 
