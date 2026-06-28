@@ -107,7 +107,11 @@ reaches all of this via `slot.basis_id → ctx.basis(id)`.
    registry copy keeps a slot's `basis_id` resolvable.
 3. Basis-aware steps filter by `basis_id`. Add multi-basis tests: rotation
    `e_i ⊗ e'_i` (must sum), overlap `e_i^A·e_j^B` (must NOT become δ),
-   two-point `F_{iJ}`.
+   two-point `F_{iJ}`. **DONE** (commit 5337bb4): `as_basis_vector` and
+   `as_coord_component` require the slot `basis_id` to match the step's basis,
+   and `reassemble`'s whole-term path got the same coordinate guard; so
+   `simplify_basis_dot/_cross` leave the cross-frame overlap alone and
+   `reassemble(A)` refuses a foreign expansion or a two-point `F_{iJ}`.
 4. Gap-2 rendering: `value_names` + concrete-index rendering via
    `basis_id→value_name`; vector-symbol override; display label. Coordinate
    systems populate `value_names` (and optionally the WCS `i,j,k` symbols).
