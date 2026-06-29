@@ -148,7 +148,10 @@ auto factor_rank(Factor const* f) -> std::optional<int>
                 }
                 return std::nullopt;
             },
-            [](Div const& d) -> std::optional<int> { return nf_rank(d.num); }},
+            [](Div const& d) -> std::optional<int> { return nf_rank(d.num); },
+            // Scalar fields are rank 0.
+            [](ScalarFn const&) -> std::optional<int> { return 0; },
+            [](Pow const&) -> std::optional<int> { return 0; }},
         *f);
 }
 
@@ -308,6 +311,18 @@ auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
                 return t && match_nf(p.num, t->num, bnd)
                        && match_nf(p.den, t->den, bnd);
             },
+            [&](ScalarFn const& p) -> bool
+            {
+                auto const* t = std::get_if<ScalarFn>(&tgt->node);
+                return t && p.kind == t->kind
+                       && match_nf(p.operand, t->operand, bnd);
+            },
+            [&](Pow const& p) -> bool
+            {
+                auto const* t = std::get_if<Pow>(&tgt->node);
+                return t && match_nf(p.base, t->base, bnd)
+                       && match_nf(p.exponent, t->exponent, bnd);
+            },
         },
         *pat);
 }
@@ -388,6 +403,12 @@ void collect_factor_ids(Factor const* f, std::set<int>& out)
             {
                 collect_nf_ids(d.num, out);
                 collect_nf_ids(d.den, out);
+            },
+            [&](ScalarFn const& s) { collect_nf_ids(s.operand, out); },
+            [&](Pow const& p)
+            {
+                collect_nf_ids(p.base, out);
+                collect_nf_ids(p.exponent, out);
             },
         },
         *f);
@@ -619,6 +640,16 @@ auto inst_factor(
                 return make_div(
                     ctx, inst_nf(ctx, d.num, bnd), inst_nf(ctx, d.den, bnd));
             },
+            [&](ScalarFn const& s) -> Factor const* {
+                return make_scalar_fn(ctx, s.kind, inst_nf(ctx, s.operand, bnd));
+            },
+            [&](Pow const& p) -> Factor const*
+            {
+                return make_pow(
+                    ctx,
+                    inst_nf(ctx, p.base, bnd),
+                    inst_nf(ctx, p.exponent, bnd));
+            },
         },
         *f);
 }
@@ -801,6 +832,8 @@ auto rewrite_in_factor(Context& ctx, ChainRule const& cr, Factor const* f)
             },
             [&](Paren const&) -> Factor const* { return nullptr; },
             [&](Div const&) -> Factor const* { return nullptr; },
+            [&](ScalarFn const&) -> Factor const* { return nullptr; },
+            [&](Pow const&) -> Factor const* { return nullptr; },
         },
         *f);
 }

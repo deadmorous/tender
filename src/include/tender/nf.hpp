@@ -114,9 +114,26 @@ struct Div final
     Nf const* den;
 };
 
+// A scalar field factor (vibe 000069): an elementary function `fn(body)` or a
+// power `base ^ exponent`, each side a recursively canonical `Nf`.  Both are
+// rank-0, so they land in a term's commutative scalar region.  Kept distinct so
+// the scalar simplifier can recognise patterns like cos² + sin² (M3).
+struct ScalarFn final
+{
+    ScalarFnKind kind;
+    Nf const* operand;
+};
+
+struct Pow final
+{
+    Nf const* base;
+    Nf const* exponent;
+};
+
 struct Factor final
 {
-    using Node = std::variant<Atom, Contraction, Cross, Paren, Unary, Div>;
+    using Node =
+        std::variant<Atom, Contraction, Cross, Paren, Unary, Div, ScalarFn, Pow>;
 
     Node node;
 
@@ -207,6 +224,12 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
     -> Factor const*;
 
 [[nodiscard]] auto make_div(Context&, Nf const* num, Nf const* den)
+    -> Factor const*;
+
+[[nodiscard]] auto make_scalar_fn(Context&, ScalarFnKind, Nf const* operand)
+    -> Factor const*;
+
+[[nodiscard]] auto make_pow(Context&, Nf const* base, Nf const* exponent)
     -> Factor const*;
 
 [[nodiscard]] auto make_nf(Context&, std::vector<Term> terms) -> Nf const*;

@@ -115,8 +115,27 @@ static bool is_scalar_expr(Expr const& e)
             [](Cross const&) { return false; },
             [](ExplicitSum const& s) { return is_scalar_expr(*s.body); },
             [](NoSum const& s) { return is_scalar_expr(*s.body); },
+            [](ScalarFn const&) { return true; },
+            [](Pow const& p)
+            { return is_scalar_expr(*p.base) && is_scalar_expr(*p.exponent); },
         },
         e);
+}
+
+// LaTeX for a scalar function applied to an already-rendered operand string.
+static auto scalar_fn_str(ScalarFnKind kind, std::string const& arg)
+    -> std::string
+{
+    switch (kind)
+    {
+        case ScalarFnKind::Sin: return "\\sin\\left(" + arg + "\\right)";
+        case ScalarFnKind::Cos: return "\\cos\\left(" + arg + "\\right)";
+        case ScalarFnKind::Tan: return "\\tan\\left(" + arg + "\\right)";
+        case ScalarFnKind::Exp: return "\\exp\\left(" + arg + "\\right)";
+        case ScalarFnKind::Log: return "\\log\\left(" + arg + "\\right)";
+        case ScalarFnKind::Sqrt: return "\\sqrt{" + arg + "}";
+    }
+    return arg; // unreachable
 }
 
 // ---- shared leaf rendering (Expr atoms == Nf atoms) --------------------
@@ -301,6 +320,9 @@ struct Renderer
                 [](DDot const&) { return CONTRACT_PREC; },
                 [](DDotAlt const&) { return CONTRACT_PREC; },
                 [](Cross const&) { return CONTRACT_PREC; },
+                // Function application / superscript — self-delimiting, atomic.
+                [](ScalarFn const&) { return ATOM_PREC; },
+                [](Pow const&) { return ATOM_PREC; },
             },
             e);
     }
@@ -469,6 +491,12 @@ struct Renderer
                 { return sum_str(s.index, s.body, "\\sum"); },
                 [&](NoSum const& s) -> std::string
                 { return sum_str(s.index, s.body, "\\cancel{\\sum}"); },
+                [&](ScalarFn const& f) -> std::string
+                { return scalar_fn_str(f.kind, render(*f.operand)); },
+                [&](Pow const& p) -> std::string {
+                    return sub(*p.base, ATOM_PREC) + "^{" + render(*p.exponent)
+                           + "}";
+                },
             },
             e);
     }
@@ -497,6 +525,8 @@ struct NfRenderer
                 { return ATOM_PREC; }, // self-parenthesized
                 [](nf::Unary const&) { return ATOM_PREC; }, // self-delimiting
                 [](nf::Div const&) { return ATOM_PREC; },   // \frac is atomic
+                [](nf::ScalarFn const&) { return ATOM_PREC; },
+                [](nf::Pow const&) { return ATOM_PREC; },
             },
             f);
     }
@@ -577,6 +607,21 @@ struct NfRenderer
                                    + "^{\\mathsf{T}}";
                     }
                     return "?"; // unreachable
+                },
+                [&](nf::ScalarFn const& s) -> std::string
+                { return scalar_fn_str(s.kind, render_nf(*s.operand)); },
+                [&](nf::Pow const& p) -> std::string
+                {
+                    // Wrap a non-atomic base (e.g. a sum) so a^{…} binds it.
+                    auto base = render_nf(*p.base);
+                    bool const wrap =
+                        p.base->terms.size() != 1
+                        || p.base->terms[0].scalars.size()
+                                   + p.base->terms[0].tensors.size()
+                               > 1;
+                    if (wrap)
+                        base = "(" + base + ")";
+                    return base + "^{" + render_nf(*p.exponent) + "}";
                 },
             },
             f);

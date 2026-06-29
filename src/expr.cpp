@@ -25,6 +25,28 @@ auto make_scalar(Context& ctx, Rational value) -> Expr const*
     return ctx.make<Expr>(ScalarLiteral{value});
 }
 
+auto make_coordinate(Context& ctx, TensorName name, int chart_id, int slot)
+    -> Expr const*
+{
+    return ctx.make<Expr>(TensorObject{
+        .name = std::move(name),
+        .rank = 0,
+        .traits = TensorTraits{.coordinate = CoordinateRef{chart_id, slot}},
+        .slots = {}});
+}
+
+auto make_scalar_fn(Context& ctx, ScalarFnKind kind, Expr const* operand)
+    -> Expr const*
+{
+    return ctx.make<Expr>(ScalarFn{kind, operand});
+}
+
+auto make_pow(Context& ctx, Expr const* base, Expr const* exponent)
+    -> Expr const*
+{
+    return ctx.make<Expr>(Pow{base, exponent});
+}
+
 // ---- Unary factory -----------------------------------------------------
 
 auto make_negate(Context& ctx, Expr const* operand) -> Expr const*

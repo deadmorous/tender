@@ -36,6 +36,30 @@ enum class RenderHint : uint8_t
     OmitVoidIndexPlaceholders = 1, // suppress \cdot in mixed upper/lower slots
 };
 
+// Elementary scalar functions (vibe 000069 M1).  Each kind has a derivative-
+// table entry the chain rule consults (M2).  Operand and result are rank-0.
+enum class ScalarFnKind : uint8_t
+{
+    Sin,
+    Cos,
+    Tan,
+    Exp,
+    Log,
+    Sqrt,
+};
+
+// Reference to a coordinate of a coordinate chart (vibe 000069 M1).  Stamped on
+// a rank-0 TensorObject's traits to mark it as a chart coordinate the
+// differentiator recognises (∂_{q^i} q^j = δ_ij).  chart_id == 0 means the
+// coordinate is not yet bound to a chart (a free coordinate symbol); a chart
+// stamps its id when it owns the coordinate (M4).  slot is the coordinate's
+// 0-based position within the chart.
+struct CoordinateRef final
+{
+    int chart_id = 0;
+    int slot = 0;
+};
+
 // Value-preserving permutation generators for a tensor object (e.g. even
 // permutations of Levi-Civita, any slot swap of a symmetric tensor).
 struct SymmetrySpec final
@@ -57,6 +81,11 @@ struct TensorTraits
     SymmetrySpec symmetry = {};
     AntisymmetrySpec antisymmetry = {};
     mpk::mix::EnumFlags<RenderHint> render_hints = {};
+    // Set on a rank-0 object that is a coordinate of a chart (vibe 000069 M1).
+    // Identity-neutral (structural_eq / tensor_object_cmp ignore traits), like
+    // well_known: a coordinate is told apart from a plain scalar by inspecting
+    // this marker, not by comparison.
+    std::optional<CoordinateRef> coordinate = {};
 };
 
 // ---- SlotBinding -------------------------------------------------------
@@ -117,6 +146,25 @@ struct VectorInvariant final
 struct Transpose final
 {
     Expr const* operand;
+};
+
+// An elementary scalar function applied to a rank-0 operand: sin, cos, sqrt, …
+// (vibe 000069 M1).  Linear-algebra operators stay separate; this is the scalar
+// (coordinate-field) layer.
+struct ScalarFn final
+{
+    ScalarFnKind kind;
+    Expr const* operand;
+};
+
+// base raised to a power, both rank-0 (vibe 000069 M1).  Kept distinct from a
+// repeated ⊗ product so the scalar simplifier can recognise patterns such as
+// cos² + sin² (M3).  The exponent is an Expr (usually a ScalarLiteral, e.g.
+// r²), leaving room for symbolic exponents.
+struct Pow final
+{
+    Expr const* base;
+    Expr const* exponent;
 };
 
 // ---- Binary operation nodes --------------------------------------------
@@ -208,7 +256,9 @@ struct Expr final
         DDotAlt,
         Cross,
         ExplicitSum,
-        NoSum>;
+        NoSum,
+        ScalarFn,
+        Pow>;
 
     Node node;
 
@@ -255,6 +305,18 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 
 // Numeric scalar literal.
 [[nodiscard]] auto make_scalar(Context&, Rational) -> Expr const*;
+
+// Coordinate variable of a chart: a rank-0 TensorObject carrying a
+// CoordinateRef trait (vibe 000069 M1).  chart_id 0 / slot 0 leave it unbound
+// to a chart.
+[[nodiscard]] auto make_coordinate(
+    Context&, TensorName, int chart_id = 0, int slot = 0) -> Expr const*;
+
+// Elementary scalar function and power (vibe 000069 M1).
+[[nodiscard]] auto make_scalar_fn(Context&, ScalarFnKind, Expr const* operand)
+    -> Expr const*;
+[[nodiscard]] auto make_pow(Context&, Expr const* base, Expr const* exponent)
+    -> Expr const*;
 
 // Unary
 [[nodiscard]] auto make_negate(Context&, Expr const*) -> Expr const*;

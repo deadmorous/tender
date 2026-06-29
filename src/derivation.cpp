@@ -96,6 +96,12 @@ auto find_index_space(Expr const* e, int id) -> IndexSpace const*
                         go(s.bound);
                 },
                 [&](NoSum const& s) { go(s.body); },
+                [&](ScalarFn const& s) { go(s.operand); },
+                [&](Pow const& s)
+                {
+                    go(s.base);
+                    go(s.exponent);
+                },
             },
             *node);
     };
@@ -288,6 +294,12 @@ auto find_space_from_concrete(Expr const* e) -> IndexSpace const*
                         go(s.bound);
                 },
                 [&](NoSum const& s) { go(s.body); },
+                [&](ScalarFn const& s) { go(s.operand); },
+                [&](Pow const& s)
+                {
+                    go(s.base);
+                    go(s.exponent);
+                },
             },
             *node);
     };
@@ -369,6 +381,12 @@ void collect_concrete_values(Expr const* e, std::vector<int>& out)
                         go(s.bound);
                 },
                 [&](NoSum const& s) { go(s.body); },
+                [&](ScalarFn const& s) { go(s.operand); },
+                [&](Pow const& s)
+                {
+                    go(s.base);
+                    go(s.exponent);
+                },
             },
             *node);
     };
@@ -539,6 +557,18 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                 auto const* sb = std::get_if<NoSum>(&b->node);
                 return sb && sa.index.id == sb->index.id
                        && structural_eq(sa.body, sb->body);
+            },
+            [&](ScalarFn const& fa) -> bool
+            {
+                auto const* fb = std::get_if<ScalarFn>(&b->node);
+                return fb && fa.kind == fb->kind
+                       && structural_eq(fa.operand, fb->operand);
+            },
+            [&](Pow const& pa) -> bool
+            {
+                auto const* pb = std::get_if<Pow>(&b->node);
+                return pb && structural_eq(pa.base, pb->base)
+                       && structural_eq(pa.exponent, pb->exponent);
             },
         },
         a->node);
@@ -733,6 +763,13 @@ auto has_free_index_for(
                 b2.insert(s.index.id);
                 return has_free_index_for(s.body, indices, b2);
             },
+            [&](ScalarFn const& s) -> bool
+            { return has_free_index_for(s.operand, indices, bound); },
+            [&](Pow const& s) -> bool
+            {
+                return has_free_index_for(s.base, indices, bound)
+                       || has_free_index_for(s.exponent, indices, bound);
+            },
         },
         *e);
 }
@@ -845,6 +882,20 @@ auto expr_cmp(Expr const* a, Expr const* b) -> int
                     return sa.index.id < sb.index.id ? -1 : 1;
                 return expr_cmp(sa.body, sb.body);
             },
+            [&](ScalarFn const& fa) -> int
+            {
+                auto const& fb = std::get<ScalarFn>(b->node);
+                if (fa.kind != fb.kind)
+                    return fa.kind < fb.kind ? -1 : 1;
+                return expr_cmp(fa.operand, fb.operand);
+            },
+            [&](Pow const& pa) -> int
+            {
+                auto const& pb = std::get<Pow>(b->node);
+                if (int c = expr_cmp(pa.base, pb.base))
+                    return c;
+                return expr_cmp(pa.exponent, pb.exponent);
+            },
         },
         *a);
 }
@@ -909,6 +960,12 @@ auto is_component_valued(Expr const* e) -> bool
             [](DDot const&) { return false; },
             [](DDotAlt const&) { return false; },
             [](Cross const&) { return false; },
+            // Scalar fields are component (commuting) values.
+            [](ScalarFn const& s) { return is_component_valued(s.operand); },
+            [](Pow const& p) {
+                return is_component_valued(p.base)
+                       && is_component_valued(p.exponent);
+            },
         },
         *e);
 }
@@ -966,6 +1023,9 @@ auto infer_rank(Expr const* e) -> std::optional<int>
             { return infer_rank(s.body); },
             [](NoSum const& s) -> std::optional<int>
             { return infer_rank(s.body); },
+            // Scalar fields are rank 0.
+            [](ScalarFn const&) -> std::optional<int> { return 0; },
+            [](Pow const&) -> std::optional<int> { return 0; },
         },
         *e);
 }
@@ -2356,6 +2416,19 @@ auto map_children(Context& ctx, Expr const* e, Rec const& rec) -> Expr const*
                 auto* body = rec(s.body);
                 return body == s.body ? e : make_no_sum(ctx, s.index, body);
             },
+            [&](ScalarFn const& s) -> Expr const*
+            {
+                auto* o = rec(s.operand);
+                return o == s.operand ? e : make_scalar_fn(ctx, s.kind, o);
+            },
+            [&](Pow const& s) -> Expr const*
+            {
+                auto* base = rec(s.base);
+                auto* exp = rec(s.exponent);
+                return (base == s.base && exp == s.exponent) ?
+                           e :
+                           make_pow(ctx, base, exp);
+            },
         },
         *e);
 }
@@ -2737,6 +2810,12 @@ auto has_explicit_sum_for(
                     go(s.right);
                 },
                 [&](NoSum const& s) { go(s.body); },
+                [&](ScalarFn const& s) { go(s.operand); },
+                [&](Pow const& s)
+                {
+                    go(s.base);
+                    go(s.exponent);
+                },
             },
             *node);
     };

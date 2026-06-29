@@ -251,6 +251,14 @@ struct NfEGraph::Impl final
                     return add_node(NfENode{
                         NfEKind::Div, nullptr, {add_nf(d.num), add_nf(d.den)}});
                 },
+                // Scalar fields (vibe 000069): opaque leaves — stored whole via
+                // the generic Atom node path, so the e-graph carries them
+                // through without rewriting their interior (the targeted scalar
+                // simplifier handles those separately).
+                [&](ScalarFn const&) -> EClassId
+                { return add_node(NfENode{NfEKind::Atom, f, {}}); },
+                [&](Pow const&) -> EClassId
+                { return add_node(NfENode{NfEKind::Atom, f, {}}); },
             },
             *f);
     }

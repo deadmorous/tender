@@ -62,6 +62,21 @@ auto make_div(Context& ctx, Nf const* num, Nf const* den) -> Factor const*
     return ctx.make<Factor>(Div{.num = num, .den = den});
 }
 
+auto make_scalar_fn(Context& ctx, ScalarFnKind kind, Nf const* operand)
+    -> Factor const*
+{
+    if (operand == nullptr)
+        throw std::invalid_argument("make_scalar_fn: null operand");
+    return ctx.make<Factor>(ScalarFn{.kind = kind, .operand = operand});
+}
+
+auto make_pow(Context& ctx, Nf const* base, Nf const* exponent) -> Factor const*
+{
+    if (base == nullptr || exponent == nullptr)
+        throw std::invalid_argument("make_pow: null base/exponent");
+    return ctx.make<Factor>(Pow{.base = base, .exponent = exponent});
+}
+
 auto make_nf(Context& ctx, std::vector<Term> terms) -> Nf const*
 {
     return ctx.make<Nf>(Nf{.terms = std::move(terms)});
@@ -120,6 +135,17 @@ auto equal(Factor const& a, Factor const& b) -> bool
             {
                 auto const& fb = std::get<Div>(b.node);
                 return equal(fa.num, fb.num) && equal(fa.den, fb.den);
+            },
+            [&](ScalarFn const& fa) -> bool
+            {
+                auto const& fb = std::get<ScalarFn>(b.node);
+                return fa.kind == fb.kind && equal(fa.operand, fb.operand);
+            },
+            [&](Pow const& fa) -> bool
+            {
+                auto const& fb = std::get<Pow>(b.node);
+                return equal(fa.base, fb.base)
+                       && equal(fa.exponent, fb.exponent);
             },
         },
         a);
@@ -216,6 +242,20 @@ auto compare(Factor const& a, Factor const& b) -> int
                 if (int c = compare(*fa.num, *fb.num))
                     return c;
                 return compare(*fa.den, *fb.den);
+            },
+            [&](ScalarFn const& fa) -> int
+            {
+                auto const& fb = std::get<ScalarFn>(b.node);
+                if (fa.kind != fb.kind)
+                    return fa.kind < fb.kind ? -1 : 1;
+                return compare(*fa.operand, *fb.operand);
+            },
+            [&](Pow const& fa) -> int
+            {
+                auto const& fb = std::get<Pow>(b.node);
+                if (int c = compare(*fa.base, *fb.base))
+                    return c;
+                return compare(*fa.exponent, *fb.exponent);
             },
         },
         a);
@@ -351,6 +391,18 @@ auto hash(Factor const& f) -> std::size_t
             {
                 std::size_t h = d.num ? hash(*d.num) : 0;
                 h = hash_mix(h, d.den ? hash(*d.den) : 0);
+                return hash_mix(tag, h);
+            },
+            [&](ScalarFn const& s) -> std::size_t
+            {
+                std::size_t h = static_cast<std::size_t>(s.kind);
+                h = hash_mix(h, s.operand ? hash(*s.operand) : 0);
+                return hash_mix(tag, h);
+            },
+            [&](Pow const& p) -> std::size_t
+            {
+                std::size_t h = p.base ? hash(*p.base) : 0;
+                h = hash_mix(h, p.exponent ? hash(*p.exponent) : 0);
                 return hash_mix(tag, h);
             },
         },

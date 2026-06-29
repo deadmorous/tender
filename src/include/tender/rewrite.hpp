@@ -115,6 +115,21 @@ auto rewrite_tree(Context& ctx, Expr const* e, F const& f) -> Expr const*
                 auto* body = rewrite_tree(ctx, s.body, f);
                 return body == s.body ? e : make_no_sum(ctx, s.index, body);
             },
+
+            // Scalar fields (vibe 000069).
+            [&](ScalarFn const& s) -> Expr const*
+            {
+                auto* op = rewrite_tree(ctx, s.operand, f);
+                return op == s.operand ? e : make_scalar_fn(ctx, s.kind, op);
+            },
+            [&](Pow const& s) -> Expr const*
+            {
+                auto* base = rewrite_tree(ctx, s.base, f);
+                auto* exp = rewrite_tree(ctx, s.exponent, f);
+                return (base == s.base && exp == s.exponent) ?
+                           e :
+                           make_pow(ctx, base, exp);
+            },
         },
         *e);
 

@@ -79,9 +79,25 @@ Missing (in dependency order):
 
 ## Milestones (each buildable + tested, per CLAUDE.md #1)
 
-- **M1 — Scalar fields.** Coordinate-variable atom + `ScalarFn`/`Pow` nodes +
-  rendering; interplay with existing scalar arithmetic.  *Alive:* can write
-  `r cos φ`, render it.
+- **M1 — Scalar fields.** ✅ DONE.  Coordinate-variable atom + `ScalarFn`/`Pow`
+  nodes + rendering; interplay with existing scalar arithmetic.  *Alive:* can
+  write `r cos φ`, render it.
+  - Coordinate = rank-0 `TensorObject` carrying a `CoordinateRef{chart_id,
+    slot}` trait (identity-neutral, like `well_known`); no new node, so it flows
+    through every visitor as a scalar atom — only the differentiator (M2) will
+    inspect the marker.  `chart_id 0` = unbound free coordinate.
+  - `ScalarFn{kind, operand}` (sin/cos/tan/exp/log/sqrt) and `Pow{base,
+    exponent}` are new Expr nodes *and* new `nf::Factor` types (scalar region),
+    threaded through structural_eq / expr_cmp / infer_rank / is_component_valued
+    / map_children / rewrite_tree / render and the Nf equal/compare/hash /
+    encapsulate / raise / match / e-graph (opaque-leaf via the Atom path).
+  - Render: `\cos\left(φ\right)`, `\sqrt{r^{2}}`, `r^{2}`; a scalar-field product
+    juxtaposes (`r \, \cos φ`) — `\cdot` stays reserved for numeric products.
+  - Python: `coordinate(name, chart_id=0, slot=0)`, `sin/cos/tan/exp/log/sqrt`,
+    `**` (`__pow__`).
+  - Tests: `tests/scalar_field_test.cpp`, `python/tests/test_scalar_field.py`
+    (679 C++ / 157 Python pass).  cos²+sin² round-trips unsimplified (the fold
+    to 1 is M3).
 - **M2 — Differentiation `∂_q`.** All rules + derivative table; `∂` of
   coordinates and of constant reference vectors.  *Alive:* `∂_r R`, `∂_φ R` give
   the step-3 tangent vectors.
@@ -136,5 +152,5 @@ coordinate mapping", which needs the scalar-field + differentiation foundations
 above.  Stage 5 (operators) then sits on M6.  Builds on [[basis-aware-indices-plan]]
 (vibe 000067) for the frame + naming and on the basis layer (vibe 000049).
 
-Status: **plan; scope confirmed** (decisions 0–3 settled).  Ready to start at
-**M1** (scalar fields).
+Status: **M1 done** (scalar fields landed; 679 C++ / 157 Python pass).  Next is
+**M2** (differentiation `∂_q`).  Decisions 0–3 settled.

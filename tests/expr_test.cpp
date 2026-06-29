@@ -433,6 +433,8 @@ TEST(Visit, DispatchesCorrectAlternative)
             [](Cross const&) {},
             [](ExplicitSum const&) {},
             [](NoSum const&) {},
+            [](ScalarFn const&) {},
+            [](Pow const&) {},
         },
         *e);
     EXPECT_TRUE(scalar_seen);
@@ -505,6 +507,15 @@ TEST(Visit, TreeDepthCounter)
         auto operator()(NoSum const& s) const -> int
         {
             return 1 + visit(*this, *s.body);
+        }
+        auto operator()(ScalarFn const& f) const -> int
+        {
+            return 1 + visit(*this, *f.operand);
+        }
+        auto operator()(Pow const& p) const -> int
+        {
+            return 1
+                   + std::max(visit(*this, *p.base), visit(*this, *p.exponent));
         }
     };
 

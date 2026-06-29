@@ -310,6 +310,18 @@ NB_MODULE(_core, m)
                 auto s = py_to_scalar(b, *a.ctx);
                 return derive(a, make_scalar_div(*a.ctx, a.expr, s));
             })
+        // ** = power (scalar field, vibe 000069)
+        .def(
+            "__pow__",
+            [](PyExpr const& a, PyExpr const& b) -> PyExpr
+            { return derive(a, make_pow(*a.ctx, a.expr, b.expr)); })
+        .def(
+            "__pow__",
+            [](PyExpr const& a, nb::object const& b) -> PyExpr
+            {
+                auto s = py_to_scalar(b, *a.ctx);
+                return derive(a, make_pow(*a.ctx, a.expr, s));
+            })
         // // = alternate double contraction (··); ':' is not a Python operator,
         // so ddot keeps the method form only.
         .def(
@@ -422,6 +434,43 @@ NB_MODULE(_core, m)
         },
         "ctx"_a = nb::none(),
         "Create the identity tensor.");
+
+    // ---- scalar fields (vibe 000069 M1) -------------------------------- //
+
+    m.def(
+        "coordinate",
+        [](std::string const& name, int chart_id, int slot, nb::object ctx_arg)
+            -> PyExpr
+        {
+            auto [ctx, keep] = resolve_ctx(ctx_arg);
+            return PyExpr{
+                keep,
+                ctx,
+                make_coordinate(*ctx, make_tensor_name(name), chart_id, slot)};
+        },
+        "name"_a,
+        "chart_id"_a = 0,
+        "slot"_a = 0,
+        "ctx"_a = nb::none(),
+        "Create a chart coordinate variable (rank-0 scalar field).  chart_id 0 "
+        "leaves it unbound to a chart.");
+
+    auto bind_scalar_fn =
+        [&m](char const* py_name, ScalarFnKind kind, char const* doc)
+    {
+        m.def(
+            py_name,
+            [kind](PyExpr const& a) -> PyExpr
+            { return derive(a, make_scalar_fn(*a.ctx, kind, a.expr)); },
+            "x"_a,
+            doc);
+    };
+    bind_scalar_fn("sin", ScalarFnKind::Sin, "Sine of a scalar field.");
+    bind_scalar_fn("cos", ScalarFnKind::Cos, "Cosine of a scalar field.");
+    bind_scalar_fn("tan", ScalarFnKind::Tan, "Tangent of a scalar field.");
+    bind_scalar_fn("exp", ScalarFnKind::Exp, "Exponential of a scalar field.");
+    bind_scalar_fn("log", ScalarFnKind::Log, "Natural log of a scalar field.");
+    bind_scalar_fn("sqrt", ScalarFnKind::Sqrt, "Square root of a scalar field.");
 
     m.def(
         "tr",

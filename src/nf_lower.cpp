@@ -320,6 +320,22 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
                 canonicalize_nf(ctx, d->left),
                 canonicalize_nf(ctx, d->right))};
 
+    // Scalar fields (vibe 000069): an elementary function / power becomes the
+    // corresponding scalar Factor over recursively canonical operand `Nf`s.
+    // (`tender::ScalarFn` / `tender::Pow` are the Expr nodes; the unqualified
+    // `make_scalar_fn` / `make_pow` here are this namespace's Factor builders.)
+    if (auto const* fn = std::get_if<tender::ScalarFn>(&factor->node))
+        return {
+            +1,
+            make_scalar_fn(ctx, fn->kind, canonicalize_nf(ctx, fn->operand))};
+    if (auto const* pw = std::get_if<tender::Pow>(&factor->node))
+        return {
+            +1,
+            make_pow(
+                ctx,
+                canonicalize_nf(ctx, pw->base),
+                canonicalize_nf(ctx, pw->exponent))};
+
     throw std::invalid_argument(
         "encapsulate: unsupported factor node (a nested ⊗ inside an operand "
         "awaits fence distribution)");
@@ -708,6 +724,17 @@ auto raise_factor(Context& ctx, Factor const& f) -> Expr const*
                         return make_transpose(ctx, operand);
                 }
                 return operand; // unreachable
+            },
+            // Scalar fields: rebuild the Expr node (the qualified `tender::`
+            // factories — the unqualified names are this namespace's Factor
+            // builders) over raised operand Nfs.
+            [&](ScalarFn const& s) -> Expr const* {
+                return tender::make_scalar_fn(
+                    ctx, s.kind, raise(ctx, *s.operand));
+            },
+            [&](Pow const& p) -> Expr const* {
+                return tender::make_pow(
+                    ctx, raise(ctx, *p.base), raise(ctx, *p.exponent));
             },
         },
         f);
