@@ -2909,5 +2909,210 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*
     return implicitize(ctx, fold_equal_addends_structural(ctx, prepped));
 }
 
+// ---- partial differentiation (vibe 000069 M2) --------------------------
+
+namespace
+{
+
+// The coordinate we differentiate by: its display name and chart identity.
+struct DiffCoord final
+{
+    TensorName name;
+    CoordinateRef ref;
+};
+
+// Recognise a coordinate variable (rank-0 TensorObject with a CoordinateRef).
+auto as_diff_coord(Expr const* e) -> std::optional<DiffCoord>
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    if (!t || !t->traits || !t->traits->coordinate)
+        return std::nullopt;
+    return DiffCoord{t->name, *t->traits->coordinate};
+}
+
+// Does the target object `t` denote the same coordinate as `q`?  Identity is
+// the chart slot (chart_id, slot) plus the display name — distinct coordinates
+// of a chart differ in slot, and unbound (chart_id 0) coordinates differ in
+// name.
+auto is_same_coord(TensorObject const& t, DiffCoord const& q) -> bool
+{
+    if (!t.traits || !t.traits->coordinate)
+        return false;
+    auto const& c = *t.traits->coordinate;
+    return t.name == q.name && c.chart_id == q.ref.chart_id
+           && c.slot == q.ref.slot;
+}
+
+// The outer derivative d/du of an elementary function f, as an Expr in `u`
+// (the chain rule then multiplies by u' = ∂u).
+auto scalar_fn_derivative(Context& ctx, ScalarFnKind kind, Expr const* u)
+    -> Expr const*
+{
+    auto one = [&] { return make_scalar(ctx, Rational{1}); };
+    switch (kind)
+    {
+        case ScalarFnKind::Sin:
+            return make_scalar_fn(ctx, ScalarFnKind::Cos, u);
+        case ScalarFnKind::Cos:
+            return make_negate(ctx, make_scalar_fn(ctx, ScalarFnKind::Sin, u));
+        case ScalarFnKind::Tan: // 1 / cos(u)^2
+            return make_scalar_div(
+                ctx,
+                one(),
+                make_pow(
+                    ctx,
+                    make_scalar_fn(ctx, ScalarFnKind::Cos, u),
+                    make_scalar(ctx, Rational{2})));
+        case ScalarFnKind::Exp:
+            return make_scalar_fn(ctx, ScalarFnKind::Exp, u);
+        case ScalarFnKind::Log: // 1 / u
+            return make_scalar_div(ctx, one(), u);
+        case ScalarFnKind::Sqrt: // 1 / (2 sqrt(u))
+            return make_scalar_div(
+                ctx,
+                one(),
+                make_tensor_product(
+                    ctx,
+                    make_scalar(ctx, Rational{2}),
+                    make_scalar_fn(ctx, ScalarFnKind::Sqrt, u)));
+    }
+    return make_scalar(ctx, Rational{0}); // unreachable
+}
+
+// The raw (un-canonicalized) derivative tree.
+auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
+{
+    auto zero = [&] { return make_scalar(ctx, Rational{0}); };
+    // Leibniz over a binary operator `op(l, r)`: op(l', r) + op(l, r').
+    auto leibniz =
+        [&](auto make_op, Expr const* l, Expr const* r) -> Expr const*
+    {
+        return make_sum(
+            ctx,
+            make_op(ctx, diff(ctx, l, q), r),
+            make_op(ctx, l, diff(ctx, r, q)));
+    };
+    return visit(
+        Overloads{
+            [&](TensorObject const& t) -> Expr const*
+            {
+                // Only the matching coordinate varies; everything else (other
+                // coordinates, reference vectors, parameters, I/δ/ε) is
+                // constant.
+                return is_same_coord(t, q) ? make_scalar(ctx, Rational{1}) :
+                                             zero();
+            },
+            [&](ScalarLiteral const&) -> Expr const* { return zero(); },
+            [&](Negate const& n) -> Expr const*
+            { return make_negate(ctx, diff(ctx, n.operand, q)); },
+            [&](Trace const& u) -> Expr const*
+            { return make_trace(ctx, diff(ctx, u.operand, q)); },
+            [&](VectorInvariant const& u) -> Expr const*
+            { return make_vector_invariant(ctx, diff(ctx, u.operand, q)); },
+            [&](Transpose const& u) -> Expr const*
+            { return make_transpose(ctx, diff(ctx, u.operand, q)); },
+            [&](Sum const& s) -> Expr const* {
+                return make_sum(
+                    ctx, diff(ctx, s.left, q), diff(ctx, s.right, q));
+            },
+            [&](Difference const& s) -> Expr const* {
+                return make_difference(
+                    ctx, diff(ctx, s.left, q), diff(ctx, s.right, q));
+            },
+            [&](TensorProduct const& s) -> Expr const* // Leibniz; ⊗ order kept
+            { return leibniz(make_tensor_product, s.left, s.right); },
+            [&](ScalarDiv const& s) -> Expr const*
+            {
+                // (l/r)' = (l' r − l r') / r².
+                auto* num = make_difference(
+                    ctx,
+                    make_tensor_product(ctx, diff(ctx, s.left, q), s.right),
+                    make_tensor_product(ctx, s.left, diff(ctx, s.right, q)));
+                return make_scalar_div(
+                    ctx,
+                    num,
+                    make_pow(ctx, s.right, make_scalar(ctx, Rational{2})));
+            },
+            [&](Dot const& s) -> Expr const*
+            { return leibniz(make_dot, s.left, s.right); },
+            [&](DDot const& s) -> Expr const*
+            { return leibniz(make_ddot, s.left, s.right); },
+            [&](DDotAlt const& s) -> Expr const*
+            { return leibniz(make_ddot_alt, s.left, s.right); },
+            [&](Cross const& s) -> Expr const*
+            { return leibniz(make_cross, s.left, s.right); },
+            [&](ExplicitSum const& s) -> Expr const*
+            {
+                // ∂ commutes with summation; the bound (cardinality) is
+                // constant.
+                return make_explicit_sum(
+                    ctx, s.index, diff(ctx, s.body, q), s.bound);
+            },
+            [&](NoSum const& s) -> Expr const*
+            { return make_no_sum(ctx, s.index, diff(ctx, s.body, q)); },
+            [&](ScalarFn const& f) -> Expr const*
+            {
+                // Chain rule: f(u)' = f'(u) · u'.
+                return make_tensor_product(
+                    ctx,
+                    scalar_fn_derivative(ctx, f.kind, f.operand),
+                    diff(ctx, f.operand, q));
+            },
+            [&](Pow const& p) -> Expr const*
+            {
+                auto* bprime = diff(ctx, p.base, q);
+                if (std::holds_alternative<ScalarLiteral>(p.exponent->node))
+                {
+                    // Constant (literal) exponent: (b^n)' = n · b^{n−1} · b'.
+                    auto* n_minus_1 = make_difference(
+                        ctx, p.exponent, make_scalar(ctx, Rational{1}));
+                    return make_tensor_product(
+                        ctx,
+                        make_tensor_product(
+                            ctx, p.exponent, make_pow(ctx, p.base, n_minus_1)),
+                        bprime);
+                }
+                // General power rule:
+                //   (b^e)' = b^e · ( e'·log(b) + e·b'/b ).
+                auto* eprime = diff(ctx, p.exponent, q);
+                auto* inner = make_sum(
+                    ctx,
+                    make_tensor_product(
+                        ctx,
+                        eprime,
+                        make_scalar_fn(ctx, ScalarFnKind::Log, p.base)),
+                    make_scalar_div(
+                        ctx,
+                        make_tensor_product(ctx, p.exponent, bprime),
+                        p.base));
+                return make_tensor_product(
+                    ctx, make_pow(ctx, p.base, p.exponent), inner);
+            },
+        },
+        *e);
+}
+
+} // namespace
+
+auto partial(Context& ctx, Expr const* e, Expr const* coord) -> Expr const*
+{
+    auto q = as_diff_coord(coord);
+    if (!q)
+        throw std::invalid_argument(
+            "partial: coord must be a coordinate variable (make_coordinate)");
+    auto const* raw = diff(ctx, e, *q);
+    // Canonicalize to fold the 0/1 noise the rules generate.  canonicalize
+    // throws on an ill-formed implicit sum; then the raw form is the best we
+    // can return (it is still a correct derivative).
+    try
+    {
+        return canonicalize(ctx, raw);
+    }
+    catch (std::invalid_argument const&)
+    {
+        return raw;
+    }
+}
+
 } // namespace steps
 } // namespace tender

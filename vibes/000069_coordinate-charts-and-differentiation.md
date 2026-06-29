@@ -98,9 +98,24 @@ Missing (in dependency order):
   - Tests: `tests/scalar_field_test.cpp`, `python/tests/test_scalar_field.py`
     (679 C++ / 157 Python pass).  cos²+sin² round-trips unsimplified (the fold
     to 1 is M3).
-- **M2 — Differentiation `∂_q`.** All rules + derivative table; `∂` of
+- **M2 — Differentiation `∂_q`.** ✅ DONE.  All rules + derivative table; `∂` of
   coordinates and of constant reference vectors.  *Alive:* `∂_r R`, `∂_φ R` give
   the step-3 tangent vectors.
+  - `steps::partial(ctx, e, coord)` (Python `td.partial(e, coord)`).  Coord must
+    be a `make_coordinate` (else `invalid_argument`/`ValueError`).
+  - Rules: linearity (+/−/Negate); Leibniz over ⊗ and every contraction
+    (·,:,··,×); quotient over /; chain rule over the elementary functions
+    (table: sin→cos, cos→−sin, tan→1/cos², exp→exp, log→1/u, sqrt→1/(2√u)) and
+    powers (literal exponent → n·bⁿ⁻¹·b'; general → bᵉ(e'·log b + e·b'/b));
+    ∂ commutes with Σ binders.  Constancy from the coordinate marker: only the
+    matching (name+chart_id+slot) coordinate → 1, every other coordinate and
+    non-coordinate symbol → 0.  Output is canonicalized (folds the 0/1 noise),
+    guarded by try/catch like fold_equal_addends.
+  - Does *not* fold `r^{2-1}→r¹` or `pow(x,1)→x` (that is M3); tests compare to
+    the un-folded form.  ∂_φ(r cos φ·i + r sin φ·j) = −r sin φ·i + r cos φ·j
+    exactly (the spec's step-3 tangent g_φ).
+  - Tests in `tests/scalar_field_test.cpp` (TEST(Partial,…)) +
+    `python/tests/test_scalar_field.py`.  685 C++ / 161 Python pass.
 - **M3 — Targeted scalar simplifier + per-coordinate domains.** The specific
   trig/`√(square)`/power identities the geometry needs, using the chart's
   coordinate domains where required (`r ≥ 0` ⇒ `√(r²) → r`).  *Alive:*
@@ -152,5 +167,6 @@ coordinate mapping", which needs the scalar-field + differentiation foundations
 above.  Stage 5 (operators) then sits on M6.  Builds on [[basis-aware-indices-plan]]
 (vibe 000067) for the frame + naming and on the basis layer (vibe 000049).
 
-Status: **M1 done** (scalar fields landed; 679 C++ / 157 Python pass).  Next is
-**M2** (differentiation `∂_q`).  Decisions 0–3 settled.
+Status: **M1 + M2 done** (scalar fields + `∂_q`; 685 C++ / 161 Python pass).
+Next is **M3** (targeted scalar simplifier + per-coordinate domains).  Decisions
+0–3 settled.

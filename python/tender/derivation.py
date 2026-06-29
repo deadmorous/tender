@@ -40,6 +40,7 @@ __all__ = [
     "fold_equal_addends",
     "fold_equal_addends_structural",
     "canonicalize",
+    "partial",
     "implicitize",
     "simplify",
     "Identity",
@@ -239,6 +240,20 @@ def canonicalize(expr):
     equal under the normal-form theory T0 produce structurally identical results.
     """
     return _d._canonicalize(expr)
+
+
+def partial(expr, coord):
+    """Partial derivative ∂expr/∂coord (vibe 000069 M2).
+
+    ``coord`` must be a coordinate variable (``tender.coordinate``).  Applies
+    linearity, the Leibniz product rule over ``*`` and every contraction, the
+    quotient rule over ``/``, and the chain rule over the elementary functions
+    and powers.  Only the matching coordinate differentiates to 1; every other
+    coordinate and every non-coordinate symbol (reference vectors, parameters,
+    literals) is constant.  The result is canonicalized, so e.g.
+    ``partial(r * cos(phi), phi)`` is ``-r sin phi``.
+    """
+    return _d._partial(expr, coord)
 
 
 def implicitize(expr):

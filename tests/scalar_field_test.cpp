@@ -134,3 +134,118 @@ TEST(ScalarField, ScalarProductFoldsLikeTerms)
         make_tensor_product(ctx, make_scalar(ctx, Rational{3}), term);
     EXPECT_TRUE(algebraic_eq(ctx, sum, three_term));
 }
+
+// ---- partial differentiation (vibe 000069 M2) --------------------------
+
+namespace
+{
+
+auto coord(Context& ctx, char const* name, int slot) -> Expr const*
+{
+    return make_coordinate(ctx, make_tensor_name(name), 0, slot);
+}
+
+} // namespace
+
+TEST(Partial, CoordinateAndConstants)
+{
+    Context ctx;
+    auto* r = coord(ctx, "r", 0);
+    auto* phi = coord(ctx, "\\varphi", 1);
+    // ∂_r r = 1, ∂_r φ = 0 (a different coordinate), ∂_r 5 = 0.
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::partial(ctx, r, r), make_scalar(ctx, Rational{1})));
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::partial(ctx, phi, r), make_scalar(ctx, Rational{0})));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::partial(ctx, make_scalar(ctx, Rational{5}), r),
+        make_scalar(ctx, Rational{0})));
+    // ∂_r of a constant reference vector i = 0.
+    auto* i = make_tensor_object(ctx, make_tensor_name("i"), {}, 1);
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::partial(ctx, i, r), make_scalar(ctx, Rational{0})));
+}
+
+TEST(Partial, RejectsNonCoordinate)
+{
+    Context ctx;
+    auto* r = coord(ctx, "r", 0);
+    auto* plain = make_tensor_object(ctx, make_tensor_name("a"), {}, 0);
+    EXPECT_THROW(steps::partial(ctx, r, plain), std::invalid_argument);
+}
+
+TEST(Partial, ChainRuleOnElementaryFunctions)
+{
+    Context ctx;
+    auto* phi = coord(ctx, "\\varphi", 0);
+    // ∂_φ sin φ = cos φ;  ∂_φ cos φ = −sin φ.
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::partial(ctx, make_scalar_fn(ctx, ScalarFnKind::Sin, phi), phi),
+        make_scalar_fn(ctx, ScalarFnKind::Cos, phi)));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::partial(ctx, make_scalar_fn(ctx, ScalarFnKind::Cos, phi), phi),
+        make_negate(ctx, make_scalar_fn(ctx, ScalarFnKind::Sin, phi))));
+}
+
+TEST(Partial, PowerRule)
+{
+    Context ctx;
+    auto* r = coord(ctx, "r", 0);
+    // ∂_r r² = 2 r¹ (M2 leaves the r^{2-1} unfolded; M3 folds the exponent).
+    auto* r2 = make_pow(ctx, r, make_scalar(ctx, Rational{2}));
+    auto* expected = make_tensor_product(
+        ctx,
+        make_scalar(ctx, Rational{2}),
+        make_pow(ctx, r, make_scalar(ctx, Rational{1})));
+    EXPECT_TRUE(algebraic_eq(ctx, steps::partial(ctx, r2, r), expected));
+}
+
+TEST(Partial, QuotientRule)
+{
+    Context ctx;
+    auto* r = coord(ctx, "r", 0);
+    // ∂_r (1/r) = (−1)/r².  The quotient rule emits the sign in the numerator;
+    // canonicalize keeps that distinct from −(1/r²) (it does not lift a sign
+    // out of a division), so the expected form carries the −1 in the numerator
+    // too.
+    auto* inv = make_scalar_div(ctx, make_scalar(ctx, Rational{1}), r);
+    auto* expected = make_scalar_div(
+        ctx,
+        make_scalar(ctx, Rational{-1}),
+        make_pow(ctx, r, make_scalar(ctx, Rational{2})));
+    EXPECT_TRUE(algebraic_eq(ctx, steps::partial(ctx, inv, r), expected));
+}
+
+TEST(Partial, PolarTangentVectors)
+{
+    Context ctx;
+    auto* r = coord(ctx, "r", 0);
+    auto* phi = coord(ctx, "\\varphi", 1);
+    auto* i = make_tensor_object(ctx, make_tensor_name("i"), {}, 1);
+    auto* j = make_tensor_object(ctx, make_tensor_name("j"), {}, 1);
+    auto* cos = make_scalar_fn(ctx, ScalarFnKind::Cos, phi);
+    auto* sin = make_scalar_fn(ctx, ScalarFnKind::Sin, phi);
+
+    // R = r cos φ · i + r sin φ · j.
+    auto* x = make_tensor_product(ctx, make_tensor_product(ctx, r, cos), i);
+    auto* y = make_tensor_product(ctx, make_tensor_product(ctx, r, sin), j);
+    auto* R = make_sum(ctx, x, y);
+
+    // g_r = ∂_r R = cos φ · i + sin φ · j.
+    auto* g_r = make_sum(
+        ctx,
+        make_tensor_product(ctx, cos, i),
+        make_tensor_product(ctx, sin, j));
+    EXPECT_TRUE(algebraic_eq(ctx, steps::partial(ctx, R, r), g_r));
+
+    // g_φ = ∂_φ R = −r sin φ · i + r cos φ · j.
+    auto* g_phi = make_sum(
+        ctx,
+        make_negate(
+            ctx, make_tensor_product(ctx, make_tensor_product(ctx, r, sin), i)),
+        make_tensor_product(ctx, make_tensor_product(ctx, r, cos), j));
+    EXPECT_TRUE(algebraic_eq(ctx, steps::partial(ctx, R, phi), g_phi));
+}

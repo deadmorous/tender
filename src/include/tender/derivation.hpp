@@ -198,6 +198,21 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*;
 // normalization).
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*;
 
+// Partial derivative ∂/∂q of `e` with respect to the coordinate variable
+// `coord` (vibe 000069 M2).  `coord` must be a coordinate (a rank-0 object
+// carrying a CoordinateRef trait, from make_coordinate); otherwise
+// std::invalid_argument.
+//
+// Rules: linearity over +/−/Negate; the Leibniz product rule over ⊗ and every
+// contraction (·, :, ··, ×); the quotient rule over /; the chain rule over the
+// elementary functions (sin/cos/tan/exp/log/sqrt) and powers; and ∂ commutes
+// with summation binders.  Constancy is decided by the coordinate marker: only
+// the matching coordinate differentiates to 1; every other coordinate, and
+// every non-coordinate symbol (reference basis vectors, parameters, literals,
+// I/δ/ε), is constant and differentiates to 0.  The result is canonicalized, so
+// the 0-and 1-folding leaves a clean expression (e.g. ∂_φ(r cos φ) → −r sin φ).
+auto partial(Context& ctx, Expr const* e, Expr const* coord) -> Expr const*;
+
 // Inverse of the implicit-sum convention: strip a null-bound ExplicitSum whose
 // index is already an implicit Einstein contraction in its body (so the
 // explicit wrapper is redundant), returning the expression in the implicit form

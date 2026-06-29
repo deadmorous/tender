@@ -769,6 +769,15 @@ NB_MODULE(_core, m)
         "like terms combined; no distribution).");
 
     md.def(
+        "_partial",
+        [](PyExpr const& e, PyExpr const& coord) -> PyExpr
+        { return derive(e, steps::partial(*e.ctx, e.expr, coord.expr)); },
+        "expr"_a,
+        "coord"_a,
+        "Partial derivative ∂/∂coord of expr with respect to a coordinate "
+        "variable (chain/product/quotient rules; constants → 0).");
+
+    md.def(
         "_implicitize",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::implicitize(*e.ctx, e.expr)); },

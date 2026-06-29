@@ -1,6 +1,8 @@
 """Scalar fields (vibe 000069 M1): coordinate variables, elementary functions,
 powers — construction, rendering, and the canonicalize round trip."""
 
+import pytest
+
 import tender as t
 import tender.derivation as td
 
@@ -59,3 +61,46 @@ def test_pythagorean_pair_survives_unsimplified():
     phi = t.coordinate(r"\varphi", ctx=ctx)
     s = td.canonicalize(t.cos(phi) ** 2 + t.sin(phi) ** 2)
     assert "\\cos" in s.latex() and "\\sin" in s.latex()
+
+
+# ---- partial differentiation (vibe 000069 M2) -------------------------------
+
+
+def test_partial_coordinate_and_constant():
+    ctx = t.Context()
+    r = t.coordinate("r", slot=0, ctx=ctx)
+    phi = t.coordinate(r"\varphi", slot=1, ctx=ctx)
+    assert td.partial(r, r).latex() == "1"
+    assert td.partial(phi, r).latex() == "0"
+    # A reference vector is constant.
+    i = t.tensor("i", rank=1, ctx=ctx)
+    assert td.partial(i, r).latex() == "0"
+
+
+def test_partial_chain_rule():
+    ctx = t.Context()
+    phi = t.coordinate(r"\varphi", ctx=ctx)
+    assert td.partial(t.sin(phi), phi).latex() == r"\cos\left(\varphi\right)"
+
+
+def test_partial_rejects_non_coordinate():
+    ctx = t.Context()
+    r = t.coordinate("r", ctx=ctx)
+    a = t.tensor("a", rank=0, ctx=ctx)
+    with pytest.raises(ValueError):
+        td.partial(r, a)
+
+
+def test_partial_polar_tangent_vectors():
+    ctx = t.Context()
+    r = t.coordinate("r", slot=0, ctx=ctx)
+    phi = t.coordinate(r"\varphi", slot=1, ctx=ctx)
+    i = t.tensor("i", rank=1, ctx=ctx)
+    j = t.tensor("j", rank=1, ctx=ctx)
+    R = r * t.cos(phi) * i + r * t.sin(phi) * j
+
+    g_r = td.canonicalize(t.cos(phi) * i + t.sin(phi) * j)
+    assert td.algebraic_eq(td.partial(R, r), g_r)
+
+    g_phi = td.canonicalize(-(r * t.sin(phi) * i) + r * t.cos(phi) * j)
+    assert td.algebraic_eq(td.partial(R, phi), g_phi)
