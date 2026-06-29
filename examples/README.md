@@ -62,6 +62,7 @@ MathJax.
 | `basis_dot_product.py` / `.ipynb` | Dot product through a basis: deriving a·b = b·a from first principles |
 | `cross_identity.py` / `.ipynb` | Cross with the identity tensor: deriving the theorem a × I = I × a |
 | `basis_aware_coordinates.py` / `.ipynb` | Basis-aware indices & coordinate notation: familiar letters (i,j,k / e_r), basis identity, basis-aware steps, custom naming & labels |
+| `curvilinear_operators.py` / `.ipynb` | Curvilinear ∇/div/rot/Δ derived from a coordinate mapping: tangent basis → metric → scale factors → physical frame → ∂e connection → operators (cylindrical & spherical) |
 
 ## Notebook hygiene — stripping outputs before committing
 
