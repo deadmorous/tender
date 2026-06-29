@@ -84,9 +84,10 @@ cyl = tc.CoordinateChart(
 )
 names = ["r", r"\theta", "z"]
 
+R = cyl.radius_vector()
 show(
     "0. The mapping  ->  position vector R",
-    [("R = x i + y j + z k", cyl.radius_vector())],
+    [("R = x i + y j + z k", R)],
 )
 
 # ---------------------------------------------------------------------------
@@ -163,30 +164,45 @@ show(
 # 5. Differential operators  (∇ = Σ_i (1/h_i) e_i ∂_{q^i})
 # ---------------------------------------------------------------------------
 
-# grad surfaces the curvilinear 1/h factors: ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z.
+# Each operator is ∇ applied formally and returns an invariant tensor — no
+# component tuples.  Fields are tensors in the reference frame: r e_r is built
+# straight from the physical basis vector.  grad raises the rank by one, so
+# ∇R = Σ_i e_i ⊗ e_i = I, the identity tensor; grad surfaces the 1/h factors,
+# i.e. ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z.
+grad_R = cyl.gradient(R)  # ∇R = I
 grad_theta = cyl.gradient(th)  # ∇θ = (1/r) e_θ
 grad_r2 = cyl.gradient(r**2)  # ∇r² = 2r e_r
 
 # div, Δ and rot on concrete fields, matching the textbook curvilinear formulas.
-zero = tender.scalar(0, ctx=ctx)
-div_radial = cyl.divergence([r, zero, zero])  # ∇·(r e_r) = 2
+v_radial = r * e[0]  # r e_r
+v_swirl = r * e[1]  # r e_θ
+div_radial = cyl.divergence(v_radial)  # ∇·(r e_r) = 2
 lap_r2 = cyl.laplacian(r**2)  # Δ(r²) = 4
-rot_swirl = cyl.rot([zero, r, zero])  # ∇×(r e_θ) = 2 e_z
+rot_swirl = cyl.rot(v_swirl)  # ∇×(r e_θ) = 2 e_z
+
+
+def simp(expr):
+    """Distribute ⊗ over + and simplify, for clean display/comparison."""
+    return td.simplify_scalars(td.expand_products(expr))
+
 
 show(
     "5. Differential operators",
     [
-        ("∇θ", field_latex(grad_theta, names)),
-        ("∇(r²)", field_latex(grad_r2, names)),
+        ("∇R  (rank-2 identity I)", simp(grad_R)),
+        ("∇θ", simp(grad_theta)),
+        ("∇(r²)", simp(grad_r2)),
         ("∇·(r e_r)", div_radial),
         ("Δ(r²)", lap_r2),
-        ("∇×(r e_θ)", field_latex(rot_swirl, names)),
+        ("∇×(r e_θ)", simp(rot_swirl)),
     ],
 )
+# ∇R is the identity tensor I = Σ_i e_i ⊗ e_i.
+identity = e[0] * e[0] + e[1] * e[1] + e[2] * e[2]
+assert td.algebraic_eq(simp(grad_R), simp(identity))
 assert td.algebraic_eq(div_radial, tender.scalar(2, ctx=ctx))
 assert td.algebraic_eq(lap_r2, tender.scalar(4, ctx=ctx))
-assert is_zero(rot_swirl[0]) and is_zero(rot_swirl[1])
-assert td.algebraic_eq(rot_swirl[2], tender.scalar(2, ctx=ctx))
+assert td.algebraic_eq(simp(rot_swirl), simp(tender.scalar(2, ctx=ctx) * e[2]))
 
 # ---------------------------------------------------------------------------
 # 6. The same machinery, spherical:  x = r sinθ cosφ, y = r sinθ sinφ, z = r cosθ

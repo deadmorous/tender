@@ -382,23 +382,62 @@ auto make_cyl(Context& ctx) -> Cyl
             {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}}};
 }
 
+// Equality of two invariant tensors written in the reference frame: distribute
+// ⊗ over + (canonicalize alone does not) and simplify, then compare.
+auto inv_eq(Context& ctx, Expr const* a, Expr const* b) -> bool
+{
+    auto* na = steps::simplify_scalars(ctx, steps::expand_products(ctx, a));
+    auto* nb = steps::simplify_scalars(ctx, steps::expand_products(ctx, b));
+    return algebraic_eq(ctx, na, nb);
+}
+
 } // namespace
 
-// Step 7: ∇f.  The 1/h_i factors are the curvilinear content — for cylindrical
-// ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r.
+// The operators are ∇ applied formally and return invariant tensors.  ∇R is the
+// identity tensor I = Σ_i e_i ⊗ e_i, div R = 3, rot R = 0 — no component
+// bookkeeping, no special-casing.
+TEST(Chart, CartesianGradientIsIdentity)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+    auto* R = radius_vector(ctx, chart);
+
+    Expr const* I = nullptr;
+    for (int k = 0; k < 3; ++k)
+    {
+        auto* dyad = mul(ctx, ref.basis(k), ref.basis(k));
+        I = I ? make_sum(ctx, I, dyad) : dyad;
+    }
+    EXPECT_TRUE(inv_eq(ctx, gradient(ctx, chart, R), I)); // ∇R = I
+    EXPECT_TRUE(
+        eq(ctx, divergence(ctx, chart, R), make_scalar(ctx, Rational{3})));
+    EXPECT_TRUE(eq(ctx, rot(ctx, chart, R), s0(ctx)));
+}
+
+// ∇f: the 1/h_i factors are the curvilinear content — for cylindrical
+// ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r,
+// each returned as the invariant vector in the reference frame.
 TEST(Chart, CylindricalGradient)
 {
     Context ctx;
     auto c = make_cyl(ctx);
-    EXPECT_TRUE(coeffs_eq(
+    auto fb = physical_basis(ctx, c.chart);
+
+    // ∇θ = (1/r) e_θ
+    EXPECT_TRUE(inv_eq(
         ctx,
         gradient(ctx, c.chart, c.th),
-        {s0(ctx), make_scalar_div(ctx, s1(ctx), c.r), s0(ctx)}));
+        mul(ctx, make_scalar_div(ctx, s1(ctx), c.r), fb.basis(1))));
+    // ∇r² = 2r e_r
     auto* r2 = make_pow(ctx, c.r, make_scalar(ctx, Rational{2}));
-    EXPECT_TRUE(coeffs_eq(
+    EXPECT_TRUE(inv_eq(
         ctx,
         gradient(ctx, c.chart, r2),
-        {mul(ctx, make_scalar(ctx, Rational{2}), c.r), s0(ctx), s0(ctx)}));
+        mul(ctx, mul(ctx, make_scalar(ctx, Rational{2}), c.r), fb.basis(0))));
 }
 
 // div of the radial field v = r e_r is 2 (= (1/r) ∂_r(r·r)).
@@ -406,8 +445,9 @@ TEST(Chart, CylindricalDivergence)
 {
     Context ctx;
     auto c = make_cyl(ctx);
-    auto* d = divergence(ctx, c.chart, {c.r, s0(ctx), s0(ctx)});
-    EXPECT_TRUE(eq(ctx, d, make_scalar(ctx, Rational{2})));
+    auto* v = mul(ctx, c.r, physical_basis(ctx, c.chart).basis(0)); // r e_r
+    EXPECT_TRUE(
+        eq(ctx, divergence(ctx, c.chart, v), make_scalar(ctx, Rational{2})));
 }
 
 // Δr² = 4 in cylindrical (and Δr² = 6 in spherical) — div(grad) composed.
@@ -438,13 +478,15 @@ TEST(Chart, SphericalLaplacian)
         eq(ctx, laplacian(ctx, chart, r2), make_scalar(ctx, Rational{6})));
 }
 
-// rot of the rigid-rotation field v = r e_θ is the uniform vorticity 2 e_z.
+// rot of the rigid-rotation field v = r e_θ is the uniform vorticity 2 e_z =
+// 2k.
 TEST(Chart, CylindricalRot)
 {
     Context ctx;
     auto c = make_cyl(ctx);
-    EXPECT_TRUE(coeffs_eq(
+    auto* v = mul(ctx, c.r, physical_basis(ctx, c.chart).basis(1)); // r e_θ
+    EXPECT_TRUE(inv_eq(
         ctx,
-        rot(ctx, c.chart, {s0(ctx), c.r, s0(ctx)}),
-        {s0(ctx), s0(ctx), make_scalar(ctx, Rational{2})}));
+        rot(ctx, c.chart, v),
+        mul(ctx, make_scalar(ctx, Rational{2}), c.ref.basis(2))));
 }

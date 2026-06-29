@@ -1,6 +1,7 @@
 #include <tender/chart.hpp>
 
 #include <tender/derivation.hpp>
+#include <tender/rewrite.hpp>
 
 #include <cmath>
 #include <stdexcept>
@@ -40,36 +41,40 @@ auto product_of(Context& ctx, std::vector<Expr const*> const& factors)
     return p ? p : make_scalar(ctx, Rational{1});
 }
 
-// Bilinearly expand a dot of (sums/differences/negations of) vector terms:
-// (A + B)·C → A·C + B·C, so the basis-vector dots inside reach
-// simplify_basis_dot.  Leaves a leaf-vs-leaf pair as a single Dot.
-auto distribute_dot(Context& ctx, Expr const* l, Expr const* r) -> Expr const*
+// Bilinearly expand a contraction `op` (· or ×) of (sums/differences/negations
+// of) vector terms: (A + B) op C → (A op C) + (B op C), so the leaf
+// basis-vector contractions surface for the basis steps.  A leaf-vs-leaf pair
+// stays a single `op` node.
+using BinOp = Expr const* (*)(Context&, Expr const*, Expr const*);
+
+auto distribute_bilinear(Context& ctx, Expr const* l, Expr const* r, BinOp op)
+    -> Expr const*
 {
     if (auto const* s = std::get_if<Sum>(&l->node))
         return make_sum(
             ctx,
-            distribute_dot(ctx, s->left, r),
-            distribute_dot(ctx, s->right, r));
+            distribute_bilinear(ctx, s->left, r, op),
+            distribute_bilinear(ctx, s->right, r, op));
     if (auto const* d = std::get_if<Difference>(&l->node))
         return make_difference(
             ctx,
-            distribute_dot(ctx, d->left, r),
-            distribute_dot(ctx, d->right, r));
+            distribute_bilinear(ctx, d->left, r, op),
+            distribute_bilinear(ctx, d->right, r, op));
     if (auto const* n = std::get_if<Negate>(&l->node))
-        return make_negate(ctx, distribute_dot(ctx, n->operand, r));
+        return make_negate(ctx, distribute_bilinear(ctx, n->operand, r, op));
     if (auto const* s = std::get_if<Sum>(&r->node))
         return make_sum(
             ctx,
-            distribute_dot(ctx, l, s->left),
-            distribute_dot(ctx, l, s->right));
+            distribute_bilinear(ctx, l, s->left, op),
+            distribute_bilinear(ctx, l, s->right, op));
     if (auto const* d = std::get_if<Difference>(&r->node))
         return make_difference(
             ctx,
-            distribute_dot(ctx, l, d->left),
-            distribute_dot(ctx, l, d->right));
+            distribute_bilinear(ctx, l, d->left, op),
+            distribute_bilinear(ctx, l, d->right, op));
     if (auto const* n = std::get_if<Negate>(&r->node))
-        return make_negate(ctx, distribute_dot(ctx, l, n->operand));
-    return make_dot(ctx, l, r);
+        return make_negate(ctx, distribute_bilinear(ctx, l, n->operand, op));
+    return op(ctx, l, r);
 }
 
 // Divide a vector field (sum of scalar ⊗ frame-vector terms) by the scalar h:
@@ -179,18 +184,99 @@ auto positive_sqrt(Context& ctx, Expr const* g) -> Expr const*
         ctx, make_scalar_fn(ctx, ScalarFnKind::Sqrt, g));
 }
 
-// The invariant dot u·v of two vectors expressed in the orthonormal reference
-// frame `ref`, reduced to a scalar field: distribute the dot bilinearly over
-// the sums so the basis-vector dots surface, turn the concrete frame-vector
-// legs into Kronecker deltas, evaluate them, and simplify.
-auto reduce_scalar_dot(
-    Context& ctx, Basis const& ref, Expr const* u, Expr const* v) -> Expr const*
+// The invariant dot u·v of two tensors expressed in the orthonormal reference
+// frame `ref`, reduced: distribute the dot bilinearly over the sums so the
+// basis-vector dots surface, turn the concrete frame-vector legs into Kronecker
+// deltas, evaluate them, and simplify.  For two vectors the result is a scalar.
+auto reduce_dot(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
+    -> Expr const*
 {
-    Expr const* e = distribute_dot(ctx, u, v);
+    Expr const* e = distribute_bilinear(ctx, u, v, &make_dot);
     e = simplify_basis_dot(ctx, e, ref);
     e = steps::canonicalize(ctx, e);
     e = steps::eval_delta_concrete(ctx, e);
     e = steps::fold_arithmetic(ctx, e);
+    e = steps::canonicalize(ctx, e);
+    return steps::simplify_scalars(ctx, e);
+}
+
+// The sign of the permutation (a, b, c) of {0,1,2}: +1 even, −1 odd, 0 on any
+// repeat — the 3D Levi-Civita symbol.
+auto eps3(int a, int b, int c) -> int
+{
+    if (a == b || b == c || a == c)
+        return 0;
+    return ((b - a) * (c - a) * (c - b) > 0) ? 1 : -1;
+}
+
+// One side of a frame-vector cross: split a (scalar-weighted) reference frame
+// vector into its scalar factor (null when bare) and its direction index k
+// (matched structurally against ref.basis(k)).  nullopt if it is not a single
+// scaled frame vector.
+struct FrameSide final
+{
+    Expr const* scalar;
+    int dir;
+};
+auto split_frame(Context& ctx, Basis const& ref, Expr const* e)
+    -> std::optional<FrameSide>
+{
+    std::vector<Expr const*> facs;
+    flatten(e, facs);
+    int dir = -1;
+    std::vector<Expr const*> scalars;
+    for (auto const* f: facs)
+    {
+        int matched = -1;
+        for (int k = 0; k < ref.dim(); ++k)
+            if (structural_eq(f, ref.basis(k)))
+            {
+                matched = k;
+                break;
+            }
+        if (matched < 0)
+            scalars.push_back(f);
+        else if (dir < 0)
+            dir = matched;
+        else
+            return std::nullopt; // two frame vectors — a dyad, not a vector
+    }
+    if (dir < 0)
+        return std::nullopt;
+    return FrameSide{scalars.empty() ? nullptr : product_of(ctx, scalars), dir};
+}
+
+// The invariant cross u×v of two vectors in the right-handed orthonormal
+// reference frame `ref`, reduced to a frame vector: distribute bilinearly, then
+// fold each frame-vector cross via e_a × e_b = Σ_c ε_{abc} e_c.
+auto reduce_cross(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
+    -> Expr const*
+{
+    Expr const* e = distribute_bilinear(ctx, u, v, &make_cross);
+    e = rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const* x = std::get_if<Cross>(&node->node);
+            if (!x)
+                return node;
+            auto l = split_frame(c, ref, x->left);
+            auto r = split_frame(c, ref, x->right);
+            if (!l || !r)
+                return node;
+            if (l->dir == r->dir)
+                return make_scalar(c, Rational{0}); // parallel
+            Expr const* res = nullptr;
+            for (int m = 0; m < ref.dim(); ++m)
+                if (int s = eps3(l->dir, r->dir, m))
+                    res = s > 0 ? ref.basis(m) : make_negate(c, ref.basis(m));
+            if (l->scalar)
+                res = make_tensor_product(c, l->scalar, res);
+            if (r->scalar)
+                res = make_tensor_product(c, r->scalar, res);
+            return res;
+        });
     e = steps::canonicalize(ctx, e);
     return steps::simplify_scalars(ctx, e);
 }
@@ -213,7 +299,7 @@ auto connection_at(
     std::vector<Expr const*> out;
     out.reserve(n);
     for (int k = 0; k < n; ++k)
-        out.push_back(reduce_scalar_dot(ctx, chart.reference, de, pb.basis(k)));
+        out.push_back(reduce_dot(ctx, chart.reference, de, pb.basis(k)));
     return out;
 }
 
@@ -223,13 +309,10 @@ auto over_h(Context& ctx, Expr const* x, Expr const* h) -> Expr const*
     return steps::simplify_scalars(ctx, make_scalar_div(ctx, x, h));
 }
 
-// The sign of the permutation (a, b, c) of {0,1,2}: +1 even, −1 odd, 0 on any
-// repeat — the 3D Levi-Civita symbol.
-auto eps3(int a, int b, int c) -> int
+// The directional derivative (1/h_i) ∂_{q^i} T scaled out: the scalar 1/h_i.
+auto inv_h(Context& ctx, Expr const* h) -> Expr const*
 {
-    if (a == b || b == c || a == c)
-        return 0;
-    return ((b - a) * (c - a) * (c - b) > 0) ? 1 : -1;
+    return over_h(ctx, make_scalar(ctx, Rational{1}), h);
 }
 
 } // namespace
@@ -262,7 +345,7 @@ auto metric_component(Context& ctx, CoordinateChart const& chart, int i, int j)
 {
     Expr const* gi = tangent_vector(ctx, chart, i);
     Expr const* gj = tangent_vector(ctx, chart, j);
-    return reduce_scalar_dot(ctx, chart.reference, gi, gj);
+    return reduce_dot(ctx, chart.reference, gi, gj);
 }
 
 auto scale_factor(Context& ctx, CoordinateChart const& chart, int i)
@@ -324,56 +407,72 @@ auto connection_coefficients(
 
 // ---- differential operators (vibe 000069 M6) ---------------------------
 //
-// In the orthonormal physical frame, ∇ = Σ_i (1/h_i) e_i ∂_{q^i}.  Applying it
-// with the Leibniz rule and the connection coefficients γ^k_{ij} = (∂_j
-// e_i)·e_k (M5) gives the textbook curvilinear operators; nothing is
-// hand-tabulated. Vector fields are carried by their physical components v =
-// Σ_i v_i e_i.
+// ∇ is the invariant operator ∇ = Σ_i e_i (1/h_i) ∂_{q^i}, and an operator is
+// just ∇ applied by the formal rule — no component bookkeeping.  A field is an
+// invariant Expr written in the constant reference frame, so ∂_{q^i} (the M2
+// differentiator) acts on the *whole* expression by Leibniz: differentiating a
+// field given in the moving frame e_j(q) differentiates those e_j too, and the
+// connection (∂e) terms fall out on their own.  Each operator is
+//
+//     ∇ ⊙ T = Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T          (⊙ = ⊗, ·, or ×)
+//
+// reduced back to an invariant tensor.  grad raises the rank by one, div lowers
+// it by one, rot keeps it (3D); nothing assumes a particular basis for T.
 
-auto gradient(Context& ctx, CoordinateChart const& chart, Expr const* f)
-    -> std::vector<Expr const*>
+// Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T, with `combine(e_i, ∂_i T)` choosing ⊗ / · / ×.
+template <typename Combine>
+auto del_apply(
+    Context& ctx, CoordinateChart const& chart, Expr const* T, Combine combine)
+    -> Expr const*
 {
     int const n = static_cast<int>(chart.coords.size());
-    std::vector<Expr const*> out;
-    out.reserve(n);
-    for (int i = 0; i < n; ++i)
-        out.push_back(over_h(
-            ctx,
-            steps::partial(ctx, f, chart.coords[i]),
-            scale_factor(ctx, chart, i)));
-    return out;
-}
-
-auto divergence(
-    Context& ctx,
-    CoordinateChart const& chart,
-    std::vector<Expr const*> const& v) -> Expr const*
-{
-    int const n = static_cast<int>(chart.coords.size());
-    if (static_cast<int>(v.size()) != n)
-        throw std::invalid_argument("divergence: component count != dimension");
     Basis const pb = physical_basis(ctx, chart);
-    std::vector<Expr const*> h(n);
-    for (int i = 0; i < n; ++i)
-        h[i] = scale_factor(ctx, chart, i);
-
-    // ∇·v = Σ_i (1/h_i) e_i·∂_{q^i} v, v = Σ_j v_j e_j.  With the Leibniz rule
-    // and e_i·e_k = δ_ik this is Σ_i (1/h_i) ∂_i v_i + Σ_{i,j} (1/h_i) v_j
-    // γ^i_{ji} (γ^i_{ji} = (∂_{q^i} e_j)·e_i).
+    // Distribute the field into a clean sum of monomials first, so a field
+    // handed in as scalar ⊗ (moving-frame vector) — e.g. r ⊗ e_r —
+    // differentiates and reduces without a stray un-fenced ⊗ tripping
+    // canonicalize.
+    T = steps::expand_products(ctx, T);
     Expr const* acc = make_scalar(ctx, Rational{0});
     for (int i = 0; i < n; ++i)
-        acc = make_sum(
-            ctx,
-            acc,
-            over_h(ctx, steps::partial(ctx, v[i], chart.coords[i]), h[i]));
-    for (int i = 0; i < n; ++i)
-        for (int j = 0; j < n; ++j)
-        {
-            Expr const* g = connection_at(ctx, chart, pb, j, i)[i];
-            acc = make_sum(
-                ctx, acc, over_h(ctx, make_tensor_product(ctx, v[j], g), h[i]));
-        }
-    return steps::simplify_scalars(ctx, acc);
+    {
+        Expr const* di = steps::simplify_scalars(
+            ctx, steps::partial(ctx, T, chart.coords[i]));
+        // A coordinate the field does not depend on contributes nothing — and
+        // there is no vector to contract e_i with (skip, don't dot against 0).
+        if (auto const* s = std::get_if<ScalarLiteral>(&di->node);
+            s && s->value.is_zero())
+            continue;
+        Expr const* leg = combine(pb.basis(i), di);
+        Expr const* term = make_tensor_product(
+            ctx, inv_h(ctx, scale_factor(ctx, chart, i)), leg);
+        acc = make_sum(ctx, acc, term);
+    }
+    acc = steps::expand_products(ctx, acc);
+    return steps::simplify_scalars(ctx, steps::canonicalize(ctx, acc));
+}
+
+auto gradient(Context& ctx, CoordinateChart const& chart, Expr const* f)
+    -> Expr const*
+{
+    // grad T = Σ_i (1/h_i) e_i ⊗ ∂_i T (rank + 1); e.g. ∇R = Σ_i e_i ⊗ e_i = I.
+    return del_apply(
+        ctx,
+        chart,
+        f,
+        [&](Expr const* ei, Expr const* di)
+        { return make_tensor_product(ctx, ei, di); });
+}
+
+auto divergence(Context& ctx, CoordinateChart const& chart, Expr const* v)
+    -> Expr const*
+{
+    // div v = Σ_i (1/h_i) e_i · ∂_i v (rank − 1).
+    return del_apply(
+        ctx,
+        chart,
+        v,
+        [&](Expr const* ei, Expr const* di)
+        { return reduce_dot(ctx, chart.reference, ei, di); });
 }
 
 auto laplacian(Context& ctx, CoordinateChart const& chart, Expr const* f)
@@ -382,62 +481,19 @@ auto laplacian(Context& ctx, CoordinateChart const& chart, Expr const* f)
     return divergence(ctx, chart, gradient(ctx, chart, f));
 }
 
-auto rot(
-    Context& ctx,
-    CoordinateChart const& chart,
-    std::vector<Expr const*> const& v) -> std::vector<Expr const*>
+auto rot(Context& ctx, CoordinateChart const& chart, Expr const* v)
+    -> Expr const*
 {
-    int const n = static_cast<int>(chart.coords.size());
-    if (n != 3)
+    if (chart.reference.dim() != 3)
         throw std::invalid_argument(
             "rot: only the 3D cross product is defined");
-    if (static_cast<int>(v.size()) != 3)
-        throw std::invalid_argument("rot: component count != dimension");
-    Basis const pb = physical_basis(ctx, chart);
-    std::vector<Expr const*> h(3);
-    for (int i = 0; i < 3; ++i)
-        h[i] = scale_factor(ctx, chart, i);
-    // gamma[a][d] = coefficients of ∂_{q^d} e_a (over k).
-    std::vector<std::vector<std::vector<Expr const*>>> gamma(
-        3, std::vector<std::vector<Expr const*>>(3));
-    for (int a = 0; a < 3; ++a)
-        for (int d = 0; d < 3; ++d)
-            gamma[a][d] = connection_at(ctx, chart, pb, a, d);
-
-    auto add = [&](Expr const* acc, int s, Expr const* term) -> Expr const*
-    { return make_sum(ctx, acc, s > 0 ? term : make_negate(ctx, term)); };
-
-    // ∇×v = Σ_i (1/h_i) e_i × ∂_{q^i} v; with e_i×e_k = ε_{ikm} e_m the m-th
-    // physical component is Σ_{i,j} (1/h_i) ε_{ijm} ∂_i v_j +
-    // Σ_{i,j,k} (1/h_i) ε_{ikm} v_j γ^k_{ji}.
-    std::vector<Expr const*> out(3, nullptr);
-    for (int m = 0; m < 3; ++m)
-    {
-        Expr const* acc = make_scalar(ctx, Rational{0});
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j)
-                if (int s = eps3(i, j, m))
-                    acc =
-                        add(acc,
-                            s,
-                            over_h(
-                                ctx,
-                                steps::partial(ctx, v[j], chart.coords[i]),
-                                h[i]));
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j)
-                for (int k = 0; k < 3; ++k)
-                    if (int s = eps3(i, k, m))
-                        acc = add(
-                            acc,
-                            s,
-                            over_h(
-                                ctx,
-                                make_tensor_product(ctx, v[j], gamma[j][i][k]),
-                                h[i]));
-        out[m] = steps::simplify_scalars(ctx, acc);
-    }
-    return out;
+    // rot v = ∇×v = Σ_i (1/h_i) e_i × ∂_i v.
+    return del_apply(
+        ctx,
+        chart,
+        v,
+        [&](Expr const* ei, Expr const* di)
+        { return reduce_cross(ctx, chart.reference, ei, di); });
 }
 
 } // namespace tender

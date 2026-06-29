@@ -192,21 +192,31 @@ Missing (in dependency order):
 - **M6 — Differential operators.** ✅ DONE.  `∇`, grad, div, rot, Laplacian using
   the chart's `∂`, scale factors, and `∂e` table.  *Alive:* the cylindrical
   `∇ = e_r ∂_r + (1/r) e_φ ∂_φ + e_z ∂_z` and the curvilinear div/Laplacian.
-  - All four sit on `∇ = Σ_i (1/h_i) e_i ∂_{q^i}` applied with the Leibniz rule
-    + the M5 connection coefficients γ^k_{ij} — nothing hand-tabulated; the
-    `1/h` and `∂e` factors fall out.  A vector field is its physical components
-    v = Σ_i v_i e_i (one scalar per direction).
-  - `gradient(ctx, chart, f)` = [(1/h_i) ∂_i f] (cylindrical ⇒ ∇θ = (1/r) e_θ,
-    ∇r² = 2r e_r — the headline ∇ structure).  `divergence` =
-    Σ_i (1/h_i) ∂_i v_i + Σ_{i,j} (1/h_i) v_j γ^i_{ji}.  `laplacian` = div∘grad.
-    `rot` (3D, right-handed physical frame) = Σ_i (1/h_i) e_i × ∂_i v via
-    ε_{ikm} and γ.
-  - Internals refactored: `connection_at` takes a precomputed physical basis so
-    the operators build the frame once; `over_h`, `eps3` helpers.
-  - Verified: cylindrical div(r e_r)=2, Δr²=4, rot(r e_θ)=2 e_z; spherical
-    Δr²=6.  Python: `chart.gradient/divergence/laplacian/rot`.
-  - Tests: `tests/chart_test.cpp` (Cylindrical Gradient/Divergence/Laplacian/Rot,
-    SphericalLaplacian) + `python/tests/test_chart.py`.  705 C++ / 178 Python.
+  - **Formal rule, invariant tensors in and out** (revised after first cut):
+    each operator is just `∇ ⊙ T = Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T` (⊙ = ⊗/·/×) on
+    an invariant `Expr` field written in the *constant* reference frame.  `∂_{q^i}`
+    (M2) acts on the whole expression by Leibniz, so a field given in the moving
+    frame e_j(q) differentiates those e_j too and the connection (∂e) terms fall
+    out on their own — **no component tuples, no hand-rolled Christoffel terms in
+    the operators**.  (The first version returned per-direction component lists
+    and only handled scalars correctly; replaced per the "follow the formal rule,
+    don't invent representations" directive.)
+  - `gradient` raises rank by 1 (∇R = Σ_i e_i⊗e_i = **I**; ∇f a vector, surfacing
+    the 1/h: cyl ∇θ = (1/r) e_θ, ∇r² = 2r e_r).  `divergence` lowers it by 1
+    (e_i · ∂_i v).  `laplacian` = div∘grad.  `rot` (3D, right-handed reference)
+    = e_i × ∂_i v.  All return invariant `Expr`.
+  - Internals: `del_apply` (the shared Σ_i (1/h_i) e_i ⊙ ∂_i loop; expands the
+    field first, skips coords the field doesn't depend on so we never dot/cross
+    against 0); `reduce_dot` (distribute→simplify_basis_dot→δ→eval→simplify),
+    `reduce_cross` (frame table e_a×e_b = Σ_c ε_{abc} e_c via `split_frame`+`eps3`),
+    `distribute_bilinear`, `inv_h`.  M5's `connection_coefficients` stays as a
+    queryable artifact, no longer load-bearing for the operators.
+  - Verified: ∇R = I, div R = 3, rot R = 0 (Cartesian); cyl div(r e_r)=2, Δr²=4,
+    rot(r e_θ)=2 e_z; spherical Δr²=6.  Python: `chart.gradient/divergence/
+    laplacian/rot` (all PyExpr in/out).
+  - Tests: `tests/chart_test.cpp` (CartesianGradientIsIdentity, Cylindrical
+    Gradient/Divergence/Laplacian/Rot, SphericalLaplacian) +
+    `python/tests/test_chart.py`.  706 C++ / 179 Python.
 
 ## Decisions (settled)
 
@@ -246,7 +256,8 @@ above.  Stage 5 (operators) then sits on M6.  Builds on [[basis-aware-indices-pl
 
 Status: **COMPLETE — M1–M6 all done** (scalar fields + `∂_q` + targeted
 simplifier + coordinate chart / geometry pipeline + `∂_j e_i` / connection
-coefficients + differential operators ∇/grad/div/rot/Laplacian; 705 C++ / 178
+coefficients + differential operators ∇/grad/div/rot/Laplacian; 706 C++ / 179
 Python pass).  The full vibe-000069 plan is implemented; ∇ and the curvilinear
-div/rot/Laplacian are derived end-to-end from a coordinate mapping.  Decisions
-0–3 settled.
+div/rot/Laplacian are derived end-to-end from a coordinate mapping, the operators
+taking and returning invariant tensors by the formal rule (∇R = I).  Decisions
+0–3 settled.  Showcase: `examples/curvilinear_operators.{py,ipynb}`.

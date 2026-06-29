@@ -83,37 +83,37 @@ struct CoordinateChart final
 
 // ---- differential operators (vibe 000069 M6) ---------------------------
 //
-// In the orthonormal physical frame ∇ = Σ_i (1/h_i) e_i ∂_{q^i}.  These
-// operators apply it with the Leibniz rule and the M5 connection coefficients,
-// so the curvilinear 1/h and ∂e factors fall out rather than being tabulated.
-// A vector field is carried by its physical components v = Σ_i v_i e_i (a
-// scalar field per direction, in coordinate order).
+// ∇ is the invariant operator ∇ = Σ_i e_i (1/h_i) ∂_{q^i}, and each operator is
+// just ∇ applied by the formal rule
+//
+//     ∇ ⊙ T = Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T          (⊙ = ⊗, ·, or ×)
+//
+// to an invariant tensor field T (an `Expr`, written in the constant reference
+// frame).  ∂_{q^i} acts on the whole expression by Leibniz, so a field given in
+// the moving frame e_j(q) differentiates those e_j too and the connection (∂e)
+// terms fall out on their own — no components, no hand-tabulated Christoffels.
+// Every operator takes and returns an invariant `Expr`; nothing assumes a
+// particular basis for T.
 
-// grad f = Σ_i (1/h_i)(∂_{q^i} f) e_i, returned as physical components.  In
-// cylindrical this is the familiar ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z.
+// grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, raising the rank by one.  For a scalar
+// f this is the familiar ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z; for the
+// position vector R it is the identity tensor ∇R = Σ_i e_i ⊗ e_i = I.
 [[nodiscard]] auto gradient(
-    Context& ctx,
-    CoordinateChart const& chart,
-    Expr const* f) -> std::vector<Expr const*>;
+    Context& ctx, CoordinateChart const& chart, Expr const* f) -> Expr const*;
 
-// div v = ∇·v as a scalar field, from ∇·v = Σ_i (1/h_i) ∂_i v_i +
-// Σ_{i,j} (1/h_i) v_j γ^i_{ji}.  Throws std::invalid_argument unless v has one
-// component per coordinate.
+// div v = ∇·v = Σ_i (1/h_i) e_i · ∂_{q^i} v, lowering the rank by one (a vector
+// field → a scalar).
 [[nodiscard]] auto divergence(
-    Context& ctx,
-    CoordinateChart const& chart,
-    std::vector<Expr const*> const& v) -> Expr const*;
+    Context& ctx, CoordinateChart const& chart, Expr const* v) -> Expr const*;
 
 // Laplacian Δf = div(grad f) as a scalar field.
 [[nodiscard]] auto laplacian(
     Context& ctx, CoordinateChart const& chart, Expr const* f) -> Expr const*;
 
-// rot v = ∇×v, returned as physical components.  3D only (the cross product),
-// and the physical frame is taken right-handed in coordinate order (standard
-// for the well-known charts); throws std::invalid_argument otherwise.
+// rot v = ∇×v = Σ_i (1/h_i) e_i × ∂_{q^i} v.  3D only (the cross product), and
+// the reference frame is taken right-handed (standard for the well-known
+// charts); throws std::invalid_argument otherwise.
 [[nodiscard]] auto rot(
-    Context& ctx,
-    CoordinateChart const& chart,
-    std::vector<Expr const*> const& v) -> std::vector<Expr const*>;
+    Context& ctx, CoordinateChart const& chart, Expr const* v) -> Expr const*;
 
 } // namespace tender

@@ -1216,30 +1216,21 @@ NB_MODULE(_core, m)
             "(one scalar per direction k).")
         .def(
             "gradient",
-            [](PyChart const& c, PyExpr const& f) -> std::vector<PyExpr>
-            {
-                auto gs = gradient(*c.ctx, c.chart, f.expr);
-                std::vector<PyExpr> out;
-                out.reserve(gs.size());
-                for (auto const* e: gs)
-                    out.push_back(PyExpr{c.ctx_keep, c.ctx, e});
-                return out;
+            [](PyChart const& c, PyExpr const& f) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, gradient(*c.ctx, c.chart, f.expr)};
             },
             "f"_a,
-            "∇f = Σ_i (1/h_i)(∂_{q^i} f) e_i, as physical components.")
+            "grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, an invariant tensor of rank "
+            "one higher (∇R = I, ∇f a vector).")
         .def(
             "divergence",
-            [](PyChart const& c, std::vector<PyExpr> const& v) -> PyExpr
-            {
-                std::vector<Expr const*> vs;
-                vs.reserve(v.size());
-                for (auto const& e: v)
-                    vs.push_back(e.expr);
+            [](PyChart const& c, PyExpr const& v) -> PyExpr {
                 return PyExpr{
-                    c.ctx_keep, c.ctx, divergence(*c.ctx, c.chart, vs)};
+                    c.ctx_keep, c.ctx, divergence(*c.ctx, c.chart, v.expr)};
             },
             "v"_a,
-            "∇·v from the physical components v = Σ_i v_i e_i, as a scalar.")
+            "div v = ∇·v = Σ_i (1/h_i) e_i · ∂_{q^i} v (rank one lower).")
         .def(
             "laplacian",
             [](PyChart const& c, PyExpr const& f) -> PyExpr {
@@ -1250,20 +1241,8 @@ NB_MODULE(_core, m)
             "Δf = div(grad f), as a scalar.")
         .def(
             "rot",
-            [](PyChart const& c,
-               std::vector<PyExpr> const& v) -> std::vector<PyExpr>
-            {
-                std::vector<Expr const*> vs;
-                vs.reserve(v.size());
-                for (auto const& e: v)
-                    vs.push_back(e.expr);
-                auto rs = rot(*c.ctx, c.chart, vs);
-                std::vector<PyExpr> out;
-                out.reserve(rs.size());
-                for (auto const* e: rs)
-                    out.push_back(PyExpr{c.ctx_keep, c.ctx, e});
-                return out;
-            },
+            [](PyChart const& c, PyExpr const& v) -> PyExpr
+            { return PyExpr{c.ctx_keep, c.ctx, rot(*c.ctx, c.chart, v.expr)}; },
             "v"_a,
-            "∇×v from the physical components v, as physical components (3D).");
+            "rot v = ∇×v = Σ_i (1/h_i) e_i × ∂_{q^i} v (3D, invariant vector).");
 }
