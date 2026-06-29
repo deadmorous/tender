@@ -102,3 +102,60 @@ def test_spherical_azimuth_row():
     fb = chart.physical_basis()
     i, j = ref.basis(0), ref.basis(1)
     assert td.algebraic_eq(fb.basis(2), -(t.sin(ph)) * i + t.cos(ph) * j)
+
+
+def test_polar_basis_derivative():
+    ctx = t.Context()
+    _, _, _, chart = make_polar(ctx)
+    fb = chart.physical_basis()
+    # radial derivatives vanish
+    assert td.algebraic_eq(chart.basis_derivative(0, 0), t.scalar(0, ctx=ctx))
+    assert td.algebraic_eq(chart.basis_derivative(1, 0), t.scalar(0, ctx=ctx))
+    # d_phi e_r = e_phi, d_phi e_phi = -e_r
+    assert td.algebraic_eq(chart.basis_derivative(0, 1), fb.basis(1))
+    assert td.algebraic_eq(chart.basis_derivative(1, 1), -fb.basis(0))
+
+
+def _coeffs_eq(got, exp):
+    return len(got) == len(exp) and all(
+        td.algebraic_eq(g, e) for g, e in zip(got, exp)
+    )
+
+
+def test_polar_connection_coefficients():
+    ctx = t.Context()
+    _, _, _, chart = make_polar(ctx)
+    z = t.scalar(0, ctx=ctx)
+    one = t.scalar(1, ctx=ctx)
+    assert _coeffs_eq(chart.connection_coefficients(0, 0), [z, z])
+    assert _coeffs_eq(chart.connection_coefficients(1, 0), [z, z])
+    assert _coeffs_eq(chart.connection_coefficients(0, 1), [z, one])
+    assert _coeffs_eq(
+        chart.connection_coefficients(1, 1), [t.scalar(-1, ctx=ctx), z]
+    )
+
+
+def test_spherical_connection_coefficients():
+    ctx = t.Context()
+    ref = tb.wcs(ctx)
+    r = t.coordinate("r", chart_id=3, slot=0, nonneg=True, ctx=ctx)
+    th = t.coordinate(r"\theta", chart_id=3, slot=1, ctx=ctx)
+    ph = t.coordinate(r"\phi", chart_id=3, slot=2, ctx=ctx)
+    chart = tc.CoordinateChart(
+        ref,
+        [r, th, ph],
+        [
+            r * t.sin(th) * t.cos(ph),
+            r * t.sin(th) * t.sin(ph),
+            r * t.cos(th),
+        ],
+    )
+    z = t.scalar(0, ctx=ctx)
+    one = t.scalar(1, ctx=ctx)
+    # d_theta e_r = e_theta; d_phi e_r = sin(theta) e_phi.
+    assert _coeffs_eq(chart.connection_coefficients(0, 1), [z, one, z])
+    assert _coeffs_eq(chart.connection_coefficients(0, 2), [z, z, t.sin(th)])
+    # d_phi e_phi = -sin(theta) e_r - cos(theta) e_theta.
+    assert _coeffs_eq(
+        chart.connection_coefficients(2, 2), [-t.sin(th), -t.cos(th), z]
+    )

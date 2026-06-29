@@ -62,4 +62,23 @@ struct CoordinateChart final
 [[nodiscard]] auto physical_basis(Context& ctx, CoordinateChart const& chart)
     -> Basis;
 
+// The derivative ∂_{q^j} e_i of the i-th physical basis vector (step 6), as a
+// vector in the constant reference frame: since e_i is written in the constant
+// reference vectors, ∂ acts only on its scalar coefficients.  For polar
+// ∂_φ e_r = −sin φ i + cos φ j (= e_φ), ∂_φ e_φ = −cos φ i − sin φ j (= −e_r),
+// and the ∂_r derivatives vanish.  Throws std::out_of_range on a bad index.
+[[nodiscard]] auto basis_derivative(
+    Context& ctx, CoordinateChart const& chart, int i, int j) -> Expr const*;
+
+// The physical-basis connection (rotation) coefficients γ^k_{ij} of step 6,
+// re-expressing ∂_{q^j} e_i = Σ_k γ^k_{ij} e_k in the local frame: the returned
+// vector holds, for k = 0…dim−1, the scalar projection (∂_{q^j} e_i)·e_k (the
+// physical frame being orthonormal).  For polar ∂_φ e_r = e_φ gives {0, 1} and
+// ∂_φ e_φ = −e_r gives {−1, 0}.  Throws std::out_of_range on a bad index.
+[[nodiscard]] auto connection_coefficients(
+    Context& ctx,
+    CoordinateChart const& chart,
+    int i,
+    int j) -> std::vector<Expr const*>;
+
 } // namespace tender

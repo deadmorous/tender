@@ -179,6 +179,22 @@ auto positive_sqrt(Context& ctx, Expr const* g) -> Expr const*
         ctx, make_scalar_fn(ctx, ScalarFnKind::Sqrt, g));
 }
 
+// The invariant dot u·v of two vectors expressed in the orthonormal reference
+// frame `ref`, reduced to a scalar field: distribute the dot bilinearly over
+// the sums so the basis-vector dots surface, turn the concrete frame-vector
+// legs into Kronecker deltas, evaluate them, and simplify.
+auto reduce_scalar_dot(
+    Context& ctx, Basis const& ref, Expr const* u, Expr const* v) -> Expr const*
+{
+    Expr const* e = distribute_dot(ctx, u, v);
+    e = simplify_basis_dot(ctx, e, ref);
+    e = steps::canonicalize(ctx, e);
+    e = steps::eval_delta_concrete(ctx, e);
+    e = steps::fold_arithmetic(ctx, e);
+    e = steps::canonicalize(ctx, e);
+    return steps::simplify_scalars(ctx, e);
+}
+
 } // namespace
 
 auto radius_vector(Context& ctx, CoordinateChart const& chart) -> Expr const*
@@ -209,13 +225,7 @@ auto metric_component(Context& ctx, CoordinateChart const& chart, int i, int j)
 {
     Expr const* gi = tangent_vector(ctx, chart, i);
     Expr const* gj = tangent_vector(ctx, chart, j);
-    Expr const* e = distribute_dot(ctx, gi, gj);
-    e = simplify_basis_dot(ctx, e, chart.reference);
-    e = steps::canonicalize(ctx, e);
-    e = steps::eval_delta_concrete(ctx, e);
-    e = steps::fold_arithmetic(ctx, e);
-    e = steps::canonicalize(ctx, e);
-    return steps::simplify_scalars(ctx, e);
+    return reduce_scalar_dot(ctx, chart.reference, gi, gj);
 }
 
 auto scale_factor(Context& ctx, CoordinateChart const& chart, int i)
@@ -248,6 +258,44 @@ auto physical_basis(Context& ctx, CoordinateChart const& chart) -> Basis
         make_tensor_name("e"),
         Handedness::Right,
         BasisNaming{.value_names = std::move(value_names)});
+}
+
+auto basis_derivative(Context& ctx, CoordinateChart const& chart, int i, int j)
+    -> Expr const*
+{
+    int const n = static_cast<int>(chart.coords.size());
+    if (i < 0 || i >= n || j < 0 || j >= n)
+        throw std::out_of_range("basis_derivative: index out of range");
+    // e_i lives in the constant reference frame, so ∂_{q^j} differentiates only
+    // its scalar coefficients (the reference vectors are constant → 0).
+    Expr const* ei = physical_basis(ctx, chart).basis(i);
+    return steps::simplify_scalars(
+        ctx, steps::partial(ctx, ei, chart.coords[j]));
+}
+
+auto connection_coefficients(
+    Context& ctx,
+    CoordinateChart const& chart,
+    int i,
+    int j) -> std::vector<Expr const*>
+{
+    int const n = static_cast<int>(chart.coords.size());
+    if (i < 0 || i >= n || j < 0 || j >= n)
+        throw std::out_of_range("connection_coefficients: index out of range");
+    Basis const pb = physical_basis(ctx, chart);
+    Expr const* de = steps::simplify_scalars(
+        ctx, steps::partial(ctx, pb.basis(i), chart.coords[j]));
+    // A vanishing derivative collapses to the scalar 0 (rank 0); every
+    // coefficient is then 0 (and there is no vector to project).
+    if (infer_rank(de) == std::optional<int>{0})
+        return std::vector<Expr const*>(n, make_scalar(ctx, Rational{0}));
+    // The physical frame being orthonormal, the k-th coefficient of
+    // ∂_j e_i = Σ_k γ^k_{ij} e_k is the projection (∂_j e_i)·e_k.
+    std::vector<Expr const*> out;
+    out.reserve(n);
+    for (int k = 0; k < n; ++k)
+        out.push_back(reduce_scalar_dot(ctx, chart.reference, de, pb.basis(k)));
+    return out;
 }
 
 } // namespace tender

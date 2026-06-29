@@ -245,3 +245,109 @@ TEST(Chart, SphericalAzimuthRow)
         mul(ctx, cos_(ctx, ph), ref.basis(1)));
     EXPECT_TRUE(eq(ctx, fb.basis(2), ep_exp));
 }
+
+namespace
+{
+
+auto s0(Context& ctx) -> Expr const*
+{
+    return make_scalar(ctx, Rational{0});
+}
+auto s1(Context& ctx) -> Expr const*
+{
+    return make_scalar(ctx, Rational{1});
+}
+
+// Compare a connection-coefficient vector against an expected list.
+auto coeffs_eq(
+    Context& ctx,
+    std::vector<Expr const*> const& got,
+    std::vector<Expr const*> const& exp) -> bool
+{
+    if (got.size() != exp.size())
+        return false;
+    for (std::size_t k = 0; k < got.size(); ++k)
+        if (!algebraic_eq(ctx, got[k], exp[k]))
+            return false;
+    return true;
+}
+
+} // namespace
+
+// Step 6: ∂_{q^j} e_i in the reference frame.  ∂_φ e_r = e_φ, ∂_φ e_φ = −e_r,
+// and the radial derivatives vanish.
+TEST(Chart, PolarBasisDerivative)
+{
+    Context ctx;
+    auto p = make_polar(ctx);
+    auto fb = physical_basis(ctx, p.chart);
+
+    EXPECT_TRUE(eq(ctx, basis_derivative(ctx, p.chart, 0, 0), s0(ctx)));
+    EXPECT_TRUE(eq(ctx, basis_derivative(ctx, p.chart, 1, 0), s0(ctx)));
+    // ∂_φ e_r = e_φ.
+    EXPECT_TRUE(eq(ctx, basis_derivative(ctx, p.chart, 0, 1), fb.basis(1)));
+    // ∂_φ e_φ = −e_r.
+    EXPECT_TRUE(
+        eq(ctx,
+           basis_derivative(ctx, p.chart, 1, 1),
+           make_negate(ctx, fb.basis(0))));
+}
+
+// Step 6 as connection (rotation) coefficients γ^k_{ij}: ∂_φ e_r = e_φ gives
+// {0, 1}, ∂_φ e_φ = −e_r gives {−1, 0}, the radial rows vanish.
+TEST(Chart, PolarConnectionCoefficients)
+{
+    Context ctx;
+    auto p = make_polar(ctx);
+
+    EXPECT_TRUE(coeffs_eq(
+        ctx, connection_coefficients(ctx, p.chart, 0, 0), {s0(ctx), s0(ctx)}));
+    EXPECT_TRUE(coeffs_eq(
+        ctx, connection_coefficients(ctx, p.chart, 1, 0), {s0(ctx), s0(ctx)}));
+    EXPECT_TRUE(coeffs_eq(
+        ctx, connection_coefficients(ctx, p.chart, 0, 1), {s0(ctx), s1(ctx)}));
+    EXPECT_TRUE(coeffs_eq(
+        ctx,
+        connection_coefficients(ctx, p.chart, 1, 1),
+        {make_scalar(ctx, Rational{-1}), s0(ctx)}));
+}
+
+// Spherical rotation coefficients (the curvilinear payoff): ∂_φ e_r = sinθ e_φ,
+// ∂_φ e_θ = cosθ e_φ, ∂_φ e_φ = −sinθ e_r − cosθ e_θ.
+TEST(Chart, SphericalConnectionCoefficients)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 3, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 3, 1);
+    auto* ph = make_coordinate(ctx, make_tensor_name("\\phi"), 3, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, ph},
+        {mul(ctx, mul(ctx, r, sin_(ctx, th)), cos_(ctx, ph)),
+         mul(ctx, mul(ctx, r, sin_(ctx, th)), sin_(ctx, ph)),
+         mul(ctx, r, cos_(ctx, th))}};
+
+    // ∂_θ e_r = e_θ.
+    EXPECT_TRUE(coeffs_eq(
+        ctx,
+        connection_coefficients(ctx, chart, 0, 1),
+        {s0(ctx), s1(ctx), s0(ctx)}));
+    // ∂_φ e_r = sinθ e_φ.
+    EXPECT_TRUE(coeffs_eq(
+        ctx,
+        connection_coefficients(ctx, chart, 0, 2),
+        {s0(ctx), s0(ctx), sin_(ctx, th)}));
+    // ∂_φ e_θ = cosθ e_φ.
+    EXPECT_TRUE(coeffs_eq(
+        ctx,
+        connection_coefficients(ctx, chart, 1, 2),
+        {s0(ctx), s0(ctx), cos_(ctx, th)}));
+    // ∂_φ e_φ = −sinθ e_r − cosθ e_θ.
+    EXPECT_TRUE(coeffs_eq(
+        ctx,
+        connection_coefficients(ctx, chart, 2, 2),
+        {make_negate(ctx, sin_(ctx, th)),
+         make_negate(ctx, cos_(ctx, th)),
+         s0(ctx)}));
+}

@@ -169,9 +169,26 @@ Missing (in dependency order):
     `tangent_vector` / `metric_component` / `scale_factor` / `physical_basis`.
   - Tests: `tests/chart_test.cpp` (TEST(Chart,…)) + `python/tests/test_chart.py`.
     697 C++ / 171 Python pass.
-- **M5 — `∂_j e_i` / Christoffel.** Differentiate `e_i`, re-express in the local
-  basis.  *Alive:* reproduce the step-6 polar formulas (and cylindrical/
-  spherical).
+- **M5 — `∂_j e_i` / Christoffel.** ✅ DONE.  Differentiate `e_i`, re-express in
+  the local basis.  *Alive:* reproduce the step-6 polar formulas (and
+  cylindrical/spherical).
+  - `basis_derivative(ctx, chart, i, j)` = ∂_{q^j} e_i as a vector in the
+    *constant* reference frame: e_i is written in the constant reference
+    vectors, so `partial` differentiates only its scalar coefficients (the
+    reference vectors → 0), then `simplify_scalars`.  Polar ∂_φ e_r = e_φ,
+    ∂_φ e_φ = −e_r, radial derivatives vanish.
+  - `connection_coefficients(ctx, chart, i, j)` = the physical-basis connection
+    (rotation) coefficients γ^k_{ij} with ∂_{q^j} e_i = Σ_k γ^k_{ij} e_k: the
+    orthonormal projections (∂_j e_i)·e_k, one scalar per k (reusing the M4
+    `reduce_scalar_dot` distribute-dot→δ→simplify pipeline, refactored out of
+    `metric_component`).  A vanishing derivative (rank-0 scalar 0) short-circuits
+    to all-zero coefficients — there is no vector to dot.
+  - Verified: polar γ^φ_{rφ}=1, γ^r_{φφ}=−1 (rest 0); spherical the full set
+    incl. ∂_φ e_r = sinθ e_φ, ∂_φ e_θ = cosθ e_φ, ∂_φ e_φ = −sinθ e_r − cosθ e_θ.
+  - Python: `chart.basis_derivative(i,j)`, `chart.connection_coefficients(i,j)`.
+  - Tests: `tests/chart_test.cpp` (PolarBasisDerivative,
+    PolarConnectionCoefficients, SphericalConnectionCoefficients) +
+    `python/tests/test_chart.py`.  700 C++ / 174 Python pass.
 - **M6 — Differential operators.** `∇`, grad, div, rot, Laplacian using the
   chart's `∂`, scale factors, and `∂e` table.  *Alive:* the cylindrical
   `∇ = e_r ∂_r + (1/r) e_φ ∂_φ + e_z ∂_z` and the curvilinear div/Laplacian.
@@ -212,6 +229,7 @@ coordinate mapping", which needs the scalar-field + differentiation foundations
 above.  Stage 5 (operators) then sits on M6.  Builds on [[basis-aware-indices-plan]]
 (vibe 000067) for the frame + naming and on the basis layer (vibe 000049).
 
-Status: **M1 + M2 + M3 + M4 done** (scalar fields + `∂_q` + targeted simplifier
-+ coordinate chart / geometry pipeline; 697 C++ / 171 Python pass).  Next is
-**M5** (`∂_j e_i` / Christoffel).  Decisions 0–3 settled.
+Status: **M1 + M2 + M3 + M4 + M5 done** (scalar fields + `∂_q` + targeted
+simplifier + coordinate chart / geometry pipeline + `∂_j e_i` / connection
+coefficients; 700 C++ / 174 Python pass).  Next is **M6** (differential
+operators ∇/grad/div/rot/Laplacian).  Decisions 0–3 settled.

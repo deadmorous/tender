@@ -1187,5 +1187,31 @@ NB_MODULE(_core, m)
                 return PyBasis{
                     c.ctx_keep, c.ctx, physical_basis(*c.ctx, c.chart)};
             },
-            "The derived physical orthonormal frame e_i = g_i/h_i as a Basis.");
+            "The derived physical orthonormal frame e_i = g_i/h_i as a Basis.")
+        .def(
+            "basis_derivative",
+            [](PyChart const& c, int i, int j) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, basis_derivative(*c.ctx, c.chart, i, j)};
+            },
+            "i"_a,
+            "j"_a,
+            "The derivative ∂_{q^j} e_i of the i-th physical basis vector, as a "
+            "vector in the reference frame (∂_φ e_r = e_φ, ∂_φ e_φ = −e_r).")
+        .def(
+            "connection_coefficients",
+            [](PyChart const& c, int i, int j) -> std::vector<PyExpr>
+            {
+                auto cs = connection_coefficients(*c.ctx, c.chart, i, j);
+                std::vector<PyExpr> out;
+                out.reserve(cs.size());
+                for (auto const* e: cs)
+                    out.push_back(PyExpr{c.ctx_keep, c.ctx, e});
+                return out;
+            },
+            "i"_a,
+            "j"_a,
+            "The physical-basis connection (rotation) coefficients γ^k_{ij} "
+            "re-expressing ∂_{q^j} e_i = Σ_k γ^k_{ij} e_k in the local frame "
+            "(one scalar per direction k).");
 }
