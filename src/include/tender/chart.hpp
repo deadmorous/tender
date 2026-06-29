@@ -81,4 +81,39 @@ struct CoordinateChart final
     int i,
     int j) -> std::vector<Expr const*>;
 
+// ---- differential operators (vibe 000069 M6) ---------------------------
+//
+// In the orthonormal physical frame ∇ = Σ_i (1/h_i) e_i ∂_{q^i}.  These
+// operators apply it with the Leibniz rule and the M5 connection coefficients,
+// so the curvilinear 1/h and ∂e factors fall out rather than being tabulated.
+// A vector field is carried by its physical components v = Σ_i v_i e_i (a
+// scalar field per direction, in coordinate order).
+
+// grad f = Σ_i (1/h_i)(∂_{q^i} f) e_i, returned as physical components.  In
+// cylindrical this is the familiar ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z.
+[[nodiscard]] auto gradient(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* f) -> std::vector<Expr const*>;
+
+// div v = ∇·v as a scalar field, from ∇·v = Σ_i (1/h_i) ∂_i v_i +
+// Σ_{i,j} (1/h_i) v_j γ^i_{ji}.  Throws std::invalid_argument unless v has one
+// component per coordinate.
+[[nodiscard]] auto divergence(
+    Context& ctx,
+    CoordinateChart const& chart,
+    std::vector<Expr const*> const& v) -> Expr const*;
+
+// Laplacian Δf = div(grad f) as a scalar field.
+[[nodiscard]] auto laplacian(
+    Context& ctx, CoordinateChart const& chart, Expr const* f) -> Expr const*;
+
+// rot v = ∇×v, returned as physical components.  3D only (the cross product),
+// and the physical frame is taken right-handed in coordinate order (standard
+// for the well-known charts); throws std::invalid_argument otherwise.
+[[nodiscard]] auto rot(
+    Context& ctx,
+    CoordinateChart const& chart,
+    std::vector<Expr const*> const& v) -> std::vector<Expr const*>;
+
 } // namespace tender

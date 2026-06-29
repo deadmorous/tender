@@ -195,6 +195,43 @@ auto reduce_scalar_dot(
     return steps::simplify_scalars(ctx, e);
 }
 
+// The coefficients γ^k_{ij} of ∂_{q^j} e_i = Σ_k γ^k_{ij} e_k, given a
+// precomputed physical basis `pb` (so callers that need many of them — the
+// operators — do not rebuild the frame each time).  e_i lives in the constant
+// reference frame, so ∂ acts on its scalar coefficients alone; the orthonormal
+// projection (∂_j e_i)·e_k gives the k-th coefficient.  A vanishing derivative
+// (rank-0 scalar 0) yields all zeros.
+auto connection_at(
+    Context& ctx, CoordinateChart const& chart, Basis const& pb, int i, int j)
+    -> std::vector<Expr const*>
+{
+    int const n = static_cast<int>(chart.coords.size());
+    Expr const* de = steps::simplify_scalars(
+        ctx, steps::partial(ctx, pb.basis(i), chart.coords[j]));
+    if (infer_rank(de) == std::optional<int>{0})
+        return std::vector<Expr const*>(n, make_scalar(ctx, Rational{0}));
+    std::vector<Expr const*> out;
+    out.reserve(n);
+    for (int k = 0; k < n; ++k)
+        out.push_back(reduce_scalar_dot(ctx, chart.reference, de, pb.basis(k)));
+    return out;
+}
+
+// (1/h) ⊗ x as a scalar quotient, simplified.
+auto over_h(Context& ctx, Expr const* x, Expr const* h) -> Expr const*
+{
+    return steps::simplify_scalars(ctx, make_scalar_div(ctx, x, h));
+}
+
+// The sign of the permutation (a, b, c) of {0,1,2}: +1 even, −1 odd, 0 on any
+// repeat — the 3D Levi-Civita symbol.
+auto eps3(int a, int b, int c) -> int
+{
+    if (a == b || b == c || a == c)
+        return 0;
+    return ((b - a) * (c - a) * (c - b) > 0) ? 1 : -1;
+}
+
 } // namespace
 
 auto radius_vector(Context& ctx, CoordinateChart const& chart) -> Expr const*
@@ -282,19 +319,124 @@ auto connection_coefficients(
     int const n = static_cast<int>(chart.coords.size());
     if (i < 0 || i >= n || j < 0 || j >= n)
         throw std::out_of_range("connection_coefficients: index out of range");
-    Basis const pb = physical_basis(ctx, chart);
-    Expr const* de = steps::simplify_scalars(
-        ctx, steps::partial(ctx, pb.basis(i), chart.coords[j]));
-    // A vanishing derivative collapses to the scalar 0 (rank 0); every
-    // coefficient is then 0 (and there is no vector to project).
-    if (infer_rank(de) == std::optional<int>{0})
-        return std::vector<Expr const*>(n, make_scalar(ctx, Rational{0}));
-    // The physical frame being orthonormal, the k-th coefficient of
-    // ∂_j e_i = Σ_k γ^k_{ij} e_k is the projection (∂_j e_i)·e_k.
+    return connection_at(ctx, chart, physical_basis(ctx, chart), i, j);
+}
+
+// ---- differential operators (vibe 000069 M6) ---------------------------
+//
+// In the orthonormal physical frame, ∇ = Σ_i (1/h_i) e_i ∂_{q^i}.  Applying it
+// with the Leibniz rule and the connection coefficients γ^k_{ij} = (∂_j
+// e_i)·e_k (M5) gives the textbook curvilinear operators; nothing is
+// hand-tabulated. Vector fields are carried by their physical components v =
+// Σ_i v_i e_i.
+
+auto gradient(Context& ctx, CoordinateChart const& chart, Expr const* f)
+    -> std::vector<Expr const*>
+{
+    int const n = static_cast<int>(chart.coords.size());
     std::vector<Expr const*> out;
     out.reserve(n);
-    for (int k = 0; k < n; ++k)
-        out.push_back(reduce_scalar_dot(ctx, chart.reference, de, pb.basis(k)));
+    for (int i = 0; i < n; ++i)
+        out.push_back(over_h(
+            ctx,
+            steps::partial(ctx, f, chart.coords[i]),
+            scale_factor(ctx, chart, i)));
+    return out;
+}
+
+auto divergence(
+    Context& ctx,
+    CoordinateChart const& chart,
+    std::vector<Expr const*> const& v) -> Expr const*
+{
+    int const n = static_cast<int>(chart.coords.size());
+    if (static_cast<int>(v.size()) != n)
+        throw std::invalid_argument("divergence: component count != dimension");
+    Basis const pb = physical_basis(ctx, chart);
+    std::vector<Expr const*> h(n);
+    for (int i = 0; i < n; ++i)
+        h[i] = scale_factor(ctx, chart, i);
+
+    // ∇·v = Σ_i (1/h_i) e_i·∂_{q^i} v, v = Σ_j v_j e_j.  With the Leibniz rule
+    // and e_i·e_k = δ_ik this is Σ_i (1/h_i) ∂_i v_i + Σ_{i,j} (1/h_i) v_j
+    // γ^i_{ji} (γ^i_{ji} = (∂_{q^i} e_j)·e_i).
+    Expr const* acc = make_scalar(ctx, Rational{0});
+    for (int i = 0; i < n; ++i)
+        acc = make_sum(
+            ctx,
+            acc,
+            over_h(ctx, steps::partial(ctx, v[i], chart.coords[i]), h[i]));
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            Expr const* g = connection_at(ctx, chart, pb, j, i)[i];
+            acc = make_sum(
+                ctx, acc, over_h(ctx, make_tensor_product(ctx, v[j], g), h[i]));
+        }
+    return steps::simplify_scalars(ctx, acc);
+}
+
+auto laplacian(Context& ctx, CoordinateChart const& chart, Expr const* f)
+    -> Expr const*
+{
+    return divergence(ctx, chart, gradient(ctx, chart, f));
+}
+
+auto rot(
+    Context& ctx,
+    CoordinateChart const& chart,
+    std::vector<Expr const*> const& v) -> std::vector<Expr const*>
+{
+    int const n = static_cast<int>(chart.coords.size());
+    if (n != 3)
+        throw std::invalid_argument(
+            "rot: only the 3D cross product is defined");
+    if (static_cast<int>(v.size()) != 3)
+        throw std::invalid_argument("rot: component count != dimension");
+    Basis const pb = physical_basis(ctx, chart);
+    std::vector<Expr const*> h(3);
+    for (int i = 0; i < 3; ++i)
+        h[i] = scale_factor(ctx, chart, i);
+    // gamma[a][d] = coefficients of ∂_{q^d} e_a (over k).
+    std::vector<std::vector<std::vector<Expr const*>>> gamma(
+        3, std::vector<std::vector<Expr const*>>(3));
+    for (int a = 0; a < 3; ++a)
+        for (int d = 0; d < 3; ++d)
+            gamma[a][d] = connection_at(ctx, chart, pb, a, d);
+
+    auto add = [&](Expr const* acc, int s, Expr const* term) -> Expr const*
+    { return make_sum(ctx, acc, s > 0 ? term : make_negate(ctx, term)); };
+
+    // ∇×v = Σ_i (1/h_i) e_i × ∂_{q^i} v; with e_i×e_k = ε_{ikm} e_m the m-th
+    // physical component is Σ_{i,j} (1/h_i) ε_{ijm} ∂_i v_j +
+    // Σ_{i,j,k} (1/h_i) ε_{ikm} v_j γ^k_{ji}.
+    std::vector<Expr const*> out(3, nullptr);
+    for (int m = 0; m < 3; ++m)
+    {
+        Expr const* acc = make_scalar(ctx, Rational{0});
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                if (int s = eps3(i, j, m))
+                    acc =
+                        add(acc,
+                            s,
+                            over_h(
+                                ctx,
+                                steps::partial(ctx, v[j], chart.coords[i]),
+                                h[i]));
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                for (int k = 0; k < 3; ++k)
+                    if (int s = eps3(i, k, m))
+                        acc = add(
+                            acc,
+                            s,
+                            over_h(
+                                ctx,
+                                make_tensor_product(ctx, v[j], gamma[j][i][k]),
+                                h[i]));
+        out[m] = steps::simplify_scalars(ctx, acc);
+    }
     return out;
 }
 

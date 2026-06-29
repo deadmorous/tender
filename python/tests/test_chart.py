@@ -159,3 +159,58 @@ def test_spherical_connection_coefficients():
     assert _coeffs_eq(
         chart.connection_coefficients(2, 2), [-t.sin(th), -t.cos(th), z]
     )
+
+
+def make_cylindrical(ctx):
+    ref = tb.wcs(ctx)
+    r = t.coordinate("r", chart_id=2, slot=0, nonneg=True, ctx=ctx)
+    th = t.coordinate(r"\theta", chart_id=2, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=2, slot=2, ctx=ctx)
+    chart = tc.CoordinateChart(
+        ref, [r, th, z], [r * t.cos(th), r * t.sin(th), z]
+    )
+    return r, th, z, chart
+
+
+def test_cylindrical_gradient():
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    one, zero = t.scalar(1, ctx=ctx), t.scalar(0, ctx=ctx)
+    # grad(theta) = (1/r) e_theta
+    assert _coeffs_eq(chart.gradient(th), [zero, one / r, zero])
+    # grad(r^2) = 2r e_r
+    assert _coeffs_eq(chart.gradient(r**2), [t.scalar(2, ctx=ctx) * r, zero, zero])
+
+
+def test_cylindrical_divergence_and_laplacian():
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    zero = t.scalar(0, ctx=ctx)
+    assert td.algebraic_eq(
+        chart.divergence([r, zero, zero]), t.scalar(2, ctx=ctx)
+    )
+    assert td.algebraic_eq(chart.laplacian(r**2), t.scalar(4, ctx=ctx))
+
+
+def test_spherical_laplacian():
+    ctx = t.Context()
+    ref = tb.wcs(ctx)
+    r = t.coordinate("r", chart_id=3, slot=0, nonneg=True, ctx=ctx)
+    th = t.coordinate(r"\theta", chart_id=3, slot=1, ctx=ctx)
+    ph = t.coordinate(r"\phi", chart_id=3, slot=2, ctx=ctx)
+    chart = tc.CoordinateChart(
+        ref,
+        [r, th, ph],
+        [r * t.sin(th) * t.cos(ph), r * t.sin(th) * t.sin(ph), r * t.cos(th)],
+    )
+    assert td.algebraic_eq(chart.laplacian(r**2), t.scalar(6, ctx=ctx))
+
+
+def test_cylindrical_rot():
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    zero = t.scalar(0, ctx=ctx)
+    # rot(r e_theta) = 2 e_z (uniform vorticity).
+    assert _coeffs_eq(
+        chart.rot([zero, r, zero]), [zero, zero, t.scalar(2, ctx=ctx)]
+    )

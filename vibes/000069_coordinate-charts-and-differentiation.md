@@ -189,9 +189,24 @@ Missing (in dependency order):
   - Tests: `tests/chart_test.cpp` (PolarBasisDerivative,
     PolarConnectionCoefficients, SphericalConnectionCoefficients) +
     `python/tests/test_chart.py`.  700 C++ / 174 Python pass.
-- **M6 — Differential operators.** `∇`, grad, div, rot, Laplacian using the
-  chart's `∂`, scale factors, and `∂e` table.  *Alive:* the cylindrical
+- **M6 — Differential operators.** ✅ DONE.  `∇`, grad, div, rot, Laplacian using
+  the chart's `∂`, scale factors, and `∂e` table.  *Alive:* the cylindrical
   `∇ = e_r ∂_r + (1/r) e_φ ∂_φ + e_z ∂_z` and the curvilinear div/Laplacian.
+  - All four sit on `∇ = Σ_i (1/h_i) e_i ∂_{q^i}` applied with the Leibniz rule
+    + the M5 connection coefficients γ^k_{ij} — nothing hand-tabulated; the
+    `1/h` and `∂e` factors fall out.  A vector field is its physical components
+    v = Σ_i v_i e_i (one scalar per direction).
+  - `gradient(ctx, chart, f)` = [(1/h_i) ∂_i f] (cylindrical ⇒ ∇θ = (1/r) e_θ,
+    ∇r² = 2r e_r — the headline ∇ structure).  `divergence` =
+    Σ_i (1/h_i) ∂_i v_i + Σ_{i,j} (1/h_i) v_j γ^i_{ji}.  `laplacian` = div∘grad.
+    `rot` (3D, right-handed physical frame) = Σ_i (1/h_i) e_i × ∂_i v via
+    ε_{ikm} and γ.
+  - Internals refactored: `connection_at` takes a precomputed physical basis so
+    the operators build the frame once; `over_h`, `eps3` helpers.
+  - Verified: cylindrical div(r e_r)=2, Δr²=4, rot(r e_θ)=2 e_z; spherical
+    Δr²=6.  Python: `chart.gradient/divergence/laplacian/rot`.
+  - Tests: `tests/chart_test.cpp` (Cylindrical Gradient/Divergence/Laplacian/Rot,
+    SphericalLaplacian) + `python/tests/test_chart.py`.  705 C++ / 178 Python.
 
 ## Decisions (settled)
 
@@ -229,7 +244,9 @@ coordinate mapping", which needs the scalar-field + differentiation foundations
 above.  Stage 5 (operators) then sits on M6.  Builds on [[basis-aware-indices-plan]]
 (vibe 000067) for the frame + naming and on the basis layer (vibe 000049).
 
-Status: **M1 + M2 + M3 + M4 + M5 done** (scalar fields + `∂_q` + targeted
+Status: **COMPLETE — M1–M6 all done** (scalar fields + `∂_q` + targeted
 simplifier + coordinate chart / geometry pipeline + `∂_j e_i` / connection
-coefficients; 700 C++ / 174 Python pass).  Next is **M6** (differential
-operators ∇/grad/div/rot/Laplacian).  Decisions 0–3 settled.
+coefficients + differential operators ∇/grad/div/rot/Laplacian; 705 C++ / 178
+Python pass).  The full vibe-000069 plan is implemented; ∇ and the curvilinear
+div/rot/Laplacian are derived end-to-end from a coordinate mapping.  Decisions
+0–3 settled.

@@ -351,3 +351,100 @@ TEST(Chart, SphericalConnectionCoefficients)
          make_negate(ctx, cos_(ctx, th)),
          s0(ctx)}));
 }
+
+namespace
+{
+
+// The cylindrical chart x = r cos θ, y = r sin θ, z = z over WCS.
+struct Cyl final
+{
+    Basis ref;
+    Expr const* r;
+    Expr const* th;
+    Expr const* z;
+    CoordinateChart chart;
+};
+
+auto make_cyl(Context& ctx) -> Cyl
+{
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    return Cyl{
+        ref,
+        r,
+        th,
+        z,
+        CoordinateChart{
+            ref,
+            {r, th, z},
+            {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}}};
+}
+
+} // namespace
+
+// Step 7: ∇f.  The 1/h_i factors are the curvilinear content — for cylindrical
+// ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r.
+TEST(Chart, CylindricalGradient)
+{
+    Context ctx;
+    auto c = make_cyl(ctx);
+    EXPECT_TRUE(coeffs_eq(
+        ctx,
+        gradient(ctx, c.chart, c.th),
+        {s0(ctx), make_scalar_div(ctx, s1(ctx), c.r), s0(ctx)}));
+    auto* r2 = make_pow(ctx, c.r, make_scalar(ctx, Rational{2}));
+    EXPECT_TRUE(coeffs_eq(
+        ctx,
+        gradient(ctx, c.chart, r2),
+        {mul(ctx, make_scalar(ctx, Rational{2}), c.r), s0(ctx), s0(ctx)}));
+}
+
+// div of the radial field v = r e_r is 2 (= (1/r) ∂_r(r·r)).
+TEST(Chart, CylindricalDivergence)
+{
+    Context ctx;
+    auto c = make_cyl(ctx);
+    auto* d = divergence(ctx, c.chart, {c.r, s0(ctx), s0(ctx)});
+    EXPECT_TRUE(eq(ctx, d, make_scalar(ctx, Rational{2})));
+}
+
+// Δr² = 4 in cylindrical (and Δr² = 6 in spherical) — div(grad) composed.
+TEST(Chart, CylindricalLaplacian)
+{
+    Context ctx;
+    auto c = make_cyl(ctx);
+    auto* r2 = make_pow(ctx, c.r, make_scalar(ctx, Rational{2}));
+    EXPECT_TRUE(
+        eq(ctx, laplacian(ctx, c.chart, r2), make_scalar(ctx, Rational{4})));
+}
+
+TEST(Chart, SphericalLaplacian)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 3, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 3, 1);
+    auto* ph = make_coordinate(ctx, make_tensor_name("\\phi"), 3, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, ph},
+        {mul(ctx, mul(ctx, r, sin_(ctx, th)), cos_(ctx, ph)),
+         mul(ctx, mul(ctx, r, sin_(ctx, th)), sin_(ctx, ph)),
+         mul(ctx, r, cos_(ctx, th))}};
+    auto* r2 = make_pow(ctx, r, make_scalar(ctx, Rational{2}));
+    EXPECT_TRUE(
+        eq(ctx, laplacian(ctx, chart, r2), make_scalar(ctx, Rational{6})));
+}
+
+// rot of the rigid-rotation field v = r e_θ is the uniform vorticity 2 e_z.
+TEST(Chart, CylindricalRot)
+{
+    Context ctx;
+    auto c = make_cyl(ctx);
+    EXPECT_TRUE(coeffs_eq(
+        ctx,
+        rot(ctx, c.chart, {s0(ctx), c.r, s0(ctx)}),
+        {s0(ctx), s0(ctx), make_scalar(ctx, Rational{2})}));
+}
