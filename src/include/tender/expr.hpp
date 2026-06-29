@@ -54,10 +54,18 @@ enum class ScalarFnKind : uint8_t
 // coordinate is not yet bound to a chart (a free coordinate symbol); a chart
 // stamps its id when it owns the coordinate (M4).  slot is the coordinate's
 // 0-based position within the chart.
+//
+// `nonneg` is the one piece of the coordinate's domain the targeted scalar
+// simplifier needs (vibe 000069 M3 decision 2): a coordinate known to be ≥ 0
+// (e.g. a cylindrical radius), which licenses √(r²) → r and positive scale
+// factors.  A chart stamps it from its known domain (M4); the richer interval
+// domain is deferred until something needs it.  Identity-neutral, like the rest
+// of the marker.
 struct CoordinateRef final
 {
     int chart_id = 0;
     int slot = 0;
+    bool nonneg = false;
 };
 
 // Value-preserving permutation generators for a tensor object (e.g. even
@@ -308,9 +316,11 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 
 // Coordinate variable of a chart: a rank-0 TensorObject carrying a
 // CoordinateRef trait (vibe 000069 M1).  chart_id 0 / slot 0 leave it unbound
-// to a chart.
+// to a chart.  nonneg marks a coordinate known to be ≥ 0 (vibe 000069 M3),
+// enabling √(x²) → x.
 [[nodiscard]] auto make_coordinate(
-    Context&, TensorName, int chart_id = 0, int slot = 0) -> Expr const*;
+    Context&, TensorName, int chart_id = 0, int slot = 0, bool nonneg = false)
+    -> Expr const*;
 
 // Elementary scalar function and power (vibe 000069 M1).
 [[nodiscard]] auto make_scalar_fn(Context&, ScalarFnKind, Expr const* operand)

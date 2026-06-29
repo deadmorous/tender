@@ -91,6 +91,36 @@ def test_partial_rejects_non_coordinate():
         td.partial(r, a)
 
 
+def test_simplify_pythagorean():
+    ctx = t.Context()
+    phi = t.coordinate(r"\varphi", ctx=ctx)
+    assert td.simplify_scalars(t.cos(phi) ** 2 + t.sin(phi) ** 2).latex() == "1"
+
+
+def test_simplify_metric_component():
+    ctx = t.Context()
+    r = t.coordinate("r", slot=0, nonneg=True, ctx=ctx)
+    phi = t.coordinate(r"\varphi", slot=1, ctx=ctx)
+    g = r**2 * t.sin(phi) ** 2 + r**2 * t.cos(phi) ** 2
+    assert td.simplify_scalars(g).latex() == "r^{2}"
+
+
+def test_simplify_root_of_square_needs_nonneg():
+    ctx = t.Context()
+    r = t.coordinate("r", slot=0, nonneg=True, ctx=ctx)
+    s = t.coordinate("s", slot=0, ctx=ctx)  # sign unknown
+    assert td.simplify_scalars(t.sqrt(r**2)).latex() == "r"
+    assert td.simplify_scalars(t.sqrt(s**2)).latex() == r"\sqrt{s^{2}}"
+
+
+def test_simplify_scale_factor():
+    ctx = t.Context()
+    r = t.coordinate("r", slot=0, nonneg=True, ctx=ctx)
+    phi = t.coordinate(r"\varphi", slot=1, ctx=ctx)
+    h_phi = t.sqrt(r**2 * t.sin(phi) ** 2 + r**2 * t.cos(phi) ** 2)
+    assert td.simplify_scalars(h_phi).latex() == "r"
+
+
 def test_partial_polar_tangent_vectors():
     ctx = t.Context()
     r = t.coordinate("r", slot=0, ctx=ctx)

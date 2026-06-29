@@ -41,6 +41,7 @@ __all__ = [
     "fold_equal_addends_structural",
     "canonicalize",
     "partial",
+    "simplify_scalars",
     "implicitize",
     "simplify",
     "Identity",
@@ -254,6 +255,18 @@ def partial(expr, coord):
     ``partial(r * cos(phi), phi)`` is ``-r sin phi``.
     """
     return _d._partial(expr, coord)
+
+
+def simplify_scalars(expr):
+    """Targeted scalar-field simplifier (vibe 000069 M3).
+
+    Applies the small set of identities the orthogonal-curvilinear geometry
+    pipeline needs, to a fixed point on top of ``canonicalize``: the Pythagorean
+    fold ``cos²(u)·C + sin²(u)·C → C``, power cleanup ``x⁰ → 1`` / ``x¹ → x``,
+    and ``√(x²ᵏ) → xᵏ`` when ``x`` is known ≥ 0 (a coordinate created with
+    ``nonneg=True``).  Finishes in implicit-sum form.
+    """
+    return _d._simplify_scalars(expr)
 
 
 def implicitize(expr):

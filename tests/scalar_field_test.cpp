@@ -219,6 +219,107 @@ TEST(Partial, QuotientRule)
     EXPECT_TRUE(algebraic_eq(ctx, steps::partial(ctx, inv, r), expected));
 }
 
+// ---- targeted scalar simplifier (vibe 000069 M3) -----------------------
+
+TEST(SimplifyScalars, Pythagorean)
+{
+    Context ctx;
+    auto* phi = coord(ctx, "\\varphi", 0);
+    auto* cos2 = make_pow(
+        ctx,
+        make_scalar_fn(ctx, ScalarFnKind::Cos, phi),
+        make_scalar(ctx, Rational{2}));
+    auto* sin2 = make_pow(
+        ctx,
+        make_scalar_fn(ctx, ScalarFnKind::Sin, phi),
+        make_scalar(ctx, Rational{2}));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::simplify_scalars(ctx, make_sum(ctx, cos2, sin2)),
+        make_scalar(ctx, Rational{1})));
+}
+
+TEST(SimplifyScalars, PythagoreanWithCommonFactor)
+{
+    Context ctx;
+    // r² sin²φ + r² cos²φ → r²  (the g_φφ metric component).
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 0, 0, /*nonneg=*/true);
+    auto* phi = coord(ctx, "\\varphi", 1);
+    auto* r2 = make_pow(ctx, r, make_scalar(ctx, Rational{2}));
+    auto* two = make_scalar(ctx, Rational{2});
+    auto* term_s = make_tensor_product(
+        ctx,
+        r2,
+        make_pow(ctx, make_scalar_fn(ctx, ScalarFnKind::Sin, phi), two));
+    auto* term_c = make_tensor_product(
+        ctx,
+        r2,
+        make_pow(ctx, make_scalar_fn(ctx, ScalarFnKind::Cos, phi), two));
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::simplify_scalars(ctx, make_sum(ctx, term_s, term_c)), r2));
+}
+
+TEST(SimplifyScalars, RootOfSquareNeedsNonneg)
+{
+    Context ctx;
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 0, 0, /*nonneg=*/true);
+    auto* s =
+        make_coordinate(ctx, make_tensor_name("s"), 0, 0, /*nonneg=*/false);
+    auto* sqrt_r2 = make_scalar_fn(
+        ctx,
+        ScalarFnKind::Sqrt,
+        make_pow(ctx, r, make_scalar(ctx, Rational{2})));
+    auto* sqrt_s2 = make_scalar_fn(
+        ctx,
+        ScalarFnKind::Sqrt,
+        make_pow(ctx, s, make_scalar(ctx, Rational{2})));
+    // √(r²) → r because r ≥ 0; √(s²) stays (s sign unknown).
+    EXPECT_TRUE(algebraic_eq(ctx, steps::simplify_scalars(ctx, sqrt_r2), r));
+    EXPECT_TRUE(
+        algebraic_eq(ctx, steps::simplify_scalars(ctx, sqrt_s2), sqrt_s2));
+}
+
+TEST(SimplifyScalars, PowerCleanup)
+{
+    Context ctx;
+    auto* r = coord(ctx, "r", 0);
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::simplify_scalars(
+            ctx, make_pow(ctx, r, make_scalar(ctx, Rational{1}))),
+        r));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::simplify_scalars(
+            ctx, make_pow(ctx, r, make_scalar(ctx, Rational{0}))),
+        make_scalar(ctx, Rational{1})));
+}
+
+TEST(SimplifyScalars, ScaleFactorThroughRoot)
+{
+    Context ctx;
+    // h_φ = √(r² sin²φ + r² cos²φ) → √(r²) → r  (the polar scale factor).
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 0, 0, /*nonneg=*/true);
+    auto* phi = coord(ctx, "\\varphi", 1);
+    auto* r2 = make_pow(ctx, r, make_scalar(ctx, Rational{2}));
+    auto* two = make_scalar(ctx, Rational{2});
+    auto* g_phiphi = make_sum(
+        ctx,
+        make_tensor_product(
+            ctx,
+            r2,
+            make_pow(ctx, make_scalar_fn(ctx, ScalarFnKind::Sin, phi), two)),
+        make_tensor_product(
+            ctx,
+            r2,
+            make_pow(ctx, make_scalar_fn(ctx, ScalarFnKind::Cos, phi), two)));
+    auto* h_phi = make_scalar_fn(ctx, ScalarFnKind::Sqrt, g_phiphi);
+    EXPECT_TRUE(algebraic_eq(ctx, steps::simplify_scalars(ctx, h_phi), r));
+}
+
 TEST(Partial, PolarTangentVectors)
 {
     Context ctx;

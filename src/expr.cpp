@@ -25,13 +25,15 @@ auto make_scalar(Context& ctx, Rational value) -> Expr const*
     return ctx.make<Expr>(ScalarLiteral{value});
 }
 
-auto make_coordinate(Context& ctx, TensorName name, int chart_id, int slot)
+auto make_coordinate(
+    Context& ctx, TensorName name, int chart_id, int slot, bool nonneg)
     -> Expr const*
 {
     return ctx.make<Expr>(TensorObject{
         .name = std::move(name),
         .rank = 0,
-        .traits = TensorTraits{.coordinate = CoordinateRef{chart_id, slot}},
+        .traits =
+            TensorTraits{.coordinate = CoordinateRef{chart_id, slot, nonneg}},
         .slots = {}});
 }
 

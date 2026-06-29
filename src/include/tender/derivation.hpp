@@ -213,6 +213,19 @@ auto canonicalize(Context& ctx, Expr const* e) -> Expr const*;
 // the 0-and 1-folding leaves a clean expression (e.g. ∂_φ(r cos φ) → −r sin φ).
 auto partial(Context& ctx, Expr const* e, Expr const* coord) -> Expr const*;
 
+// Targeted scalar-field simplifier (vibe 000069 M3): the specific identities
+// the orthogonal-curvilinear geometry pipeline needs, applied to a fixed point
+// on top of canonicalize.  Deliberately small (decision 1 — e-graph promotion
+// later):
+//   - Pythagorean fold: cos²(u)·C + sin²(u)·C → C (matching
+//   coefficient/factors);
+//   - power cleanup: x⁰ → 1, x¹ → x;
+//   - root of a square: √(x²ᵏ) → xᵏ when x is known ≥ 0 (the coordinate's
+//     `nonneg` domain bit, or a manifestly non-negative factor).
+// Finishes in implicit-sum form like `simplify`.  Other expressions pass
+// through unchanged.
+auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*;
+
 // Inverse of the implicit-sum convention: strip a null-bound ExplicitSum whose
 // index is already an implicit Einstein contraction in its body (so the
 // explicit wrapper is redundant), returning the expression in the implicit form

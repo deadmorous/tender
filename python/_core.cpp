@@ -439,21 +439,26 @@ NB_MODULE(_core, m)
 
     m.def(
         "coordinate",
-        [](std::string const& name, int chart_id, int slot, nb::object ctx_arg)
-            -> PyExpr
+        [](std::string const& name,
+           int chart_id,
+           int slot,
+           bool nonneg,
+           nb::object ctx_arg) -> PyExpr
         {
             auto [ctx, keep] = resolve_ctx(ctx_arg);
             return PyExpr{
                 keep,
                 ctx,
-                make_coordinate(*ctx, make_tensor_name(name), chart_id, slot)};
+                make_coordinate(
+                    *ctx, make_tensor_name(name), chart_id, slot, nonneg)};
         },
         "name"_a,
         "chart_id"_a = 0,
         "slot"_a = 0,
+        "nonneg"_a = false,
         "ctx"_a = nb::none(),
         "Create a chart coordinate variable (rank-0 scalar field).  chart_id 0 "
-        "leaves it unbound to a chart.");
+        "leaves it unbound to a chart; nonneg marks it ≥ 0 (enables √(x²)→x).");
 
     auto bind_scalar_fn =
         [&m](char const* py_name, ScalarFnKind kind, char const* doc)
@@ -776,6 +781,14 @@ NB_MODULE(_core, m)
         "coord"_a,
         "Partial derivative ∂/∂coord of expr with respect to a coordinate "
         "variable (chain/product/quotient rules; constants → 0).");
+
+    md.def(
+        "_simplify_scalars",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::simplify_scalars(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Targeted scalar-field simplifier: cos²+sin²→1, x⁰→1, x¹→x, and "
+        "√(x²)→x for x≥0 (vibe 000069 M3).");
 
     md.def(
         "_implicitize",

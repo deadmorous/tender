@@ -3114,5 +3114,225 @@ auto partial(Context& ctx, Expr const* e, Expr const* coord) -> Expr const*
     }
 }
 
+// ---- targeted scalar simplifier (vibe 000069 M3) -----------------------
+
+namespace
+{
+
+// Is `e` manifestly non-negative?  Used to license √(x²) → x.  Conservative:
+// only the cases the geometry pipeline produces.
+auto is_nonneg(Expr const* e) -> bool
+{
+    return visit(
+        Overloads{
+            [](ScalarLiteral const& s) -> bool
+            { return !(s.value < Rational{0}); },
+            [](TensorObject const& t) -> bool {
+                return t.traits && t.traits->coordinate
+                       && t.traits->coordinate->nonneg;
+            },
+            [&](Pow const& p) -> bool
+            {
+                // x^(2k) ≥ 0 for any real x; otherwise inherit the base's sign.
+                if (auto const* n =
+                        std::get_if<ScalarLiteral>(&p.exponent->node))
+                    if (n->value.is_integer() && n->value.num() % 2 == 0)
+                        return true;
+                return is_nonneg(p.base);
+            },
+            [&](TensorProduct const& s) -> bool
+            { return is_nonneg(s.left) && is_nonneg(s.right); },
+            [](ScalarFn const& f) -> bool {
+                return f.kind == ScalarFnKind::Sqrt
+                       || f.kind == ScalarFnKind::Exp;
+            },
+            [](auto const&) -> bool { return false; },
+        },
+        *e);
+}
+
+// Local (single-node) folds, applied bottom-up by rewrite_tree:
+//   x⁰ → 1, x¹ → x, and √(x^{2k}) → x^k when x is known ≥ 0.
+auto fold_local_scalar(Context& ctx, Expr const* e) -> Expr const*
+{
+    if (auto const* p = std::get_if<Pow>(&e->node))
+    {
+        if (auto const* n = std::get_if<ScalarLiteral>(&p->exponent->node))
+        {
+            if (n->value == Rational{0})
+                return make_scalar(ctx, Rational{1});
+            if (n->value == Rational{1})
+                return p->base;
+        }
+        return e;
+    }
+    if (auto const* f = std::get_if<ScalarFn>(&e->node);
+        f && f->kind == ScalarFnKind::Sqrt)
+    {
+        if (auto const* p = std::get_if<Pow>(&f->operand->node))
+            if (auto const* n = std::get_if<ScalarLiteral>(&p->exponent->node))
+                if (n->value.is_integer() && n->value.num() > 0
+                    && n->value.num() % 2 == 0 && is_nonneg(p->base))
+                {
+                    auto const half = n->value.num() / 2;
+                    if (half == 1)
+                        return p->base;
+                    return make_pow(
+                        ctx, p->base, make_scalar(ctx, Rational{half}));
+                }
+    }
+    return e;
+}
+
+// A term split as C · fn²(u): the trig kind, its argument u, and the remaining
+// product C (carrying coefficient and any other factors, plus the sign).
+struct TrigSquare final
+{
+    ScalarFnKind kind;
+    Expr const* arg;
+    Expr const* remainder;
+};
+
+// If `term` is C · sin²(u) or C · cos²(u), peel the trig square off it.
+auto split_trig_square(Context& ctx, Expr const* term)
+    -> std::optional<TrigSquare>
+{
+    bool neg = false;
+    Expr const* inner = term;
+    if (auto const* n = std::get_if<Negate>(&term->node))
+    {
+        neg = true;
+        inner = n->operand;
+    }
+    std::vector<Expr const*> factors;
+    flatten_factors(inner, factors);
+    for (std::size_t i = 0; i < factors.size(); ++i)
+    {
+        auto const* p = std::get_if<Pow>(&factors[i]->node);
+        if (!p)
+            continue;
+        auto const* n = std::get_if<ScalarLiteral>(&p->exponent->node);
+        if (!n || !(n->value == Rational{2}))
+            continue;
+        auto const* fn = std::get_if<ScalarFn>(&p->base->node);
+        if (!fn
+            || (fn->kind != ScalarFnKind::Sin && fn->kind != ScalarFnKind::Cos))
+            continue;
+        std::vector<Expr const*> rest;
+        for (std::size_t j = 0; j < factors.size(); ++j)
+            if (j != i)
+                rest.push_back(factors[j]);
+        Expr const* rem = rest.empty() ? make_scalar(ctx, Rational{1}) :
+                                         product_of(ctx, rest);
+        if (neg)
+            rem = make_negate(ctx, rem);
+        return TrigSquare{fn->kind, fn->operand, rem};
+    }
+    return std::nullopt;
+}
+
+void collect_sum(Expr const* e, std::vector<Expr const*>& out)
+{
+    if (auto const* s = std::get_if<Sum>(&e->node))
+    {
+        collect_sum(s->left, out);
+        collect_sum(s->right, out);
+    }
+    else
+        out.push_back(e);
+}
+
+// cos²(u)·C + sin²(u)·C → C for every matching pair among the addends.
+auto pythagorean_fold(Context& ctx, Expr const* e) -> Expr const*
+{
+    std::vector<Expr const*> addends;
+    collect_sum(e, addends);
+    std::size_t const n = addends.size();
+    if (n < 2)
+        return e;
+    std::vector<bool> used(n, false);
+    std::vector<Expr const*> result;
+    bool changed = false;
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        if (used[i])
+            continue;
+        auto si = split_trig_square(ctx, addends[i]);
+        bool matched = false;
+        if (si)
+            for (std::size_t j = i + 1; j < n; ++j)
+            {
+                if (used[j])
+                    continue;
+                auto sj = split_trig_square(ctx, addends[j]);
+                if (!sj || si->kind == sj->kind) // need one sin and one cos
+                    continue;
+                if (algebraic_eq(ctx, si->arg, sj->arg)
+                    && algebraic_eq(ctx, si->remainder, sj->remainder))
+                {
+                    result.push_back(si->remainder);
+                    used[i] = used[j] = true;
+                    matched = changed = true;
+                    break;
+                }
+            }
+        if (!matched)
+        {
+            result.push_back(addends[i]);
+            used[i] = true;
+        }
+    }
+    if (!changed)
+        return e;
+    Expr const* acc = nullptr;
+    for (auto const* t: result)
+        acc = acc ? make_sum(ctx, acc, t) : t;
+    return acc ? acc : make_scalar(ctx, Rational{0});
+}
+
+} // namespace
+
+auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*
+{
+    Expr const* cur = e;
+    try
+    {
+        cur = canonicalize(ctx, e);
+    }
+    catch (std::invalid_argument const&)
+    {
+        cur = e;
+    }
+    // One bottom-up pass applies the local folds and, at every Sum node, the
+    // Pythagorean fold — so a sum buried in √(…) (a scale factor h = √(g)) is
+    // folded before its enclosing root.  Re-canonicalize and repeat to a fixed
+    // point; the rules strictly shrink the expression, so this terminates (the
+    // iteration cap is a belt-and-braces guard).
+    auto step_cb = [](Context& c, Expr const* node) -> Expr const*
+    {
+        Expr const* a = fold_local_scalar(c, node);
+        if (std::holds_alternative<Sum>(a->node))
+            a = pythagorean_fold(c, a);
+        return a;
+    };
+    for (int iter = 0; iter < 64; ++iter)
+    {
+        auto const* stepped = rewrite_tree(ctx, cur, step_cb);
+        Expr const* next = stepped;
+        try
+        {
+            next = canonicalize(ctx, stepped);
+        }
+        catch (std::invalid_argument const&)
+        {
+            next = stepped;
+        }
+        if (structural_eq(next, cur))
+            break;
+        cur = next;
+    }
+    return implicitize(ctx, cur);
+}
+
 } // namespace steps
 } // namespace tender

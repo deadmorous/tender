@@ -116,10 +116,24 @@ Missing (in dependency order):
     exactly (the spec's step-3 tangent g_φ).
   - Tests in `tests/scalar_field_test.cpp` (TEST(Partial,…)) +
     `python/tests/test_scalar_field.py`.  685 C++ / 161 Python pass.
-- **M3 — Targeted scalar simplifier + per-coordinate domains.** The specific
-  trig/`√(square)`/power identities the geometry needs, using the chart's
-  coordinate domains where required (`r ≥ 0` ⇒ `√(r²) → r`).  *Alive:*
+- **M3 — Targeted scalar simplifier + per-coordinate domains.** ✅ DONE.  The
+  specific trig/`√(square)`/power identities the geometry needs, using the
+  chart's coordinate domains where required (`r ≥ 0` ⇒ `√(r²) → r`).  *Alive:*
   `cos²+sin² → 1`, `√(r²) → r`.
+  - `steps::simplify_scalars` (Python `td.simplify_scalars`).  Self-prepares
+    (canonicalize), then a bottom-up `rewrite_tree` pass applies the local folds
+    and, at every `Sum` node, the Pythagorean fold; re-canonicalize to a fixed
+    point; finish with `implicitize`.
+  - Rules: `cos²(u)·C + sin²(u)·C → C` (pairs addends sharing arg + remainder,
+    coefficient/sign included, via `algebraic_eq`); `x⁰→1`, `x¹→x`; `√(x^{2k})→xᵏ`
+    when `x` is `is_nonneg` (coordinate `nonneg` bit, positive literal, even
+    power, √/exp, or product of such).  Bottom-up so a sum buried in `√(…)` folds
+    before its root: `h_φ = √(r²sin²+r²cos²) → √(r²) → r`.
+  - Domain bit: `CoordinateRef.nonneg` (identity-neutral), set via
+    `make_coordinate(..., nonneg=)` / Python `coordinate(nonneg=True)`.  Charts
+    will stamp it in M4; richer interval domains deferred until needed.
+  - Tests in `tests/scalar_field_test.cpp` (TEST(SimplifyScalars,…)) +
+    `python/tests/test_scalar_field.py`.  690 C++ / 165 Python pass.
 - **M4 — Chart + tangent basis + metric + physical basis.** Chart spec → `g_i`,
   `g_{ij}`, `h_i`, orthonormal `e_i`/`e^i`; bridge to `Basis`.  *Alive:* build
   polar/cylindrical/spherical from their mappings; validate the derived `Basis`
@@ -167,6 +181,6 @@ coordinate mapping", which needs the scalar-field + differentiation foundations
 above.  Stage 5 (operators) then sits on M6.  Builds on [[basis-aware-indices-plan]]
 (vibe 000067) for the frame + naming and on the basis layer (vibe 000049).
 
-Status: **M1 + M2 done** (scalar fields + `∂_q`; 685 C++ / 161 Python pass).
-Next is **M3** (targeted scalar simplifier + per-coordinate domains).  Decisions
-0–3 settled.
+Status: **M1 + M2 + M3 done** (scalar fields + `∂_q` + targeted simplifier;
+690 C++ / 165 Python pass).  Next is **M4** (chart + tangent basis + metric +
+physical basis).  Decisions 0–3 settled.
