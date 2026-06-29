@@ -4,6 +4,7 @@
 #include <nanobind/stl/vector.h>
 
 #include <tender/basis.hpp>
+#include <tender/chart.hpp>
 #include <tender/context.hpp>
 #include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>
@@ -60,6 +61,16 @@ struct PyBasis
     nb::object ctx_keep;
     Context* ctx;
     Basis basis;
+};
+
+// Python wrapper for CoordinateChart (vibe 000069 M4).  Like PyBasis it keeps
+// the owning Context alive: the chart's reference basis, coordinate atoms and
+// embedding all live there, and the geometry it derives allocates there too.
+struct PyChart
+{
+    nb::object ctx_keep;
+    Context* ctx;
+    CoordinateChart chart;
 };
 
 // Convert a Python value to IndexAssoc: CountableIndex | int → Concrete | str →
@@ -1104,4 +1115,77 @@ NB_MODULE(_core, m)
         "Fold the resolution of identity Σ_i e_i⊗e^i = I where it is partially "
         "contracted: Σ_i (X·e_i) e_i -> X (and Σ_i (scalars) e_i⊗e_i -> "
         "(scalars) I).  Complements reassemble; a no-op otherwise.");
+
+    // ------------------------------------------------------------------ //
+    // chart submodule — coordinate mapping → curvilinear geometry (M4)
+    // ------------------------------------------------------------------ //
+    nb::module_ mc = m.def_submodule(
+        "chart", "Coordinate charts and derived curvilinear geometry.");
+
+    nb::class_<PyChart>(mc, "CoordinateChart")
+        .def(
+            "__init__",
+            [](PyChart* self,
+               PyBasis const& reference,
+               std::vector<PyExpr> const& coords,
+               std::vector<PyExpr> const& embedding)
+            {
+                std::vector<Expr const*> cs;
+                cs.reserve(coords.size());
+                for (auto const& c: coords)
+                    cs.push_back(c.expr);
+                std::vector<Expr const*> emb;
+                emb.reserve(embedding.size());
+                for (auto const& f: embedding)
+                    emb.push_back(f.expr);
+                new (self) PyChart{
+                    reference.ctx_keep,
+                    reference.ctx,
+                    CoordinateChart{
+                        reference.basis, std::move(cs), std::move(emb)}};
+            },
+            "reference"_a,
+            "coords"_a,
+            "embedding"_a,
+            "A coordinate chart: an orthonormal reference Basis, the coordinate "
+            "variables q^i (coordinate() atoms), and the Cartesian components "
+            "x^a = f^a(q) of the position vector (one per reference direction).")
+        .def(
+            "radius_vector",
+            [](PyChart const& c) -> PyExpr {
+                return PyExpr{c.ctx_keep, c.ctx, radius_vector(*c.ctx, c.chart)};
+            },
+            "The position vector R = Σ_a f^a(q) u_a in the reference frame.")
+        .def(
+            "tangent_vector",
+            [](PyChart const& c, int i) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, tangent_vector(*c.ctx, c.chart, i)};
+            },
+            "i"_a,
+            "The holonomic tangent basis vector g_i = ∂R/∂q^i.")
+        .def(
+            "metric_component",
+            [](PyChart const& c, int i, int j) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, metric_component(*c.ctx, c.chart, i, j)};
+            },
+            "i"_a,
+            "j"_a,
+            "The metric component g_ij = g_i·g_j, simplified to a scalar field.")
+        .def(
+            "scale_factor",
+            [](PyChart const& c, int i) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, scale_factor(*c.ctx, c.chart, i)};
+            },
+            "i"_a,
+            "The scale factor h_i = √(g_ii), the positive root by convention.")
+        .def(
+            "physical_basis",
+            [](PyChart const& c) -> PyBasis {
+                return PyBasis{
+                    c.ctx_keep, c.ctx, physical_basis(*c.ctx, c.chart)};
+            },
+            "The derived physical orthonormal frame e_i = g_i/h_i as a Basis.");
 }

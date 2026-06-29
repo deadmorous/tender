@@ -134,10 +134,41 @@ Missing (in dependency order):
     will stamp it in M4; richer interval domains deferred until needed.
   - Tests in `tests/scalar_field_test.cpp` (TEST(SimplifyScalars,…)) +
     `python/tests/test_scalar_field.py`.  690 C++ / 165 Python pass.
-- **M4 — Chart + tangent basis + metric + physical basis.** Chart spec → `g_i`,
-  `g_{ij}`, `h_i`, orthonormal `e_i`/`e^i`; bridge to `Basis`.  *Alive:* build
-  polar/cylindrical/spherical from their mappings; validate the derived `Basis`
-  against the hand-written `coord_system` ones.
+- **M4 — Chart + tangent basis + metric + physical basis.** ✅ DONE.  Chart spec
+  → `g_i`, `g_{ij}`, `h_i`, orthonormal `e_i`/`e^i`; bridge to `Basis`.  *Alive:*
+  build polar/cylindrical/spherical from their mappings; validate the derived
+  `Basis` against the hand-written `coord_system` ones.
+  - `CoordinateChart{Basis reference; vector<Expr> coords; vector<Expr>
+    embedding}` (`src/chart.{hpp,cpp}`).  `reference` is an orthonormal Cartesian
+    `Basis` (its concrete vectors are the constant i, j, k); `coords` are the
+    `make_coordinate` atoms (their `nonneg` bit licenses √(r²)→r); `embedding`
+    is `x^a = f^a(q)`, one scalar per reference direction.
+  - `radius_vector` = Σ_a f^a ⊗ u_a; `tangent_vector(i)` = `partial(R, q^i)` = g_i;
+    `metric_component(i,j)` = g_i·g_j reduced (distribute the dot bilinearly over
+    sums → `simplify_basis_dot` (concrete frame-vector legs → δ) → canonicalize →
+    `eval_delta_concrete` → `fold_arithmetic` → `simplify_scalars`);
+    `scale_factor(i)` = positive √(g_ii); `physical_basis` = the e_i = g_i/h_i
+    frame as a tender `Basis` carrying the coords as value names.
+  - Two M3-simplifier extensions were needed and added to `simplify_scalars`:
+    (a) `normalize_scalar` — collects repeated factors into powers (x·x→x², the
+    dot expansion emits sin θ·sin θ not sin²θ) and cancels scalar fractions
+    ((r cos φ)/r→cos φ, r²/r→r, 0/x→0), fired at every scalar `TensorProduct`/
+    `ScalarDiv`; (b) the Pythagorean fold now enumerates *all* trig-square
+    factors per addend (`enumerate_trig_squares`), so spherical
+    g_φφ = r²sin²θ sin²φ + r²sin²θ cos²φ → r²sin²θ folds on the φ pair.
+  - Positive scale factor (decision 2/3): `scale_factor`'s `positive_sqrt`
+    factors the radicand and, when every exponent is even and the coefficient a
+    perfect square, returns the product of the half-powers as *positive*
+    (√(r²)→r, √(r²sin²θ)→r sin θ) — the textbook "scale factors are positive"
+    convention, localized here rather than weakening the general √ rule.
+  - Bridge/validate: derived polar frame matches hand-written `polar_2d` on dim,
+    space, orthonormality and value names (the explicit e_i = cos θ i + sin θ j
+    etc. differ from the hand-written placeholders, as expected).  Polar e_φ =
+    −sin θ i + cos θ j, cylindrical e_z = k, spherical e_φ = −sin φ i + cos φ j.
+  - Python: `tender.chart.CoordinateChart` with `radius_vector` /
+    `tangent_vector` / `metric_component` / `scale_factor` / `physical_basis`.
+  - Tests: `tests/chart_test.cpp` (TEST(Chart,…)) + `python/tests/test_chart.py`.
+    697 C++ / 171 Python pass.
 - **M5 — `∂_j e_i` / Christoffel.** Differentiate `e_i`, re-express in the local
   basis.  *Alive:* reproduce the step-6 polar formulas (and cylindrical/
   spherical).
@@ -181,6 +212,6 @@ coordinate mapping", which needs the scalar-field + differentiation foundations
 above.  Stage 5 (operators) then sits on M6.  Builds on [[basis-aware-indices-plan]]
 (vibe 000067) for the frame + naming and on the basis layer (vibe 000049).
 
-Status: **M1 + M2 + M3 done** (scalar fields + `∂_q` + targeted simplifier;
-690 C++ / 165 Python pass).  Next is **M4** (chart + tangent basis + metric +
-physical basis).  Decisions 0–3 settled.
+Status: **M1 + M2 + M3 + M4 done** (scalar fields + `∂_q` + targeted simplifier
++ coordinate chart / geometry pipeline; 697 C++ / 171 Python pass).  Next is
+**M5** (`∂_j e_i` / Christoffel).  Decisions 0–3 settled.

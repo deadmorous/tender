@@ -3193,9 +3193,12 @@ struct TrigSquare final
     Expr const* remainder;
 };
 
-// If `term` is C · sin²(u) or C · cos²(u), peel the trig square off it.
-auto split_trig_square(Context& ctx, Expr const* term)
-    -> std::optional<TrigSquare>
+// Every way `term` reads as C · fn²(u): one TrigSquare per sin²/cos² factor.
+// A term may hold several (e.g. spherical r² sin²θ sin²φ), and the Pythagorean
+// pair may be on any of them, so all candidates are enumerated rather than
+// peeling only the first.
+auto enumerate_trig_squares(Context& ctx, Expr const* term)
+    -> std::vector<TrigSquare>
 {
     bool neg = false;
     Expr const* inner = term;
@@ -3206,6 +3209,7 @@ auto split_trig_square(Context& ctx, Expr const* term)
     }
     std::vector<Expr const*> factors;
     flatten_factors(inner, factors);
+    std::vector<TrigSquare> out;
     for (std::size_t i = 0; i < factors.size(); ++i)
     {
         auto const* p = std::get_if<Pow>(&factors[i]->node);
@@ -3226,9 +3230,9 @@ auto split_trig_square(Context& ctx, Expr const* term)
                                          product_of(ctx, rest);
         if (neg)
             rem = make_negate(ctx, rem);
-        return TrigSquare{fn->kind, fn->operand, rem};
+        out.push_back(TrigSquare{fn->kind, fn->operand, rem});
     }
-    return std::nullopt;
+    return out;
 }
 
 void collect_sum(Expr const* e, std::vector<Expr const*>& out)
@@ -3253,29 +3257,37 @@ auto pythagorean_fold(Context& ctx, Expr const* e) -> Expr const*
     std::vector<bool> used(n, false);
     std::vector<Expr const*> result;
     bool changed = false;
+    std::vector<std::vector<TrigSquare>> cands(n);
+    for (std::size_t i = 0; i < n; ++i)
+        cands[i] = enumerate_trig_squares(ctx, addends[i]);
     for (std::size_t i = 0; i < n; ++i)
     {
         if (used[i])
             continue;
-        auto si = split_trig_square(ctx, addends[i]);
         bool matched = false;
-        if (si)
-            for (std::size_t j = i + 1; j < n; ++j)
+        for (auto const& ci: cands[i])
+        {
+            for (std::size_t j = i + 1; j < n && !matched; ++j)
             {
                 if (used[j])
                     continue;
-                auto sj = split_trig_square(ctx, addends[j]);
-                if (!sj || si->kind == sj->kind) // need one sin and one cos
-                    continue;
-                if (algebraic_eq(ctx, si->arg, sj->arg)
-                    && algebraic_eq(ctx, si->remainder, sj->remainder))
+                for (auto const& cj: cands[j])
                 {
-                    result.push_back(si->remainder);
-                    used[i] = used[j] = true;
-                    matched = changed = true;
-                    break;
+                    if (ci.kind == cj.kind) // need one sin and one cos
+                        continue;
+                    if (algebraic_eq(ctx, ci.arg, cj.arg)
+                        && algebraic_eq(ctx, ci.remainder, cj.remainder))
+                    {
+                        result.push_back(ci.remainder);
+                        used[i] = used[j] = true;
+                        matched = changed = true;
+                        break;
+                    }
                 }
             }
+            if (matched)
+                break;
+        }
         if (!matched)
         {
             result.push_back(addends[i]);
@@ -3288,6 +3300,118 @@ auto pythagorean_fold(Context& ctx, Expr const* e) -> Expr const*
     for (auto const* t: result)
         acc = acc ? make_sum(ctx, acc, t) : t;
     return acc ? acc : make_scalar(ctx, Rational{0});
+}
+
+// --- Scalar fraction cancellation (vibe 000069 M4) ----------------------
+// Cancel common multiplicative factors of a scalar quotient so the physical
+// basis e_i = g_i / h_i comes out clean: (r cos φ)/r → cos φ, r²/r → r.
+
+// A scalar product split into a numeric coefficient and a set of
+// (base, integer exponent) factors; a denominator factor has a negative
+// exponent.
+struct FactorBag final
+{
+    Rational coeff{1};
+    std::vector<std::pair<Expr const*, long>> bases;
+};
+
+void bag_add(Context& ctx, FactorBag& bag, Expr const* base, long exp)
+{
+    for (auto& kv: bag.bases)
+        if (algebraic_eq(ctx, kv.first, base))
+        {
+            kv.second += exp;
+            return;
+        }
+    bag.bases.push_back({base, exp});
+}
+
+// Accumulate the factors of scalar product `e` into `bag`; `sign` is +1 when
+// `e` sits in the numerator, -1 in the denominator (exponents and the numeric
+// coefficient are taken to that power).
+void decompose_scalar(Context& ctx, Expr const* e, long sign, FactorBag& bag)
+{
+    std::vector<Expr const*> facs;
+    flatten_factors(e, facs);
+    for (auto const* f: facs)
+    {
+        if (auto const* s = std::get_if<ScalarLiteral>(&f->node))
+            bag.coeff = sign > 0 ? bag.coeff * s->value : bag.coeff / s->value;
+        else if (auto const* neg = std::get_if<Negate>(&f->node))
+        {
+            bag.coeff = -bag.coeff;
+            decompose_scalar(ctx, neg->operand, sign, bag);
+        }
+        else if (auto const* d = std::get_if<ScalarDiv>(&f->node))
+        {
+            decompose_scalar(ctx, d->left, sign, bag);
+            decompose_scalar(ctx, d->right, -sign, bag);
+        }
+        else if (auto const* p = std::get_if<Pow>(&f->node))
+        {
+            auto const* ne = std::get_if<ScalarLiteral>(&p->exponent->node);
+            if (ne && ne->value.is_integer())
+                bag_add(ctx, bag, p->base, sign * ne->value.num());
+            else
+                bag_add(ctx, bag, f, sign);
+        }
+        else
+            bag_add(ctx, bag, f, sign);
+    }
+}
+
+auto pow_expr(Context& ctx, Expr const* base, long exp) -> Expr const*
+{
+    if (exp == 1)
+        return base;
+    return make_pow(ctx, base, make_scalar(ctx, Rational{exp}));
+}
+
+// Normalise a scalar product/quotient into a single fraction with repeated
+// factors collected into powers: x·x → x², (r cos φ)/r → cos φ, r²/r → r.  A
+// no-op (returns `e`) unless `e` is a rank-0 scalar product or quotient and the
+// rebuilt form differs from the input.
+auto normalize_scalar(Context& ctx, Expr const* e) -> Expr const*
+{
+    FactorBag bag;
+    if (auto const* d = std::get_if<ScalarDiv>(&e->node))
+    {
+        if (infer_rank(d->left) != std::optional<int>{0}
+            || infer_rank(d->right) != std::optional<int>{0})
+            return e;
+        decompose_scalar(ctx, d->left, +1, bag);
+        decompose_scalar(ctx, d->right, -1, bag);
+    }
+    else if (std::holds_alternative<TensorProduct>(e->node))
+    {
+        if (infer_rank(e) != std::optional<int>{0})
+            return e;
+        decompose_scalar(ctx, e, +1, bag);
+    }
+    else
+        return e;
+
+    if (bag.coeff.is_zero())
+        return make_scalar(ctx, Rational{0});
+
+    std::vector<Expr const*> numf;
+    std::vector<Expr const*> denf;
+    if (bag.coeff.num() != 1)
+        numf.push_back(make_scalar(ctx, Rational{bag.coeff.num()}));
+    if (bag.coeff.den() != 1)
+        denf.push_back(make_scalar(ctx, Rational{bag.coeff.den()}));
+    for (auto const& kv: bag.bases)
+    {
+        if (kv.second > 0)
+            numf.push_back(pow_expr(ctx, kv.first, kv.second));
+        else if (kv.second < 0)
+            denf.push_back(pow_expr(ctx, kv.first, -kv.second));
+    }
+    Expr const* num =
+        numf.empty() ? make_scalar(ctx, Rational{1}) : product_of(ctx, numf);
+    Expr const* result =
+        denf.empty() ? num : make_scalar_div(ctx, num, product_of(ctx, denf));
+    return structural_eq(result, e) ? e : result;
 }
 
 } // namespace
@@ -3311,6 +3435,9 @@ auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*
     auto step_cb = [](Context& c, Expr const* node) -> Expr const*
     {
         Expr const* a = fold_local_scalar(c, node);
+        if (std::holds_alternative<ScalarDiv>(a->node)
+            || std::holds_alternative<TensorProduct>(a->node))
+            a = normalize_scalar(c, a);
         if (std::holds_alternative<Sum>(a->node))
             a = pythagorean_fold(c, a);
         return a;
