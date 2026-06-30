@@ -242,6 +242,33 @@ def test_cylindrical_rot():
     assert _inv_eq(chart.rot(v), t.scalar(2, ctx=ctx) * tb.wcs(ctx).basis(2))
 
 
+def test_tensor_field_operators():
+    # A tensor field is no longer seen as constant (vibe 000070 P7): div T is a
+    # symbolic vector, grad f a symbolic vector of partials, and a field declared
+    # on one coordinate is constant in the others.
+    ctx = t.Context()
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=1, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=1, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=1, slot=2, ctx=ctx)
+    chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
+
+    T = chart.field("T", 2)
+    div_T = chart.divergence(T)
+    assert not td.algebraic_eq(div_T, t.scalar(0, ctx=ctx))  # no longer zero
+
+    # grad of a scalar field f(x) only has the x-component; ∂_y f = 0.
+    fx = t.field("f", 0, deps=[x], ctx=ctx)
+    assert td.algebraic_eq(td.partial(fx, y), t.scalar(0, ctx=ctx))
+    assert not td.algebraic_eq(td.partial(fx, x), t.scalar(0, ctx=ctx))
+
+    # Mixed partials are symmetric.
+    g = chart.field("g", 0)
+    assert td.structural_eq(
+        td.partial(td.partial(g, x), y), td.partial(td.partial(g, y), x)
+    )
+
+
 def test_rot_of_radius_cross_identity():
     # A rank-2 field built with the identity tensor and a cross — R×I, the skew
     # tensor with (R×I)·a = R×a — reduces instead of crashing (vibe 000070 P6).

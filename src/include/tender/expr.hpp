@@ -68,6 +68,33 @@ struct CoordinateRef final
     bool nonneg = false;
 };
 
+// A tensor field's coordinate dependence (vibe 000070 P7).  Stamped on a tensor
+// declared as a *field* (a tensor whose value varies in space); absent on a
+// plain constant tensor.  When `all` (the default — general position), the
+// field depends on every coordinate, so ∂ is never silently zero; otherwise it
+// depends only on the listed coordinates (each identified by its (chart_id,
+// slot), allowing dependence on coordinates of different charts at once).
+// Identity-neutral, like the `coordinate` marker: a field is told apart from a
+// constant by inspecting this, not by comparison.
+struct FieldDeps final
+{
+    bool all = true;
+    std::vector<CoordinateRef> only = {};
+};
+
+// One direction of a field's accumulated partial derivative (vibe 000070 P7):
+// the coordinate's display name (for ∂_x rendering) and its (chart_id, slot)
+// identity.  A base field has none; ∂_q T appends q and keeps the list sorted
+// by (chart_id, slot) so mixed partials are symmetric (T_{,xy} = T_{,yx}).
+// Unlike the rest of the traits this IS part of structural identity (it
+// distinguishes ∂_x T from T), so it lives on the TensorObject, not in
+// TensorTraits.
+struct FieldDerivDir final
+{
+    TensorName coord_name;
+    CoordinateRef ref;
+};
+
 // Value-preserving permutation generators for a tensor object (e.g. even
 // permutations of Levi-Civita, any slot swap of a symmetric tensor).
 struct SymmetrySpec final
@@ -94,6 +121,11 @@ struct TensorTraits
     // well_known: a coordinate is told apart from a plain scalar by inspecting
     // this marker, not by comparison.
     std::optional<CoordinateRef> coordinate = {};
+    // Set on a tensor declared as a field (vibe 000070 P7): its coordinate
+    // dependence.  Identity-neutral like the rest of the traits — field-ness is
+    // consistent per tensor name.  The *derivative* directions, which DO bear
+    // identity, live on TensorObject::field_derivs instead.
+    std::optional<FieldDeps> field = {};
 };
 
 // ---- SlotBinding -------------------------------------------------------
@@ -123,6 +155,11 @@ struct TensorObject final
     std::optional<int> rank;
     std::optional<TensorTraits> traits;
     std::vector<SlotBinding> slots;
+    // Accumulated partial-derivative directions of a field (vibe 000070 P7),
+    // sorted by (chart_id, slot).  Empty on a base tensor; ∂_q of a field
+    // appends q.  Part of structural identity (compared by structural_eq /
+    // tensor_object_cmp), so ∂_x T and T are distinct and ∂_x∂_y T = ∂_y∂_x T.
+    std::vector<FieldDerivDir> field_derivs = {};
 };
 
 // A numeric scalar literal.
@@ -321,6 +358,29 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 [[nodiscard]] auto make_coordinate(
     Context&, TensorName, int chart_id = 0, int slot = 0, bool nonneg = false)
     -> Expr const*;
+
+// A tensor field of any rank (vibe 000070 P7): a TensorObject carrying a
+// FieldDeps trait so the differentiator treats it as varying in space rather
+// than constant.  `deps` empty means depend on all coordinates (general
+// position — the default, so ∂ is never silently zero); a non-empty list
+// restricts dependence to those coordinates (which may belong to different
+// charts).  A rank-0 field is a scalar field.
+[[nodiscard]] auto make_field(
+    Context&,
+    TensorName,
+    int rank,
+    std::vector<CoordinateRef> deps = {}) -> Expr const*;
+
+// The partial derivative ∂_q of a field (vibe 000070 P7): a fresh field of the
+// same rank, name and dependence as `base`, with q appended to its (sorted)
+// derivative directions.  `base` must be a field (its TensorObject carries a
+// FieldDeps trait); `coord_name`/`coord` identify q.  Differentiating again
+// appends further directions, kept sorted so mixed partials coincide.
+[[nodiscard]] auto make_field_derivative(
+    Context&,
+    Expr const* base,
+    TensorName coord_name,
+    CoordinateRef coord) -> Expr const*;
 
 // Elementary scalar function and power (vibe 000069 M1).
 [[nodiscard]] auto make_scalar_fn(Context&, ScalarFnKind, Expr const* operand)

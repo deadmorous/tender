@@ -1,5 +1,6 @@
 #include <tender/expr.hpp>
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace tender
@@ -35,6 +36,53 @@ auto make_coordinate(
         .traits =
             TensorTraits{.coordinate = CoordinateRef{chart_id, slot, nonneg}},
         .slots = {}});
+}
+
+auto make_field(
+    Context& ctx,
+    TensorName name,
+    int rank,
+    std::vector<CoordinateRef> deps) -> Expr const*
+{
+    FieldDeps fd;
+    if (deps.empty())
+        fd.all = true;
+    else
+    {
+        fd.all = false;
+        fd.only = std::move(deps);
+    }
+    return ctx.make<Expr>(TensorObject{
+        .name = std::move(name),
+        .rank = rank,
+        .traits = TensorTraits{.field = std::move(fd)},
+        .slots = {}});
+}
+
+auto make_field_derivative(
+    Context& ctx,
+    Expr const* base,
+    TensorName coord_name,
+    CoordinateRef coord) -> Expr const*
+{
+    auto const* t = std::get_if<TensorObject>(&base->node);
+    if (!t || !t->traits || !t->traits->field)
+        throw std::invalid_argument(
+            "make_field_derivative: base must be a field (make_field)");
+    TensorObject d = *t;
+    d.field_derivs.push_back(FieldDerivDir{std::move(coord_name), coord});
+    // Keep the multi-index sorted by (chart_id, slot) so mixed partials are
+    // symmetric and hash-cons to one node (∂_x∂_y T = ∂_y∂_x T).
+    std::sort(
+        d.field_derivs.begin(),
+        d.field_derivs.end(),
+        [](FieldDerivDir const& a, FieldDerivDir const& b)
+        {
+            if (a.ref.chart_id != b.ref.chart_id)
+                return a.ref.chart_id < b.ref.chart_id;
+            return a.ref.slot < b.ref.slot;
+        });
+    return ctx.make<Expr>(std::move(d));
 }
 
 auto make_scalar_fn(Context& ctx, ScalarFnKind kind, Expr const* operand)

@@ -412,7 +412,14 @@ struct Renderer
                     mpk::mix::EnumFlags<RenderHint> hints;
                     if (t.traits)
                         hints = t.traits->render_hints;
-                    return name_str(t.name, t.rank)
+                    // A field's accumulated partial derivatives render in
+                    // operator form ∂_x T (vibe 000070 P7, decision 2), one
+                    // ∂-factor per sorted direction.
+                    std::string prefix;
+                    for (auto const& d: t.field_derivs)
+                        prefix += "\\partial_{"
+                                  + std::string{d.coord_name.v.view()} + "} ";
+                    return prefix + name_str(t.name, t.rank)
                            + slots_str(map, t.slots, hints, ctx);
                 },
                 [&](ScalarLiteral const& s) -> std::string

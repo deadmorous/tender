@@ -446,6 +446,39 @@ NB_MODULE(_core, m)
         "ctx"_a = nb::none(),
         "Create the identity tensor.");
 
+    m.def(
+        "field",
+        [](std::string const& name,
+           int rank,
+           std::optional<std::vector<PyExpr>> deps,
+           nb::object ctx_arg) -> PyExpr
+        {
+            auto [ctx, keep] = resolve_ctx(ctx_arg);
+            std::vector<CoordinateRef> refs;
+            if (deps)
+                for (auto const& d: *deps)
+                {
+                    auto const* t = std::get_if<TensorObject>(&d.expr->node);
+                    if (!t || !t->traits || !t->traits->coordinate)
+                        throw nb::value_error(
+                            "field deps must be coordinate variables "
+                            "(tender.coordinate)");
+                    refs.push_back(*t->traits->coordinate);
+                }
+            return PyExpr{
+                keep,
+                ctx,
+                make_field(*ctx, make_tensor_name(name), rank, refs)};
+        },
+        "name"_a,
+        "rank"_a,
+        "deps"_a = nb::none(),
+        "ctx"_a = nb::none(),
+        "Create a tensor field of the given rank (vibe 000070).  With no deps "
+        "it depends on all coordinates (∂ never silently zero); pass deps=[...] "
+        "of coordinate variables (possibly from different charts) to restrict "
+        "its dependence.  A rank-0 field is a scalar field.");
+
     // ---- scalar fields (vibe 000069 M1) -------------------------------- //
 
     m.def(
@@ -1179,6 +1212,27 @@ NB_MODULE(_core, m)
                 return PyExpr{c.ctx_keep, c.ctx, radius_vector(*c.ctx, c.chart)};
             },
             "The position vector R = Σ_a f^a(q) u_a in the reference frame.")
+        .def(
+            "field",
+            [](PyChart const& c, std::string const& name, int rank) -> PyExpr
+            {
+                std::vector<CoordinateRef> refs;
+                for (auto const* q: c.chart.coords)
+                {
+                    auto const* t = std::get_if<TensorObject>(&q->node);
+                    if (t && t->traits && t->traits->coordinate)
+                        refs.push_back(*t->traits->coordinate);
+                }
+                return PyExpr{
+                    c.ctx_keep,
+                    c.ctx,
+                    make_field(*c.ctx, make_tensor_name(name), rank, refs)};
+            },
+            "name"_a,
+            "rank"_a,
+            "A tensor field of the given rank depending on all of this chart's "
+            "coordinates (vibe 000070).  Shorthand for tender.field with "
+            "deps=chart coords.")
         .def(
             "tangent_vector",
             [](PyChart const& c, int i) -> PyExpr {

@@ -403,7 +403,10 @@ The keystone: one primitive used in **both** directions by P4 and P6.
   multi-index ⇒ mixed-partial symmetry `T_{,ij}=T_{,ji}` and hash-cons; higher
   derivatives for the Laplacian; `∂_i T` LaTeX (decision 2). Tests: symmetry,
   second derivatives, render.
-- **F3 · 13 pts (needs F1; expensive, deferrable)** — cross-chart dependence.
+- **F3 · 13 pts (needs F1; expensive, DEFERRED)** — cross-chart dependence.
+  *Status: not implemented* — F1/F2 deliver the value; F3 (a field on spherical
+  `r` AND Cartesian `x`, differentiated by a coordinate related through the
+  charts) needs the inverse-Jacobian chain-rule machinery and is left for later.
   Chain rule `∂_q T = Σ_{p∈D}(∂_p T)(∂p/∂q)`; charts embed into the shared
   reference Cartesian (`∂x^a/∂q^i` free), reverse `∂q^i/∂x^a` via inverse
   Jacobian or user-supplied inverse relations; register chart relations through

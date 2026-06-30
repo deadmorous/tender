@@ -464,6 +464,16 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                     if (!index_assoc_eq(sa.index, sb.index))
                         return false;
                 }
+                // Field-derivative directions bear identity (vibe 000070 P7).
+                if (ta.field_derivs.size() != tb->field_derivs.size())
+                    return false;
+                for (std::size_t i = 0; i < ta.field_derivs.size(); ++i)
+                {
+                    auto const& da = ta.field_derivs[i].ref;
+                    auto const& db = tb->field_derivs[i].ref;
+                    if (da.chart_id != db.chart_id || da.slot != db.slot)
+                        return false;
+                }
                 return true;
             },
             [&](ScalarLiteral const& la) -> bool
@@ -2996,11 +3006,36 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
         Overloads{
             [&](TensorObject const& t) -> Expr const*
             {
-                // Only the matching coordinate varies; everything else (other
-                // coordinates, reference vectors, parameters, I/δ/ε) is
+                // A coordinate atom: ∂_q q = 1 for the matching coordinate, 0
+                // for any other (sibling coordinate, unbound symbol).
+                if (t.traits && t.traits->coordinate)
+                    return is_same_coord(t, q) ? make_scalar(ctx, Rational{1}) :
+                                                 zero();
+                // A tensor field (vibe 000070 P7): if it depends on q, the
+                // derivative is the opaque derivative field ∂_q T (a fresh
+                // field of the same rank, so it can be differentiated again);
+                // if it provably does not, it is constant in q → 0.  An opaque
+                // field carries no e_j(q) inside it, so there are no connection
+                // terms.
+                if (t.traits && t.traits->field)
+                {
+                    auto const& fd = *t.traits->field;
+                    bool const depends =
+                        fd.all
+                        || std::any_of(
+                            fd.only.begin(),
+                            fd.only.end(),
+                            [&](CoordinateRef const& d) {
+                                return d.chart_id == q.ref.chart_id
+                                       && d.slot == q.ref.slot;
+                            });
+                    return depends ?
+                               make_field_derivative(ctx, e, q.name, q.ref) :
+                               zero();
+                }
+                // Everything else (reference vectors, parameters, I/δ/ε) is
                 // constant.
-                return is_same_coord(t, q) ? make_scalar(ctx, Rational{1}) :
-                                             zero();
+                return zero();
             },
             [&](ScalarLiteral const&) -> Expr const* { return zero(); },
             [&](Negate const& n) -> Expr const*

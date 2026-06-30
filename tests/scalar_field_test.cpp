@@ -175,6 +175,53 @@ TEST(Partial, RejectsNonCoordinate)
     EXPECT_THROW(steps::partial(ctx, r, plain), std::invalid_argument);
 }
 
+// ---- tensor fields (vibe 000070 P7) ------------------------------------
+
+// A field depends on its coordinates: ∂_q T is a fresh, non-zero derivative
+// field (an opaque tensor is no longer treated as constant); a plain tensor
+// still differentiates to 0.
+TEST(Field, DependsAndDifferentiates)
+{
+    Context ctx;
+    auto* x = coord(ctx, "x", 0);
+    auto* T = make_field(ctx, make_tensor_name("T"), 2); // depends on all
+    auto* dT = steps::partial(ctx, T, x);
+    EXPECT_FALSE(algebraic_eq(ctx, dT, make_scalar(ctx, Rational{0})));
+    EXPECT_FALSE(structural_eq(dT, T)); // ∂_x T is distinct from T
+    EXPECT_EQ(infer_rank(dT), std::optional<int>{2}); // rank preserved
+
+    auto* plain = make_tensor_object(ctx, make_tensor_name("a"), {}, 2);
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::partial(ctx, plain, x), make_scalar(ctx, Rational{0})));
+}
+
+// Restricted dependence: a field declared on x alone is constant in y.
+TEST(Field, RestrictedDependence)
+{
+    Context ctx;
+    auto* x = coord(ctx, "x", 0);
+    auto* y = coord(ctx, "y", 1);
+    auto* f = make_field(
+        ctx, make_tensor_name("f"), 0, {CoordinateRef{0, 0, false}}); // f(x)
+    EXPECT_FALSE(algebraic_eq(
+        ctx, steps::partial(ctx, f, x), make_scalar(ctx, Rational{0})));
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::partial(ctx, f, y), make_scalar(ctx, Rational{0})));
+}
+
+// Mixed partials are symmetric: ∂_x∂_y T = ∂_y∂_x T (the sorted multi-index
+// hash-conses them to one node).
+TEST(Field, MixedPartialsAreSymmetric)
+{
+    Context ctx;
+    auto* x = coord(ctx, "x", 0);
+    auto* y = coord(ctx, "y", 1);
+    auto* T = make_field(ctx, make_tensor_name("T"), 1);
+    auto* dxy = steps::partial(ctx, steps::partial(ctx, T, x), y);
+    auto* dyx = steps::partial(ctx, steps::partial(ctx, T, y), x);
+    EXPECT_TRUE(structural_eq(dxy, dyx));
+}
+
 TEST(Partial, ChainRuleOnElementaryFunctions)
 {
     Context ctx;
