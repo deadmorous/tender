@@ -197,9 +197,9 @@ show(
         ("∇×(r e_θ)", simp(rot_swirl)),
     ],
 )
-# ∇R is the identity tensor I = Σ_i e_i ⊗ e_i.
-identity = e[0] * e[0] + e[1] * e[1] + e[2] * e[2]
-assert td.algebraic_eq(simp(grad_R), simp(identity))
+# ∇R is the identity tensor I: the operators now fold the concrete resolution
+# Σ_i e_i ⊗ e_i back to I itself (vibe 000070 P4), so grad_R is structurally I.
+assert td.structural_eq(grad_R, tender.identity(ctx))
 assert td.algebraic_eq(div_radial, tender.scalar(2, ctx=ctx))
 assert td.algebraic_eq(lap_r2, tender.scalar(4, ctx=ctx))
 assert td.algebraic_eq(simp(rot_swirl), simp(tender.scalar(2, ctx=ctx) * e[2]))
