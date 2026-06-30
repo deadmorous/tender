@@ -133,4 +133,20 @@ struct CoordinateChart final
     Expr const* v,
     bool fold_identity = true) -> Expr const*;
 
+// The invariant dot u·v and cross u×v reduced in the chart's orthonormal
+// reference frame (vibe 000070 P8): distribute, turn frame-vector contractions
+// into δ/ε, and simplify.  These expose the reductions the operators use
+// internally, so user-built operators — e.g. the directional derivative
+// (v·∇)T = v · ∇T — can contract their results.  frame_cross is 3D only.
+[[nodiscard]] auto frame_dot(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* u,
+    Expr const* v) -> Expr const*;
+[[nodiscard]] auto frame_cross(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* u,
+    Expr const* v) -> Expr const*;
+
 } // namespace tender

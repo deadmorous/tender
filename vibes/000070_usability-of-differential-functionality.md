@@ -415,6 +415,23 @@ The keystone: one primitive used in **both** directions by P4 and P6.
 
 ### Phase 5 — first-class `∇`/`∂_q` (P8) · 21 pts (best after F1)
 
+> **Implemented as a deferred operator layer, not core IR nodes.** Adding
+> `Nabla`/`DiffOp`/`Diff`/`Laplacian` to the `Expr` variant would force a new arm
+> across ~6 exhaustive `Expr` visitors (canonicalize, nf lowering, nf_match,
+> nf_egraph, render, structural_eq/tensor_order) plus `rewrite_tree` — high risk
+> of destabilising the whole library for a layer whose nodes are eliminated
+> before canonicalize ever runs (explicit evaluation, decision 2).  Instead
+> Phase 5 ships `tender.operators`: a small **Python** algebra (`Nabla`, `d(q)`,
+> `laplacian`, `DifferentialExpr`) that builds a symbolic, inspectable tree and
+> lowers to the existing chart operators on `.evaluate(chart)`.  All three
+> decisions hold: chart-free `nabla`, explicit `.evaluate(chart)`, and `Δ` a
+> citable atom whose evaluation routes through `div(grad)` so it equals
+> `nabla @ (nabla * f)` by construction.  Custom operators work: the directional
+> derivative `nabla.along(v) * T = v·∇T` evaluates via the new public
+> `chart.dot`/`chart.cross` (frame reductions).  *Limitation vs the IR-node
+> design:* `∇` identities cannot be proven chart-free (evaluation needs a chart);
+> that is the one thing the full IR nodes would add, and remains a future option.
+
 - **IR · main change** — `src/include/tender/expr.hpp`: add `DiffOp{coord}`
   (rank-0 **order-fixed** factor category — canonicalize must NOT float it to
   the front like a scalar coefficient), `Diff{coord, operand}`, `Nabla`

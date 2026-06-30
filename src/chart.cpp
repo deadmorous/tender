@@ -574,4 +574,25 @@ auto rot(
         fold_identity);
 }
 
+auto frame_dot(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* u,
+    Expr const* v) -> Expr const*
+{
+    return reduce_dot(ctx, chart.reference, u, v);
+}
+
+auto frame_cross(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* u,
+    Expr const* v) -> Expr const*
+{
+    if (chart.reference.dim() != 3)
+        throw std::invalid_argument(
+            "frame_cross: only the 3D cross product is defined");
+    return reduce_cross(ctx, chart.reference, u, v);
+}
+
 } // namespace tender

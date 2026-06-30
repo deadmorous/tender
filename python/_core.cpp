@@ -1352,5 +1352,30 @@ NB_MODULE(_core, m)
             },
             "v"_a,
             "fold_identity"_a = true,
-            "rot v = ∇×v = Σ_i (1/h_i) e_i × ∂_{q^i} v (3D, invariant vector).");
+            "rot v = ∇×v = Σ_i (1/h_i) e_i × ∂_{q^i} v (3D, invariant vector).")
+        .def(
+            "dot",
+            [](PyChart const& c, PyExpr const& u, PyExpr const& v) -> PyExpr
+            {
+                return PyExpr{
+                    c.ctx_keep,
+                    c.ctx,
+                    frame_dot(*c.ctx, c.chart, u.expr, v.expr)};
+            },
+            "u"_a,
+            "v"_a,
+            "The invariant dot u·v reduced in the reference frame (used to build "
+            "custom operators such as the directional derivative v·∇).")
+        .def(
+            "cross",
+            [](PyChart const& c, PyExpr const& u, PyExpr const& v) -> PyExpr
+            {
+                return PyExpr{
+                    c.ctx_keep,
+                    c.ctx,
+                    frame_cross(*c.ctx, c.chart, u.expr, v.expr)};
+            },
+            "u"_a,
+            "v"_a,
+            "The invariant cross u×v reduced in the reference frame (3D).");
 }
