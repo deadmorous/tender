@@ -2464,7 +2464,7 @@ TEST(Canonicalize, IdempotentAcrossNodeKinds)
             make_scalar(ctx, Rational{2})), // folds to 3
         make_no_sum(ctx, i, delta_ul(ctx, i, j)),
         make_explicit_sum(ctx, i, delta_ul(ctx, i, j), N), // symbolic bound
-        // sorting two same-kind cores → exercises expr_cmp arms
+        // sorting two same-kind cores → exercises the canonical-order arms
         make_sum(ctx, make_dot(ctx, a, b), make_dot(ctx, c, d)),
         make_sum(ctx, make_ddot(ctx, A, B), make_ddot(ctx, B, A)),
         make_sum(ctx, make_ddot_alt(ctx, A, B), make_ddot_alt(ctx, B, A)),
@@ -3677,10 +3677,9 @@ TEST(ContractEpsPair, ContractsFourEpsilonsPairByPair)
     EXPECT_EQ(tex.find("varepsilon"), std::string::npos);
 }
 
-// Exercise every arm of the canonical-order comparator expr_cmp: canonicalizing
-// a sum of two same-kind nodes makes the sort compare them through that arm.
-// Asserting idempotence (canonicalize is a fixed point) is a meaningful check
-// that also covers the comparator branches.
+// Canonicalize is a fixed point on a sum of two same-kind nodes for every node
+// kind — the sort orders the addends consistently, so a second canonicalize is
+// a no-op.  Covers the canonical-order comparison path across all node types.
 TEST(Canonicalize, ComparatorArmsAreExercised)
 {
     Context ctx;
