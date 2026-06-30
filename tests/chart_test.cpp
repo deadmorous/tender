@@ -424,6 +424,41 @@ TEST(Chart, CartesianGradientIsIdentity)
     EXPECT_TRUE(eq(ctx, rot(ctx, chart, R), s0(ctx)));
 }
 
+// The operators reduce a field built with the identity tensor and a cross —
+// R×I, the rank-2 skew tensor with (R×I)·a = R×a — instead of crashing (vibe
+// 000070 P6).  ∇×(R×I) = I − 3I = −2I.  Previously this raised in Nf lowering.
+TEST(Chart, RotOfRCrossIdentity)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+    auto* R = radius_vector(ctx, chart);
+    auto* RxI = make_cross(ctx, R, make_identity(ctx));
+
+    auto* want = make_negate(
+        ctx, mul(ctx, make_scalar(ctx, Rational{2}), make_identity(ctx)));
+    EXPECT_TRUE(structural_eq(rot(ctx, chart, RxI), want)); // ∇×(R×I) = −2I
+}
+
+// A cross of two constant (non-field) vectors differentiates to zero by Leibniz
+// (0×b + a×0); the operator folds that away gracefully rather than crashing on
+// the zero-operand crosses (vibe 000070 P6, graceful path).
+TEST(Chart, RotOfConstantCrossIsZero)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+    auto* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    EXPECT_TRUE(eq(ctx, rot(ctx, chart, make_cross(ctx, a, b)), s0(ctx)));
+}
+
 // ∇f: the 1/h_i factors are the curvilinear content — for cylindrical
 // ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r,
 // each returned as the invariant vector in the reference frame.

@@ -240,3 +240,23 @@ def test_cylindrical_rot():
     v = r * chart.physical_basis().basis(1)  # r e_theta
     # rot(r e_theta) = 2 e_z = 2k (uniform vorticity).
     assert _inv_eq(chart.rot(v), t.scalar(2, ctx=ctx) * tb.wcs(ctx).basis(2))
+
+
+def test_rot_of_radius_cross_identity():
+    # A rank-2 field built with the identity tensor and a cross — R×I, the skew
+    # tensor with (R×I)·a = R×a — reduces instead of crashing (vibe 000070 P6).
+    # ∇×(R×I) = I − 3I = −2I.
+    ctx = t.Context()
+    identity = t.identity(ctx)
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=1, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=1, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=1, slot=2, ctx=ctx)
+    chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
+    R = chart.radius_vector()
+    want = t.scalar(-2, ctx=ctx) * identity
+    assert td.structural_eq(chart.rot(R % identity), td.canonicalize(want))
+    # A cross of two constant vectors differentiates to 0 (gracefully, no crash).
+    a = t.tensor("a", rank=1, ctx=ctx)
+    b = t.tensor("b", rank=1, ctx=ctx)
+    assert td.algebraic_eq(chart.rot(a % b), t.scalar(0, ctx=ctx))

@@ -246,14 +246,16 @@ auto split_frame(Context& ctx, Basis const& ref, Expr const* e)
     return FrameSide{scalars.empty() ? nullptr : product_of(ctx, scalars), dir};
 }
 
-// The invariant cross u×v of two vectors in the right-handed orthonormal
-// reference frame `ref`, reduced to a frame vector: distribute bilinearly, then
-// fold each frame-vector cross via e_a × e_b = Σ_c ε_{abc} e_c.
-auto reduce_cross(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
+// Reduce every frame-vector cross e_a × e_b in `e` via e_a × e_b = Σ_c ε_{abc}
+// e_c (the right-handed orthonormal reference frame `ref`), in place across the
+// whole tree.  A cross whose sides are not both (scalar-weighted) frame vectors
+// — e.g. e_a × (b⊗c), which fence-distribution must split first — is left for
+// the caller.  Used both by reduce_cross and to clean frame crosses already
+// present in an operator's input field (vibe 000070 P6: ∇×(R×I)).
+auto fold_frame_crosses(Context& ctx, Basis const& ref, Expr const* e)
     -> Expr const*
 {
-    Expr const* e = distribute_bilinear(ctx, u, v, &make_cross);
-    e = rewrite_tree(
+    return rewrite_tree(
         ctx,
         e,
         [&](Context& c, Expr const* node) -> Expr const*
@@ -261,6 +263,16 @@ auto reduce_cross(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
             auto const* x = std::get_if<Cross>(&node->node);
             if (!x)
                 return node;
+            // A cross with a zero operand is zero — fold it away (the
+            // differentiator emits 0×b + a×0 when it Leibniz-differentiates a
+            // cross of constants; canonicalize cannot reduce that on its own).
+            auto is_zero = [](Expr const* z)
+            {
+                auto const* s = std::get_if<ScalarLiteral>(&z->node);
+                return s && s->value.is_zero();
+            };
+            if (is_zero(x->left) || is_zero(x->right))
+                return make_scalar(c, Rational{0});
             auto l = split_frame(c, ref, x->left);
             auto r = split_frame(c, ref, x->right);
             if (!l || !r)
@@ -277,6 +289,36 @@ auto reduce_cross(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
                 res = make_tensor_product(c, r->scalar, res);
             return res;
         });
+}
+
+// Reduce every cross in `e` to frame vectors, however deeply its operands are
+// dyads (vibe 000070 P6).  A cross of a vector with a rank-2 tensor — e_i × the
+// field ∂_i(R×I) — must first fence-distribute over the ⊗, a × (u⊗v) → (a×u)⊗v,
+// before the frame table applies; distribute_contraction does one such pass, so
+// iterate it with fold_frame_crosses to a fixpoint.
+auto reduce_frame_crosses(Context& ctx, Basis const& ref, Expr const* e)
+    -> Expr const*
+{
+    e = steps::expand_products(ctx, e);
+    Expr const* prev = nullptr;
+    for (int guard = 0; e != prev && guard <= ref.dim() + 2; ++guard)
+    {
+        prev = e;
+        e = steps::distribute_contraction(ctx, e);
+        e = fold_frame_crosses(ctx, ref, e);
+    }
+    return e;
+}
+
+// The invariant cross u×v of two tensors in the right-handed orthonormal
+// reference frame `ref`, reduced to frame vectors: distribute bilinearly, then
+// fence-distribute and fold each frame-vector cross via e_a × e_b = Σ_c ε_{abc}
+// e_c.
+auto reduce_cross(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
+    -> Expr const*
+{
+    Expr const* e = distribute_bilinear(ctx, u, v, &make_cross);
+    e = reduce_frame_crosses(ctx, ref, e);
     e = steps::canonicalize(ctx, e);
     return steps::simplify_scalars(ctx, e);
 }
@@ -434,11 +476,21 @@ auto del_apply(
 {
     int const n = static_cast<int>(chart.coords.size());
     Basis const pb = physical_basis(ctx, chart);
-    // Distribute the field into a clean sum of monomials first, so a field
-    // handed in as scalar ⊗ (moving-frame vector) — e.g. r ⊗ e_r —
-    // differentiates and reduces without a stray un-fenced ⊗ tripping
-    // canonicalize.
+    // Reduce the input field to clean dyad form first (vibe 000070 P6).  A
+    // field built with the identity tensor or an unreduced cross — e.g. R×I —
+    // carries an atomic I and frame-vector crosses the differentiator/reducer
+    // cannot see through.  Expand I → Σ_k u_k⊗u_k over the (orthonormal)
+    // reference frame, distribute into a sum of monomials (which also
+    // fence-distributes a cross over the dyads, a × (b⊗c) → (a×b)⊗c), then fold
+    // those frame crosses to frame vectors.  All transparent: any resulting Σ_k
+    // u_k⊗u_k folds back to I at the end.  Also lets a field handed in as
+    // scalar ⊗ moving-frame vector (r ⊗ e_r) differentiate without a stray
+    // un-fenced ⊗ tripping canonicalize.
+    if (chart.reference.is_orthonormal())
+        T = expand_identity(ctx, T, chart.reference);
+    T = reduce_frame_crosses(ctx, chart.reference, T);
     T = steps::expand_products(ctx, T);
+    T = steps::canonicalize(ctx, T);
     Expr const* acc = make_scalar(ctx, Rational{0});
     for (int i = 0; i < n; ++i)
     {
