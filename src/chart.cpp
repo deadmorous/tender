@@ -420,10 +420,17 @@ auto connection_coefficients(
 // it by one, rot keeps it (3D); nothing assumes a particular basis for T.
 
 // Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T, with `combine(e_i, ∂_i T)` choosing ⊗ / · / ×.
+// When `fold_identity` (the default), the result's concrete resolution of
+// identity Σ_k u_k⊗u_k over the reference frame is folded back to I (vibe
+// 000070 P4), so ∇R = I, ∇×(R×I) = −2I etc. come out directly; pass false for
+// the raw expanded form.
 template <typename Combine>
 auto del_apply(
-    Context& ctx, CoordinateChart const& chart, Expr const* T, Combine combine)
-    -> Expr const*
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* T,
+    Combine combine,
+    bool fold_identity) -> Expr const*
 {
     int const n = static_cast<int>(chart.coords.size());
     Basis const pb = physical_basis(ctx, chart);
@@ -448,11 +455,17 @@ auto del_apply(
         acc = make_sum(ctx, acc, term);
     }
     acc = steps::expand_products(ctx, acc);
-    return steps::simplify_scalars(ctx, steps::canonicalize(ctx, acc));
+    acc = steps::simplify_scalars(ctx, steps::canonicalize(ctx, acc));
+    if (fold_identity)
+        acc = fold_resolution_of_identity(ctx, acc, chart.reference);
+    return acc;
 }
 
-auto gradient(Context& ctx, CoordinateChart const& chart, Expr const* f)
-    -> Expr const*
+auto gradient(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* f,
+    bool fold_identity) -> Expr const*
 {
     // grad T = Σ_i (1/h_i) e_i ⊗ ∂_i T (rank + 1); e.g. ∇R = Σ_i e_i ⊗ e_i = I.
     return del_apply(
@@ -460,11 +473,15 @@ auto gradient(Context& ctx, CoordinateChart const& chart, Expr const* f)
         chart,
         f,
         [&](Expr const* ei, Expr const* di)
-        { return make_tensor_product(ctx, ei, di); });
+        { return make_tensor_product(ctx, ei, di); },
+        fold_identity);
 }
 
-auto divergence(Context& ctx, CoordinateChart const& chart, Expr const* v)
-    -> Expr const*
+auto divergence(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* v,
+    bool fold_identity) -> Expr const*
 {
     // div v = Σ_i (1/h_i) e_i · ∂_i v (rank − 1).
     return del_apply(
@@ -472,17 +489,25 @@ auto divergence(Context& ctx, CoordinateChart const& chart, Expr const* v)
         chart,
         v,
         [&](Expr const* ei, Expr const* di)
-        { return reduce_dot(ctx, chart.reference, ei, di); });
+        { return reduce_dot(ctx, chart.reference, ei, di); },
+        fold_identity);
 }
 
-auto laplacian(Context& ctx, CoordinateChart const& chart, Expr const* f)
-    -> Expr const*
+auto laplacian(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* f,
+    bool fold_identity) -> Expr const*
 {
-    return divergence(ctx, chart, gradient(ctx, chart, f));
+    return divergence(
+        ctx, chart, gradient(ctx, chart, f, fold_identity), fold_identity);
 }
 
-auto rot(Context& ctx, CoordinateChart const& chart, Expr const* v)
-    -> Expr const*
+auto rot(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* v,
+    bool fold_identity) -> Expr const*
 {
     if (chart.reference.dim() != 3)
         throw std::invalid_argument(
@@ -493,7 +518,8 @@ auto rot(Context& ctx, CoordinateChart const& chart, Expr const* v)
         chart,
         v,
         [&](Expr const* ei, Expr const* di)
-        { return reduce_cross(ctx, chart.reference, ei, di); });
+        { return reduce_cross(ctx, chart.reference, ei, di); },
+        fold_identity);
 }
 
 } // namespace tender

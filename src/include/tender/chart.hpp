@@ -98,22 +98,39 @@ struct CoordinateChart final
 // grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, raising the rank by one.  For a scalar
 // f this is the familiar ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z; for the
 // position vector R it is the identity tensor ∇R = Σ_i e_i ⊗ e_i = I.
+//
+// fold_identity (default true): collapse the result's concrete resolution of
+// identity Σ_k u_k⊗u_k back to I (vibe 000070 P4) so ∇R = I comes out directly;
+// pass false to keep the raw expanded sum of dyads.
 [[nodiscard]] auto gradient(
-    Context& ctx, CoordinateChart const& chart, Expr const* f) -> Expr const*;
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* f,
+    bool fold_identity = true) -> Expr const*;
 
 // div v = ∇·v = Σ_i (1/h_i) e_i · ∂_{q^i} v, lowering the rank by one (a vector
-// field → a scalar).
+// field → a scalar).  fold_identity as in gradient.
 [[nodiscard]] auto divergence(
-    Context& ctx, CoordinateChart const& chart, Expr const* v) -> Expr const*;
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* v,
+    bool fold_identity = true) -> Expr const*;
 
-// Laplacian Δf = div(grad f) as a scalar field.
+// Laplacian Δf = div(grad f) as a scalar field.  fold_identity as in gradient.
 [[nodiscard]] auto laplacian(
-    Context& ctx, CoordinateChart const& chart, Expr const* f) -> Expr const*;
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* f,
+    bool fold_identity = true) -> Expr const*;
 
 // rot v = ∇×v = Σ_i (1/h_i) e_i × ∂_{q^i} v.  3D only (the cross product), and
 // the reference frame is taken right-handed (standard for the well-known
-// charts); throws std::invalid_argument otherwise.
+// charts); throws std::invalid_argument otherwise.  fold_identity as in
+// gradient (so ∇×(R×I) = −2I folds).
 [[nodiscard]] auto rot(
-    Context& ctx, CoordinateChart const& chart, Expr const* v) -> Expr const*;
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* v,
+    bool fold_identity = true) -> Expr const*;
 
 } // namespace tender

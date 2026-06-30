@@ -406,13 +406,19 @@ TEST(Chart, CartesianGradientIsIdentity)
     CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
     auto* R = radius_vector(ctx, chart);
 
-    Expr const* I = nullptr;
+    // ∇R = I: the operator now folds the concrete resolution Σ_k e_k⊗e_k back
+    // to the identity tensor itself (vibe 000070 P4), so the result is
+    // structurally I — not just inv_eq to the expanded dyad sum.
+    EXPECT_TRUE(structural_eq(gradient(ctx, chart, R), make_identity(ctx)));
+    // The raw (unfolded) form is still available and equals the dyad sum.
+    Expr const* dyads = nullptr;
     for (int k = 0; k < 3; ++k)
     {
         auto* dyad = mul(ctx, ref.basis(k), ref.basis(k));
-        I = I ? make_sum(ctx, I, dyad) : dyad;
+        dyads = dyads ? make_sum(ctx, dyads, dyad) : dyad;
     }
-    EXPECT_TRUE(inv_eq(ctx, gradient(ctx, chart, R), I)); // ∇R = I
+    EXPECT_TRUE(
+        inv_eq(ctx, gradient(ctx, chart, R, /*fold_identity=*/false), dyads));
     EXPECT_TRUE(
         eq(ctx, divergence(ctx, chart, R), make_scalar(ctx, Rational{3})));
     EXPECT_TRUE(eq(ctx, rot(ctx, chart, R), s0(ctx)));

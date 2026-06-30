@@ -1477,6 +1477,102 @@ TEST(Reassemble, AlsoDoesCompletenessFold)
     EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), b.basis(0)));
 }
 
+// ---- concrete resolution of identity (vibe 000070 Phase 0) ----------------
+
+namespace
+{
+// The concrete dyad sum Σ_k c·u_k⊗u_k over `b`'s frame vectors (the shape the
+// differential operators emit), with an optional common scalar coefficient.
+auto dyad_sum(Context& ctx, Basis const& b, Expr const* coeff = nullptr)
+    -> Expr const*
+{
+    Expr const* s = nullptr;
+    for (int k = 0; k < b.dim(); ++k)
+    {
+        Expr const* d = make_tensor_product(ctx, b.basis(k), b.basis(k));
+        if (coeff)
+            d = make_tensor_product(ctx, coeff, d);
+        s = s ? make_sum(ctx, s, d) : d;
+    }
+    return s;
+}
+} // namespace
+
+// i⊗i + j⊗j + k⊗k folds back to the identity tensor I (the headline ∇R = I).
+TEST(ResolutionOfIdentity, ConcreteDyadSumFoldsToIdentity)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* got = fold_resolution_of_identity(ctx, dyad_sum(ctx, b), b);
+    EXPECT_TRUE(structural_eq(got, make_identity(ctx)));
+}
+
+// A common scalar coefficient survives the fold: 2(i⊗i + …) → 2 I, and the
+// negated group −(i⊗i + …) → −I.
+TEST(ResolutionOfIdentity, ScaledAndNegatedGroupsFold)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* two = make_scalar(ctx, Rational{2});
+    auto const* scaled =
+        fold_resolution_of_identity(ctx, dyad_sum(ctx, b, two), b);
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, scaled),
+        steps::canonicalize(
+            ctx, make_tensor_product(ctx, two, make_identity(ctx)))));
+
+    auto const* neg = make_negate(ctx, dyad_sum(ctx, b));
+    auto const* folded = fold_resolution_of_identity(ctx, neg, b);
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, folded),
+        steps::canonicalize(ctx, make_negate(ctx, make_identity(ctx)))));
+}
+
+// An incomplete group (a direction missing) does not fold — completeness needs
+// every frame vector present.
+TEST(ResolutionOfIdentity, IncompleteGroupUnchanged)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* partial = make_sum(
+        ctx,
+        make_tensor_product(ctx, b.basis(0), b.basis(0)),
+        make_tensor_product(ctx, b.basis(1), b.basis(1))); // no k⊗k
+    auto const* got = fold_resolution_of_identity(ctx, partial, b);
+    EXPECT_FALSE(
+        structural_eq(steps::canonicalize(ctx, got), make_identity(ctx)));
+}
+
+// A non-orthonormal basis has no resolution of identity: the fold is a no-op
+// and the forward expansion throws.
+TEST(ResolutionOfIdentity, ObliqueBasisIsNoOp)
+{
+    Context ctx;
+    auto i = vec(ctx, "i");
+    auto j = vec(ctx, "j");
+    auto k = vec(ctx, "k");
+    auto ob = make_oblique_basis(ctx, space_3d(), {i, j, k});
+    auto const* sum = dyad_sum(ctx, ob);
+    EXPECT_EQ(fold_resolution_of_identity(ctx, sum, ob), sum);
+    EXPECT_THROW(
+        (void)expand_identity(ctx, make_identity(ctx), ob),
+        std::invalid_argument);
+}
+
+// expand_identity is the inverse direction: I → Σ_k u_k⊗u_k, and folding it
+// back returns I (round-trip).
+TEST(ResolutionOfIdentity, ExpandThenFoldRoundTrips)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* expanded = expand_identity(ctx, make_identity(ctx), b);
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, expanded),
+        steps::canonicalize(ctx, dyad_sum(ctx, b))));
+    EXPECT_TRUE(structural_eq(
+        fold_resolution_of_identity(ctx, expanded, b), make_identity(ctx)));
+}
+
 // ---- concrete-direction basis dots (vibe 000068 P1/P3) --------------------
 
 namespace

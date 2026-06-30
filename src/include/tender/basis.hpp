@@ -304,4 +304,27 @@ enum class Variance
 [[nodiscard]] auto reassemble_completeness(
     Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
 
+// Fold the *concrete, fully-expanded* resolution of identity back to I (vibe
+// 000070 P3).  The differential operators emit their results in the chart's
+// constant reference frame as a plain sum of concrete dyads — `u_0⊗u_0 +
+// u_1⊗u_1 + …`, never the symbolic bound Σ_i e_i⊗e_i that `fold_completeness`
+// recognises.  This pass finds, within any Sum, addends `c·u_k⊗u_k` present for
+// *every* concrete vector u_k of the orthonormal `basis` sharing one sign and
+// coefficient c, and replaces that complete group with a single `c·I`.
+//
+// `basis` must be the frame the dyads are written in (a chart's reference
+// basis); a non-orthonormal basis (where completeness does not hold) is a
+// no-op. Operates on the canonical form; anything else is left unchanged. Walks
+// the whole tree.
+[[nodiscard]] auto fold_resolution_of_identity(
+    Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
+
+// Expand every identity tensor I in `e` into the concrete resolution
+// Σ_k u_k⊗u_k over the orthonormal `basis` — the forward direction used by the
+// contraction engine so a cross/dot against I reduces leg-by-leg (vibe 000070
+// P6).  Throws std::invalid_argument if the basis is not orthonormal (the
+// resolution holds only there).  Walks the whole tree.
+[[nodiscard]] auto expand_identity(
+    Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
+
 } // namespace tender

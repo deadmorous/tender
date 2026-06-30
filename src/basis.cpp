@@ -768,6 +768,171 @@ auto fold_completeness(Context& ctx, Expr const* node, Basis const& basis)
     return more ? more : folded;
 }
 
+// ---- concrete resolution of identity (vibe 000070 Phase 0) -------------
+//
+// The differential operators emit their results in the chart's constant
+// reference frame, *fully expanded* — Σ_k u_k⊗u_k as separate concrete addends
+// `u_0⊗u_0 + u_1⊗u_1 + …`, never the symbolic bound Σ that fold_completeness
+// above recognises.  This pass folds that concrete shape back to the identity
+// tensor I, and the forward direction expands I to it (used by the contraction
+// engine, vibe 000070 Phase 2).
+
+// True for the well-known identity tensor I.
+auto is_identity_tensor(Expr const* e) -> bool
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    return t && t->traits
+           && t->traits->well_known == std::optional{WellKnownKind::Identity};
+}
+
+// The direction k for which `e` is structurally the concrete basis vector
+// b.basis(k), or -1 when `e` is not one of `b`'s concrete vectors.
+auto concrete_basis_dir(Expr const* e, Basis const& b) -> int
+{
+    for (int k = 0; k < b.dim(); ++k)
+        if (structural_eq(e, b.basis(k)))
+            return k;
+    return -1;
+}
+
+// Gather the signed addends of a Sum/Difference/Negate tree (so the concrete
+// resolution of identity, spread across the addends, can be matched as a set).
+void collect_addends(
+    Expr const* e, bool neg, std::vector<std::pair<Expr const*, bool>>& out)
+{
+    if (auto const* s = std::get_if<Sum>(&e->node))
+    {
+        collect_addends(s->left, neg, out);
+        collect_addends(s->right, neg, out);
+    }
+    else if (auto const* d = std::get_if<Difference>(&e->node))
+    {
+        collect_addends(d->left, neg, out);
+        collect_addends(d->right, !neg, out);
+    }
+    else if (auto const* n = std::get_if<Negate>(&e->node))
+        collect_addends(n->operand, !neg, out);
+    else
+        out.push_back({e, neg});
+}
+
+// A dyad addend c·u_k⊗u_k of the resolution of identity: the same concrete
+// basis vector on both legs (dir), times a rank-0 scalar coefficient (null =
+// 1).
+struct DyadAddend final
+{
+    int dir;
+    Expr const* coeff; // null = 1
+};
+auto as_identity_dyad(Context& ctx, Expr const* e, Basis const& b)
+    -> std::optional<DyadAddend>
+{
+    std::vector<Expr const*> facs;
+    flatten_product(e, facs);
+    int dir = -1, legs = 0;
+    std::vector<Expr const*> scalars;
+    for (auto const* f: facs)
+    {
+        int const k = concrete_basis_dir(f, b);
+        if (k >= 0)
+        {
+            if (legs == 0)
+                dir = k;
+            else if (k != dir)
+                return std::nullopt; // two different directions — not a u_k⊗u_k
+            ++legs;
+        }
+        else if (infer_rank(f) == std::optional<int>{0})
+            scalars.push_back(f);
+        else
+            return std::nullopt; // a non-scalar, non-leg factor
+    }
+    if (legs != 2)
+        return std::nullopt;
+    return DyadAddend{dir, scalars.empty() ? nullptr : product_of(ctx, scalars)};
+}
+
+// Rebuild a signed-addend list into a Sum (empty → scalar 0).
+auto rebuild_sum(
+    Context& ctx,
+    std::vector<std::pair<Expr const*, bool>> const& xs) -> Expr const*
+{
+    Expr const* acc = nullptr;
+    for (auto const& [e, neg]: xs)
+    {
+        Expr const* term = neg ? make_negate(ctx, e) : e;
+        acc = acc ? make_sum(ctx, acc, term) : term;
+    }
+    return acc ? acc : make_scalar(ctx, Rational{0});
+}
+
+// Fold complete groups of resolution-of-identity dyads in an addend list:
+// addends c·u_k⊗u_k present for every k = 0…dim−1 with one common sign and
+// coefficient collapse to one c·I.  nullopt when no group is complete.
+auto fold_identity_dyads(
+    Context& ctx,
+    std::vector<std::pair<Expr const*, bool>> const& addends,
+    Basis const& b) -> std::optional<std::vector<std::pair<Expr const*, bool>>>
+{
+    struct Item final
+    {
+        std::optional<DyadAddend> dyad;
+        Expr const* coeff; // dyad coeff materialised to scalar 1 when null
+        Expr const* raw;
+        bool neg;
+    };
+    std::vector<Item> items;
+    items.reserve(addends.size());
+    for (auto const& [e, neg]: addends)
+    {
+        auto d = as_identity_dyad(ctx, e, b);
+        Expr const* coeff =
+            d ? (d->coeff ? d->coeff : make_scalar(ctx, Rational{1})) : nullptr;
+        items.push_back(Item{d, coeff, e, neg});
+    }
+
+    std::vector<bool> consumed(items.size(), false);
+    std::vector<std::pair<Expr const*, bool>> folded;
+    bool any = false;
+    for (std::size_t i = 0; i < items.size(); ++i)
+    {
+        if (consumed[i] || !items[i].dyad)
+            continue;
+        std::vector<int> member(static_cast<std::size_t>(b.dim()), -1);
+        member[static_cast<std::size_t>(items[i].dyad->dir)] =
+            static_cast<int>(i);
+        for (std::size_t j = i + 1; j < items.size(); ++j)
+        {
+            if (consumed[j] || !items[j].dyad)
+                continue;
+            if (items[j].neg != items[i].neg)
+                continue;
+            if (!structural_eq(items[j].coeff, items[i].coeff))
+                continue;
+            auto& slot = member[static_cast<std::size_t>(items[j].dyad->dir)];
+            if (slot == -1)
+                slot = static_cast<int>(j);
+        }
+        if (std::any_of(
+                member.begin(), member.end(), [](int x) { return x < 0; }))
+            continue;
+        for (int x: member)
+            consumed[static_cast<std::size_t>(x)] = true;
+        Expr const* c = items[i].dyad->coeff;
+        Expr const* term = c ? make_tensor_product(ctx, c, make_identity(ctx)) :
+                               make_identity(ctx);
+        folded.push_back({term, items[i].neg});
+        any = true;
+    }
+    if (!any)
+        return std::nullopt;
+    std::vector<std::pair<Expr const*, bool>> out = std::move(folded);
+    for (std::size_t i = 0; i < items.size(); ++i)
+        if (!consumed[i])
+            out.push_back({items[i].raw, items[i].neg});
+    return out;
+}
+
 // A coordinate component of any rank: a non-basis, non-well-known tensor whose
 // slots all carry CountableIndex ids and which expand_in_basis emitted at rank
 // 0 (so a rank-1 basis vector — including a *foreign* basis's vector — is
@@ -1337,6 +1502,63 @@ auto reassemble_completeness(Context& ctx, Expr const* e, Basis const& basis)
     if (out == prepped && structural_eq(prepped, e))
         return e;
     return steps::implicitize(ctx, out);
+}
+
+auto fold_resolution_of_identity(
+    Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
+{
+    if (!basis.is_orthonormal())
+        return e;
+    Expr const* prepped = e;
+    try
+    {
+        prepped = steps::canonicalize(ctx, e);
+    }
+    catch (std::invalid_argument const&)
+    {
+        prepped = e;
+    }
+    auto const* out = rewrite_tree(
+        ctx,
+        prepped,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            if (!std::holds_alternative<Sum>(node->node)
+                && !std::holds_alternative<Difference>(node->node))
+                return node;
+            std::vector<std::pair<Expr const*, bool>> addends;
+            collect_addends(node, false, addends);
+            auto folded = fold_identity_dyads(c, addends, basis);
+            return folded ? rebuild_sum(c, *folded) : node;
+        });
+    if (out == prepped && structural_eq(prepped, e))
+        return e;
+    return steps::implicitize(ctx, out);
+}
+
+auto expand_identity(Context& ctx, Expr const* e, Basis const& basis)
+    -> Expr const*
+{
+    if (!basis.is_orthonormal())
+        throw std::invalid_argument(
+            "expand_identity: the resolution of identity Σ_k e_k⊗e_k = I holds "
+            "only for an orthonormal basis");
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            if (!is_identity_tensor(node))
+                return node;
+            Expr const* sum = nullptr;
+            for (int k = 0; k < basis.dim(); ++k)
+            {
+                Expr const* dyad =
+                    make_tensor_product(c, basis.basis(k), basis.basis(k));
+                sum = sum ? make_sum(c, sum, dyad) : dyad;
+            }
+            return sum ? sum : node;
+        });
 }
 
 } // namespace tender

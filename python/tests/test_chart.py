@@ -189,10 +189,14 @@ def test_cartesian_gradient_is_identity():
     z = t.coordinate("z", chart_id=7, slot=2, ctx=ctx)
     chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
     R = chart.radius_vector()
+    # grad R folds the resolution of identity Σ_k e_k⊗e_k back to I itself
+    # (vibe 000070 P4), so the result is structurally the identity tensor.
+    assert td.structural_eq(chart.gradient(R), t.identity(ctx))
+    # The raw (unfolded) form is the concrete dyad sum.
     identity = sum(
         (ref.basis(k) * ref.basis(k) for k in range(1, 3)), ref.basis(0) * ref.basis(0)
     )
-    assert _inv_eq(chart.gradient(R), identity)  # grad R = I
+    assert _inv_eq(chart.gradient(R, fold_identity=False), identity)
     assert td.algebraic_eq(chart.divergence(R), t.scalar(3, ctx=ctx))
     assert td.algebraic_eq(chart.rot(R), t.scalar(0, ctx=ctx))
 

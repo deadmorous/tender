@@ -1116,6 +1116,29 @@ NB_MODULE(_core, m)
         "contracted: Σ_i (X·e_i) e_i -> X (and Σ_i (scalars) e_i⊗e_i -> "
         "(scalars) I).  Complements reassemble; a no-op otherwise.");
 
+    mb.def(
+        "fold_resolution_of_identity",
+        [](PyExpr const& e, PyBasis const& b) -> PyExpr {
+            return derive(
+                e, fold_resolution_of_identity(*e.ctx, e.expr, b.basis));
+        },
+        "expr"_a,
+        "basis"_a,
+        "Fold the concrete, fully-expanded resolution of identity back to I "
+        "(vibe 000070): in any sum, c·u_k⊗u_k present for every frame vector "
+        "u_k of the orthonormal basis collapses to c·I.  A no-op otherwise.");
+
+    mb.def(
+        "expand_identity",
+        [](PyExpr const& e, PyBasis const& b) -> PyExpr
+        { return derive(e, expand_identity(*e.ctx, e.expr, b.basis)); },
+        "expr"_a,
+        "basis"_a,
+        "Expand every identity tensor I into the concrete resolution "
+        "Σ_k u_k⊗u_k over the orthonormal basis (inverse of "
+        "fold_resolution_of_identity).  Raises if the basis is not "
+        "orthonormal.");
+
     // ------------------------------------------------------------------ //
     // chart submodule — coordinate mapping → curvilinear geometry (M4)
     // ------------------------------------------------------------------ //
@@ -1216,33 +1239,52 @@ NB_MODULE(_core, m)
             "(one scalar per direction k).")
         .def(
             "gradient",
-            [](PyChart const& c, PyExpr const& f) -> PyExpr {
+            [](PyChart const& c, PyExpr const& f, bool fold_identity) -> PyExpr
+            {
                 return PyExpr{
-                    c.ctx_keep, c.ctx, gradient(*c.ctx, c.chart, f.expr)};
+                    c.ctx_keep,
+                    c.ctx,
+                    gradient(*c.ctx, c.chart, f.expr, fold_identity)};
             },
             "f"_a,
+            "fold_identity"_a = true,
             "grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, an invariant tensor of rank "
-            "one higher (∇R = I, ∇f a vector).")
+            "one higher (∇R = I, ∇f a vector).  fold_identity (default) "
+            "collapses Σ_k e_k⊗e_k back to I; pass False for the raw sum.")
         .def(
             "divergence",
-            [](PyChart const& c, PyExpr const& v) -> PyExpr {
+            [](PyChart const& c, PyExpr const& v, bool fold_identity) -> PyExpr
+            {
                 return PyExpr{
-                    c.ctx_keep, c.ctx, divergence(*c.ctx, c.chart, v.expr)};
+                    c.ctx_keep,
+                    c.ctx,
+                    divergence(*c.ctx, c.chart, v.expr, fold_identity)};
             },
             "v"_a,
+            "fold_identity"_a = true,
             "div v = ∇·v = Σ_i (1/h_i) e_i · ∂_{q^i} v (rank one lower).")
         .def(
             "laplacian",
-            [](PyChart const& c, PyExpr const& f) -> PyExpr {
+            [](PyChart const& c, PyExpr const& f, bool fold_identity) -> PyExpr
+            {
                 return PyExpr{
-                    c.ctx_keep, c.ctx, laplacian(*c.ctx, c.chart, f.expr)};
+                    c.ctx_keep,
+                    c.ctx,
+                    laplacian(*c.ctx, c.chart, f.expr, fold_identity)};
             },
             "f"_a,
+            "fold_identity"_a = true,
             "Δf = div(grad f), as a scalar.")
         .def(
             "rot",
-            [](PyChart const& c, PyExpr const& v) -> PyExpr
-            { return PyExpr{c.ctx_keep, c.ctx, rot(*c.ctx, c.chart, v.expr)}; },
+            [](PyChart const& c, PyExpr const& v, bool fold_identity) -> PyExpr
+            {
+                return PyExpr{
+                    c.ctx_keep,
+                    c.ctx,
+                    rot(*c.ctx, c.chart, v.expr, fold_identity)};
+            },
             "v"_a,
+            "fold_identity"_a = true,
             "rot v = ∇×v = Σ_i (1/h_i) e_i × ∂_{q^i} v (3D, invariant vector).");
 }
