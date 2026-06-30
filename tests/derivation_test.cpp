@@ -3676,3 +3676,50 @@ TEST(ContractEpsPair, ContractsFourEpsilonsPairByPair)
     // Both pairs contracted: no Levi-Civita symbol survives.
     EXPECT_EQ(tex.find("varepsilon"), std::string::npos);
 }
+
+// Exercise every arm of the canonical-order comparator expr_cmp: canonicalizing
+// a sum of two same-kind nodes makes the sort compare them through that arm.
+// Asserting idempotence (canonicalize is a fixed point) is a meaningful check
+// that also covers the comparator branches.
+TEST(Canonicalize, ComparatorArmsAreExercised)
+{
+    Context ctx;
+    auto A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto C = make_tensor_object(ctx, make_tensor_name("C"), {}, 2);
+    auto D = make_tensor_object(ctx, make_tensor_name("D"), {}, 2);
+    auto a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto c = make_tensor_object(ctx, make_tensor_name("c"), {}, 1);
+    auto d = make_tensor_object(ctx, make_tensor_name("d"), {}, 1);
+    auto x = make_coordinate(ctx, make_tensor_name("x"), 1, 0);
+    auto y = make_coordinate(ctx, make_tensor_name("y"), 1, 1);
+    auto two = make_scalar(ctx, Rational{2});
+
+    std::vector<Expr const*> sums = {
+        make_sum(ctx, make_trace(ctx, A), make_trace(ctx, B)),
+        make_sum(
+            ctx, make_vector_invariant(ctx, A), make_vector_invariant(ctx, B)),
+        make_sum(ctx, make_transpose(ctx, A), make_transpose(ctx, B)),
+        make_sum(ctx, make_dot(ctx, a, b), make_dot(ctx, c, d)),
+        make_sum(ctx, make_cross(ctx, a, b), make_cross(ctx, c, d)),
+        make_sum(ctx, make_ddot(ctx, A, B), make_ddot(ctx, C, D)),
+        make_sum(ctx, make_ddot_alt(ctx, A, B), make_ddot_alt(ctx, C, D)),
+        make_sum(ctx, make_scalar_div(ctx, a, x), make_scalar_div(ctx, b, x)),
+        make_sum(
+            ctx,
+            make_scalar_fn(ctx, ScalarFnKind::Sin, x),
+            make_scalar_fn(ctx, ScalarFnKind::Sin, y)),
+        make_sum(
+            ctx,
+            make_scalar_fn(ctx, ScalarFnKind::Sin, x),
+            make_scalar_fn(ctx, ScalarFnKind::Cos, x)),
+        make_sum(ctx, make_pow(ctx, x, two), make_pow(ctx, y, two)),
+    };
+    for (auto const* s: sums)
+    {
+        auto const* once = steps::canonicalize(ctx, s);
+        auto const* twice = steps::canonicalize(ctx, once);
+        EXPECT_TRUE(structural_eq(once, twice));
+    }
+}

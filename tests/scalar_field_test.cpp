@@ -222,6 +222,29 @@ TEST(Field, MixedPartialsAreSymmetric)
     EXPECT_TRUE(structural_eq(dxy, dyx));
 }
 
+// A field derivative renders in operator form ∂_x T (vibe 000070 P7), one
+// ∂-factor per sorted direction, and make_field_derivative rejects a non-field.
+TEST(Field, RenderingAndFactoryGuard)
+{
+    Context ctx;
+    auto* x = coord(ctx, "x", 0);
+    auto* y = coord(ctx, "y", 1);
+    auto* T = make_field(ctx, make_tensor_name("T"), 1);
+    auto* dT = steps::partial(ctx, T, x);
+    IndexNameMap map;
+    EXPECT_NE(render_latex(*dT, map).find("\\partial_{x}"), std::string::npos);
+    auto* dxyT = steps::partial(ctx, dT, y);
+    auto const s = render_latex(*dxyT, map);
+    EXPECT_NE(s.find("\\partial_{x}"), std::string::npos);
+    EXPECT_NE(s.find("\\partial_{y}"), std::string::npos);
+
+    auto* plain = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    EXPECT_THROW(
+        (void)make_field_derivative(
+            ctx, plain, make_tensor_name("x"), CoordinateRef{0, 0, false}),
+        std::invalid_argument);
+}
+
 TEST(Partial, ChainRuleOnElementaryFunctions)
 {
     Context ctx;

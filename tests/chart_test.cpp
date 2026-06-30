@@ -459,6 +459,38 @@ TEST(Chart, RotOfConstantCrossIsZero)
     EXPECT_TRUE(eq(ctx, rot(ctx, chart, make_cross(ctx, a, b)), s0(ctx)));
 }
 
+// The public frame dot/cross reduce contractions in the reference frame (vibe
+// 000070 P8): i·i = 1, i·j = 0, i×j = k.
+TEST(Chart, FrameDotAndCross)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+
+    EXPECT_TRUE(
+        eq(ctx,
+           frame_dot(ctx, chart, ref.basis(0), ref.basis(0)),
+           make_scalar(ctx, Rational{1})));
+    EXPECT_TRUE(
+        eq(ctx, frame_dot(ctx, chart, ref.basis(0), ref.basis(1)), s0(ctx)));
+    EXPECT_TRUE(structural_eq(
+        frame_cross(ctx, chart, ref.basis(0), ref.basis(1)), ref.basis(2)));
+}
+
+// Both the 3D-only operators reject a 2D chart instead of misbehaving.
+TEST(Chart, FrameCrossAndRotRequire3D)
+{
+    Context ctx;
+    auto p = make_polar(ctx); // 2D
+    auto* i = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto* j = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    EXPECT_THROW((void)frame_cross(ctx, p.chart, i, j), std::invalid_argument);
+    EXPECT_THROW((void)rot(ctx, p.chart, i), std::invalid_argument);
+}
+
 // ∇f: the 1/h_i factors are the curvilinear content — for cylindrical
 // ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r,
 // each returned as the invariant vector in the reference frame.

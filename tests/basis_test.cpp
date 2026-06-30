@@ -1573,6 +1573,41 @@ TEST(ResolutionOfIdentity, ExpandThenFoldRoundTrips)
         fold_resolution_of_identity(ctx, expanded, b), make_identity(ctx)));
 }
 
+// A complete dyad group inside a Difference still folds (the fold gathers
+// signed addends across subtraction): (i⊗i+j⊗j+k⊗k) − X folds the group to I −
+// X.
+TEST(ResolutionOfIdentity, FoldsAcrossDifference)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* X = make_tensor_object(ctx, make_tensor_name("X"), {}, 2);
+    auto const* term = make_difference(ctx, dyad_sum(ctx, b), X);
+    auto const* got = fold_resolution_of_identity(ctx, term, b);
+    auto const* want =
+        steps::canonicalize(ctx, make_difference(ctx, make_identity(ctx), X));
+    EXPECT_TRUE(structural_eq(steps::canonicalize(ctx, got), want));
+}
+
+// Sum addends that are not c·u_k⊗u_k are parsed but rejected: a mixed dyad i⊗j
+// (two distinct directions) and a triad i⊗i⊗a (a non-scalar extra leg) leave
+// the fold a no-op when no complete group is present.
+TEST(ResolutionOfIdentity, NonDyadAddendsIgnored)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* mixed = make_tensor_product(ctx, b.basis(0), b.basis(1)); // i⊗j
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* triad = make_tensor_product(
+        ctx, make_tensor_product(ctx, b.basis(0), b.basis(0)), a); // i⊗i⊗a
+    // A Sum so fold_identity_dyads parses each addend (hits the reject paths);
+    // no complete dyad group, so nothing folds and no I appears.
+    auto const* sum = make_sum(ctx, mixed, triad);
+    auto const* got = fold_resolution_of_identity(ctx, sum, b);
+    EXPECT_FALSE(structural_eq(
+        steps::canonicalize(ctx, got),
+        steps::canonicalize(ctx, make_identity(ctx))));
+}
+
 // ---- concrete-direction basis dots (vibe 000068 P1/P3) --------------------
 
 namespace
