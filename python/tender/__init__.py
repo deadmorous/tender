@@ -38,6 +38,8 @@ space_2d: IndexSpace = _space_2d()
 space_3d: IndexSpace = _space_3d()
 space_4d: IndexSpace = _space_4d()
 
+from .workspace import Workspace
+
 __all__ = [
     # Numeric type
     "Rational",
@@ -49,6 +51,7 @@ __all__ = [
     "CountableIndex",
     "IndexSpace",
     "IndexNameMap",
+    "Workspace",
     # Expression factories
     "tensor",
     "scalar",

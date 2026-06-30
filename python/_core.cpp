@@ -1206,6 +1206,18 @@ NB_MODULE(_core, m)
             "A coordinate chart: an orthonormal reference Basis, the coordinate "
             "variables q^i (coordinate() atoms), and the Cartesian components "
             "x^a = f^a(q) of the position vector (one per reference direction).")
+        .def_prop_ro(
+            "coords",
+            [](PyChart const& c) -> std::vector<PyExpr>
+            {
+                std::vector<PyExpr> out;
+                out.reserve(c.chart.coords.size());
+                for (auto const* q: c.chart.coords)
+                    out.push_back(PyExpr{c.ctx_keep, c.ctx, q});
+                return out;
+            },
+            "The chart's coordinate variables q^i, in order (the atoms passed "
+            "at construction).")
         .def(
             "radius_vector",
             [](PyChart const& c) -> PyExpr {

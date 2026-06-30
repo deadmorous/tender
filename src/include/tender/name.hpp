@@ -5,6 +5,7 @@
 
 #include <cctype>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace tender
@@ -69,7 +70,13 @@ inline auto is_alpha_word(std::string_view s) noexcept -> bool
         || detail::is_latex_command(s);
     if (!valid)
         throw std::invalid_argument(
-            "TensorName must be a single ASCII letter or a LaTeX command");
+            "TensorName must be a single ASCII letter (e.g. \"x\") or a LaTeX "
+            "command (e.g. \"\\phi\", \"\\sigma\"); a plain multi-letter name "
+            "like \""
+            + std::string{s}
+            + "\" is not allowed — for a Greek letter use its LaTeX command "
+              "(e.g. \"\\"
+            + std::string{s} + "\").");
     return TensorName{NameStr{s}};
 }
 
