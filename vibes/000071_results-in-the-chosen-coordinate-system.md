@@ -392,6 +392,29 @@ alongside M6, reach parity, then remove M6 in Phase 3.
     (`Σ_k e_k⊗e_k = I` holds only for an orthonormal frame), is correctly
     guarded (no-op on an oblique basis).
 
+### Follow-up polish (post-P5, from usage feedback)
+
+- **`rot(R×I)` regression fixed.** A field built with the identity tensor and a
+  cross (`R×I`) tripped `encapsulate` after M6 removal.  The frame-aware field
+  prep is restored: `del_apply` now `reduce_field`s the input — expand each `I`
+  into the frame's `Σ_k e_k⊗e_k` (on the symbolic direction atoms) and reduce the
+  frame crosses via their ε expansion — so `∇×(R×I) = −2I` again (with `R` on the
+  frame, or WCS for a Cartesian chart).  `nabla % (R%I)` then evaluates too.
+- **Operator-form parens.** `tender.operators` now parenthesises a compound
+  operand: `∇×(x i + y j + z k)`, `∇×((…)×I)`, while `∇f` / `∇·∇f` stay bare.
+- **`collect_terms` step.** A curvilinear second gradient `∇∇(f(r) sinθ)` comes
+  out as six raw terms; `td.collect_terms` groups addends by their dyad and sums
+  the scalar coefficients — even non-numeric ones (unlike `fold_equal_addends`),
+  collapsing to one term per `e_i⊗e_j` (four here).
+- **Known gap — the symmetric 3-term form.** `A e_r e_r + B(e_r e_θ + e_θ e_r) +
+  C e_θ e_θ` needs the coefficients of the transposed dyads recognised as equal.
+  They are *algebraically* equal but not *structurally*, because `simplify_scalars`
+  does not put a sum of fractions over a common denominator (`A/r² + B/r`
+  stays split), so `algebraic_eq` on them is false.  The missing pieces are
+  (1) **common-denominator fraction combination** in the scalar simplifier and
+  (2) a **symmetric-dyad factoring** step keyed on the combined coefficients.
+  Deferred; the 4-term `collect_terms` form is available now.
+
   **Scope boundary (surfaced):** the chart *operators* (`gradient`/`divergence`/
   `rot`) build an **orthonormal** physical frame `e_i = g_i/h_i`, because the
   charts model *orthogonal* curvilinear systems (diagonal metric).  A genuinely

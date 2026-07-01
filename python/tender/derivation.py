@@ -39,6 +39,7 @@ __all__ = [
     "contract_eps_pair",
     "fold_equal_addends",
     "fold_equal_addends_structural",
+    "collect_terms",
     "canonicalize",
     "partial",
     "simplify_scalars",
@@ -227,6 +228,18 @@ def fold_equal_addends_structural(expr):
     are already in a common frame; otherwise prefer :func:`fold_equal_addends`.
     """
     return _d._fold_equal_addends_structural(expr)
+
+
+def collect_terms(expr):
+    """Group addends sharing the same tensor (dyad) part, summing coefficients.
+
+    Each addend ``scalar_coeff ⊗ (e_i⊗e_j…)`` is grouped by its non-scalar part;
+    the scalar coefficients are added and simplified into one term per distinct
+    dyad.  Unlike :func:`fold_equal_addends` (numeric coefficients only) it
+    factors an arbitrary scalar, so a curvilinear second gradient's six raw terms
+    collapse to one per e_i⊗e_j.
+    """
+    return _d._collect_terms(expr)
 
 
 def canonicalize(expr):

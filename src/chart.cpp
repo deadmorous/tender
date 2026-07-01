@@ -433,6 +433,58 @@ auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
 // basis vectors (connection), and the result staying on e_i.  grad raises the
 // rank by one, div lowers it by one (via e_i·e_j = δ_ij / g_ij), rot keeps it.
 
+// Expand every identity tensor I in `e` into the frame's resolution of identity
+// Σ_k e_k⊗e_k on the symbolic direction atoms (vibe 000071), so a field
+// carrying I (e.g. R×I) reduces to clean dyad form.
+auto expand_identity_frame(Context& ctx, Basis const& fb, Expr const* e)
+    -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&node->node);
+            if (!t || !t->traits
+                || t->traits->well_known
+                       != std::optional{WellKnownKind::Identity})
+                return node;
+            Expr const* sum = nullptr;
+            for (int k = 0; k < fb.dim(); ++k)
+            {
+                Expr const* d = make_tensor_product(
+                    c, fb.direction(c, k), fb.direction(c, k));
+                sum = sum ? make_sum(c, sum, d) : d;
+            }
+            return sum ? sum : node;
+        });
+}
+
+// Bring a field into clean dyad form on the frame before an operator
+// differentiates it (vibe 000071): expand any identity tensor, then reduce
+// every frame-vector cross to frame vectors via its Levi-Civita expansion — so
+// a field built with I or an unreduced cross (R×I) does not trip the
+// differentiator or canonicalize.  A fixpoint over fence-distribution +
+// basis-cross reduction.
+auto reduce_field(Context& ctx, Basis const& fb, Expr const* T) -> Expr const*
+{
+    T = expand_identity_frame(ctx, fb, T);
+    T = steps::expand_products(ctx, T);
+    Expr const* prev = nullptr;
+    for (int guard = 0; T != prev && guard <= fb.dim() + 2; ++guard)
+    {
+        prev = T;
+        T = steps::distribute_contraction(ctx, T); // fence a×(u⊗v) → (a×u)⊗v
+        T = simplify_basis_cross(ctx, T, fb); // frame crosses → √g ε e^k
+        T = steps::canonicalize(ctx, T);
+        T = steps::unroll_sums(ctx, T);
+        T = steps::eval_eps_concrete(ctx, T);
+        T = steps::fold_arithmetic(ctx, T);
+        T = steps::canonicalize(ctx, T);
+    }
+    return steps::simplify_scalars(ctx, T);
+}
+
 // Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T on the physical frame `fb`.  `combine(e_i, ∂_i
 // T)` chooses ⊗ / · / ×.  When `fold_identity` (default), a resolution of
 // identity Σ_k e_k⊗e_k folds back to I (so ∇R = I).
@@ -446,9 +498,10 @@ auto del_apply(
     bool fold_identity) -> Expr const*
 {
     int const n = static_cast<int>(chart.coords.size());
-    // Distribute the field into a clean sum of monomials so a term like
-    // scalar ⊗ e_i differentiates without a stray un-fenced ⊗ tripping
-    // canonicalize.
+    // Reduce the field to clean dyad form on the frame first: expand any I and
+    // reduce frame crosses (so R×I etc. differentiate without an atomic I or an
+    // un-fenced cross tripping canonicalize), then distribute into monomials.
+    T = reduce_field(ctx, fb, T);
     T = steps::canonicalize(ctx, steps::expand_products(ctx, T));
     Expr const* acc = make_scalar(ctx, Rational{0});
     for (int i = 0; i < n; ++i)

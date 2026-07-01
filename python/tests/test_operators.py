@@ -22,6 +22,21 @@ def test_nabla_builds_symbolically():
     assert (nabla @ (nabla * f)).latex() == "\\nabla \\cdot \\nabla f"
 
 
+def test_compound_operands_are_parenthesised():
+    # A compound operand (sum, or another cross) is wrapped in parens so the
+    # rendering is unambiguous (vibe 000071).
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    R = cart.radius_vector()
+    I = ws.identity()
+    assert "\\left(" in (nabla % R).latex()  # ∇×(x i + y j + z k)
+    assert "\\left(" in (nabla % (R % I)).latex()  # ∇×((…) × I)
+    # A bare field is not parenthesised.
+    f = cart.field("f", 0)
+    assert "\\left(" not in (nabla * f).latex()
+    assert "\\left(" not in (nabla @ (nabla * f)).latex()
+
+
 def test_nabla_evaluates_to_m6_operators():
     # The operators are thin wrappers over the chart's M6 operators.
     ws = t.Workspace()

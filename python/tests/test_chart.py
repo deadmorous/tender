@@ -250,6 +250,40 @@ def test_cylindrical_rot():
     )
 
 
+def test_collect_terms_on_second_gradient():
+    # ∇∇(f(r) sin θ) comes out as six raw terms; collect_terms groups them by
+    # dyad to one per e_i⊗e_j (vibe 000071).
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    fb = chart.physical_frame()
+    from tender.operators import nabla
+
+    f = t.field("f", 0, deps=[r], ctx=ctx)
+    x = (nabla * (nabla * (f * t.sin(th)))).evaluate(chart)
+    collected = td.collect_terms(x)
+    tex = collected.latex()
+    # Four distinct dyads, each appearing once.
+    for a, b in [("r", "r"), ("r", "\\theta"), ("\\theta", "r"), ("\\theta", "\\theta")]:
+        dyad = "\\mathbf{e}_{" + a + "} \\, \\mathbf{e}_{" + b + "}"
+        assert tex.count(dyad) == 1, (a, b, tex)
+
+
+def test_rot_of_radius_cross_identity():
+    # A field built with the identity tensor and a cross reduces on the frame
+    # (vibe 000071): ∇×(R×I) = −2I, with R on the chart's frame.
+    ctx = t.Context()
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=1, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=1, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=1, slot=2, ctx=ctx)
+    chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
+    fb = chart.physical_frame()
+    I = t.identity(ctx)
+    R = x * fb.direction(0) + y * fb.direction(1) + z * fb.direction(2)
+    want = td.canonicalize(t.scalar(-2, ctx=ctx) * I)
+    assert td.structural_eq(td.canonicalize(chart.rot(R % I)), want)
+
+
 def test_basis_to_basis_expansion():
     # vibe 000071 P4: a frame result can be brought to WCS on demand, and a WCS
     # vector expressed in a curvilinear frame; the round-trip recovers the frame.

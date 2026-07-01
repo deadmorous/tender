@@ -37,10 +37,30 @@ from . import derivation as _td
 __all__ = ["Nabla", "nabla", "d", "laplacian", "evaluate"]
 
 
+def _needs_parens(s):
+    """True if `s` has a top-level (paren/brace-depth 0) additive or contraction
+    operator, so it must be parenthesised when it becomes an operator's operand
+    (e.g. ∇×(x i + y j + z k), ∇×(R×I))."""
+    depth = 0
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c in "{(":
+            depth += 1
+        elif c in "})":
+            depth -= 1
+        elif depth == 0:
+            if s.startswith(" + ", i) or s.startswith(" - ", i):
+                return True
+            if s.startswith("\\times", i) or s.startswith("\\cdot", i):
+                return True
+        i += 1
+    return False
+
+
 def _operand_latex(x):
-    if isinstance(x, DifferentialExpr):
-        return x.latex()
-    return x.latex()
+    s = x.latex()
+    return "\\left(" + s + "\\right)" if _needs_parens(s) else s
 
 
 def _eval_operand(x, chart):

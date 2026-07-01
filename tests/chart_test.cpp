@@ -416,6 +416,33 @@ TEST(Chart, CartesianGradientIsIdentity)
     EXPECT_TRUE(eq(ctx, rot(ctx, chart, R), s0(ctx)));
 }
 
+// A field built with the identity tensor and a cross — R×I, the rank-2 skew
+// tensor — reduces on the frame instead of crashing (vibe 000071): the operator
+// expands I → Σ e_k⊗e_k and reduces the frame crosses.  ∇×(R×I) = −2I.
+TEST(Chart, RotOfRCrossIdentity)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+    auto fb = physical_frame(ctx, chart);
+    Expr const* R = nullptr;
+    Expr const* coord[] = {x, y, z};
+    for (int k = 0; k < 3; ++k)
+    {
+        auto* term = mul(ctx, coord[k], fb.direction(ctx, k));
+        R = R ? make_sum(ctx, R, term) : term;
+    }
+    auto* RxI = make_cross(ctx, R, make_identity(ctx));
+    auto* want = make_negate(
+        ctx, mul(ctx, make_scalar(ctx, Rational{2}), make_identity(ctx)));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, rot(ctx, chart, RxI)),
+        steps::canonicalize(ctx, want))); // ∇×(R×I) = −2I
+}
+
 // A cross of two constant (non-field) vectors differentiates to zero by
 // Leibniz; the operator yields 0 rather than crashing.
 TEST(Chart, RotOfConstantCrossIsZero)

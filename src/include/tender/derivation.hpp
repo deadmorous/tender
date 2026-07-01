@@ -204,6 +204,17 @@ auto fold_equal_addends_structural(Context& ctx, Expr const* e) -> Expr const*;
 // reduces to 0 without the caller having to canonicalize by hand.
 auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*;
 
+// Collect addends that share the same tensor (non-scalar) part, summing their
+// scalar coefficients (vibe 000071): a sum like
+//   (1/r) e_θ⊗e_r + (1/r²) e_θ⊗e_r + …
+// where each addend is scalar_coeff ⊗ (product of rank-≥1 factors) is grouped
+// by the tensor part e_i⊗e_j…, and the coefficients are added and simplified
+// into a single term per distinct dyad.  Unlike fold_equal_addends (which only
+// merges terms with a common *numeric* coefficient) this factors an arbitrary
+// scalar coefficient, so it collapses a curvilinear second-gradient's six raw
+// terms to one per dyad.  A zero combined coefficient drops the term.
+auto collect_terms(Context& ctx, Expr const* e) -> Expr const*;
+
 // Rewrite an expression into algebraic normal form (vibe 000037): the local
 // AC/α-canonical form for which structural_eq decides theory T0.
 //

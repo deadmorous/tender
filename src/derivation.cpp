@@ -2794,6 +2794,69 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*
     return implicitize(ctx, fold_equal_addends_structural(ctx, prepped));
 }
 
+auto collect_terms(Context& ctx, Expr const* e) -> Expr const*
+{
+    Expr const* prepped = e;
+    try
+    {
+        prepped = canonicalize(ctx, e);
+    }
+    catch (std::invalid_argument const&)
+    {
+        prepped = e;
+    }
+    std::vector<std::pair<int, Expr const*>> addends;
+    collect_signed_addends(prepped, 1, addends);
+
+    // Group by the tensor (non-scalar) part; accumulate the scalar coefficient.
+    struct Group final
+    {
+        Expr const* tensor; // nullptr = pure scalar term
+        Expr const* coeff;
+    };
+    std::vector<Group> groups;
+    for (auto const& [sign, term]: addends)
+    {
+        std::vector<Expr const*> facs;
+        flatten_factors(term, facs);
+        std::vector<Expr const*> scalars;
+        std::vector<Expr const*> tensors;
+        for (auto const* f: facs)
+            (infer_rank(f) == std::optional<int>{0} ? scalars : tensors)
+                .push_back(f);
+        Expr const* tpart =
+            tensors.empty() ? nullptr : product_of(ctx, tensors);
+        Expr const* coeff = scalars.empty() ? make_scalar(ctx, Rational{1}) :
+                                              product_of(ctx, scalars);
+        if (sign < 0)
+            coeff = make_negate(ctx, coeff);
+
+        bool merged = false;
+        for (auto& g: groups)
+            if ((g.tensor == nullptr && tpart == nullptr)
+                || (g.tensor && tpart && structural_eq(g.tensor, tpart)))
+            {
+                g.coeff = make_sum(ctx, g.coeff, coeff);
+                merged = true;
+                break;
+            }
+        if (!merged)
+            groups.push_back({tpart, coeff});
+    }
+
+    Expr const* out = nullptr;
+    for (auto const& g: groups)
+    {
+        Expr const* c = simplify_scalars(ctx, canonicalize(ctx, g.coeff));
+        if (auto const* s = std::get_if<ScalarLiteral>(&c->node);
+            s && s->value.is_zero())
+            continue;
+        Expr const* term = g.tensor ? make_tensor_product(ctx, c, g.tensor) : c;
+        out = out ? make_sum(ctx, out, term) : term;
+    }
+    return out ? out : make_scalar(ctx, Rational{0});
+}
+
 // ---- partial differentiation (vibe 000069 M2) --------------------------
 
 namespace

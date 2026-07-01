@@ -3722,3 +3722,48 @@ TEST(Canonicalize, ComparatorArmsAreExercised)
         EXPECT_TRUE(structural_eq(once, twice));
     }
 }
+
+// collect_terms groups addends sharing a tensor (dyad) part and sums their
+// scalar coefficients — unlike fold_equal_addends it factors a non-numeric
+// coefficient (vibe 000071).
+TEST(CollectTerms, GroupsByDyadSummingScalarCoefficients)
+{
+    Context ctx;
+    // Two frame-like vectors e, g (rank 1) and a coordinate r.
+    auto e = make_tensor_object(ctx, make_tensor_name("e"), {}, 1);
+    auto g = make_tensor_object(ctx, make_tensor_name("g"), {}, 1);
+    auto r = make_coordinate(ctx, make_tensor_name("r"), 1, 0);
+    auto one = make_scalar(ctx, Rational{1});
+    // (1/r) e⊗g + (1/r²) e⊗g + 3 g⊗e  →  (1/r + 1/r²) e⊗g + 3 g⊗e  (two terms).
+    auto dyad_eg = make_tensor_product(ctx, e, g);
+    auto dyad_ge = make_tensor_product(ctx, g, e);
+    auto* sum = make_sum(
+        ctx,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, make_scalar_div(ctx, one, r), dyad_eg),
+            make_tensor_product(
+                ctx,
+                make_scalar_div(
+                    ctx, one, make_pow(ctx, r, make_scalar(ctx, Rational{2}))),
+                dyad_eg)),
+        make_tensor_product(ctx, make_scalar(ctx, Rational{3}), dyad_ge));
+
+    auto* out = steps::collect_terms(ctx, sum);
+    // Two distinct dyads remain; each dyad appears once.
+    std::vector<std::pair<int, Expr const*>> addends;
+    // count e⊗g and g⊗e occurrences via signed addends
+    IndexNameMap map;
+    auto const tex = render_latex(*out, map);
+    // e⊗g collapsed to a single term: "e \, g" appears once.
+    auto count = [](std::string const& s, std::string const& sub)
+    {
+        int n = 0;
+        for (std::size_t p = s.find(sub); p != std::string::npos;
+             p = s.find(sub, p + 1))
+            ++n;
+        return n;
+    };
+    EXPECT_EQ(count(tex, "\\mathbf{e} \\, \\mathbf{g}"), 1);
+    EXPECT_EQ(count(tex, "\\mathbf{g} \\, \\mathbf{e}"), 1);
+}

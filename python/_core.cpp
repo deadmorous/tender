@@ -810,6 +810,15 @@ NB_MODULE(_core, m)
         "rename dummies or normalize factor/sign order.");
 
     md.def(
+        "_collect_terms",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::collect_terms(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Group addends sharing the same tensor (dyad) part, summing their "
+        "scalar coefficients into one term per distinct dyad (collapses a "
+        "curvilinear second gradient's raw terms to one per e_i⊗e_j).");
+
+    md.def(
         "_canonicalize",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::canonicalize(*e.ctx, e.expr)); },
