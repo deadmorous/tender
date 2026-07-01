@@ -1395,5 +1395,26 @@ NB_MODULE(_core, m)
             },
             "u"_a,
             "v"_a,
-            "The invariant cross u×v reduced in the reference frame (3D).");
+            "The invariant cross u×v reduced in the reference frame (3D).")
+        .def(
+            "to_reference",
+            [](PyChart const& c, PyExpr const& v) -> PyExpr
+            { return PyExpr{c.ctx_keep, c.ctx, to_reference(*c.ctx, v.expr)}; },
+            "v"_a,
+            "Re-express v in the reference (WCS) frame (vibe 000071 P4): each "
+            "physical-frame e_i becomes its Cartesian expansion, e.g. e_r → "
+            "cos θ i + sin θ j.  The explicit opt-in to WCS components.")
+        .def(
+            "express",
+            [](PyChart const& target, PyExpr const& v) -> PyExpr
+            {
+                return PyExpr{
+                    target.ctx_keep,
+                    target.ctx,
+                    express(*target.ctx, target.chart, v.expr)};
+            },
+            "v"_a,
+            "Re-express v in THIS chart's physical frame (vibe 000071 P4): "
+            "brings v to the shared reference frame, then projects onto this "
+            "frame's e_k.  The general change of basis (WCS is to_reference).");
 }

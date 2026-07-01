@@ -250,6 +250,28 @@ def test_cylindrical_rot():
     )
 
 
+def test_basis_to_basis_expansion():
+    # vibe 000071 P4: a frame result can be brought to WCS on demand, and a WCS
+    # vector expressed in a curvilinear frame; the round-trip recovers the frame.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    fb = chart.physical_frame()
+    ref = tb.wcs(ctx)
+    e_r = fb.direction(0)
+
+    # to_reference: e_r = cos θ i + sin θ j.
+    er_wcs = t.cos(th) * ref.basis(0) + t.sin(th) * ref.basis(1)
+    assert td.algebraic_eq(chart.to_reference(e_r), er_wcs)
+
+    # express: WCS i in the cylindrical frame is cos θ e_r − sin θ e_θ.
+    want = t.cos(th) * fb.direction(0) - t.sin(th) * fb.direction(1)
+    assert td.structural_eq(
+        td.canonicalize(chart.express(ref.basis(0))), td.canonicalize(want)
+    )
+    # Round-trip WCS → frame recovers e_r.
+    assert td.algebraic_eq(chart.express(chart.to_reference(e_r)), e_r)
+
+
 def test_tensor_field_operators():
     # A tensor field is no longer seen as constant (vibe 000070 P7): div T is a
     # symbolic vector, grad f a symbolic vector of partials, and a field declared

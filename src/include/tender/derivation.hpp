@@ -26,6 +26,11 @@ struct BasisConnection final
     std::vector<int> values;
     // deriv[i][j] = ∂_{q^j} e_i, an Expr over this basis's e_k atoms.
     std::vector<std::vector<Expr const*>> deriv;
+    // reference_expansion[i] = e_i written in the chart's reference (WCS) frame
+    // — the concrete Cartesian vector (e.g. e_r = cos θ i + sin θ j).  Lets a
+    // result be re-expressed in WCS on demand (vibe 000071 P4, basis-to-basis
+    // expansion, WCS as one target).
+    std::vector<Expr const*> reference_expansion;
 };
 
 // A derivation records the expression at each rewriting step.

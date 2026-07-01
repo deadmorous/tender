@@ -390,6 +390,12 @@ auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
     conn->basis_id = basis.basis_id();
     auto const vals = basis.space()->values();
     conn->values.assign(vals.begin(), vals.end());
+    // The reference-frame (WCS) expansion of each frame vector, e.g.
+    // e_r = cos θ i + sin θ j — physical_basis's concrete vectors (vibe 000071
+    // P4).
+    conn->reference_expansion.reserve(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        conn->reference_expansion.push_back(basis.basis(i));
     conn->deriv.assign(n, std::vector<Expr const*>(n, nullptr));
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
@@ -551,6 +557,66 @@ auto frame_cross(
         throw std::invalid_argument(
             "frame_cross: only the 3D cross product is defined");
     return reduce_cross(ctx, physical_frame(ctx, chart), u, v);
+}
+
+auto to_reference(Context& ctx, Expr const* v) -> Expr const*
+{
+    // Replace every registered physical-frame vector e_i in `v` with its
+    // reference-frame (WCS) expansion (vibe 000071 P4).  Works via the
+    // connection registry, so a vector mixing several charts' frames is fully
+    // expanded; anything not a registered frame atom is left untouched.
+    Expr const* out = rewrite_tree(
+        ctx,
+        v,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&node->node);
+            if (!t || t->slots.size() != 1 || !t->slots[0].index)
+                return node;
+            int const bid = t->slots[0].slot.basis_id;
+            if (bid == 0)
+                return node;
+            auto const* conn = c.connection(bid);
+            if (!conn || conn->reference_expansion.empty())
+                return node;
+            auto const* ci = std::get_if<ConcreteIndex>(&*t->slots[0].index);
+            if (!ci)
+                return node;
+            for (std::size_t k = 0; k < conn->values.size(); ++k)
+                if (conn->values[k] == ci->value)
+                    return conn->reference_expansion[k];
+            return node;
+        });
+    out = steps::expand_products(ctx, out);
+    return steps::simplify_scalars(ctx, steps::canonicalize(ctx, out));
+}
+
+auto express(Context& ctx, CoordinateChart const& target, Expr const* v)
+    -> Expr const*
+{
+    // Re-express `v` in `target`'s physical frame (vibe 000071 P4): first bring
+    // it to the shared reference (WCS) frame, then project each reference
+    // direction onto target's orthonormal frame,
+    //     w = Σ_k (w · e_k) e_k,
+    // with the components w·e_k taken in the reference frame and the result
+    // written on target's symbolic e_k atoms.
+    Basis const tf = physical_frame(ctx, target);
+    Expr const* w = to_reference(ctx, v);
+    int const n = tf.dim();
+    Expr const* out = nullptr;
+    for (int k = 0; k < n; ++k)
+    {
+        // component c_k = w · e_k, reduced in the reference frame.
+        Expr const* ck = reduce_dot(ctx, target.reference, w, tf.basis(k));
+        if (auto const* s = std::get_if<ScalarLiteral>(&ck->node);
+            s && s->value.is_zero())
+            continue;
+        Expr const* term = make_tensor_product(ctx, ck, tf.direction(ctx, k));
+        out = out ? make_sum(ctx, out, term) : term;
+    }
+    if (!out)
+        return make_scalar(ctx, Rational{0});
+    return steps::simplify_scalars(ctx, steps::canonicalize(ctx, out));
 }
 
 } // namespace tender

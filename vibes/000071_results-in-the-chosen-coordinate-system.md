@@ -372,4 +372,12 @@ alongside M6, reach parity, then remove M6 in Phase 3.
   removed (a field carrying the atomic `I` in a cross is not an intrinsic input;
   robustness there is a later concern).  Python: `chart.physical_frame()`,
   `Basis.direction(i)`.
-- **Phases 4 (basis-to-basis / WCS), 5 (oblique)** — pending.
+- **Phase 4 DONE**: basis-to-basis expansion.  `BasisConnection` now stores each
+  frame vector's reference (WCS) expansion; `to_reference(v)` rewrites every
+  registered frame atom to its Cartesian form (`e_r → cos θ i + sin θ j`) — the
+  explicit WCS opt-in, answering the earlier Q2.  `express(target, v)` is the
+  general change of basis: bring `v` to the shared reference frame, then project
+  onto `target`'s orthonormal frame (`w = Σ_k (w·e_k) e_k`) — so a WCS `i`
+  becomes `cos θ e_r − sin θ e_θ`, and the WCS→frame round-trip recovers e_r.
+  Python: `chart.to_reference(v)`, `chart.express(v)`.
+- **Phase 5 (oblique)** — pending.

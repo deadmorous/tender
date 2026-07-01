@@ -159,4 +159,26 @@ struct CoordinateChart final
     Expr const* u,
     Expr const* v) -> Expr const*;
 
+// ---- basis-to-basis expansion (vibe 000071 P4) -------------------------
+//
+// The intrinsic operators keep results on the chart's own frame; these bring a
+// result into another frame on demand — WCS is the common case, expressing e_r
+// as cos θ i + sin θ j.  Basis-to-basis expansion is the general primitive of
+// which "give me WCS components" is one target.
+
+// Re-express `v` in the reference (WCS) frame: every registered physical-frame
+// vector e_i in `v` is replaced by its concrete Cartesian expansion (e.g.
+// e_r → cos θ i + sin θ j), then distributed and simplified.  Chart-independent
+// (uses the connection registry), so a vector mixing several frames is fully
+// expanded; non-frame atoms are left as-is.
+[[nodiscard]] auto to_reference(Context& ctx, Expr const* v) -> Expr const*;
+
+// Re-express `v` in `target`'s physical frame, on its symbolic e_k atoms: bring
+// `v` to the shared reference frame, then project onto target's orthonormal
+// frame (w = Σ_k (w·e_k) e_k).  This is the general change of basis —
+// expressing one chart's frame vectors in another chart's frame — with
+// `to_reference` the WCS special case.
+[[nodiscard]] auto express(
+    Context& ctx, CoordinateChart const& target, Expr const* v) -> Expr const*;
+
 } // namespace tender

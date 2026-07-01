@@ -520,6 +520,35 @@ TEST(Chart, IntrinsicBasisVectorDifferentiation)
     EXPECT_TRUE(structural_eq(got, want));
 }
 
+// Basis-to-basis expansion (vibe 000071 P4): a frame result can be brought to
+// WCS on demand (e_r → cos θ i + sin θ j), and expressed in another frame; the
+// round-trip WCS → frame recovers the frame vector.
+TEST(Chart, BasisToBasisExpansion)
+{
+    Context ctx;
+    auto c = make_cyl(ctx);
+    auto fb = physical_frame(ctx, c.chart);
+    auto* e_r = fb.direction(ctx, 0);
+
+    // to_reference: e_r = cos θ i + sin θ j (WCS).
+    auto* i = c.ref.basis(0);
+    auto* j = c.ref.basis(1);
+    auto* er_wcs = make_sum(
+        ctx, mul(ctx, cos_(ctx, c.th), i), mul(ctx, sin_(ctx, c.th), j));
+    EXPECT_TRUE(eq(ctx, to_reference(ctx, e_r), er_wcs));
+
+    // express: WCS i in the cylindrical frame is cos θ e_r − sin θ e_θ.
+    auto* e_th = fb.direction(ctx, 1);
+    auto* want = make_difference(
+        ctx, mul(ctx, cos_(ctx, c.th), e_r), mul(ctx, sin_(ctx, c.th), e_th));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, express(ctx, c.chart, i)),
+        steps::canonicalize(ctx, want)));
+
+    // Round-trip WCS → frame recovers e_r.
+    EXPECT_TRUE(eq(ctx, express(ctx, c.chart, to_reference(ctx, e_r)), e_r));
+}
+
 // ∇f: the 1/h_i factors are the curvilinear content — for cylindrical
 // ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r,
 // each returned intrinsically on the frame's own e_r, e_θ (vibe 000071).
