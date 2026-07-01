@@ -4,11 +4,13 @@
 // mapping, and validate the derived frame against the hand-written
 // coord_system bases.
 
+#include <tender/basis.hpp>
 #include <tender/chart.hpp>
 #include <tender/context.hpp>
 #include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
+#include <tender/render.hpp>
 
 #include <gtest/gtest.h>
 
@@ -518,6 +520,43 @@ TEST(Chart, IntrinsicBasisVectorDifferentiation)
         ctx, steps::canonicalize(ctx, steps::partial(ctx, field_vec, c.th)));
     auto* want = steps::canonicalize(ctx, make_tensor_product(ctx, f, e_th));
     EXPECT_TRUE(structural_eq(got, want));
+}
+
+// The intrinsic differentiation ∂_j e_i = Σ_k γ^k_{ij} e_k is basis-agnostic
+// (vibe 000071 P5, decision 3): it works on an oblique basis via its registered
+// connection, and the dot is metric-aware (e_i·e_j = g_ij, not δ_ij) — the
+// machinery is not hard-wired to orthonormal frames.
+TEST(Chart, IntrinsicDifferentiationIsBasisAgnostic)
+{
+    Context ctx;
+    // An oblique (non-orthonormal) basis a, b, c.
+    auto ob = make_oblique_basis(
+        ctx, space_3d(), {frame(ctx, "a"), frame(ctx, "b"), frame(ctx, "c")});
+    ASSERT_NE(ob.basis_id(), 0);
+    EXPECT_FALSE(ob.is_orthonormal());
+
+    // Register a connection for a chart (id 9, one coordinate u): ∂_u e_0 =
+    // e_1.
+    auto* u = make_coordinate(ctx, make_tensor_name("u"), 9, 0);
+    auto* conn = ctx.make<BasisConnection>();
+    conn->chart_id = 9;
+    conn->basis_id = ob.basis_id();
+    auto const vals = ob.space()->values();
+    conn->values.assign(vals.begin(), vals.end());
+    conn->deriv = {{ob.direction(ctx, 1)}, {s0(ctx)}, {s0(ctx)}}; // ∂_u e_i,
+                                                                  // one coord
+    ctx.register_connection(conn, ob.basis_id());
+
+    // ∂_u e_0 = e_1, resolved through the connection on the oblique frame.
+    EXPECT_TRUE(structural_eq(
+        steps::partial(ctx, ob.direction(ctx, 0), u), ob.direction(ctx, 1)));
+
+    // The dot on the oblique basis yields the metric g (same-variance), not the
+    // Kronecker δ an orthonormal frame would give.
+    auto* dot = make_dot(ctx, ob.direction(ctx, 0), ob.direction(ctx, 1));
+    IndexNameMap map;
+    auto const tex = render_latex(*simplify_basis_dot(ctx, dot, ob), map);
+    EXPECT_NE(tex.find("g"), std::string::npos); // metric, not δ
 }
 
 // Basis-to-basis expansion (vibe 000071 P4): a frame result can be brought to

@@ -380,4 +380,23 @@ alongside M6, reach parity, then remove M6 in Phase 3.
   onto `target`'s orthonormal frame (`w = Σ_k (w·e_k) e_k`) — so a WCS `i`
   becomes `cos θ e_r − sin θ e_θ`, and the WCS→frame round-trip recovers e_r.
   Python: `chart.to_reference(v)`, `chart.express(v)`.
-- **Phase 5 (oblique)** — pending.
+- **Phase 5 DONE** (audit + generality of the machinery): the intrinsic
+  *machinery* is basis-agnostic, verified —
+  - **differentiation** `∂_j e_i = Σ_k γ^k_{ij} e_k` resolves through the
+    connection registry for *any* registered basis (test on an oblique basis
+    with `is_orthonormal() == false`);
+  - the **dot** is metric-aware (`e_i·e_j = g_ij` on an oblique basis, not
+    `δ_ij` — `simplify_basis_dot`) and the **cross** carries `√g` and the
+    contravariant `e^k` (`simplify_basis_cross`);
+  - the one orthonormal-only step, `fold_resolution_of_identity`
+    (`Σ_k e_k⊗e_k = I` holds only for an orthonormal frame), is correctly
+    guarded (no-op on an oblique basis).
+
+  **Scope boundary (surfaced):** the chart *operators* (`gradient`/`divergence`/
+  `rot`) build an **orthonormal** physical frame `e_i = g_i/h_i`, because the
+  charts model *orthogonal* curvilinear systems (diagonal metric).  A genuinely
+  **skew** chart — non-diagonal metric, so the physical frame is oblique and the
+  operator needs the contravariant cobasis `e^i` and the covariant-derivative
+  form (`∇T = e^i ∂_i T`, index raising/lowering, `Ω×` deferred) — is a larger
+  follow-up than this cut and is left as scoped future work.  The differentiation
+  and contraction pieces it would build on are already general (above).
