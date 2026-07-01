@@ -518,6 +518,33 @@ TEST(Chart, PhysicalFrameConnectionTable)
     EXPECT_TRUE(eq(ctx, conn->deriv[0][0], s0(ctx)));      // ∂_r e_r = 0
 }
 
+// Intrinsic differentiation (vibe 000071 P2): ∂ of a frame-vector atom is
+// resolved through the connection, staying on the symbolic e_k — no trig, no
+// WCS.  Leibniz then differentiates a curvilinear field f(r) e_r.
+TEST(Chart, IntrinsicBasisVectorDifferentiation)
+{
+    Context ctx;
+    auto c = make_cyl(ctx); // chart_id 2: r(0), θ(1), z(2)
+    auto fb = physical_frame(ctx, c.chart);
+    auto* e_r = fb.direction(ctx, 0);
+    auto* e_th = fb.direction(ctx, 1);
+
+    // ∂_θ e_r = e_θ, ∂_r e_r = 0 — directly on the atoms.
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, steps::partial(ctx, e_r, c.th)),
+        steps::canonicalize(ctx, e_th)));
+    EXPECT_TRUE(eq(ctx, steps::partial(ctx, e_r, c.r), s0(ctx)));
+
+    // Leibniz on a curvilinear field: ∂_θ(f(r) e_r) = f ∂_θ e_r = f e_θ.
+    auto* f = make_field(
+        ctx, make_tensor_name("f"), 0, {CoordinateRef{2, 0, false}}); // f(r)
+    auto* field_vec = make_tensor_product(ctx, f, e_r);
+    auto* got = steps::simplify_scalars(
+        ctx, steps::canonicalize(ctx, steps::partial(ctx, field_vec, c.th)));
+    auto* want = steps::canonicalize(ctx, make_tensor_product(ctx, f, e_th));
+    EXPECT_TRUE(structural_eq(got, want));
+}
+
 // ∇f: the 1/h_i factors are the curvilinear content — for cylindrical
 // ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r,
 // each returned as the invariant vector in the reference frame.

@@ -1,6 +1,7 @@
 #include <tender/derivation.hpp>
 
 #include <mpk/mix/util/overloads.hpp>
+#include <tender/context.hpp>
 #include <tender/nf_lower.hpp>
 #include <tender/rewrite.hpp>
 #include <tender/summation.hpp>
@@ -2827,6 +2828,44 @@ auto is_same_coord(TensorObject const& t, DiffCoord const& q) -> bool
            && c.slot == q.ref.slot;
 }
 
+// Intrinsic derivative of a physical-frame basis vector (vibe 000071).  If `e`
+// is a frame-vector atom eᵢ — a rank-1 TensorObject with a single basis-tagged
+// slot carrying a ConcreteIndex — whose basis has a registered connection whose
+// chart owns the coordinate `q`, return ∂_{q^j} eᵢ = deriv[i][j] from that
+// table (the pre-expanded Σ_k γ^k_{ij} eₖ).  nullptr if `e` is not such an
+// atom, or the coordinate belongs to a different chart (then eᵢ is constant in
+// q here — cross-chart coupling is a later stage), so the caller falls through
+// to 0.
+auto diff_frame_vector(Context& ctx, Expr const* e, DiffCoord const& q)
+    -> Expr const*
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    if (!t || t->slots.size() != 1 || !t->slots[0].index)
+        return nullptr;
+    int const basis_id = t->slots[0].slot.basis_id;
+    if (basis_id == 0)
+        return nullptr;
+    auto const* ci = std::get_if<ConcreteIndex>(&*t->slots[0].index);
+    if (!ci)
+        return nullptr;
+    auto const* conn = ctx.connection(basis_id);
+    if (!conn || conn->chart_id != q.ref.chart_id)
+        return nullptr;
+    int dir = -1;
+    for (std::size_t k = 0; k < conn->values.size(); ++k)
+        if (conn->values[k] == ci->value)
+        {
+            dir = static_cast<int>(k);
+            break;
+        }
+    if (dir < 0 || q.ref.slot < 0
+        || q.ref.slot >= static_cast<int>(
+               conn->deriv[static_cast<std::size_t>(dir)].size()))
+        return nullptr;
+    return conn->deriv[static_cast<std::size_t>(dir)]
+                      [static_cast<std::size_t>(q.ref.slot)];
+}
+
 // The outer derivative d/du of an elementary function f, as an Expr in `u`
 // (the chain rule then multiplies by u' = ∂u).
 auto scalar_fn_derivative(Context& ctx, ScalarFnKind kind, Expr const* u)
@@ -2907,8 +2946,14 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
                                make_field_derivative(ctx, e, q.name, q.ref) :
                                zero();
                 }
-                // Everything else (reference vectors, parameters, I/δ/ε) is
-                // constant.
+                // A physical-frame basis vector eᵢ (vibe 000071): differentiate
+                // it through the connection, ∂_{q^j} eᵢ = Σ_k γ^k_{ij} eₖ,
+                // staying intrinsic to the curvilinear basis — never expanding
+                // it in the reference frame.
+                if (auto const* de = diff_frame_vector(ctx, e, q))
+                    return de;
+                // Everything else (reference vectors of an unregistered basis,
+                // parameters, I/δ/ε) is constant.
                 return zero();
             },
             [&](ScalarLiteral const&) -> Expr const* { return zero(); },
