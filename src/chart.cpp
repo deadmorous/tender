@@ -201,125 +201,40 @@ auto reduce_dot(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
     return steps::simplify_scalars(ctx, e);
 }
 
-// The sign of the permutation (a, b, c) of {0,1,2}: +1 even, −1 odd, 0 on any
-// repeat — the 3D Levi-Civita symbol.
-auto eps3(int a, int b, int c) -> int
-{
-    if (a == b || b == c || a == c)
-        return 0;
-    return ((b - a) * (c - a) * (c - b) > 0) ? 1 : -1;
-}
-
-// One side of a frame-vector cross: split a (scalar-weighted) reference frame
-// vector into its scalar factor (null when bare) and its direction index k
-// (matched structurally against ref.basis(k)).  nullopt if it is not a single
-// scaled frame vector.
-struct FrameSide final
-{
-    Expr const* scalar;
-    int dir;
-};
-auto split_frame(Context& ctx, Basis const& ref, Expr const* e)
-    -> std::optional<FrameSide>
-{
-    std::vector<Expr const*> facs;
-    flatten(e, facs);
-    int dir = -1;
-    std::vector<Expr const*> scalars;
-    for (auto const* f: facs)
-    {
-        int matched = -1;
-        for (int k = 0; k < ref.dim(); ++k)
-            if (structural_eq(f, ref.basis(k)))
-            {
-                matched = k;
-                break;
-            }
-        if (matched < 0)
-            scalars.push_back(f);
-        else if (dir < 0)
-            dir = matched;
-        else
-            return std::nullopt; // two frame vectors — a dyad, not a vector
-    }
-    if (dir < 0)
-        return std::nullopt;
-    return FrameSide{scalars.empty() ? nullptr : product_of(ctx, scalars), dir};
-}
-
-// Reduce every frame-vector cross e_a × e_b in `e` via e_a × e_b = Σ_c ε_{abc}
-// e_c (the right-handed orthonormal reference frame `ref`), in place across the
-// whole tree.  A cross whose sides are not both (scalar-weighted) frame vectors
-// — e.g. e_a × (b⊗c), which fence-distribution must split first — is left for
-// the caller.  Used both by reduce_cross and to clean frame crosses already
-// present in an operator's input field (vibe 000070 P6: ∇×(R×I)).
-auto fold_frame_crosses(Context& ctx, Basis const& ref, Expr const* e)
+// The invariant cross u×v reduced in the frame `fb`, symbolically: distribute
+// bilinearly, turn each frame-vector cross into its Levi-Civita expansion
+// (s e_i)×(t e_j) → s t √g ε_{ijk} e^k, materialise the Σ_k, evaluate the
+// concrete ε, and simplify.  Works on the symbolic e_i atoms (vibe 000071), so
+// e_r × e_θ = e_z with no reference frame.
+auto reduce_cross(Context& ctx, Basis const& fb, Expr const* u, Expr const* v)
     -> Expr const*
 {
-    return rewrite_tree(
+    Expr const* e = distribute_bilinear(ctx, u, v, &make_cross);
+    // A cross with a zero operand is zero — the differentiator emits 0×b + a×0
+    // when it Leibniz-differentiates a cross of constants; fold it before the
+    // basis reduction so the term vanishes cleanly.
+    e = rewrite_tree(
         ctx,
         e,
-        [&](Context& c, Expr const* node) -> Expr const*
+        [](Context& c, Expr const* node) -> Expr const*
         {
             auto const* x = std::get_if<Cross>(&node->node);
             if (!x)
                 return node;
-            // A cross with a zero operand is zero — fold it away (the
-            // differentiator emits 0×b + a×0 when it Leibniz-differentiates a
-            // cross of constants; canonicalize cannot reduce that on its own).
             auto is_zero = [](Expr const* z)
             {
                 auto const* s = std::get_if<ScalarLiteral>(&z->node);
                 return s && s->value.is_zero();
             };
-            if (is_zero(x->left) || is_zero(x->right))
-                return make_scalar(c, Rational{0});
-            auto l = split_frame(c, ref, x->left);
-            auto r = split_frame(c, ref, x->right);
-            if (!l || !r)
-                return node;
-            if (l->dir == r->dir)
-                return make_scalar(c, Rational{0}); // parallel
-            Expr const* res = nullptr;
-            for (int m = 0; m < ref.dim(); ++m)
-                if (int s = eps3(l->dir, r->dir, m))
-                    res = s > 0 ? ref.basis(m) : make_negate(c, ref.basis(m));
-            if (l->scalar)
-                res = make_tensor_product(c, l->scalar, res);
-            if (r->scalar)
-                res = make_tensor_product(c, r->scalar, res);
-            return res;
+            return (is_zero(x->left) || is_zero(x->right)) ?
+                       make_scalar(c, Rational{0}) :
+                       node;
         });
-}
-
-// Reduce every cross in `e` to frame vectors, however deeply its operands are
-// dyads (vibe 000070 P6).  A cross of a vector with a rank-2 tensor — e_i × the
-// field ∂_i(R×I) — must first fence-distribute over the ⊗, a × (u⊗v) → (a×u)⊗v,
-// before the frame table applies; distribute_contraction does one such pass, so
-// iterate it with fold_frame_crosses to a fixpoint.
-auto reduce_frame_crosses(Context& ctx, Basis const& ref, Expr const* e)
-    -> Expr const*
-{
-    e = steps::expand_products(ctx, e);
-    Expr const* prev = nullptr;
-    for (int guard = 0; e != prev && guard <= ref.dim() + 2; ++guard)
-    {
-        prev = e;
-        e = steps::distribute_contraction(ctx, e);
-        e = fold_frame_crosses(ctx, ref, e);
-    }
-    return e;
-}
-
-// The invariant cross u×v of two tensors in the right-handed orthonormal
-// reference frame `ref`, reduced to frame vectors: distribute bilinearly, then
-// fence-distribute and fold each frame-vector cross via e_a × e_b = Σ_c ε_{abc}
-// e_c.
-auto reduce_cross(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
-    -> Expr const*
-{
-    Expr const* e = distribute_bilinear(ctx, u, v, &make_cross);
-    e = reduce_frame_crosses(ctx, ref, e);
+    e = simplify_basis_cross(ctx, e, fb);
+    e = steps::canonicalize(ctx, e);
+    e = steps::unroll_sums(ctx, e);
+    e = steps::eval_eps_concrete(ctx, e);
+    e = steps::fold_arithmetic(ctx, e);
     e = steps::canonicalize(ctx, e);
     return steps::simplify_scalars(ctx, e);
 }
@@ -450,7 +365,6 @@ auto connection_coefficients(
 
 auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
 {
-    Basis const basis = physical_basis(ctx, chart);
     int const n = static_cast<int>(chart.coords.size());
 
     // The chart these coordinates belong to (all coords share one chart_id).
@@ -459,6 +373,14 @@ auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
         throw std::invalid_argument(
             "physical_frame: coordinate is not a coordinate variable");
     int const chart_id = c0->traits->coordinate->chart_id;
+
+    // Idempotent per chart: reuse the frame if already built, so the user's
+    // fields and the operators share the same e_i atoms and connection.
+    if (int const cached = ctx.chart_frame(chart_id))
+        if (auto const* b = ctx.basis(cached))
+            return *b;
+
+    Basis const basis = physical_basis(ctx, chart);
 
     // Pre-express ∂_{q^j} e_i on the symbolic e_k atoms: Σ_k γ^k_{ij} e_k, with
     // the γ from the connection (M5).  The e_k are this basis's own direction
@@ -488,64 +410,50 @@ auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
                     make_scalar(ctx, Rational{0});
         }
     ctx.register_connection(conn, basis.basis_id());
+    ctx.register_chart_frame(chart_id, basis.basis_id());
     return basis;
 }
 
-// ---- differential operators (vibe 000069 M6) ---------------------------
+// ---- differential operators (vibe 000071, intrinsic) -------------------
 //
-// ∇ is the invariant operator ∇ = Σ_i e_i (1/h_i) ∂_{q^i}, and an operator is
-// just ∇ applied by the formal rule — no component bookkeeping.  A field is an
-// invariant Expr written in the constant reference frame, so ∂_{q^i} (the M2
-// differentiator) acts on the *whole* expression by Leibniz: differentiating a
-// field given in the moving frame e_j(q) differentiates those e_j too, and the
-// connection (∂e) terms fall out on their own.  Each operator is
+// ∇ = Σ_i (1/h_i) e_i ∂_{q^i}, applied *intrinsically in the chart's own
+// physical frame* — the symbolic e_i atoms, whose derivatives come from the
+// connection (∂_j e_i = γ^k_{ij} e_k, vibe 000071 P2), never expanded in WCS.
+// Each operator is
 //
 //     ∇ ⊙ T = Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T          (⊙ = ⊗, ·, or ×)
 //
-// reduced back to an invariant tensor.  grad raises the rank by one, div lowers
-// it by one, rot keeps it (3D); nothing assumes a particular basis for T.
+// with ∂_{q^i} acting by Leibniz on the curvilinear components (fields) and the
+// basis vectors (connection), and the result staying on e_i.  grad raises the
+// rank by one, div lowers it by one (via e_i·e_j = δ_ij / g_ij), rot keeps it.
 
-// Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T, with `combine(e_i, ∂_i T)` choosing ⊗ / · / ×.
-// When `fold_identity` (the default), the result's concrete resolution of
-// identity Σ_k u_k⊗u_k over the reference frame is folded back to I (vibe
-// 000070 P4), so ∇R = I, ∇×(R×I) = −2I etc. come out directly; pass false for
-// the raw expanded form.
+// Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T on the physical frame `fb`.  `combine(e_i, ∂_i
+// T)` chooses ⊗ / · / ×.  When `fold_identity` (default), a resolution of
+// identity Σ_k e_k⊗e_k folds back to I (so ∇R = I).
 template <typename Combine>
 auto del_apply(
     Context& ctx,
     CoordinateChart const& chart,
+    Basis const& fb,
     Expr const* T,
     Combine combine,
     bool fold_identity) -> Expr const*
 {
     int const n = static_cast<int>(chart.coords.size());
-    Basis const pb = physical_basis(ctx, chart);
-    // Reduce the input field to clean dyad form first (vibe 000070 P6).  A
-    // field built with the identity tensor or an unreduced cross — e.g. R×I —
-    // carries an atomic I and frame-vector crosses the differentiator/reducer
-    // cannot see through.  Expand I → Σ_k u_k⊗u_k over the (orthonormal)
-    // reference frame, distribute into a sum of monomials (which also
-    // fence-distributes a cross over the dyads, a × (b⊗c) → (a×b)⊗c), then fold
-    // those frame crosses to frame vectors.  All transparent: any resulting Σ_k
-    // u_k⊗u_k folds back to I at the end.  Also lets a field handed in as
-    // scalar ⊗ moving-frame vector (r ⊗ e_r) differentiate without a stray
-    // un-fenced ⊗ tripping canonicalize.
-    if (chart.reference.is_orthonormal())
-        T = expand_identity(ctx, T, chart.reference);
-    T = reduce_frame_crosses(ctx, chart.reference, T);
-    T = steps::expand_products(ctx, T);
-    T = steps::canonicalize(ctx, T);
+    // Distribute the field into a clean sum of monomials so a term like
+    // scalar ⊗ e_i differentiates without a stray un-fenced ⊗ tripping
+    // canonicalize.
+    T = steps::canonicalize(ctx, steps::expand_products(ctx, T));
     Expr const* acc = make_scalar(ctx, Rational{0});
     for (int i = 0; i < n; ++i)
     {
         Expr const* di = steps::simplify_scalars(
             ctx, steps::partial(ctx, T, chart.coords[i]));
-        // A coordinate the field does not depend on contributes nothing — and
-        // there is no vector to contract e_i with (skip, don't dot against 0).
+        // A coordinate the field does not depend on contributes nothing.
         if (auto const* s = std::get_if<ScalarLiteral>(&di->node);
             s && s->value.is_zero())
             continue;
-        Expr const* leg = combine(pb.basis(i), di);
+        Expr const* leg = combine(fb.direction(ctx, i), di);
         Expr const* term = make_tensor_product(
             ctx, inv_h(ctx, scale_factor(ctx, chart, i)), leg);
         acc = make_sum(ctx, acc, term);
@@ -553,7 +461,7 @@ auto del_apply(
     acc = steps::expand_products(ctx, acc);
     acc = steps::simplify_scalars(ctx, steps::canonicalize(ctx, acc));
     if (fold_identity)
-        acc = fold_resolution_of_identity(ctx, acc, chart.reference);
+        acc = fold_resolution_of_identity(ctx, acc, fb);
     return acc;
 }
 
@@ -563,10 +471,12 @@ auto gradient(
     Expr const* f,
     bool fold_identity) -> Expr const*
 {
-    // grad T = Σ_i (1/h_i) e_i ⊗ ∂_i T (rank + 1); e.g. ∇R = Σ_i e_i ⊗ e_i = I.
+    Basis const fb = physical_frame(ctx, chart);
+    // grad T = Σ_i (1/h_i) e_i ⊗ ∂_i T (rank + 1).
     return del_apply(
         ctx,
         chart,
+        fb,
         f,
         [&](Expr const* ei, Expr const* di)
         { return make_tensor_product(ctx, ei, di); },
@@ -579,13 +489,15 @@ auto divergence(
     Expr const* v,
     bool fold_identity) -> Expr const*
 {
+    Basis const fb = physical_frame(ctx, chart);
     // div v = Σ_i (1/h_i) e_i · ∂_i v (rank − 1).
     return del_apply(
         ctx,
         chart,
+        fb,
         v,
         [&](Expr const* ei, Expr const* di)
-        { return reduce_dot(ctx, chart.reference, ei, di); },
+        { return reduce_dot(ctx, fb, ei, di); },
         fold_identity);
 }
 
@@ -608,13 +520,15 @@ auto rot(
     if (chart.reference.dim() != 3)
         throw std::invalid_argument(
             "rot: only the 3D cross product is defined");
+    Basis const fb = physical_frame(ctx, chart);
     // rot v = ∇×v = Σ_i (1/h_i) e_i × ∂_i v.
     return del_apply(
         ctx,
         chart,
+        fb,
         v,
         [&](Expr const* ei, Expr const* di)
-        { return reduce_cross(ctx, chart.reference, ei, di); },
+        { return reduce_cross(ctx, fb, ei, di); },
         fold_identity);
 }
 
@@ -624,7 +538,7 @@ auto frame_dot(
     Expr const* u,
     Expr const* v) -> Expr const*
 {
-    return reduce_dot(ctx, chart.reference, u, v);
+    return reduce_dot(ctx, physical_frame(ctx, chart), u, v);
 }
 
 auto frame_cross(
@@ -636,7 +550,7 @@ auto frame_cross(
     if (chart.reference.dim() != 3)
         throw std::invalid_argument(
             "frame_cross: only the 3D cross product is defined");
-    return reduce_cross(ctx, chart.reference, u, v);
+    return reduce_cross(ctx, physical_frame(ctx, chart), u, v);
 }
 
 } // namespace tender

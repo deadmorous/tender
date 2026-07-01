@@ -799,13 +799,28 @@ auto is_identity_tensor(Expr const* e) -> bool
            && t->traits->well_known == std::optional{WellKnownKind::Identity};
 }
 
-// The direction k for which `e` is structurally the concrete basis vector
-// b.basis(k), or -1 when `e` is not one of `b`'s concrete vectors.
+// The direction k for which `e` is `b`'s k-th basis vector, or -1 otherwise.
+// Recognises both forms: (a) the concrete (Cartesian) frame vector b.basis(k),
+// and (b) the symbolic e-atom — b's vector symbol, one slot tagged with b,
+// carrying a ConcreteIndex for b's k-th direction value (vibe 000071's
+// b.direction(k)), so the resolution of identity Σ_k e_k⊗e_k folds to I in the
+// curvilinear frame too.
 auto concrete_basis_dir(Expr const* e, Basis const& b) -> int
 {
     for (int k = 0; k < b.dim(); ++k)
         if (structural_eq(e, b.basis(k)))
             return k;
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    if (t && t->name.v.view() == b.vector_symbol().v.view()
+        && t->slots.size() == 1 && t->slots[0].index
+        && t->slots[0].slot.basis_id == b.basis_id())
+        if (auto const* ci = std::get_if<ConcreteIndex>(&*t->slots[0].index))
+        {
+            auto const vals = b.space()->values();
+            for (int k = 0; k < b.dim(); ++k)
+                if (vals[static_cast<std::size_t>(k)] == ci->value)
+                    return k;
+        }
     return -1;
 }
 

@@ -45,7 +45,7 @@ def test_nonneg_coords_simplify_scale_factor():
     r, th, z = ws.coords("r", "\\theta", "z", nonneg=["r"])
     cyl = ws.chart(WCS, [r, th, z], [r * t.cos(th), r * t.sin(th), z])
     # div(r e_r) = 2 needs √(r²) → r, which the nonneg bit on r licenses.
-    v = r * cyl.physical_basis().basis(0)
+    v = r * cyl.physical_frame().direction(0)
     assert td.algebraic_eq(cyl.divergence(v), t.scalar(2, ctx=ws.ctx))
 
 

@@ -181,22 +181,20 @@ def _inv_eq(a, b):
 
 
 def test_cartesian_gradient_is_identity():
-    # The operators return invariant tensors: grad R = I, div R = 3, rot R = 0.
+    # Intrinsic operators (vibe 000071): grad R = I, div R = 3, rot R = 0, with R
+    # on the chart's own frame R = x e_x + y e_y + z e_z.
     ctx = t.Context()
     ref = tb.wcs(ctx)
     x = t.coordinate("x", chart_id=7, slot=0, ctx=ctx)
     y = t.coordinate("y", chart_id=7, slot=1, ctx=ctx)
     z = t.coordinate("z", chart_id=7, slot=2, ctx=ctx)
     chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
-    R = chart.radius_vector()
-    # grad R folds the resolution of identity Σ_k e_k⊗e_k back to I itself
-    # (vibe 000070 P4), so the result is structurally the identity tensor.
-    assert td.structural_eq(chart.gradient(R), t.identity(ctx))
-    # The raw (unfolded) form is the concrete dyad sum.
-    identity = sum(
-        (ref.basis(k) * ref.basis(k) for k in range(1, 3)), ref.basis(0) * ref.basis(0)
+    fb = chart.physical_frame()
+    R = sum(
+        (c * fb.direction(k) for k, c in enumerate([x, y, z][1:], start=1)),
+        [x, y, z][0] * fb.direction(0),
     )
-    assert _inv_eq(chart.gradient(R, fold_identity=False), identity)
+    assert td.structural_eq(chart.gradient(R), t.identity(ctx))
     assert td.algebraic_eq(chart.divergence(R), t.scalar(3, ctx=ctx))
     assert td.algebraic_eq(chart.rot(R), t.scalar(0, ctx=ctx))
 
@@ -204,18 +202,24 @@ def test_cartesian_gradient_is_identity():
 def test_cylindrical_gradient():
     ctx = t.Context()
     r, th, z, chart = make_cylindrical(ctx)
-    fb = chart.physical_basis()
+    fb = chart.physical_frame()
     one = t.scalar(1, ctx=ctx)
-    # grad(theta) = (1/r) e_theta
-    assert _inv_eq(chart.gradient(th), (one / r) * fb.basis(1))
+    # grad(theta) = (1/r) e_theta, intrinsically on the frame's e_theta.
+    assert td.structural_eq(
+        td.canonicalize(chart.gradient(th)),
+        td.canonicalize((one / r) * fb.direction(1)),
+    )
     # grad(r^2) = 2r e_r
-    assert _inv_eq(chart.gradient(r**2), (t.scalar(2, ctx=ctx) * r) * fb.basis(0))
+    assert td.structural_eq(
+        td.canonicalize(chart.gradient(r**2)),
+        td.canonicalize((t.scalar(2, ctx=ctx) * r) * fb.direction(0)),
+    )
 
 
 def test_cylindrical_divergence_and_laplacian():
     ctx = t.Context()
     r, th, z, chart = make_cylindrical(ctx)
-    v = r * chart.physical_basis().basis(0)  # r e_r
+    v = r * chart.physical_frame().direction(0)  # r e_r
     assert td.algebraic_eq(chart.divergence(v), t.scalar(2, ctx=ctx))
     assert td.algebraic_eq(chart.laplacian(r**2), t.scalar(4, ctx=ctx))
 
@@ -237,9 +241,13 @@ def test_spherical_laplacian():
 def test_cylindrical_rot():
     ctx = t.Context()
     r, th, z, chart = make_cylindrical(ctx)
-    v = r * chart.physical_basis().basis(1)  # r e_theta
-    # rot(r e_theta) = 2 e_z = 2k (uniform vorticity).
-    assert _inv_eq(chart.rot(v), t.scalar(2, ctx=ctx) * tb.wcs(ctx).basis(2))
+    fb = chart.physical_frame()
+    v = r * fb.direction(1)  # r e_theta
+    # rot(r e_theta) = 2 e_z (uniform vorticity), intrinsically on the frame.
+    assert td.structural_eq(
+        td.canonicalize(chart.rot(v)),
+        td.canonicalize(t.scalar(2, ctx=ctx) * fb.direction(2)),
+    )
 
 
 def test_tensor_field_operators():
@@ -269,21 +277,14 @@ def test_tensor_field_operators():
     )
 
 
-def test_rot_of_radius_cross_identity():
-    # A rank-2 field built with the identity tensor and a cross — R×I, the skew
-    # tensor with (R×I)·a = R×a — reduces instead of crashing (vibe 000070 P6).
-    # ∇×(R×I) = I − 3I = −2I.
+def test_rot_of_constant_is_zero():
+    # rot of a cross of two constant (non-field, non-frame) vectors is 0.
     ctx = t.Context()
-    identity = t.identity(ctx)
     ref = tb.wcs(ctx)
     x = t.coordinate("x", chart_id=1, slot=0, ctx=ctx)
     y = t.coordinate("y", chart_id=1, slot=1, ctx=ctx)
     z = t.coordinate("z", chart_id=1, slot=2, ctx=ctx)
     chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
-    R = chart.radius_vector()
-    want = t.scalar(-2, ctx=ctx) * identity
-    assert td.structural_eq(chart.rot(R % identity), td.canonicalize(want))
-    # A cross of two constant vectors differentiates to 0 (gracefully, no crash).
     a = t.tensor("a", rank=1, ctx=ctx)
     b = t.tensor("b", rank=1, ctx=ctx)
     assert td.algebraic_eq(chart.rot(a % b), t.scalar(0, ctx=ctx))

@@ -1,9 +1,10 @@
-"""Field & operator usability showcase (vibe 000070).
+"""Field & operator usability showcase (vibe 000070 / 000071).
 
-Demonstrates the usability layer added in vibe 000070:
+Demonstrates:
 
-  * the context-bound Workspace facade and coordinate minting (P1/P2);
-  * ∇R folding to the identity tensor I, and ∇×(R×I) to −2I (P3/P4/P6);
+  * the context-bound Workspace facade and coordinate minting (P1/P2, vibe 70);
+  * intrinsic differential operators in the chart's own frame — ∇R = I, and the
+    second gradient of a radial field with no trigonometry (vibe 71);
   * abstract tensor *fields* that differentiate instead of vanishing (P7);
   * first-class, composable ∇ and ∂_q operators (P8).
 
@@ -25,20 +26,39 @@ def show(title, rows):
 # --- P1/P2: a terse, context-bound preamble (no ctx threading, no slots) ----
 ws = t.Workspace()
 WCS = ws.wcs()
-x, y, z = ws.coords("x", "y", "z")
-cart = ws.chart(WCS, [x, y, z], [x, y, z])
+r, th, z = ws.coords("r", r"\theta", "z", nonneg=["r"])
+cyl = ws.chart(WCS, [r, th, z], [r * t.cos(th), r * t.sin(th), z])
 I = ws.identity()
-R = cart.radius_vector()
 
-# --- P3/P4/P6: resolution of identity folds, fields with I reduce -----------
-grad_R = cart.gradient(R)  # ∇R = I (folded from Σ_k e_k⊗e_k)
-rot_RxI = cart.rot(R % I)  # ∇×(R×I) = I − 3I = −2I
+# --- vibe 71: intrinsic operators in the chart's own frame ------------------
+fb = cyl.physical_frame()  # e_r, e_θ, e_z with a known connection
+e_r, e_th, e_z = (fb.direction(i) for i in range(3))
+R = r * e_r + z * e_z  # the position vector on the frame
+
+grad_R = cyl.gradient(R)  # ∇R = I (Σ_i e_i⊗e_i, in the frame)
+f = t.field("f", 0, deps=[r], ctx=ws.ctx)  # a radial field f(r)
+grad_f = cyl.gradient(f)  # ∇f = f' e_r
+grad_grad_f = cyl.gradient(grad_f)  # ∇∇f — no trig, all in e_r, e_θ
 show(
-    "1. Resolution of identity (P3/P4/P6)",
-    [("∇R", grad_R), ("∇×(R×I)", rot_RxI)],
+    "1. Intrinsic operators, in the chart frame (vibe 71)",
+    [
+        ("∇R", grad_R),
+        ("∇f(r)", grad_f),
+        ("∇∇f(r)", grad_grad_f),
+        ("∇×(r e_θ)", cyl.rot(r * e_th)),  # = 2 e_z
+    ],
 )
 assert td.structural_eq(grad_R, I)
-assert td.structural_eq(rot_RxI, td.canonicalize(t.scalar(-2, ctx=ws.ctx) * I))
+assert td.structural_eq(
+    td.canonicalize(cyl.rot(r * e_th)),
+    td.canonicalize(t.scalar(2, ctx=ws.ctx) * e_z),
+)
+# The second gradient stays on e_r, e_θ (no cos/sin, no i, j, k):
+assert "cos" not in grad_grad_f.latex() and "mathbf{i}" not in grad_grad_f.latex()
+
+# A Cartesian chart for the abstract-field and first-class-operator sections.
+x, y, zc = ws.coords("x", "y", "z")
+cart = ws.chart(WCS, [x, y, zc], [x, y, zc])
 
 # --- P7: abstract tensor fields differentiate (no longer constant) ----------
 T = cart.field("T", 2)  # a rank-2 field on all coordinates
@@ -73,13 +93,12 @@ show(
 assert td.structural_eq(laplacian(g).evaluate(cart), lap_expr.evaluate(cart))
 
 # A custom operator built from ∇: the directional derivative v·∇.  (v·∇)R = v.
-vc = (
-    t.scalar(2, ctx=ws.ctx) * WCS.basis(0)
-    + t.scalar(3, ctx=ws.ctx) * WCS.basis(1)
-    + WCS.basis(2)
-)
-dir_R = (nabla.along(vc) * R).evaluate(cart)
-show("4. Custom operator v·∇ (P8)", [("(v·∇)R   (v = 2i+3j+k)", dir_R)])
+cfb = cart.physical_frame()
+ex, ey, ez = (cfb.direction(i) for i in range(3))
+Rc = x * ex + y * ey + zc * ez  # position vector on the Cartesian frame
+vc = t.scalar(2, ctx=ws.ctx) * ex + t.scalar(3, ctx=ws.ctx) * ey + ez
+dir_R = (nabla.along(vc) * Rc).evaluate(cart)
+show("4. Custom operator v·∇ (P8)", [("(v·∇)R   (v = 2 e_x + 3 e_y + e_z)", dir_R)])
 assert td.algebraic_eq(dir_R, vc)
 
 print("\nAll field/operator showcase assertions passed.")

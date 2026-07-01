@@ -130,8 +130,8 @@ assert td.algebraic_eq(h[1], r)  # h_θ = r
 # 3. Physical orthonormal frame  e_i = g_i / h_i  (a real tender Basis)
 # ---------------------------------------------------------------------------
 
-frame = cyl.physical_basis()
-e = [frame.basis(i) for i in range(3)]
+frame = cyl.physical_frame()
+e = [frame.direction(i) for i in range(3)]
 show(
     "3. Physical orthonormal frame  e_i = g_i / h_i",
     [
@@ -164,12 +164,12 @@ show(
 # 5. Differential operators  (∇ = Σ_i (1/h_i) e_i ∂_{q^i})
 # ---------------------------------------------------------------------------
 
-# Each operator is ∇ applied formally and returns an invariant tensor — no
-# component tuples.  Fields are tensors in the reference frame: r e_r is built
-# straight from the physical basis vector.  grad raises the rank by one, so
-# ∇R = Σ_i e_i ⊗ e_i = I, the identity tensor; grad surfaces the 1/h factors,
-# i.e. ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z.
-grad_R = cyl.gradient(R)  # ∇R = I
+# Each operator is ∇ applied intrinsically in the chart's own frame (vibe
+# 000071) and returns an invariant tensor — the result stays on e_r, e_θ, e_z,
+# with no trigonometry and no return to WCS.  The position vector on the frame is
+# R = r e_r + z e_z; grad raises the rank by one, so ∇R = Σ_i e_i ⊗ e_i = I.
+R_frame = r * e[0] + z * e[2]  # the same R, expressed intrinsically
+grad_R = cyl.gradient(R_frame)  # ∇R = I
 grad_theta = cyl.gradient(th)  # ∇θ = (1/r) e_θ
 grad_r2 = cyl.gradient(r**2)  # ∇r² = 2r e_r
 
@@ -197,8 +197,8 @@ show(
         ("∇×(r e_θ)", simp(rot_swirl)),
     ],
 )
-# ∇R is the identity tensor I: the operators now fold the concrete resolution
-# Σ_i e_i ⊗ e_i back to I itself (vibe 000070 P4), so grad_R is structurally I.
+# ∇R is the identity tensor I: the intrinsic operator folds the resolution
+# Σ_i e_i ⊗ e_i (in the chart's own frame) back to I (vibe 000071).
 assert td.structural_eq(grad_R, tender.identity(ctx))
 assert td.algebraic_eq(div_radial, tender.scalar(2, ctx=ctx))
 assert td.algebraic_eq(lap_r2, tender.scalar(4, ctx=ctx))

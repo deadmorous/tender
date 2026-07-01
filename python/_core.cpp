@@ -952,6 +952,14 @@ NB_MODULE(_core, m)
             "i"_a,
             "The i-th contravariant cobasis vector e^i (0-based).")
         .def(
+            "direction",
+            [](PyBasis const& b, int i) -> PyExpr
+            { return PyExpr{b.ctx_keep, b.ctx, b.basis.direction(*b.ctx, i)}; },
+            "i"_a,
+            "The concrete symbolic covariant vector e_i for direction i (vibe "
+            "000071): renders as e_r / bold i per the basis naming, and is the "
+            "atom the intrinsic differentiator resolves through the connection.")
+        .def(
             "covariant_vector",
             [](PyBasis const& b, CountableIndex idx) -> PyExpr {
                 return PyExpr{
@@ -1277,6 +1285,16 @@ NB_MODULE(_core, m)
                     c.ctx_keep, c.ctx, physical_basis(*c.ctx, c.chart)};
             },
             "The derived physical orthonormal frame e_i = g_i/h_i as a Basis.")
+        .def(
+            "physical_frame",
+            [](PyChart const& c) -> PyBasis {
+                return PyBasis{
+                    c.ctx_keep, c.ctx, physical_frame(*c.ctx, c.chart)};
+            },
+            "The chart's physical frame (vibe 000071), registering its "
+            "connection so the intrinsic operators differentiate ∂_j e_i via "
+            "the Christoffel table.  Idempotent per chart; use .direction(i) for "
+            "the symbolic e_i the operators return their results on.")
         .def(
             "basis_derivative",
             [](PyChart const& c, int i, int j) -> PyExpr {

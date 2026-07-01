@@ -383,15 +383,6 @@ auto make_cyl(Context& ctx) -> Cyl
             {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}}};
 }
 
-// Equality of two invariant tensors written in the reference frame: distribute
-// ⊗ over + (canonicalize alone does not) and simplify, then compare.
-auto inv_eq(Context& ctx, Expr const* a, Expr const* b) -> bool
-{
-    auto* na = steps::simplify_scalars(ctx, steps::expand_products(ctx, a));
-    auto* nb = steps::simplify_scalars(ctx, steps::expand_products(ctx, b));
-    return algebraic_eq(ctx, na, nb);
-}
-
 } // namespace
 
 // The operators are ∇ applied formally and return invariant tensors.  ∇R is the
@@ -405,48 +396,26 @@ TEST(Chart, CartesianGradientIsIdentity)
     auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
     auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
     CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
-    auto* R = radius_vector(ctx, chart);
-
-    // ∇R = I: the operator now folds the concrete resolution Σ_k e_k⊗e_k back
-    // to the identity tensor itself (vibe 000070 P4), so the result is
-    // structurally I — not just inv_eq to the expanded dyad sum.
-    EXPECT_TRUE(structural_eq(gradient(ctx, chart, R), make_identity(ctx)));
-    // The raw (unfolded) form is still available and equals the dyad sum.
-    Expr const* dyads = nullptr;
+    auto fb = physical_frame(ctx, chart);
+    // The position vector on the (Cartesian) frame: R = x e_x + y e_y + z e_z.
+    Expr const* R = nullptr;
+    Expr const* coord[] = {x, y, z};
     for (int k = 0; k < 3; ++k)
     {
-        auto* dyad = mul(ctx, ref.basis(k), ref.basis(k));
-        dyads = dyads ? make_sum(ctx, dyads, dyad) : dyad;
+        auto* term = mul(ctx, coord[k], fb.direction(ctx, k));
+        R = R ? make_sum(ctx, R, term) : term;
     }
-    EXPECT_TRUE(
-        inv_eq(ctx, gradient(ctx, chart, R, /*fold_identity=*/false), dyads));
+
+    // ∇R = I intrinsically: the resolution Σ_k e_k⊗e_k folds to the identity
+    // tensor, now in the chart's own frame (vibe 000071).
+    EXPECT_TRUE(structural_eq(gradient(ctx, chart, R), make_identity(ctx)));
     EXPECT_TRUE(
         eq(ctx, divergence(ctx, chart, R), make_scalar(ctx, Rational{3})));
     EXPECT_TRUE(eq(ctx, rot(ctx, chart, R), s0(ctx)));
 }
 
-// The operators reduce a field built with the identity tensor and a cross —
-// R×I, the rank-2 skew tensor with (R×I)·a = R×a — instead of crashing (vibe
-// 000070 P6).  ∇×(R×I) = I − 3I = −2I.  Previously this raised in Nf lowering.
-TEST(Chart, RotOfRCrossIdentity)
-{
-    Context ctx;
-    auto ref = wcs(ctx);
-    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
-    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
-    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
-    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
-    auto* R = radius_vector(ctx, chart);
-    auto* RxI = make_cross(ctx, R, make_identity(ctx));
-
-    auto* want = make_negate(
-        ctx, mul(ctx, make_scalar(ctx, Rational{2}), make_identity(ctx)));
-    EXPECT_TRUE(structural_eq(rot(ctx, chart, RxI), want)); // ∇×(R×I) = −2I
-}
-
-// A cross of two constant (non-field) vectors differentiates to zero by Leibniz
-// (0×b + a×0); the operator folds that away gracefully rather than crashing on
-// the zero-operand crosses (vibe 000070 P6, graceful path).
+// A cross of two constant (non-field) vectors differentiates to zero by
+// Leibniz; the operator yields 0 rather than crashing.
 TEST(Chart, RotOfConstantCrossIsZero)
 {
     Context ctx;
@@ -460,8 +429,8 @@ TEST(Chart, RotOfConstantCrossIsZero)
     EXPECT_TRUE(eq(ctx, rot(ctx, chart, make_cross(ctx, a, b)), s0(ctx)));
 }
 
-// The public frame dot/cross reduce contractions in the reference frame (vibe
-// 000070 P8): i·i = 1, i·j = 0, i×j = k.
+// The public frame dot/cross reduce contractions in the chart's physical frame
+// (vibe 000071): e_x·e_x = 1, e_x·e_y = 0, e_x×e_y = e_z on the frame's atoms.
 TEST(Chart, FrameDotAndCross)
 {
     Context ctx;
@@ -470,15 +439,21 @@ TEST(Chart, FrameDotAndCross)
     auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
     auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
     CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+    auto fb = physical_frame(ctx, chart);
 
     EXPECT_TRUE(
         eq(ctx,
-           frame_dot(ctx, chart, ref.basis(0), ref.basis(0)),
+           frame_dot(ctx, chart, fb.direction(ctx, 0), fb.direction(ctx, 0)),
            make_scalar(ctx, Rational{1})));
     EXPECT_TRUE(
-        eq(ctx, frame_dot(ctx, chart, ref.basis(0), ref.basis(1)), s0(ctx)));
+        eq(ctx,
+           frame_dot(ctx, chart, fb.direction(ctx, 0), fb.direction(ctx, 1)),
+           s0(ctx)));
     EXPECT_TRUE(structural_eq(
-        frame_cross(ctx, chart, ref.basis(0), ref.basis(1)), ref.basis(2)));
+        steps::canonicalize(
+            ctx,
+            frame_cross(ctx, chart, fb.direction(ctx, 0), fb.direction(ctx, 1))),
+        steps::canonicalize(ctx, fb.direction(ctx, 2))));
 }
 
 // Both the 3D-only operators reject a 2D chart instead of misbehaving.
@@ -547,24 +522,30 @@ TEST(Chart, IntrinsicBasisVectorDifferentiation)
 
 // ∇f: the 1/h_i factors are the curvilinear content — for cylindrical
 // ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r,
-// each returned as the invariant vector in the reference frame.
+// each returned intrinsically on the frame's own e_r, e_θ (vibe 000071).
 TEST(Chart, CylindricalGradient)
 {
     Context ctx;
     auto c = make_cyl(ctx);
-    auto fb = physical_basis(ctx, c.chart);
+    auto fb = physical_frame(ctx, c.chart);
 
     // ∇θ = (1/r) e_θ
-    EXPECT_TRUE(inv_eq(
-        ctx,
-        gradient(ctx, c.chart, c.th),
-        mul(ctx, make_scalar_div(ctx, s1(ctx), c.r), fb.basis(1))));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, gradient(ctx, c.chart, c.th)),
+        steps::canonicalize(
+            ctx,
+            mul(ctx,
+                make_scalar_div(ctx, s1(ctx), c.r),
+                fb.direction(ctx, 1)))));
     // ∇r² = 2r e_r
     auto* r2 = make_pow(ctx, c.r, make_scalar(ctx, Rational{2}));
-    EXPECT_TRUE(inv_eq(
-        ctx,
-        gradient(ctx, c.chart, r2),
-        mul(ctx, mul(ctx, make_scalar(ctx, Rational{2}), c.r), fb.basis(0))));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, gradient(ctx, c.chart, r2)),
+        steps::canonicalize(
+            ctx,
+            mul(ctx,
+                mul(ctx, make_scalar(ctx, Rational{2}), c.r),
+                fb.direction(ctx, 0)))));
 }
 
 // div of the radial field v = r e_r is 2 (= (1/r) ∂_r(r·r)).
@@ -572,7 +553,8 @@ TEST(Chart, CylindricalDivergence)
 {
     Context ctx;
     auto c = make_cyl(ctx);
-    auto* v = mul(ctx, c.r, physical_basis(ctx, c.chart).basis(0)); // r e_r
+    auto fb = physical_frame(ctx, c.chart);
+    auto* v = mul(ctx, c.r, fb.direction(ctx, 0)); // r e_r
     EXPECT_TRUE(
         eq(ctx, divergence(ctx, c.chart, v), make_scalar(ctx, Rational{2})));
 }
@@ -605,15 +587,17 @@ TEST(Chart, SphericalLaplacian)
         eq(ctx, laplacian(ctx, chart, r2), make_scalar(ctx, Rational{6})));
 }
 
-// rot of the rigid-rotation field v = r e_θ is the uniform vorticity 2 e_z =
-// 2k.
+// rot of the rigid-rotation field v = r e_θ is the uniform vorticity 2 e_z,
+// intrinsically on the frame's own e_z (vibe 000071).
 TEST(Chart, CylindricalRot)
 {
     Context ctx;
     auto c = make_cyl(ctx);
-    auto* v = mul(ctx, c.r, physical_basis(ctx, c.chart).basis(1)); // r e_θ
-    EXPECT_TRUE(inv_eq(
-        ctx,
-        rot(ctx, c.chart, v),
-        mul(ctx, make_scalar(ctx, Rational{2}), c.ref.basis(2))));
+    auto fb = physical_frame(ctx, c.chart);
+    auto* v = mul(ctx, c.r, fb.direction(ctx, 1)); // r e_θ
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, rot(ctx, c.chart, v)),
+        steps::canonicalize(
+            ctx,
+            mul(ctx, make_scalar(ctx, Rational{2}), fb.direction(ctx, 2)))));
 }

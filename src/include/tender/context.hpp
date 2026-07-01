@@ -91,6 +91,22 @@ public:
         return it == connection_registry_->end() ? nullptr : it->second;
     }
 
+    // Cache the physical-frame basis id for a chart (vibe 000071), so
+    // physical_frame is idempotent per chart and every caller — the user
+    // building fields and the operators — resolves the *same* frame (hence the
+    // same e_i atoms and connection).  Keyed by the chart's id.
+    void register_chart_frame(int chart_id, int basis_id)
+    {
+        (*chart_frame_registry_)[chart_id] = basis_id;
+    }
+
+    // The cached physical-frame basis id for a chart, or 0 if none built yet.
+    auto chart_frame(int chart_id) const -> int
+    {
+        auto it = chart_frame_registry_->find(chart_id);
+        return it == chart_frame_registry_->end() ? 0 : it->second;
+    }
+
     // Create a child context: shares the id factory (ids remain contiguous)
     // but starts with an empty resource list (independent allocation scope).
     auto new_context() -> Context
@@ -113,14 +129,19 @@ private:
     // basis id to its chart's derivative table.
     std::shared_ptr<std::map<int, BasisConnection const*>> connection_registry_{
         std::make_shared<std::map<int, BasisConnection const*>>()};
+    // Chart → physical-frame basis id cache (vibe 000071), shared likewise.
+    std::shared_ptr<std::map<int, int>> chart_frame_registry_{
+        std::make_shared<std::map<int, int>>()};
 
-    // Private copy constructor: shares id factory and both registries, fresh
-    // empty resource list.  ResourceList is non-copyable so rl_ is
-    // default-initialised here.
+    // Private copy constructor: shares the id factory and basis registry (basis
+    // ids stay globally unique across the group), but starts with FRESH
+    // connection / chart-frame registries.  Those are keyed by chart id (vibe
+    // 000071), which a user may reuse across independent contexts; sharing them
+    // would let one context resolve a chart to another's — since-freed — frame.
+    // Fresh registries keep each context's charts self-contained.  rl_ is
+    // default-initialised (ResourceList is non-copyable).
     explicit Context(Context const& other) :
-      id_factory_{other.id_factory_},
-      basis_registry_{other.basis_registry_},
-      connection_registry_{other.connection_registry_}
+      id_factory_{other.id_factory_}, basis_registry_{other.basis_registry_}
     {
     }
 };

@@ -352,3 +352,24 @@ go); **4** can proceed after 1 (needed for the "I want it in WCS" path and to
 justify dropping M6's output); **5** hardens generality after the orthonormal
 spine works.  The system stays alive at every step: build the intrinsic operators
 alongside M6, reach parity, then remove M6 in Phase 3.
+
+### Progress
+
+- **Phase 1 DONE** (`04803be`): `BasisConnection` + Context registries;
+  `Basis::direction(i)` symbolic e_i atoms; `physical_frame` builds + registers
+  the connection table.
+- **Phase 2 DONE** (`2f8ee37`): `diff` resolves `∂_j e_i = Σ_k γ^k_{ij} e_k` from
+  the registry; Leibniz differentiates `f(r) e_r`.
+- **Phase 3 DONE**: intrinsic `gradient`/`divergence`/`rot`/`laplacian` on the
+  physical frame (`del_apply` over symbolic e_i, `reduce_dot`/`reduce_cross`
+  symbolic, `fold_resolution_of_identity` extended to the frame atoms); M6's
+  reference-frame `del_apply` and the Cartesian cross helpers removed.  Delivers
+  `∇∇f(r) = ∂²_r f e_r e_r + (1/r ∂_r f) e_θ e_θ` (no trig), `∇R = I`,
+  `rot(r e_θ) = 2 e_z`.  Chart frames are idempotent per chart via a Context
+  cache; the connection/chart-frame registries are per-context (not shared
+  across `new_context`, so reused chart ids across contexts stay isolated).
+  Tests ported to the intrinsic frame; the M6-only P6 `rot(R×I)` showcase was
+  removed (a field carrying the atomic `I` in a cross is not an intrinsic input;
+  robustness there is a later concern).  Python: `chart.physical_frame()`,
+  `Basis.direction(i)`.
+- **Phases 4 (basis-to-basis / WCS), 5 (oblique)** — pending.
