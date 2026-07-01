@@ -2,6 +2,7 @@
 
 #include <mpk/mix/util/resource_list.hpp>
 
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -11,6 +12,11 @@ namespace tender
 // Forward declaration: the Context owns a registry of bases (vibe 000067) but
 // only stores pointers, so it need not see the full Basis definition.
 class Basis;
+
+// Forward declaration: the Context also owns a registry of per-chart connection
+// tables (vibe 000071) by basis id, storing pointers only (defined in
+// derivation.hpp).
+struct BasisConnection;
 
 // Context is the single argument passed to every factory function. It owns:
 //   - a ResourceList (arena-style lifetime for all allocated objects)
@@ -69,6 +75,22 @@ public:
         return (*basis_registry_)[static_cast<std::size_t>(id - 1)];
     }
 
+    // Register a chart's connection table (vibe 000071), keyed by the physical
+    // basis's id, so the differentiator can resolve ∂_{q^j} e_i.  Overwrites
+    // any previous entry for that basis id.  Stores the pointer only (the
+    // connection must outlive the expressions differentiated against it).
+    void register_connection(BasisConnection const* c, int basis_id)
+    {
+        (*connection_registry_)[basis_id] = c;
+    }
+
+    // Resolve a basis id to its connection table, or nullptr if none.
+    auto connection(int basis_id) const -> BasisConnection const*
+    {
+        auto it = connection_registry_->find(basis_id);
+        return it == connection_registry_->end() ? nullptr : it->second;
+    }
+
     // Create a child context: shares the id factory (ids remain contiguous)
     // but starts with an empty resource list (independent allocation scope).
     auto new_context() -> Context
@@ -87,12 +109,18 @@ private:
     // Basis registry, shared across the sharing group like the id factory so a
     // child context resolves bases registered by its parent (vibe 000067).
     std::shared_ptr<std::vector<Basis const*>> basis_registry_;
+    // Connection registry (vibe 000071), shared likewise, mapping a physical
+    // basis id to its chart's derivative table.
+    std::shared_ptr<std::map<int, BasisConnection const*>> connection_registry_{
+        std::make_shared<std::map<int, BasisConnection const*>>()};
 
-    // Private copy constructor: shares id factory and basis registry, fresh
+    // Private copy constructor: shares id factory and both registries, fresh
     // empty resource list.  ResourceList is non-copyable so rl_ is
     // default-initialised here.
     explicit Context(Context const& other) :
-      id_factory_{other.id_factory_}, basis_registry_{other.basis_registry_}
+      id_factory_{other.id_factory_},
+      basis_registry_{other.basis_registry_},
+      connection_registry_{other.connection_registry_}
     {
     }
 };

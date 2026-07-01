@@ -81,6 +81,16 @@ struct CoordinateChart final
     int i,
     int j) -> std::vector<Expr const*>;
 
+// Build the chart's physical (orthonormal) frame as before, and additionally
+// register its connection table in the Context (vibe 000071): the derivative
+// ∂_{q^j} e_i of each frame vector, pre-expressed on the frame's own symbolic
+// e_k atoms via the connection γ^k_{ij}.  Thereafter the intrinsic
+// differentiator resolves ∂ of a frame-vector atom `basis.direction(i)` through
+// that table — no reference-frame expansion.  Returns the frame Basis (its
+// `direction(i)` gives the symbolic e_i).  Call once per chart.
+[[nodiscard]] auto physical_frame(Context& ctx, CoordinateChart const& chart)
+    -> Basis;
+
 // ---- differential operators (vibe 000069 M6) ---------------------------
 //
 // ∇ is the invariant operator ∇ = Σ_i e_i (1/h_i) ∂_{q^i}, and each operator is

@@ -5,6 +5,7 @@
 // coord_system bases.
 
 #include <tender/chart.hpp>
+#include <tender/context.hpp>
 #include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
@@ -489,6 +490,32 @@ TEST(Chart, FrameCrossAndRotRequire3D)
     auto* j = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
     EXPECT_THROW((void)frame_cross(ctx, p.chart, i, j), std::invalid_argument);
     EXPECT_THROW((void)rot(ctx, p.chart, i), std::invalid_argument);
+}
+
+// physical_frame registers the connection table so ∂ of a frame-vector atom is
+// resolved intrinsically (vibe 000071): ∂_θ e_r = e_θ, ∂_θ e_θ = −e_r,
+// ∂_r e_r = 0 — the symbolic e_k atoms, no reference-frame expansion.
+TEST(Chart, PhysicalFrameConnectionTable)
+{
+    Context ctx;
+    auto c = make_cyl(ctx); // coords chart_id 2: r (slot 0), θ (slot 1), z (2)
+    auto fb = physical_frame(ctx, c.chart);
+
+    auto const* conn = ctx.connection(fb.basis_id());
+    ASSERT_NE(conn, nullptr);
+    EXPECT_EQ(conn->chart_id, 2);
+    EXPECT_EQ(static_cast<int>(conn->deriv.size()), 3);
+
+    auto* e_r = fb.direction(ctx, 0);
+    auto* e_th = fb.direction(ctx, 1);
+    // deriv[i][j] = ∂_{q^j} e_i.
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, conn->deriv[0][1]),
+        steps::canonicalize(ctx, e_th))); // ∂_θ e_r = e_θ
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, conn->deriv[1][1]),
+        steps::canonicalize(ctx, make_negate(ctx, e_r)))); // ∂_θ e_θ = −e_r
+    EXPECT_TRUE(eq(ctx, conn->deriv[0][0], s0(ctx)));      // ∂_r e_r = 0
 }
 
 // ∇f: the 1/h_i factors are the curvilinear content — for cylindrical

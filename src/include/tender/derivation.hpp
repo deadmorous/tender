@@ -9,6 +9,25 @@
 namespace tender
 {
 
+// Per-chart data letting the differentiator resolve ∂_{q^j} e_i intrinsically
+// (vibe 000071): the derivative of each physical basis vector along each
+// coordinate, pre-expressed on the basis's own symbolic e_k atoms (via the
+// connection γ^k_{ij}, M5).  Registered in the Context by the physical basis's
+// id; the differentiator, on meeting a basis-vector atom e_i (which carries
+// that basis_id) differentiated by a coordinate q^j of `chart_id`, substitutes
+// deriv[i][j] instead of treating the vector as constant or expanding it in
+// WCS.
+struct BasisConnection final
+{
+    int chart_id = 0; // the chart whose coordinates q^j these derivatives use
+    int basis_id = 0; // the physical basis the e_i atoms carry
+    // Space value per direction i (0-based), so an atom's ConcreteIndex value
+    // maps back to a direction row of `deriv`.
+    std::vector<int> values;
+    // deriv[i][j] = ∂_{q^j} e_i, an Expr over this basis's e_k atoms.
+    std::vector<std::vector<Expr const*>> deriv;
+};
+
 // A derivation records the expression at each rewriting step.
 // history()[0] is the initial expression; history()[k] is the result after
 // applying the k-th step.  Calling step() is the only way to advance.

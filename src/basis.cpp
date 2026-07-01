@@ -84,6 +84,20 @@ auto Basis::covariant_vector(Context& ctx, CountableIndex index) const
         1);
 }
 
+auto Basis::direction(Context& ctx, int i) const -> Expr const*
+{
+    auto const vals = space_->values();
+    if (i < 0 || static_cast<std::size_t>(i) >= vals.size())
+        throw std::out_of_range("Basis::direction: index out of range");
+    return make_tensor_object(
+        ctx,
+        symbol_,
+        {SlotBinding{
+            IndexSlot{Level::Lower, realm_, space_, id_},
+            IndexAssoc{ConcreteIndex{vals[static_cast<std::size_t>(i)]}}}},
+        1);
+}
+
 auto Basis::contravariant_vector(Context& ctx, CountableIndex index) const
     -> Expr const*
 {

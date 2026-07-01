@@ -133,6 +133,12 @@ public:
     // Symbolic covariant basis vector e_i (rank 1, lower index).
     auto covariant_vector(Context& ctx, CountableIndex index) const
         -> Expr const*;
+    // The concrete symbolic covariant basis vector for direction i (0-based):
+    // the vector symbol carrying a ConcreteIndex for the i-th space value,
+    // tagged with this basis's id (vibe 000071).  Renders as e_r / bold i etc.
+    // per the basis naming, and is recognised by the intrinsic differentiator.
+    // Throws std::out_of_range on a bad index.
+    auto direction(Context& ctx, int i) const -> Expr const*;
     // Symbolic contravariant basis vector e^i (rank 1).  For an orthonormal
     // basis the index is spelled lower (upper/lower coincide; the
     // Orthonormal-lower convention of vibe 000047); oblique spells it upper.

@@ -1,5 +1,6 @@
 #include <tender/chart.hpp>
 
+#include <tender/context.hpp>
 #include <tender/derivation.hpp>
 #include <tender/rewrite.hpp>
 
@@ -445,6 +446,49 @@ auto connection_coefficients(
     if (i < 0 || i >= n || j < 0 || j >= n)
         throw std::out_of_range("connection_coefficients: index out of range");
     return connection_at(ctx, chart, physical_basis(ctx, chart), i, j);
+}
+
+auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
+{
+    Basis const basis = physical_basis(ctx, chart);
+    int const n = static_cast<int>(chart.coords.size());
+
+    // The chart these coordinates belong to (all coords share one chart_id).
+    auto const* c0 = std::get_if<TensorObject>(&chart.coords.front()->node);
+    if (!c0 || !c0->traits || !c0->traits->coordinate)
+        throw std::invalid_argument(
+            "physical_frame: coordinate is not a coordinate variable");
+    int const chart_id = c0->traits->coordinate->chart_id;
+
+    // Pre-express ∂_{q^j} e_i on the symbolic e_k atoms: Σ_k γ^k_{ij} e_k, with
+    // the γ from the connection (M5).  The e_k are this basis's own direction
+    // atoms, so the derivative stays intrinsic to the frame.
+    auto* conn = ctx.make<BasisConnection>();
+    conn->chart_id = chart_id;
+    conn->basis_id = basis.basis_id();
+    auto const vals = basis.space()->values();
+    conn->values.assign(vals.begin(), vals.end());
+    conn->deriv.assign(n, std::vector<Expr const*>(n, nullptr));
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            auto const gamma = connection_coefficients(ctx, chart, i, j);
+            Expr const* d = nullptr;
+            for (int k = 0; k < n; ++k)
+            {
+                if (auto const* s = std::get_if<ScalarLiteral>(&gamma[k]->node);
+                    s && s->value.is_zero())
+                    continue;
+                Expr const* term =
+                    make_tensor_product(ctx, gamma[k], basis.direction(ctx, k));
+                d = d ? make_sum(ctx, d, term) : term;
+            }
+            conn->deriv[i][j] =
+                d ? steps::simplify_scalars(ctx, steps::canonicalize(ctx, d)) :
+                    make_scalar(ctx, Rational{0});
+        }
+    ctx.register_connection(conn, basis.basis_id());
+    return basis;
 }
 
 // ---- differential operators (vibe 000069 M6) ---------------------------
