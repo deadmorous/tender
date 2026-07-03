@@ -35,10 +35,10 @@ fb = cyl.physical_frame()  # e_r, e_θ, e_z with a known connection
 e_r, e_th, e_z = (fb.direction(i) for i in range(3))
 R = r * e_r + z * e_z  # the position vector on the frame
 
-grad_R = cyl.gradient(R)  # ∇R = I (Σ_i e_i⊗e_i, in the frame)
+grad_R = cyl.grad(R)  # ∇R = I (Σ_i e_i⊗e_i, in the frame)
 f = t.field("f", 0, deps=[r], ctx=ws.ctx)  # a radial field f(r)
-grad_f = cyl.gradient(f)  # ∇f = f' e_r
-grad_grad_f = cyl.gradient(grad_f)  # ∇∇f — no trig, all in e_r, e_θ
+grad_f = cyl.grad(f)  # ∇f = f' e_r
+grad_grad_f = cyl.grad(grad_f)  # ∇∇f — no trig, all in e_r, e_θ
 show(
     "1. Intrinsic operators, in the chart frame (vibe 71)",
     [
@@ -67,13 +67,13 @@ fx = t.field("f", 0, deps=[x], ctx=ws.ctx)  # scalar field f(x) only
 show(
     "2. Tensor fields (P7)",
     [
-        ("div T", cart.divergence(T)),
-        ("div v", cart.divergence(v)),
+        ("div T", cart.div(T)),
+        ("div v", cart.div(v)),
         ("∂_x f(x)", td.partial(fx, x)),
         ("∂_y f(x)  (= 0)", td.partial(fx, y)),
     ],
 )
-assert not td.algebraic_eq(cart.divergence(T), t.scalar(0, ctx=ws.ctx))
+assert not td.algebraic_eq(cart.div(T), t.scalar(0, ctx=ws.ctx))
 assert td.algebraic_eq(td.partial(fx, y), t.scalar(0, ctx=ws.ctx))
 
 # --- P8: first-class, composable ∇ and ∂_q ----------------------------------

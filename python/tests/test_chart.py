@@ -194,8 +194,8 @@ def test_cartesian_gradient_is_identity():
         (c * fb.direction(k) for k, c in enumerate([x, y, z][1:], start=1)),
         [x, y, z][0] * fb.direction(0),
     )
-    assert td.structural_eq(chart.gradient(R), t.identity(ctx))
-    assert td.algebraic_eq(chart.divergence(R), t.scalar(3, ctx=ctx))
+    assert td.structural_eq(chart.grad(R), t.identity(ctx))
+    assert td.algebraic_eq(chart.div(R), t.scalar(3, ctx=ctx))
     assert td.algebraic_eq(chart.rot(R), t.scalar(0, ctx=ctx))
 
 
@@ -206,12 +206,12 @@ def test_cylindrical_gradient():
     one = t.scalar(1, ctx=ctx)
     # grad(theta) = (1/r) e_theta, intrinsically on the frame's e_theta.
     assert td.structural_eq(
-        td.canonicalize(chart.gradient(th)),
+        td.canonicalize(chart.grad(th)),
         td.canonicalize((one / r) * fb.direction(1)),
     )
     # grad(r^2) = 2r e_r
     assert td.structural_eq(
-        td.canonicalize(chart.gradient(r**2)),
+        td.canonicalize(chart.grad(r**2)),
         td.canonicalize((t.scalar(2, ctx=ctx) * r) * fb.direction(0)),
     )
 
@@ -220,7 +220,7 @@ def test_cylindrical_divergence_and_laplacian():
     ctx = t.Context()
     r, th, z, chart = make_cylindrical(ctx)
     v = r * chart.physical_frame().direction(0)  # r e_r
-    assert td.algebraic_eq(chart.divergence(v), t.scalar(2, ctx=ctx))
+    assert td.algebraic_eq(chart.div(v), t.scalar(2, ctx=ctx))
     assert td.algebraic_eq(chart.laplacian(r**2), t.scalar(4, ctx=ctx))
 
 
@@ -318,7 +318,7 @@ def test_tensor_field_operators():
     chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
 
     T = chart.field("T", 2)
-    div_T = chart.divergence(T)
+    div_T = chart.div(T)
     assert not td.algebraic_eq(div_T, t.scalar(0, ctx=ctx))  # no longer zero
 
     # grad of a scalar field f(x) only has the x-component; ∂_y f = 0.

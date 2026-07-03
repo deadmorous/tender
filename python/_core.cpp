@@ -1331,7 +1331,7 @@ NB_MODULE(_core, m)
             "re-expressing ∂_{q^j} e_i = Σ_k γ^k_{ij} e_k in the local frame "
             "(one scalar per direction k).")
         .def(
-            "gradient",
+            "grad",
             [](PyChart const& c, PyExpr const& f, bool fold_identity) -> PyExpr
             {
                 return PyExpr{
@@ -1345,7 +1345,7 @@ NB_MODULE(_core, m)
             "one higher (∇R = I, ∇f a vector).  fold_identity (default) "
             "collapses Σ_k e_k⊗e_k back to I; pass False for the raw sum.")
         .def(
-            "divergence",
+            "div",
             [](PyChart const& c, PyExpr const& v, bool fold_identity) -> PyExpr
             {
                 return PyExpr{

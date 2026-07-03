@@ -169,14 +169,14 @@ show(
 # with no trigonometry and no return to WCS.  The position vector on the frame is
 # R = r e_r + z e_z; grad raises the rank by one, so ∇R = Σ_i e_i ⊗ e_i = I.
 R_frame = r * e[0] + z * e[2]  # the same R, expressed intrinsically
-grad_R = cyl.gradient(R_frame)  # ∇R = I
-grad_theta = cyl.gradient(th)  # ∇θ = (1/r) e_θ
-grad_r2 = cyl.gradient(r**2)  # ∇r² = 2r e_r
+grad_R = cyl.grad(R_frame)  # ∇R = I
+grad_theta = cyl.grad(th)  # ∇θ = (1/r) e_θ
+grad_r2 = cyl.grad(r**2)  # ∇r² = 2r e_r
 
 # div, Δ and rot on concrete fields, matching the textbook curvilinear formulas.
 v_radial = r * e[0]  # r e_r
 v_swirl = r * e[1]  # r e_θ
-div_radial = cyl.divergence(v_radial)  # ∇·(r e_r) = 2
+div_radial = cyl.div(v_radial)  # ∇·(r e_r) = 2
 lap_r2 = cyl.laplacian(r**2)  # Δ(r²) = 4
 rot_swirl = cyl.rot(v_swirl)  # ∇×(r e_θ) = 2 e_z
 

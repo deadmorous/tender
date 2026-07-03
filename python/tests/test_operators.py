@@ -43,11 +43,11 @@ def test_nabla_evaluates_to_m6_operators():
     cart, _ = _chart(ws)
     R = cart.radius_vector()
     v = cart.field("v", 1)
-    assert td.structural_eq((nabla * R).evaluate(cart), cart.gradient(R))
-    assert td.structural_eq((nabla @ R).evaluate(cart), cart.divergence(R))
+    assert td.structural_eq((nabla * R).evaluate(cart), cart.grad(R))
+    assert td.structural_eq((nabla @ R).evaluate(cart), cart.div(R))
     assert td.structural_eq((nabla % v).evaluate(cart), cart.rot(v))
     # Free-function form too.
-    assert td.structural_eq(evaluate(nabla * R, cart), cart.gradient(R))
+    assert td.structural_eq(evaluate(nabla * R, cart), cart.grad(R))
 
 
 def test_laplacian_atom_agrees_with_div_grad():

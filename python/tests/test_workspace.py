@@ -14,7 +14,7 @@ def test_workspace_preamble_is_terse():
     cart = ws.chart(WCS, [x, y, z], [x, y, z])
     R = cart.radius_vector()
     # grad R = I still folds through the facade-built chart.
-    assert td.structural_eq(cart.gradient(R), ws.identity())
+    assert td.structural_eq(cart.grad(R), ws.identity())
 
 
 def test_coords_auto_slots_and_chart_id():
@@ -46,7 +46,7 @@ def test_nonneg_coords_simplify_scale_factor():
     cyl = ws.chart(WCS, [r, th, z], [r * t.cos(th), r * t.sin(th), z])
     # div(r e_r) = 2 needs √(r²) → r, which the nonneg bit on r licenses.
     v = r * cyl.physical_frame().direction(0)
-    assert td.algebraic_eq(cyl.divergence(v), t.scalar(2, ctx=ws.ctx))
+    assert td.algebraic_eq(cyl.div(v), t.scalar(2, ctx=ws.ctx))
 
 
 def test_field_factory_via_workspace():
@@ -54,7 +54,7 @@ def test_field_factory_via_workspace():
     x, y, z = ws.coords("x", "y", "z")
     cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
     T = ws.field("T", 2)
-    assert not td.algebraic_eq(cart.divergence(T), t.scalar(0, ctx=ws.ctx))
+    assert not td.algebraic_eq(cart.div(T), t.scalar(0, ctx=ws.ctx))
 
 
 def test_multiletter_name_error_suggests_latex():
