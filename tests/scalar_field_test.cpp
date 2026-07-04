@@ -330,6 +330,155 @@ TEST(SimplifyScalars, PythagoreanWithCommonFactor)
         ctx, steps::simplify_scalars(ctx, make_sum(ctx, term_s, term_c)), r2));
 }
 
+TEST(SimplifyScalars, PythagoreanSquared)
+{
+    // (sin²θ+cos²θ)² expanded: sin⁴θ + 2 sin²θ cos²θ + cos⁴θ → 1.  No linear
+    // sin²+cos² pair survives, so the power fold (cos²→1−sin²) is what closes
+    // it.
+    Context ctx;
+    auto* th = coord(ctx, "\\theta", 0);
+    auto* two = make_scalar(ctx, Rational{2});
+    auto* s2 = make_pow(ctx, make_scalar_fn(ctx, ScalarFnKind::Sin, th), two);
+    auto* c2 = make_pow(ctx, make_scalar_fn(ctx, ScalarFnKind::Cos, th), two);
+    auto* s4 = make_pow(
+        ctx,
+        make_scalar_fn(ctx, ScalarFnKind::Sin, th),
+        make_scalar(ctx, Rational{4}));
+    auto* c4 = make_pow(
+        ctx,
+        make_scalar_fn(ctx, ScalarFnKind::Cos, th),
+        make_scalar(ctx, Rational{4}));
+    auto* cross =
+        make_tensor_product(ctx, two, make_tensor_product(ctx, s2, c2));
+    auto* sum = make_sum(ctx, make_sum(ctx, s4, cross), c4);
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::simplify_scalars(ctx, sum), make_scalar(ctx, Rational{1})));
+}
+
+TEST(SimplifyScalars, PythagoreanCubed)
+{
+    // (sin²θ+cos²θ)³ = sin⁶ + 3 sin⁴cos² + 3 sin²cos⁴ + cos⁶ → 1.
+    Context ctx;
+    auto* th = coord(ctx, "\\theta", 0);
+    auto pw = [&](ScalarFnKind k, long n)
+    {
+        return make_pow(
+            ctx, make_scalar_fn(ctx, k, th), make_scalar(ctx, Rational{n}));
+    };
+    auto* three = make_scalar(ctx, Rational{3});
+    auto* t1 = pw(ScalarFnKind::Sin, 6);
+    auto* t2 = make_tensor_product(
+        ctx,
+        three,
+        make_tensor_product(
+            ctx, pw(ScalarFnKind::Sin, 4), pw(ScalarFnKind::Cos, 2)));
+    auto* t3 = make_tensor_product(
+        ctx,
+        three,
+        make_tensor_product(
+            ctx, pw(ScalarFnKind::Sin, 2), pw(ScalarFnKind::Cos, 4)));
+    auto* t4 = pw(ScalarFnKind::Cos, 6);
+    auto* sum = make_sum(ctx, make_sum(ctx, make_sum(ctx, t1, t2), t3), t4);
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::simplify_scalars(ctx, sum), make_scalar(ctx, Rational{1})));
+}
+
+TEST(SimplifyScalars, LoneCosSquareNotInflated)
+{
+    // A bare cos²θ has no Pythagorean partner; the guarded power fold must NOT
+    // rewrite it to the larger 1 − sin²θ.
+    Context ctx;
+    auto* th = coord(ctx, "\\theta", 0);
+    auto* c2 = make_pow(
+        ctx,
+        make_scalar_fn(ctx, ScalarFnKind::Cos, th),
+        make_scalar(ctx, Rational{2}));
+    EXPECT_TRUE(structural_eq(steps::simplify_scalars(ctx, c2), c2));
+}
+
+TEST(SimplifyScalars, CombineFractionsCommonDenominator)
+{
+    // A/r² + B/r → (A + B r)/r²: split fraction coefficients acquire one
+    // structural form, so two algebraically-equal coefficients (the transposed
+    // dyads of a symmetric ∇∇f) match after simplify_scalars.
+    Context ctx;
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 0, 0, /*nonneg=*/true);
+    auto* A = make_field(ctx, make_tensor_name("A"), 0);
+    auto* B = make_field(ctx, make_tensor_name("B"), 0);
+    auto* r2 = make_pow(ctx, r, make_scalar(ctx, Rational{2}));
+    auto* split =
+        make_sum(ctx, make_scalar_div(ctx, A, r2), make_scalar_div(ctx, B, r));
+    auto* combined = make_scalar_div(
+        ctx, make_sum(ctx, A, make_tensor_product(ctx, B, r)), r2);
+    EXPECT_TRUE(structural_eq(
+        steps::simplify_scalars(ctx, split),
+        steps::simplify_scalars(ctx, combined)));
+}
+
+TEST(SimplifyScalars, CombineFractionsNumericDenominator)
+{
+    // A/2 + B/r → (A r + 2 B)/(2 r): the common denominator is numeric·base.
+    Context ctx;
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 0, 0, /*nonneg=*/true);
+    auto* A = make_field(ctx, make_tensor_name("A"), 0);
+    auto* B = make_field(ctx, make_tensor_name("B"), 0);
+    auto* half = make_scalar_div(ctx, A, make_scalar(ctx, Rational{2}));
+    auto* split = make_sum(ctx, half, make_scalar_div(ctx, B, r));
+    auto* combined = make_scalar_div(
+        ctx,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, A, r),
+            make_tensor_product(ctx, make_scalar(ctx, Rational{2}), B)),
+        make_tensor_product(ctx, make_scalar(ctx, Rational{2}), r));
+    EXPECT_TRUE(structural_eq(
+        steps::simplify_scalars(ctx, split),
+        steps::simplify_scalars(ctx, combined)));
+}
+
+TEST(SimplifyScalars, PythagoreanPowerLeavesOddTrigPower)
+{
+    // sin⁴θ + 2 sin²θ cos²θ + cos⁴θ + r³ → 1 + r³: the trig power collapses
+    // while the odd r³ (odd exponent) rides along untouched.
+    Context ctx;
+    auto* th = coord(ctx, "\\theta", 0);
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 0, 1, /*nonneg=*/true);
+    auto pw = [&](ScalarFnKind k, long n)
+    {
+        return make_pow(
+            ctx, make_scalar_fn(ctx, k, th), make_scalar(ctx, Rational{n}));
+    };
+    auto* cross = make_tensor_product(
+        ctx,
+        make_scalar(ctx, Rational{2}),
+        make_tensor_product(
+            ctx, pw(ScalarFnKind::Sin, 2), pw(ScalarFnKind::Cos, 2)));
+    auto* r3 = make_pow(ctx, r, make_scalar(ctx, Rational{3}));
+    auto* sum = make_sum(
+        ctx,
+        make_sum(
+            ctx,
+            make_sum(ctx, pw(ScalarFnKind::Sin, 4), cross),
+            pw(ScalarFnKind::Cos, 4)),
+        r3);
+    auto* expected = make_sum(ctx, make_scalar(ctx, Rational{1}), r3);
+    EXPECT_TRUE(algebraic_eq(ctx, steps::simplify_scalars(ctx, sum), expected));
+}
+
+TEST(SimplifyScalars, CombineFractionsLeavesPolynomialAlone)
+{
+    // A pure polynomial sum has no denominator to combine over.
+    Context ctx;
+    auto* A = make_field(ctx, make_tensor_name("A"), 0);
+    auto* B = make_field(ctx, make_tensor_name("B"), 0);
+    auto* sum = make_sum(ctx, A, B);
+    EXPECT_TRUE(structural_eq(
+        steps::simplify_scalars(ctx, sum), steps::canonicalize(ctx, sum)));
+}
+
 TEST(SimplifyScalars, RootOfSquareNeedsNonneg)
 {
     Context ctx;

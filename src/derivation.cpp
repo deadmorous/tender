@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <numeric>
 #include <set>
 #include <stdexcept>
 
@@ -3319,6 +3320,177 @@ auto pythagorean_fold(Context& ctx, Expr const* e) -> Expr const*
     return acc ? acc : make_scalar(ctx, Rational{0});
 }
 
+// --- Squared / higher-power Pythagorean fold (vibe 000072) ---------------
+// The linear pythagorean_fold above only pairs C·sin²u + C·cos²u.  A *power*
+// of the identity — e.g. (sin²θ+cos²θ)² expanded as sin⁴θ+2sin²θcos²θ+cos⁴θ —
+// leaves no such matching pair, so it survives simplify_scalars.  We close this
+// generally: substitute cos²u → 1−sin²u for a co-occurring argument, expand the
+// resulting products into a plain sum of monomials, re-collect them into a
+// pure-sin polynomial; a genuine identity power collapses to 1.  The move is
+// *guarded* by a strict node-cost decrease, so it fires only when it actually
+// simplifies (a lone cos²u, which merely inflates to 1−sin²u, is rejected).
+
+auto normalize_scalar(Context& ctx, Expr const* e) -> Expr const*; // fwd
+
+// Re-collect a scalar polynomial after substitution/expansion: merge each
+// monomial's repeated factors into powers (normalize_scalar) so like terms
+// (e.g. sin·sin·sin² and sin⁴) become structurally identical, then canonicalize
+// to sum the coefficients.  No Pythagorean rule here, so it cannot recurse back
+// into the fold.  Iterates to a structural fixpoint.
+auto collect_scalar_polynomial(Context& ctx, Expr const* e) -> Expr const*
+{
+    Expr const* cur = canonicalize(ctx, e);
+    auto cb = [](Context& c, Expr const* node) -> Expr const*
+    {
+        Expr const* a = fold_local_scalar(c, node);
+        if (std::holds_alternative<ScalarDiv>(a->node)
+            || std::holds_alternative<TensorProduct>(a->node))
+            a = normalize_scalar(c, a);
+        return a;
+    };
+    for (int iter = 0; iter < 32; ++iter)
+    {
+        Expr const* next = canonicalize(ctx, rewrite_tree(ctx, cur, cb));
+        if (structural_eq(next, cur))
+            break;
+        cur = next;
+    }
+    return cur;
+}
+
+// Total node count of `e` (every hash-consed subnode counted once per
+// position), used as the cost the Pythagorean substitution must strictly
+// reduce.
+auto expr_cost(Context& ctx, Expr const* e) -> std::size_t
+{
+    std::size_t n = 0;
+    rewrite_tree(
+        ctx,
+        e,
+        [&n](Context&, Expr const* node) -> Expr const*
+        {
+            ++n;
+            return node;
+        });
+    return n;
+}
+
+// Collect the arguments u carried by even powers of sin (into `sinargs`) and of
+// cos (into `cosargs`) anywhere in `e`.  Only Pow(sin/cos(u), 2k) qualifies —
+// the granularity the substitution below rewrites.
+void collect_even_trig_args(
+    Context& ctx,
+    Expr const* e,
+    std::vector<Expr const*>& sinargs,
+    std::vector<Expr const*>& cosargs)
+{
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* node) -> Expr const*
+        {
+            auto const* p = std::get_if<Pow>(&node->node);
+            if (!p)
+                return node;
+            auto const* n = std::get_if<ScalarLiteral>(&p->exponent->node);
+            if (!n || !n->value.is_integer() || n->value.num() < 2
+                || n->value.num() % 2 != 0)
+                return node;
+            auto const* fn = std::get_if<ScalarFn>(&p->base->node);
+            if (!fn)
+                return node;
+            if (fn->kind == ScalarFnKind::Sin)
+                sinargs.push_back(fn->operand);
+            else if (fn->kind == ScalarFnKind::Cos)
+                cosargs.push_back(fn->operand);
+            return node;
+        });
+}
+
+// Replace every Pow(cos(arg), 2k) in `e` with (1 − sin²(arg))^k, leaving all
+// other factors (including odd cos powers and cos of a *different* argument)
+// untouched.
+auto substitute_cos2(Context& ctx, Expr const* e, Expr const* arg) -> Expr const*
+{
+    Expr const* sin2 = make_pow(
+        ctx,
+        make_scalar_fn(ctx, ScalarFnKind::Sin, arg),
+        make_scalar(ctx, Rational{2}));
+    Expr const* oms = make_difference(ctx, make_scalar(ctx, Rational{1}), sin2);
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const* p = std::get_if<Pow>(&node->node);
+            if (!p)
+                return node;
+            auto const* n = std::get_if<ScalarLiteral>(&p->exponent->node);
+            if (!n || !n->value.is_integer() || n->value.num() < 2
+                || n->value.num() % 2 != 0)
+                return node;
+            auto const* fn = std::get_if<ScalarFn>(&p->base->node);
+            if (!fn || fn->kind != ScalarFnKind::Cos
+                || !structural_eq(fn->operand, arg))
+                return node;
+            // Emit (1−sin²)·…·(1−sin²) as a *product* of `half` factors rather
+            // than a Pow: expand_products distributes a product but leaves a
+            // Pow(sum, k) intact, so the identity would not collect otherwise.
+            auto const half = n->value.num() / 2;
+            Expr const* acc = oms;
+            for (long i = 1; i < half; ++i)
+                acc = make_tensor_product(c, acc, oms);
+            return acc;
+        });
+}
+
+// Collapse a power of the Pythagorean identity (see block comment above).  For
+// each argument appearing under both an even sin power and an even cos power,
+// try the cos²→1−sin² substitution; keep the expanded+canonicalized result iff
+// it is strictly cheaper than the input sum.  Returns `e` unchanged otherwise.
+auto pythagorean_power_fold(Context& ctx, Expr const* e) -> Expr const*
+{
+    std::vector<Expr const*> sinargs;
+    std::vector<Expr const*> cosargs;
+    collect_even_trig_args(ctx, e, sinargs, cosargs);
+
+    // Candidates: each distinct argument carrying both an even sin and an even
+    // cos power (only such an argument can pair off under the identity).
+    std::vector<Expr const*> candidates;
+    for (auto const* a: sinargs)
+    {
+        bool in_cos = false;
+        for (auto const* c: cosargs)
+            if (structural_eq(a, c))
+            {
+                in_cos = true;
+                break;
+            }
+        bool seen = false;
+        for (auto const* t: candidates)
+            if (structural_eq(a, t))
+            {
+                seen = true;
+                break;
+            }
+        if (in_cos && !seen)
+            candidates.push_back(a);
+    }
+    if (candidates.empty())
+        return e;
+
+    std::size_t const base_cost = expr_cost(ctx, e);
+    for (auto const* a: candidates)
+    {
+        Expr const* sub = substitute_cos2(ctx, e, a);
+        Expr const* cand =
+            collect_scalar_polynomial(ctx, expand_products(ctx, sub));
+        if (expr_cost(ctx, cand) < base_cost)
+            return cand;
+    }
+    return e;
+}
+
 // --- Scalar fraction cancellation (vibe 000069 M4) ----------------------
 // Cancel common multiplicative factors of a scalar quotient so the physical
 // basis e_i = g_i / h_i comes out clean: (r cos φ)/r → cos φ, r²/r → r.
@@ -3431,6 +3603,82 @@ auto normalize_scalar(Context& ctx, Expr const* e) -> Expr const*
     return structural_eq(result, e) ? e : result;
 }
 
+// --- Common-denominator fraction combination (vibe 000072) --------------
+// normalize_scalar cancels within a single quotient, but a *sum* of quotients
+// stays split (A/r² + B/r), so two algebraically-equal coefficients — e.g. the
+// two transposed dyads of a symmetric ∇∇f — never become structurally equal.
+// combine_fractions puts a rank-0 sum over one common denominator: A/r² + B/r →
+// (A + B r)/r².  Only a scalar sum with a genuine denominator is combined;
+// purely polynomial sums and every rank>0 (tensor) sum are left untouched.
+auto combine_fractions(Context& ctx, Expr const* e) -> Expr const*
+{
+    if (infer_rank(e) != std::optional<int>{0})
+        return e;
+    std::vector<Expr const*> addends;
+    collect_sum(e, addends); // a Sum always yields ≥ 2 addends
+
+    // Decompose each addend; note whether any carries a denominator at all.
+    std::vector<FactorBag> bags(addends.size());
+    bool any_denom = false;
+    for (std::size_t i = 0; i < addends.size(); ++i)
+    {
+        decompose_scalar(ctx, addends[i], +1, bags[i]);
+        if (bags[i].coeff.den() != 1)
+            any_denom = true;
+        for (auto const& kv: bags[i].bases)
+            if (kv.second < 0)
+                any_denom = true;
+    }
+    if (!any_denom)
+        return e;
+
+    // The least common denominator: the numeric lcm of the coefficient
+    // denominators, times each denominator base raised to the largest power any
+    // addend needs.
+    std::int64_t dnum = 1;
+    std::vector<std::pair<Expr const*, long>> dbases;
+    for (auto const& bag: bags)
+    {
+        dnum = std::lcm(dnum, bag.coeff.den());
+        for (auto const& kv: bag.bases)
+        {
+            if (kv.second >= 0)
+                continue;
+            long const need = -kv.second;
+            bool found = false;
+            for (auto& db: dbases)
+                if (algebraic_eq(ctx, db.first, kv.first))
+                {
+                    db.second = std::max(db.second, need);
+                    found = true;
+                    break;
+                }
+            if (!found)
+                dbases.push_back({kv.first, need});
+        }
+    }
+
+    std::vector<Expr const*> dfacs;
+    if (dnum != 1)
+        dfacs.push_back(make_scalar(ctx, Rational{dnum}));
+    for (auto const& db: dbases)
+        dfacs.push_back(pow_expr(ctx, db.first, db.second));
+    Expr const* denom = product_of(ctx, dfacs);
+
+    // Each numerator term is addend·denom with its own denominator cancelled —
+    // exactly what normalize_scalar does — so, denom being the LCD, no fraction
+    // survives in the numerator.
+    Expr const* numerator = nullptr;
+    for (auto const* ad: addends)
+    {
+        Expr const* term =
+            normalize_scalar(ctx, make_tensor_product(ctx, ad, denom));
+        numerator = numerator ? make_sum(ctx, numerator, term) : term;
+    }
+    Expr const* result = make_scalar_div(ctx, numerator, denom);
+    return structural_eq(result, e) ? e : result;
+}
+
 } // namespace
 
 auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*
@@ -3456,7 +3704,13 @@ auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*
             || std::holds_alternative<TensorProduct>(a->node))
             a = normalize_scalar(c, a);
         if (std::holds_alternative<Sum>(a->node))
+        {
             a = pythagorean_fold(c, a);
+            if (std::holds_alternative<Sum>(a->node))
+                a = pythagorean_power_fold(c, a);
+            if (std::holds_alternative<Sum>(a->node))
+                a = combine_fractions(c, a);
+        }
         return a;
     };
     for (int iter = 0; iter < 64; ++iter)

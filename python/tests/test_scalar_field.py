@@ -97,6 +97,54 @@ def test_simplify_pythagorean():
     assert td.simplify_scalars(t.cos(phi) ** 2 + t.sin(phi) ** 2).latex() == "1"
 
 
+def test_simplify_pythagorean_squared():
+    # (sin²θ+cos²θ)² expanded — no linear pair survives, so the power fold closes
+    # it.  This is the coefficient left by a rank-2 express WCS round-trip.
+    ctx = t.Context()
+    th = t.coordinate(r"\theta", ctx=ctx)
+    s, c = t.sin(th), t.cos(th)
+    e = s**4 + t.scalar(2) * s**2 * c**2 + c**4
+    assert td.simplify_scalars(e).latex() == "1"
+
+
+def test_simplify_pythagorean_cubed():
+    ctx = t.Context()
+    th = t.coordinate(r"\theta", ctx=ctx)
+    s, c = t.sin(th), t.cos(th)
+    e = s**6 + t.scalar(3) * s**4 * c**2 + t.scalar(3) * s**2 * c**4 + c**6
+    assert td.simplify_scalars(e).latex() == "1"
+
+
+def test_simplify_lone_cos_square_not_inflated():
+    # The guarded power fold must not rewrite a lone cos²θ to the larger 1−sin²θ.
+    ctx = t.Context()
+    th = t.coordinate(r"\theta", ctx=ctx)
+    assert td.simplify_scalars(t.cos(th) ** 2).latex() == r"\cos\left(\theta\right)^{2}"
+
+
+def test_simplify_combines_fractions_over_common_denominator():
+    # A/r² + B/r → (A + B r)/r²: split fraction coefficients acquire one shape,
+    # so algebraically-equal coefficients become structurally equal.
+    ctx = t.Context()
+    r = t.coordinate("r", nonneg=True, ctx=ctx)
+    A = t.field("A", 0, ctx=ctx)
+    B = t.field("B", 0, ctx=ctx)
+    split = A / r**2 + B / r
+    combined = (A + B * r) / r**2
+    assert td.simplify_scalars(split).latex() == td.simplify_scalars(combined).latex()
+
+
+def test_simplify_combines_fractions_numeric_denominator():
+    # A/2 + B/r brings in a numeric least-common-denominator (2r).
+    ctx = t.Context()
+    r = t.coordinate("r", nonneg=True, ctx=ctx)
+    A = t.field("A", 0, ctx=ctx)
+    B = t.field("B", 0, ctx=ctx)
+    lhs = A / t.scalar(2) + B / r
+    rhs = (A * r + t.scalar(2) * B) / (t.scalar(2) * r)
+    assert td.simplify_scalars(lhs).latex() == td.simplify_scalars(rhs).latex()
+
+
 def test_simplify_metric_component():
     ctx = t.Context()
     r = t.coordinate("r", slot=0, nonneg=True, ctx=ctx)

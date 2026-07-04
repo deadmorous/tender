@@ -361,3 +361,46 @@ Implemented the actionable observations.  All 738 C++ + 201 Python tests pass.
   (= `(sin²θ+cos²θ)² = 1`) uncollapsed — `simplify_scalars` does not fold a
   squared Pythagorean sum.  Same root as the 3-term symmetric ∇∇f form; a
   common-denominator / power-of-sum normaliser would close both.
+
+## Resolution — scalar-simplifier gaps (2026-07-04)
+
+Both gaps closed inside `steps::simplify_scalars` (src/derivation.cpp), each a
+new fold applied at `Sum` nodes in the fixpoint loop, after the existing linear
+`pythagorean_fold`:
+
+- **Power-of-Pythagoras — RESOLVED.**  `pythagorean_power_fold` collapses any
+  power `(sin²u+cos²u)^k` (e.g. `sin⁴+2sin²cos²+cos⁴ → 1`, cubed → 1) that the
+  linear pair-matcher misses.  For an argument `u` carrying *both* an even sin
+  and an even cos power it substitutes `cos²u → 1−sin²u` (emitted as a *product*
+  of `1−sin²u` factors, since `expand_products` distributes a product but leaves
+  `Pow(sum,k)` intact), `expand_products`, then re-collects monomials
+  (`collect_scalar_polynomial`, which merges `sin·sin·sin²`→`sin⁴` so like terms
+  cancel).  **Guarded** by a strict node-cost decrease (`expr_cost`), so it fires
+  only when it genuinely simplifies — a lone `cos²u` is *not* inflated to
+  `1−sin²u`.  This is exactly the coefficient a rank-2 `express` WCS round-trip
+  left behind: `cyl.to_reference(cyl.express(i⊗j))` now returns `i⊗j` clean.
+- **Common denominator — RESOLVED.**  `combine_fractions` puts a **rank-0** sum
+  of fractions over one least-common denominator: `A/r² + B/r → (A + B r)/r²`
+  (numeric LCDs too: `A/2 + B/r → (A r + 2B)/(2r)`).  It reuses `normalize_scalar`
+  to cancel each `addend·LCD`, so no fraction survives in the numerator.  Scoped
+  to rank-0 scalars, so every rank>0 (tensor) sum — including the `∇∇f(r)`
+  operator output — is untouched.  This gives two *algebraically*-equal
+  coefficients (e.g. the transposed dyads of a symmetric ∇∇f) the *same*
+  structural form under `simplify_scalars`, which is what the deferred
+  symmetric-dyad factoring needs.  Note `algebraic_eq` itself is unchanged (it
+  compares `canonicalize`, not `simplify_scalars`); the fraction combination
+  lives in `simplify_scalars`, the layer a coefficient normaliser calls.
+
+Tests: `SimplifyScalars.{PythagoreanSquared,PythagoreanCubed,LoneCosSquareNot`
+`Inflated,PythagoreanPowerLeavesOddTrigPower,CombineFractionsCommonDenominator,`
+`CombineFractionsNumericDenominator,CombineFractionsLeavesPolynomialAlone}` and
+Python `test_simplify_pythagorean_{squared,cubed}`,
+`test_simplify_lone_cos_square_not_inflated`,
+`test_simplify_combines_fractions_{over_common_denominator,numeric_denominator}`.
+
+### Still deferred (unchanged by the above)
+
+- **Symmetric-dyad factoring** — the second half of the vibe 000071 gap: given
+  the now-matching coefficients, fold `A e_r e_r + B(e_r e_θ + e_θ e_r) + C e_θ e_θ`
+  into its symmetric form.  The scalar prerequisite is in place; the dyad-level
+  step is not yet written.
