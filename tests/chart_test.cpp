@@ -246,6 +246,47 @@ TEST(Chart, CylindricalDivEThetaDyad)
     EXPECT_TRUE(eq(ctx, div, want));
 }
 
+// vibe 000073 Route A: chart.expand materializes an abstract field into frame
+// components (a field derivative via the connection), the operators
+// expand-first on an abstract field, and chart.components surfaces the scalar
+// components.
+TEST(Chart, RouteAExpandAndComponents)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto fb = physical_frame(ctx, chart);
+    auto* T = make_field(
+        ctx,
+        make_tensor_name("T"),
+        2,
+        {CoordinateRef{2, 0, true}, CoordinateRef{2, 1, false}});
+
+    // expand of a plain field yields a rank-2 dyadic (non-scalar, non-zero).
+    auto* ex = expand(ctx, chart, T);
+    EXPECT_EQ(infer_rank(ex), std::optional<int>{2});
+
+    // The operator expands-first: div of the abstract field, surfaced as
+    // components, agrees with div of the explicitly expanded field.
+    auto comps_A = components(ctx, chart, divergence(ctx, chart, T));
+    ASSERT_EQ(comps_A.size(), 3u);
+    auto comps_B = components(ctx, chart, divergence(ctx, chart, ex));
+    for (int i = 0; i < 3; ++i)
+        EXPECT_TRUE(
+            eq(ctx,
+               steps::simplify_scalars(
+                   ctx, make_difference(ctx, comps_A[i], comps_B[i])),
+               make_scalar(ctx, Rational{0})));
+    // The radial component is not constant (it carries ∂_r T_rr etc.).
+    EXPECT_FALSE(eq(ctx, comps_A[0], make_scalar(ctx, Rational{0})));
+}
+
 // vibe 000073: a bare basis has no connection Ω, so expanding a field
 // derivative ∂T on a moving frame would silently drop the connection terms.
 // expand_in_basis refuses loudly; on a constant (Cartesian) frame, where

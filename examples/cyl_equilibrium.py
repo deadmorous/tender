@@ -15,8 +15,10 @@ fall out and match the standard textbook form.
   5. Cross-check             vs the standard cylindrical equilibrium equations
   6. Boiler formula          r-only, no shear  →  ∂_r T_rr + (T_rr−T_θθ)/r + f_r
 
-This is "Route B": T is expanded in the basis explicitly (step 3), then the
-operator differentiates that expansion.  Writes a LaTeX summary to ``out/``.
+Route A: the abstract field T goes straight into ``cyl.div``, which expands it
+in the frame under the hood and differentiates (step 4 is a one-liner —
+``cyl.components(cyl.div(T))``).  Step 3 shows the same expansion explicitly for
+the reader.  Writes a LaTeX summary to ``out/``.
 """
 
 import pathlib
@@ -105,22 +107,22 @@ def reduce_scalar(x):
     return td.simplify_scalars(td.fold_arithmetic(td.eval_delta_concrete(td.canonicalize(x))))
 
 
-def comp(vec, i):
-    """The e_i scalar component of an invariant vector."""
-    return reduce_scalar(vec @ e[i])
-
-
 def Tij(i, j):
-    """The physical stress component T_ij = e_i · T · e_j."""
+    """The physical stress component T_ij = e_i · T · e_j (for the cross-check)."""
     return reduce_scalar(e[i] @ T_cyl @ e[j])
 
 
 # ---------------------------------------------------------------------------
-# 4. The divergence ∇·T, projected onto the frame  (eq 7)
+# 4. The divergence ∇·T, projected onto the frame  (eq 7)  — Route A
 # ---------------------------------------------------------------------------
 
-div_T = cyl.div(T_cyl)
-div_r, div_th, div_z = (comp(div_T, i) for i in range(3))
+# Route A: hand the *abstract* field T straight to the operator.  cyl.div
+# expands it in the chart's frame under the hood, then differentiates the
+# components AND the moving basis vectors (via the connection ∂_θ e_i), returning
+# the invariant result.  cyl.components surfaces the three scalar equations —
+# no manual expand / project / reduce pipeline.
+div_T = cyl.div(T)  # T abstract; the operator expands-then-differentiates
+div_r, div_th, div_z = cyl.components(div_T)
 show(
     "4. ∇·T, per frame component (eq 7)",
     [("(∇·T)_r", div_r), ("(∇·T)_θ", div_th), ("(∇·T)_z", div_z)],

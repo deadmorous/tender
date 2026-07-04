@@ -576,6 +576,67 @@ auto reduce_field(Context& ctx, Basis const& fb, Expr const* T) -> Expr const*
     return steps::simplify_scalars(ctx, T);
 }
 
+// A tensor *field* worth expanding into frame components: slot-less, rank ≥ 1,
+// carrying a field trait (a value varying in space), and not well-known.  The
+// field trait is what distinguishes the physical field T we mean to expand from
+// a constant abstract vector such as a reference axis i, j, k (which `express`
+// handles, not `expand`).
+auto is_expandable_leaf(TensorObject const& t) -> bool
+{
+    return t.slots.empty() && t.rank && *t.rank >= 1 && t.traits
+           && t.traits->field && !t.traits->well_known;
+}
+
+// Rewrite every abstract tensor-field leaf of `v` into its components on frame
+// `fb`, Σ T_ij e_i ⊗ e_j (vibe 000073).  A field derivative ∂_q T is expanded
+// by Leibniz: the base is expanded to CONCRETE frame vectors, then
+// differentiated through the connection ∂_q e_i (which requires `fb` to carry a
+// connection — i.e. to be a chart's physical_frame).  The structural core
+// shared by `expand` and the operators' operand pre-expansion; leaves basis
+// contractions unreduced.
+auto expand_fields(Context& ctx, Basis const& fb, Expr const* v) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        v,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&node->node);
+            if (!t || !is_expandable_leaf(*t))
+                return node;
+            auto const derivs = t->field_derivs;
+            // The base field with its ∂ directions stripped (slots stay empty).
+            // Built field-by-field so the whole-object copy does not confuse
+            // -O3's maybe-uninitialized analysis.
+            Expr const* base = c.make<Expr>(TensorObject{
+                .name = t->name,
+                .rank = t->rank,
+                .traits = t->traits,
+                .slots = t->slots,
+                .field_derivs = {}});
+            Expr const* ex = steps::unroll_sums(
+                c, expand_in_basis(c, base, fb, Variance::Covariant));
+            for (auto const& dd: derivs)
+            {
+                Expr const* q = make_coordinate(
+                    c,
+                    dd.coord_name,
+                    dd.ref.chart_id,
+                    dd.ref.slot,
+                    dd.ref.nonneg);
+                ex = steps::partial(c, ex, q);
+            }
+            // Fold the differentiated expansion before it meets an outer
+            // contraction: a vanishing connection (∂_r e_i = 0) leaves T_ij·0
+            // terms that, if an outer dot distributes into them, become the
+            // malformed e_r·0 (vector·scalar) that canonicalize rejects.  ex
+            // has no contractions yet, so folding here is safe.
+            if (!derivs.empty())
+                ex = steps::simplify_scalars(c, steps::canonicalize(c, ex));
+            return ex;
+        });
+}
+
 // Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T on the physical frame `fb`.  `combine(e_i, ∂_i
 // T)` chooses ⊗ / · / ×.  When `fold_identity` (default), a resolution of
 // identity Σ_k e_k⊗e_k folds back to I (so ∇R = I).
@@ -589,6 +650,11 @@ auto del_apply(
     bool fold_identity) -> Expr const*
 {
     int const n = static_cast<int>(chart.coords.size());
+    // Expand an abstract field operand into frame components first (vibe 000073
+    // Route A): the operator then differentiates the explicit Σ T_ij e_i e_j,
+    // picking up the connection terms — expand-then-differentiate, the only
+    // correct order in a moving frame.  A no-op on an already-explicit operand.
+    T = expand_fields(ctx, fb, T);
     // Reduce the field to clean dyad form on the frame first: expand any I and
     // reduce frame crosses (so R×I etc. differentiate without an atomic I or an
     // un-fenced cross tripping canonicalize), then distribute into monomials.
@@ -786,6 +852,45 @@ auto express(Context& ctx, CoordinateChart const& target, Expr const* v)
     // vibe 000072 Obs 8: collapse a completed resolution of identity
     // Σ_k e_k⊗e_k in the target frame back to I (guarded — a no-op otherwise).
     return fold_resolution_of_identity(ctx, out, tf);
+}
+
+auto expand(Context& ctx, CoordinateChart const& chart, Expr const* v)
+    -> Expr const*
+{
+    Basis const fb = physical_frame(ctx, chart); // ensures connection
+                                                 // registered
+    Expr const* out = expand_fields(ctx, fb, v);
+    // Reduce to clean frame form: distribute products and the contractions that
+    // now straddle ⊗ fences (the connection terms), reduce basis dots/crosses
+    // to δ/ε, evaluate them, and fold.  Iterated to a fixpoint.
+    Expr const* prev = nullptr;
+    for (int guard = 0; out != prev && guard <= 8; ++guard)
+    {
+        prev = out;
+        out = steps::expand_products(ctx, out);
+        out = steps::distribute_contraction(ctx, out);
+        out = simplify_basis_dot(ctx, out, fb);
+        out = simplify_basis_cross(ctx, out, fb);
+        out = steps::canonicalize(ctx, out);
+        out = steps::unroll_sums(ctx, out);
+        out = steps::eval_delta_concrete(ctx, out);
+        out = steps::eval_eps_concrete(ctx, out);
+        out = steps::fold_arithmetic(ctx, out);
+        out = steps::canonicalize(ctx, out);
+    }
+    out = steps::simplify_scalars(ctx, out);
+    return fold_resolution_of_identity(ctx, out, fb);
+}
+
+auto components(Context& ctx, CoordinateChart const& chart, Expr const* v)
+    -> std::vector<Expr const*>
+{
+    Basis const fb = physical_frame(ctx, chart);
+    std::vector<Expr const*> out;
+    out.reserve(static_cast<std::size_t>(fb.dim()));
+    for (int i = 0; i < fb.dim(); ++i)
+        out.push_back(reduce_dot(ctx, fb, v, fb.direction(ctx, i)));
+    return out;
 }
 
 auto position(Context& ctx, CoordinateChart const& chart) -> Expr const*

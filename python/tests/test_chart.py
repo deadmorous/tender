@@ -337,6 +337,47 @@ def test_cylindrical_divergence_matches_textbook():
     assert td.simplify_scalars(comp(div_T, 2) - exp_z).latex() == "0"
 
 
+def test_route_a_div_of_abstract_field_and_components():
+    # vibe 000073 Route A: cyl.div(T) on an ABSTRACT field expands-first
+    # internally, and cyl.components surfaces the scalar equations — matching the
+    # explicit Route B expansion, connection terms and all.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    T = t.field("T", 2, deps=[r, th], ctx=ctx)
+
+    # Route A: abstract field straight into the operator, then surface.
+    eqs = chart.components(chart.div(T))
+    assert len(eqs) == 3
+
+    # Route B reference: expand T explicitly, then div, then project.
+    frame = chart.physical_frame()
+    e = [frame.direction(k) for k in range(3)]
+    Tc = td.canonicalize(td.unroll_sums(
+        tb.expand_in_basis(T, frame, tb.Variance.Covariant)))
+    div_ref = chart.div(Tc)
+
+    def red(x):
+        x = tb.simplify_basis_dot(td.expand_products(x), frame)
+        return td.simplify_scalars(td.fold_arithmetic(
+            td.eval_delta_concrete(td.canonicalize(x))))
+
+    for i in range(3):
+        assert td.simplify_scalars(eqs[i] - red(div_ref @ e[i])).latex() == "0"
+
+
+def test_expand_of_invariant_matches_div_components():
+    # vibe 000073: chart.expand(div(T)) surfaces the same components as
+    # chart.components(div(T)) — the general 'expand an invariant' path.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    T = t.field("T", 2, deps=[r, th], ctx=ctx)
+    e = [chart.physical_frame().direction(k) for k in range(3)]
+    full = chart.expand(chart.div(T))
+    eqs = chart.components(chart.div(T))
+    for i in range(3):
+        assert td.simplify_scalars(chart.components(full)[i] - eqs[i]).latex() == "0"
+
+
 def test_mixed_coordinate_subscript_spacing():
     # vibe 000073 Gap 4: a LaTeX-command index (\theta) followed by a Latin one
     # (r) must render as "\theta r", not the invalid command "\thetar".

@@ -138,13 +138,32 @@ the silent connection-free answer into a loud error that points at the chart
 operators.  On a constant / Cartesian frame (`∂e_i = 0`) the expansion is correct
 and still allowed.
 
-### Next (agreed direction)
+### Route A — implemented
 
-Explore a **Chart** method that takes an invariant expression and expands it
-properly (the connection lives on the chart).  `Chart::express` exists but does
-not expand an abstract tensor.  Candidates: extend `express`, or make a `Basis`
-chart-aware.  Then the correct Route A is `cyl.div(T)` expanding-first internally
-plus a `components()` surface.
+Two new chart operations plus operator auto-expansion (`src/chart.cpp`):
+
+- **`chart.expand(v)`** — rewrite every abstract tensor *field* leaf of `v` into
+  its frame components `Σ T_ij e_i ⊗ e_j`, then reduce.  A field derivative `∂_q
+  T` is expanded by Leibniz — base expanded to concrete frame vectors, then
+  differentiated through the connection — so it carries the moving-frame terms.
+  The shared core is `expand_fields`; `is_expandable_leaf` requires a *field*
+  trait (so a constant reference axis `i, j, k` is left to `express`, not
+  expanded — that distinction was a bug caught by `Chart.ExpressAllLegsAndFold`).
+- **Operators expand-first** — `del_apply` runs `expand_fields` on the operand,
+  so `cyl.div(T)` / `grad` / `rot` / `laplacian` on an *abstract* field expand
+  it in the frame then differentiate (the only correct order), picking up the
+  connection.  A no-op on an already-explicit operand.
+- **`chart.components(v)`** → `[c_0, c_1, …]`, `c_i = v·e_i` reduced — surfaces
+  an invariant vector as its numbered frame components.
+
+Route A is now: `cr, cth, cz = cyl.components(cyl.div(T))` — abstract `T` in,
+the cylindrical equilibrium equations out, no manual expand/project/reduce.  A
+subtlety that cost a debug cycle: `partial` emits vanishing connection terms as
+`T_ij·0`; an outer dot distributing into them makes the malformed `e_r·0`
+(vector·scalar) that canonicalize rejects, so `expand_fields` folds the
+differentiated expansion *before* it meets a contraction.
+
+The example (`examples/cyl_equilibrium.{py,ipynb}`) now uses Route A for step 4.
 
 ## Still deferred
 

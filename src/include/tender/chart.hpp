@@ -197,4 +197,25 @@ void validate_chart(CoordinateChart const& chart);
 [[nodiscard]] auto express(
     Context& ctx, CoordinateChart const& target, Expr const* v) -> Expr const*;
 
+// Expand every abstract tensor *field* in `v` into its components on the
+// chart's physical frame, Σ T_ij e_i ⊗ e_j, and reduce (vibe 000073).  Unlike
+// `express` (which re-expresses concrete vectors between frames), this
+// materializes an abstract field that carries no basis vectors of its own.  A
+// field derivative ∂_q T is expanded correctly by Leibniz — the base is
+// expanded first, then differentiated through the connection ∂_q e_i — which is
+// legal here because the chart owns the connection (a bare basis does not;
+// expand_in_basis refuses it).  So expand(∂_q T) carries the moving-frame
+// (connection) terms that a raw basis expansion would drop.
+[[nodiscard]] auto expand(
+    Context& ctx, CoordinateChart const& chart, Expr const* v) -> Expr const*;
+
+// The scalar components of a vector `v` on the chart's physical frame, one per
+// direction i: c_i = v · e_i, reduced (vibe 000073).  Surfaces an invariant
+// vector (e.g. an operator result) as the numbered frame components, so the
+// caller need not spell out the project-then-reduce pipeline by hand.
+[[nodiscard]] auto components(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* v) -> std::vector<Expr const*>;
+
 } // namespace tender

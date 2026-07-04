@@ -1441,5 +1441,32 @@ NB_MODULE(_core, m)
             "v"_a,
             "Re-express v in THIS chart's physical frame (vibe 000071 P4): "
             "brings v to the shared reference frame, then projects onto this "
-            "frame's e_k.  The general change of basis (WCS is to_reference).");
+            "frame's e_k.  The general change of basis (WCS is to_reference).")
+        .def(
+            "expand",
+            [](PyChart const& c, PyExpr const& v) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, expand(*c.ctx, c.chart, v.expr)};
+            },
+            "v"_a,
+            "Expand every abstract tensor field in v into its components on this "
+            "chart's physical frame, Σ T_ij e_i e_j, and reduce (vibe 000073).  "
+            "A field derivative ∂_q T is expanded by Leibniz with the connection "
+            "(∂_q e_i), so moving-frame terms are kept — the correct way to "
+            "surface an invariant like div(T) into frame components.")
+        .def(
+            "components",
+            [](PyChart const& c, PyExpr const& v) -> std::vector<PyExpr>
+            {
+                auto cs = components(*c.ctx, c.chart, v.expr);
+                std::vector<PyExpr> out;
+                out.reserve(cs.size());
+                for (auto const* e: cs)
+                    out.push_back(PyExpr{c.ctx_keep, c.ctx, e});
+                return out;
+            },
+            "v"_a,
+            "The scalar components [c_0, c_1, …] of a vector v on this chart's "
+            "physical frame: c_i = v·e_i, reduced (vibe 000073).  Surfaces an "
+            "invariant vector (e.g. div(T)) as its numbered frame components.");
 }
