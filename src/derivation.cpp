@@ -1202,23 +1202,41 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
                           Expr const* r,
                           Mk mk) -> Expr const*
     {
+        // See through a Negate wrapping either operand — a connection term such
+        // as ∂_θ e_θ = −e_r yields op(L, −(A⊗B)), whose ⊗ must still be
+        // fence-distributed (vibe 000073).  Peel the signs, distribute, then
+        // re-apply: op(L, −X) = −op(L, X).
+        int sign = 1;
+        while (auto const* n = std::get_if<Negate>(&l->node))
+        {
+            l = n->operand;
+            sign = -sign;
+        }
+        while (auto const* n = std::get_if<Negate>(&r->node))
+        {
+            r = n->operand;
+            sign = -sign;
+        }
+        Expr const* res = nullptr;
         if (auto const* rp = std::get_if<TensorProduct>(&r->node))
         {
             // op(L, A⊗B): float a scalar near leg out, else contract with the
             // near vector A.
-            if (is_scalar(rp->left))
-                return make_tensor_product(c, rp->left, mk(c, l, rp->right));
-            return make_tensor_product(c, mk(c, l, rp->left), rp->right);
+            res = is_scalar(rp->left) ?
+                      make_tensor_product(c, rp->left, mk(c, l, rp->right)) :
+                      make_tensor_product(c, mk(c, l, rp->left), rp->right);
         }
-        if (auto const* lp = std::get_if<TensorProduct>(&l->node))
+        else if (auto const* lp = std::get_if<TensorProduct>(&l->node))
         {
             // op(A⊗B, R): float a scalar near leg (B) out, else contract with
             // the near vector B.
-            if (is_scalar(lp->right))
-                return make_tensor_product(c, mk(c, lp->left, r), lp->right);
-            return make_tensor_product(c, lp->left, mk(c, lp->right, r));
+            res = is_scalar(lp->right) ?
+                      make_tensor_product(c, mk(c, lp->left, r), lp->right) :
+                      make_tensor_product(c, lp->left, mk(c, lp->right, r));
         }
-        return node;
+        if (!res)
+            return node; // no ⊗ fence to distribute → unchanged
+        return sign < 0 ? make_negate(c, res) : res;
     };
     auto one_pass = [&](Expr const* x)
     {

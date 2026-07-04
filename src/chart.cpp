@@ -193,6 +193,11 @@ auto reduce_dot(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
     -> Expr const*
 {
     Expr const* e = distribute_bilinear(ctx, u, v, &make_dot);
+    // Push the dot through any ⊗ fence it now straddles: a connection term such
+    // as e_θ·∂_θ(e_θ⊗e_r) → e_θ·((−e_r)⊗e_r) leaves a raw ⊗ inside the dot
+    // operand, which canonicalize's encapsulate rejects.  Fence-distribute
+    // e_θ·(u⊗v) → (e_θ·u) v before the basis reduction (vibe 000073).
+    e = steps::distribute_contraction(ctx, e);
     e = simplify_basis_dot(ctx, e, ref);
     e = steps::canonicalize(ctx, e);
     e = steps::eval_delta_concrete(ctx, e);

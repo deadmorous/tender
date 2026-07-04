@@ -317,8 +317,20 @@ auto expand_in_basis(
                                             basis.contravariant_vector(c, idx);
                 polyad = polyad ? make_tensor_product(c, polyad, vec) : vec;
             }
-            Expr const* const coord =
-                make_tensor_object(c, t->name, std::move(coord_slots), 0);
+            // A component of a field is itself a field with the same
+            // coordinate dependence (vibe 000073): carry the source's FieldDeps
+            // and any accumulated ∂ directions onto the indexed component, so
+            // ∂_q T_ij is nonzero and div / grad can differentiate the
+            // components rather than treating them as constants.
+            TensorObject comp{
+                .name = t->name,
+                .rank = 0,
+                .traits = std::nullopt,
+                .slots = std::move(coord_slots),
+                .field_derivs = t->field_derivs};
+            if (t->traits && t->traits->field)
+                comp.traits = TensorTraits{.field = t->traits->field};
+            Expr const* const coord = c.make<Expr>(std::move(comp));
             return make_tensor_product(c, coord, polyad);
         });
 }

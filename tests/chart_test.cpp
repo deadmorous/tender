@@ -211,6 +211,73 @@ TEST(Chart, Cylindrical)
     EXPECT_TRUE(eq(ctx, fb.basis(1), et_exp));
 }
 
+// vibe 000073 Gap 2: div of a dyad whose *contracted* leg is e_θ used to throw
+// "encapsulate: unsupported factor node" — the connection term ∂_θ e_θ = −e_r
+// left a raw ⊗ inside a dot operand (a Negate-wrapped ⊗ that distribute_-
+// contraction did not see through).  Now it reduces to −(a/r) e_r +
+// (∂_θa/r)e_θ.
+TEST(Chart, CylindricalDivEThetaDyad)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto fb = physical_frame(ctx, chart);
+    auto* a = make_field(
+        ctx,
+        make_tensor_name("a"),
+        0,
+        {CoordinateRef{2, 0, true}, CoordinateRef{2, 1, false}});
+    auto* et = fb.direction(ctx, 1);
+    auto* T = mul(ctx, a, mul(ctx, et, et)); // a e_θ ⊗ e_θ
+    auto* div = divergence(ctx, chart, T);   // must not throw
+    auto* datheta = make_field_derivative(
+        ctx, a, make_tensor_name("\\theta"), CoordinateRef{2, 1, false});
+    auto* want = make_sum(
+        ctx,
+        make_negate(
+            ctx, mul(ctx, make_scalar_div(ctx, a, r), fb.direction(ctx, 0))),
+        mul(ctx, make_scalar_div(ctx, datheta, r), fb.direction(ctx, 1)));
+    EXPECT_TRUE(eq(ctx, div, want));
+}
+
+// vibe 000073: a component of a field is itself a field, so expand_in_basis
+// mints components that still differentiate (∂_r T_rr ≠ 0).  Before the fix the
+// components were constants and div dropped every derivative term.
+TEST(Chart, ExpandInBasisComponentsAreFields)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto fb = physical_frame(ctx, chart);
+    auto* T = make_field(ctx, make_tensor_name("T"), 2, {});
+    auto* Tc = expand_in_basis(ctx, T, fb, Variance::Covariant);
+    // The expanded components depend on the coordinates, so ∂_r is nonzero.
+    EXPECT_FALSE(
+        eq(ctx, steps::partial(ctx, Tc, r), make_scalar(ctx, Rational{0})));
+
+    // vibe 000073 Gap 4: a LaTeX-command index (\theta) followed by a Latin one
+    // (r) must render as "\theta r", not the invalid control word "\thetar".
+    auto* unrolled = steps::canonicalize(ctx, steps::unroll_sums(ctx, Tc));
+    IndexNameMap map;
+    auto s = render_latex(*unrolled, map, &ctx);
+    EXPECT_EQ(s.find("\\thetar"), std::string::npos);
+    EXPECT_NE(s.find("T_{\\theta r}"), std::string::npos);
+    EXPECT_NE(s.find("T_{rr}"), std::string::npos); // plain Latin stays
+                                                    // unspaced
+}
+
 // Spherical: x = r sinθ cosφ, y = r sinθ sinφ, z = r cosθ.  The φ row needs the
 // two-trig-square Pythagorean fold (g_φφ = r² sin²θ) and the product square
 // root (h_φ = r sin θ).

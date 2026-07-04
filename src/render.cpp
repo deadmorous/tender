@@ -7,6 +7,7 @@
 #include <tender/derivation.hpp> // infer_rank
 #include <tender/nf.hpp>
 
+#include <cctype>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -241,15 +242,28 @@ auto slots_str(
     if (!has_upper || !has_lower
         || hints.contains(RenderHint::OmitVoidIndexPlaceholders))
     {
-        // Flat grouping: collect upper indices then lower indices.
-        std::string upper, lower;
+        // Flat grouping: collect upper indices then lower indices.  A LaTeX
+        // control word (e.g. "\theta") followed by a letter must be terminated
+        // by a space, else "\theta" + "r" reads as the unknown command
+        // "\thetar" (vibe 000073).  Insert one only in that case, so plain
+        // Latin labels like "rr" stay unspaced.
+        auto append_idx =
+            [](std::string& band, std::string& prev, std::string const& s)
+        {
+            if (!prev.empty() && prev.front() == '\\' && !s.empty()
+                && std::isalpha(static_cast<unsigned char>(s.front())))
+                band += ' ';
+            band += s;
+            prev = s;
+        };
+        std::string upper, lower, prev_upper, prev_lower;
         for (auto const& sb: slots)
         {
             auto s = index_str(map, sb.index, sb.slot, ctx);
             if (sb.slot.level == Level::Upper)
-                upper += s;
+                append_idx(upper, prev_upper, s);
             else
-                lower += s;
+                append_idx(lower, prev_lower, s);
         }
         std::string result;
         if (has_upper)

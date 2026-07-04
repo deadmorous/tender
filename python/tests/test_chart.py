@@ -224,6 +224,85 @@ def test_cylindrical_divergence_and_laplacian():
     assert td.algebraic_eq(chart.laplacian(r**2), t.scalar(4, ctx=ctx))
 
 
+def test_div_of_e_theta_dyad_does_not_crash():
+    # vibe 000073 Gap 2: div of a dyad whose contracted leg is e_θ used to
+    # throw "encapsulate: unsupported factor node" — the connection term
+    # ∂_θ e_θ = −e_r left a raw ⊗ inside a dot operand.  Now it reduces.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    e = [chart.physical_frame().direction(k) for k in range(3)]
+    a = t.field("a", 0, deps=[r, th], ctx=ctx)
+    # ∇·(a e_θ e_θ) = −(a/r) e_r + (∂_θ a / r) e_θ
+    div = td.simplify_scalars(td.expand_products(chart.div(a * (e[1] * e[1]))))
+    expected = -(a / r) * e[0] + (td.partial(a, th) / r) * e[1]
+    assert td.simplify_scalars(td.expand_products(div - expected)).latex() == "0"
+
+
+def test_expand_in_basis_components_are_fields():
+    # vibe 000073: a component of a field must itself be a field, so div can
+    # differentiate it.  Before the fix ∂_r T_rr came out 0 (constant component).
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    frame = chart.physical_frame()
+    e = [frame.direction(k) for k in range(3)]
+    T = t.field("T", 2, ctx=ctx)
+    Tc = td.canonicalize(td.unroll_sums(
+        tb.expand_in_basis(T, frame, tb.Variance.Covariant)))
+    # Recover T_rr and check it differentiates (is a field, not a constant).
+    Trr = td.simplify_scalars(tb.simplify_basis_dot(
+        td.expand_products(e[0] @ Tc @ e[0]), frame))
+    assert not td.algebraic_eq(td.partial(Trr, r), t.scalar(0, ctx=ctx))
+
+
+def test_cylindrical_divergence_matches_textbook():
+    # vibe 000073: the full ∇·T reproduces the standard cylindrical equilibrium
+    # equations, incl. the (T_rθ + T_θr)/r shear term in the θ-component.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    frame = chart.physical_frame()
+    e = [frame.direction(k) for k in range(3)]
+    T = t.field("T", 2, ctx=ctx)
+    Tc = td.canonicalize(td.unroll_sums(
+        tb.expand_in_basis(T, frame, tb.Variance.Covariant)))
+
+    def red(x):
+        x = tb.simplify_basis_dot(td.expand_products(x), frame)
+        return td.simplify_scalars(td.fold_arithmetic(
+            td.eval_delta_concrete(td.canonicalize(x))))
+
+    def comp(v, i):
+        return red(v @ e[i])
+
+    def Tij(i, j):
+        return red(e[i] @ Tc @ e[j])
+
+    def d(x, c):
+        return td.simplify_scalars(td.partial(x, c))
+
+    div_T = chart.div(Tc)
+    exp_r = d(Tij(0,0),r) + d(Tij(1,0),th)/r + d(Tij(2,0),z) + (Tij(0,0)-Tij(1,1))/r
+    exp_th = d(Tij(0,1),r) + d(Tij(1,1),th)/r + d(Tij(2,1),z) + (Tij(0,1)+Tij(1,0))/r
+    exp_z = d(Tij(0,2),r) + d(Tij(1,2),th)/r + d(Tij(2,2),z) + Tij(0,2)/r
+    assert td.simplify_scalars(comp(div_T, 0) - exp_r).latex() == "0"
+    assert td.simplify_scalars(comp(div_T, 1) - exp_th).latex() == "0"
+    assert td.simplify_scalars(comp(div_T, 2) - exp_z).latex() == "0"
+
+
+def test_mixed_coordinate_subscript_spacing():
+    # vibe 000073 Gap 4: a LaTeX-command index (\theta) followed by a Latin one
+    # (r) must render as "\theta r", not the invalid command "\thetar".
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    frame = chart.physical_frame()
+    T = t.field("T", 2, ctx=ctx)
+    Tc = td.canonicalize(td.unroll_sums(
+        tb.expand_in_basis(T, frame, tb.Variance.Covariant)))
+    s = Tc.latex()
+    assert r"\thetar" not in s
+    assert r"T_{\theta r}" in s   # spaced
+    assert "T_{rr}" in s          # plain Latin stays unspaced
+
+
 def test_spherical_laplacian():
     ctx = t.Context()
     ref = tb.wcs(ctx)
