@@ -246,6 +246,43 @@ TEST(Chart, CylindricalDivEThetaDyad)
     EXPECT_TRUE(eq(ctx, div, want));
 }
 
+// vibe 000073: a bare basis has no connection Ω, so expanding a field
+// derivative ∂T on a moving frame would silently drop the connection terms.
+// expand_in_basis refuses loudly; on a constant (Cartesian) frame, where
+// ∂ e_i = 0, the same expansion is legal and allowed.
+TEST(Chart, ExpandInBasisRefusesFieldDerivativeOnMovingFrame)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart cyl{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto moving = physical_frame(ctx, cyl); // registers the curvilinear
+                                            // connection
+    auto* T = make_field(ctx, make_tensor_name("T"), 2, {});
+    auto* dT = make_field_derivative(
+        ctx, T, make_tensor_name("r"), CoordinateRef{2, 0, true});
+    EXPECT_THROW(
+        (void)expand_in_basis(ctx, dT, moving, Variance::Covariant),
+        std::invalid_argument);
+
+    // Cartesian chart: constant frame, ∂ e_i = 0, so the same expansion is
+    // fine.
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 8, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 8, 1);
+    auto* zc = make_coordinate(ctx, make_tensor_name("z"), 8, 2);
+    CoordinateChart cart{ref, {x, y, zc}, {x, y, zc}};
+    auto flat = physical_frame(ctx, cart);
+    auto* S = make_field(ctx, make_tensor_name("S"), 2, {});
+    auto* dS = make_field_derivative(
+        ctx, S, make_tensor_name("x"), CoordinateRef{8, 0, false});
+    EXPECT_NO_THROW((void)expand_in_basis(ctx, dS, flat, Variance::Covariant));
+}
+
 // vibe 000073 Gap 3: physical_basis and physical_frame return the *same* Basis
 // identity, in either call order — previously physical_basis minted a fresh id
 // each call, so its e_i differed structurally from the operators' and silently

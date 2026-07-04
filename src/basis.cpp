@@ -242,6 +242,26 @@ auto coord_level_for(Variance v, bool ortho) -> Level
     return v == Variance::Covariant ? Level::Upper : Level::Lower;
 }
 
+// A frame is "moving" when its connection is non-trivial — some ∂_{q^j} e_i ≠
+// 0, as for a curvilinear physical frame (vibe 000073).  Only a chart registers
+// a connection (via physical_frame); a bare or Cartesian frame has none, or an
+// all-zero one.  Used to refuse expanding a field derivative where doing so
+// would silently drop the connection terms.
+auto has_moving_connection(Context const& ctx, int basis_id) -> bool
+{
+    auto const* conn = ctx.connection(basis_id);
+    if (!conn)
+        return false;
+    for (auto const& row: conn->deriv)
+        for (auto const* d: row)
+        {
+            auto const* s = std::get_if<ScalarLiteral>(&d->node);
+            if (!s || !s->value.is_zero())
+                return true;
+        }
+    return false;
+}
+
 } // namespace
 
 auto expand_in_basis(
@@ -282,6 +302,22 @@ auto expand_in_basis(
 
             if (!is_expandable_invariant(*t))
                 return node;
+
+            // A field derivative ∂T cannot be expanded correctly in a moving
+            // frame: the connection ∂e_i (the spin Ω, ∂e_i = Ω×e_i) lives on
+            // the chart, not the basis, so expanding here would silently drop
+            // the connection terms and yield only the coordinate part d*T (vibe
+            // 000073).  Refuse loudly and point at the chart operator, which
+            // expands the field *then* differentiates.
+            if (!t->field_derivs.empty()
+                && has_moving_connection(c, basis.basis_id()))
+                throw std::invalid_argument(
+                    "expand_in_basis: cannot expand a field derivative (∂T) in "
+                    "a moving frame — the connection ∂e_i belongs to the chart, "
+                    "not the basis, so expansion here would drop the connection "
+                    "terms and give only the coordinate part d*T. Differentiate "
+                    "an already-expanded field, or use the chart's differential "
+                    "operator (div / grad / rot / laplacian).");
 
             int const r = *t->rank;
             // One variance broadcasts to every slot; otherwise the count must

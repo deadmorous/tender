@@ -2,6 +2,8 @@
 geometry (radius vector, tangent basis, metric, scale factors, physical frame)
 from a coordinate mapping."""
 
+import pytest
+
 import tender as t
 import tender.basis as tb
 import tender.chart as tc
@@ -226,15 +228,20 @@ def test_cylindrical_divergence_and_laplacian():
 
 def test_field_derivative_survives_index_materialization():
     # vibe 000073: unroll_sums / index substitution must preserve a field's ∂
-    # directions (field_derivs).  Expanding ∂_r T into components and unrolling
-    # the dummy indices used to drop the ∂, yielding constant components.
+    # directions (field_derivs).  Materializing the dummy indices of an expanded
+    # ∂S used to drop the ∂, yielding constant components.  Use a Cartesian frame
+    # (∂e_i = 0), where expanding a field derivative is legal (no connection).
     ctx = t.Context()
-    r, th, z, chart = make_cylindrical(ctx)
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=5, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=5, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=5, slot=2, ctx=ctx)
+    chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
     frame = chart.physical_frame()
-    T = t.field("T", 2, deps=[r, th], ctx=ctx)
-    expanded = tb.expand_in_basis(td.partial(T, r), frame, tb.Variance.Covariant)
+    S = t.field("S", 2, deps=[x, y], ctx=ctx)
+    expanded = tb.expand_in_basis(td.partial(S, x), frame, tb.Variance.Covariant)
     unrolled = td.canonicalize(td.unroll_sums(expanded))
-    assert r"\partial_{r}" in unrolled.latex()  # the derivative survives
+    assert r"\partial_{x}" in unrolled.latex()  # the derivative survives
 
 
 def test_physical_basis_and_frame_share_identity():
@@ -247,11 +254,23 @@ def test_physical_basis_and_frame_share_identity():
     basis = chart.physical_basis()
     for k in range(3):
         assert td.structural_eq(frame.direction(k), basis.direction(k))
-    # The originally-failing pipeline (expand/reduce on physical_basis) reduces.
+    # A plain field expanded on physical_basis() reduces its dots against the
+    # frame the operators use — the shared identity is what makes this work.
     T = t.field("T", 2, deps=[r, th], ctx=ctx)
-    X = tb.expand_in_basis(chart.div(T), basis, tb.Variance.Covariant)
+    X = tb.expand_in_basis(T @ frame.direction(0), basis, tb.Variance.Covariant)
     X = tb.simplify_basis_dot(td.unroll_sums(X), basis)
     assert r"\cdot" not in X.latex()  # all e_i·e_j contracted away
+
+
+def test_expand_in_basis_refuses_field_derivative_on_moving_frame():
+    # vibe 000073: a bare basis has no connection Ω, so expanding ∂T on a moving
+    # frame would silently drop the connection terms.  The guard refuses loudly.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    frame = chart.physical_frame()
+    T = t.field("T", 2, deps=[r, th], ctx=ctx)
+    with pytest.raises(ValueError, match="moving frame"):
+        tb.expand_in_basis(td.partial(T, r), frame, tb.Variance.Covariant)
 
 
 def test_div_of_e_theta_dyad_does_not_crash():

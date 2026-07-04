@@ -118,10 +118,33 @@ Trying the Route-A *order* — `div_T = cyl.div(T)` on an abstract field, then
    terms (the radial `∂_r` terms are correct because `∂_r e_i = 0`).
 
 **Consequence for Route A:** it must be **expand-then-differentiate under the
-hood** (Route B internally), never differentiate-then-expand.  Open question /
-protection: `expand_in_basis` of a field-derivative on a non-trivial-connection
-frame should refuse or warn rather than silently return the connection-free
-answer.
+hood** (Route B internally), never differentiate-then-expand.
+
+### Why the fix belongs at the chart, not the basis (Zaremba–Jaumann)
+
+Stepan's framing: `dT = d*T + Ω×T − T×Ω`, where `d*T` differentiates coordinates
+only and `Ω` is the frame spin (`∂e_i = Ω×e_i`).  `expand_in_basis` can produce
+`d*T`; the `Ω` (connection) terms it cannot, because **a bare `Basis` does not own
+`Ω` — only a chart does** (the connection is registered in the Context by
+`physical_frame`, keyed by `basis_id`).  Prototype confirmed: forcing
+`expand_in_basis(∂T)` to be correct required reaching into the differentiator
+from the basis layer, unrolling to concrete indices (the connection is per
+concrete direction), and re-running the operator reduction — it left `e·0` /
+nested-⊗ cruft and broke a clean reduction.  Wrong layer.
+
+**Guard (implemented).**  `expand_in_basis` now refuses a field-derivative `∂T`
+when the frame has a non-trivial connection (`has_moving_connection`), turning
+the silent connection-free answer into a loud error that points at the chart
+operators.  On a constant / Cartesian frame (`∂e_i = 0`) the expansion is correct
+and still allowed.
+
+### Next (agreed direction)
+
+Explore a **Chart** method that takes an invariant expression and expands it
+properly (the connection lives on the chart).  `Chart::express` exists but does
+not expand an abstract tensor.  Candidates: extend `express`, or make a `Basis`
+chart-aware.  Then the correct Route A is `cyl.div(T)` expanding-first internally
+plus a `components()` surface.
 
 ## Still deferred
 
