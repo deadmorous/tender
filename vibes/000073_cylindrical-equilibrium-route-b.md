@@ -57,10 +57,17 @@ index labels raw, so `\theta` + `r` rendered as the invalid control word
 control word when the next label starts with a letter, leaving plain Latin
 `rr`/`zr` unspaced (`src/render.cpp`).
 
-**Gap 3 (still open) — `physical_frame()` vs `physical_basis()` mint different
-basis identities** (`structural_eq` is `False` though both render `e_r`).
-Passing the wrong one silently no-ops `simplify_basis_dot`.  Task: unify or
-alias.  Not needed for Route B once you consistently use `physical_frame()`.
+**Gap 3 — `physical_frame()` vs `physical_basis()` minted different basis
+identities** (`structural_eq` was `False` though both render `e_r`).  Cause:
+`physical_frame` cached its basis (via `chart_frame`) but `physical_basis` built
+a fresh `make_orthonormal_basis` — a new `basis_id`, baked into each `e_i`'s slot
+tag — on every call.  Passing `physical_basis()` where the operators used
+`physical_frame()` silently no-op'd `simplify_basis_dot`.  Fix (`src/chart.cpp`):
+`physical_basis` is now the cached, idempotent frame builder (keyed by chart id +
+geometry fingerprint); `physical_frame` delegates to it and only adds the
+connection table (skipped if already registered for that basis).  Both now return
+the identical Basis in either call order, and the user's *original* pipeline
+(expand/reduce on `physical_basis()`) reduces correctly.
 
 ## Verification and a finding
 
@@ -90,7 +97,6 @@ not affect the final boiler formula (10), which uses only the r-equation.
 
 ## Still deferred
 
-- **Gap 3** — unify `physical_frame`/`physical_basis` identity.
 - **Route A** — abstract `T`, expanded under the hood; a one-call
   `cyl.components(expr, variance)` (or `.div` returning already-reduced frame
   components) to remove the expand → basis-dot → δ-eval → fold pipeline the

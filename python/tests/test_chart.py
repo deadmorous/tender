@@ -224,6 +224,23 @@ def test_cylindrical_divergence_and_laplacian():
     assert td.algebraic_eq(chart.laplacian(r**2), t.scalar(4, ctx=ctx))
 
 
+def test_physical_basis_and_frame_share_identity():
+    # vibe 000073 Gap 3: physical_basis() and physical_frame() return the same
+    # basis vectors, so a field on one and an operator result on the other still
+    # reduce together.  Previously they minted different identities.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    frame = chart.physical_frame()
+    basis = chart.physical_basis()
+    for k in range(3):
+        assert td.structural_eq(frame.direction(k), basis.direction(k))
+    # The originally-failing pipeline (expand/reduce on physical_basis) reduces.
+    T = t.field("T", 2, deps=[r, th], ctx=ctx)
+    X = tb.expand_in_basis(chart.div(T), basis, tb.Variance.Covariant)
+    X = tb.simplify_basis_dot(td.unroll_sums(X), basis)
+    assert r"\cdot" not in X.latex()  # all e_i·e_j contracted away
+
+
 def test_div_of_e_theta_dyad_does_not_crash():
     # vibe 000073 Gap 2: div of a dyad whose contracted leg is e_θ used to
     # throw "encapsulate: unsupported factor node" — the connection term

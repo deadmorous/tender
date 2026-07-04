@@ -246,6 +246,31 @@ TEST(Chart, CylindricalDivEThetaDyad)
     EXPECT_TRUE(eq(ctx, div, want));
 }
 
+// vibe 000073 Gap 3: physical_basis and physical_frame return the *same* Basis
+// identity, in either call order — previously physical_basis minted a fresh id
+// each call, so its e_i differed structurally from the operators' and silently
+// defeated simplify_basis_dot.
+TEST(Chart, PhysicalBasisAndFrameShareIdentity)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto frame = physical_frame(ctx, chart);
+    auto basis = physical_basis(ctx, chart);
+    EXPECT_EQ(frame.basis_id(), basis.basis_id());
+    for (int k = 0; k < 3; ++k)
+        EXPECT_TRUE(
+            structural_eq(frame.direction(ctx, k), basis.direction(ctx, k)));
+    // Repeated physical_basis calls are idempotent (same id).
+    EXPECT_EQ(physical_basis(ctx, chart).basis_id(), basis.basis_id());
+}
+
 // vibe 000073: a component of a field is itself a field, so expand_in_basis
 // mints components that still differentiate (∂_r T_rr ≠ 0).  Before the fix the
 // components were constants and div dropped every derivative term.

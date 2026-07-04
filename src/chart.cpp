@@ -347,8 +347,44 @@ auto scale_factor(Context& ctx, CoordinateChart const& chart, int i)
     return positive_sqrt(ctx, metric_component(ctx, chart, i, i));
 }
 
+// The chart these coordinates belong to (all coords share one chart_id).
+auto chart_id_of(CoordinateChart const& chart) -> int
+{
+    auto const* c0 = std::get_if<TensorObject>(&chart.coords.front()->node);
+    if (!c0 || !c0->traits || !c0->traits->coordinate)
+        throw std::invalid_argument(
+            "chart coordinate is not a coordinate variable");
+    return c0->traits->coordinate->chart_id;
+}
+
+// A structural fingerprint of a chart: its coordinate and embedding Expr
+// pointers, which are stable under hash-consing, so two charts with the same
+// geometry share one fingerprint and two different geometries never do (vibe
+// 000072 Obs 2).
+auto chart_fingerprint(CoordinateChart const& chart) -> std::vector<Expr const*>
+{
+    std::vector<Expr const*> fp;
+    fp.reserve(chart.coords.size() + chart.embedding.size());
+    fp.insert(fp.end(), chart.coords.begin(), chart.coords.end());
+    fp.insert(fp.end(), chart.embedding.begin(), chart.embedding.end());
+    return fp;
+}
+
 auto physical_basis(Context& ctx, CoordinateChart const& chart) -> Basis
 {
+    // Idempotent per chart (vibe 000073 Gap 3): reuse the cached frame so that
+    // physical_basis and physical_frame return the *same* Basis identity.  Each
+    // e_i atom carries the basis id in its slot tag, so a fresh build would
+    // mint structurally distinct e_r — silently defeating simplify_basis_dot
+    // when a field lives on one and an operator result on the other.  Keyed by
+    // chart id, validated by the geometry fingerprint (vibe 000072 Obs 2).
+    int const chart_id = chart_id_of(chart);
+    auto fingerprint = chart_fingerprint(chart);
+    if (auto const* cf = ctx.chart_frame(chart_id);
+        cf && cf->fingerprint == fingerprint)
+        if (auto const* b = ctx.basis(cf->basis_id))
+            return *b;
+
     std::vector<Expr const*> vectors;
     std::vector<IndexName> value_names;
     for (int i = 0; i < static_cast<int>(chart.coords.size()); ++i)
@@ -383,15 +419,21 @@ auto physical_basis(Context& ctx, CoordinateChart const& chart) -> Basis
                 break;
             }
         if (coincides)
+        {
+            ctx.register_chart_frame(
+                chart_id, chart.reference.basis_id(), std::move(fingerprint));
             return chart.reference;
+        }
     }
-    return make_orthonormal_basis(
+    Basis const basis = make_orthonormal_basis(
         ctx,
         chart.reference.space(),
         std::move(vectors),
         make_tensor_name("e"),
         Handedness::Right,
         BasisNaming{.value_names = std::move(value_names)});
+    ctx.register_chart_frame(chart_id, basis.basis_id(), std::move(fingerprint));
+    return basis;
 }
 
 auto basis_derivative(Context& ctx, CoordinateChart const& chart, int i, int j)
@@ -419,42 +461,18 @@ auto connection_coefficients(
     return connection_at(ctx, chart, physical_basis(ctx, chart), i, j);
 }
 
-// A structural fingerprint of a chart: its coordinate and embedding Expr
-// pointers, which are stable under hash-consing, so two charts with the same
-// geometry share one fingerprint and two different geometries never do (vibe
-// 000072 Obs 2).
-auto chart_fingerprint(CoordinateChart const& chart) -> std::vector<Expr const*>
-{
-    std::vector<Expr const*> fp;
-    fp.reserve(chart.coords.size() + chart.embedding.size());
-    fp.insert(fp.end(), chart.coords.begin(), chart.coords.end());
-    fp.insert(fp.end(), chart.embedding.begin(), chart.embedding.end());
-    return fp;
-}
-
 auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
 {
     int const n = static_cast<int>(chart.coords.size());
 
-    // The chart these coordinates belong to (all coords share one chart_id).
-    auto const* c0 = std::get_if<TensorObject>(&chart.coords.front()->node);
-    if (!c0 || !c0->traits || !c0->traits->coordinate)
-        throw std::invalid_argument(
-            "physical_frame: coordinate is not a coordinate variable");
-    int const chart_id = c0->traits->coordinate->chart_id;
-
-    // Idempotent per chart: reuse the frame if already built, so the user's
-    // fields and the operators share the same e_i atoms and connection.  The
-    // cache is validated by the chart's geometry fingerprint (vibe 000072 Obs
-    // 2): a chart_id reused for a *different* chart fails the match and falls
-    // through to rebuild, rather than silently returning the stale frame.
-    auto fingerprint = chart_fingerprint(chart);
-    if (auto const* cf = ctx.chart_frame(chart_id);
-        cf && cf->fingerprint == fingerprint)
-        if (auto const* b = ctx.basis(cf->basis_id))
-            return *b;
-
+    // physical_basis is the cached, idempotent frame builder (vibe 000073 Gap
+    // 3), so the user's fields and the operators share the same e_i atoms.
+    // physical_frame adds the connection table on top; skip rebuilding it if it
+    // is already registered for this basis.
     Basis const basis = physical_basis(ctx, chart);
+    if (ctx.connection(basis.basis_id()) != nullptr)
+        return basis;
+    int const chart_id = chart_id_of(chart);
 
     // Pre-express ∂_{q^j} e_i on the symbolic e_k atoms: Σ_k γ^k_{ij} e_k, with
     // the γ from the connection (M5).  The e_k are this basis's own direction
@@ -490,7 +508,6 @@ auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
                     make_scalar(ctx, Rational{0});
         }
     ctx.register_connection(conn, basis.basis_id());
-    ctx.register_chart_frame(chart_id, basis.basis_id(), std::move(fingerprint));
     return basis;
 }
 
