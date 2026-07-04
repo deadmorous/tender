@@ -139,8 +139,12 @@ auto substitute(Context& ctx, Expr const* e, int idx_id, ConcreteIndex val)
             }
             if (!changed)
                 return e;
-            return ctx.make<Expr>(
-                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+            // Copy the whole object so field_derivs (the ∂ directions of a
+            // field, vibe 000073) survive index substitution — rebuilding with
+            // only name/rank/traits/slots silently drops the derivative.
+            TensorObject obj = *t;
+            obj.slots = std::move(slots);
+            return ctx.make<Expr>(std::move(obj));
         });
 }
 
@@ -174,8 +178,12 @@ auto substitute_index(Context& ctx, Expr const* e, int from_id, IndexAssoc to)
             }
             if (!changed)
                 return e;
-            return ctx.make<Expr>(
-                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+            // Copy the whole object so field_derivs (the ∂ directions of a
+            // field, vibe 000073) survive index substitution — rebuilding with
+            // only name/rank/traits/slots silently drops the derivative.
+            TensorObject obj = *t;
+            obj.slots = std::move(slots);
+            return ctx.make<Expr>(std::move(obj));
         });
 }
 
@@ -628,8 +636,12 @@ auto substitute_concrete(
             }
             if (!changed)
                 return e;
-            return ctx.make<Expr>(
-                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+            // Copy the whole object so field_derivs (the ∂ directions of a
+            // field, vibe 000073) survive index substitution — rebuilding with
+            // only name/rank/traits/slots silently drops the derivative.
+            TensorObject obj = *t;
+            obj.slots = std::move(slots);
+            return ctx.make<Expr>(std::move(obj));
         });
 }
 

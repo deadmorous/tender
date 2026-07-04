@@ -224,6 +224,19 @@ def test_cylindrical_divergence_and_laplacian():
     assert td.algebraic_eq(chart.laplacian(r**2), t.scalar(4, ctx=ctx))
 
 
+def test_field_derivative_survives_index_materialization():
+    # vibe 000073: unroll_sums / index substitution must preserve a field's ∂
+    # directions (field_derivs).  Expanding ∂_r T into components and unrolling
+    # the dummy indices used to drop the ∂, yielding constant components.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    frame = chart.physical_frame()
+    T = t.field("T", 2, deps=[r, th], ctx=ctx)
+    expanded = tb.expand_in_basis(td.partial(T, r), frame, tb.Variance.Covariant)
+    unrolled = td.canonicalize(td.unroll_sums(expanded))
+    assert r"\partial_{r}" in unrolled.latex()  # the derivative survives
+
+
 def test_physical_basis_and_frame_share_identity():
     # vibe 000073 Gap 3: physical_basis() and physical_frame() return the same
     # basis vectors, so a field on one and an operator result on the other still

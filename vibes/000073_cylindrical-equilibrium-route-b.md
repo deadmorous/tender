@@ -95,6 +95,34 @@ not affect the final boiler formula (10), which uses only the r-equation.
   `test_mixed_coordinate_subscript_spacing`.
 - 747 C++ + 210 Python tests pass; coverage 90.4% lines.
 
+## Route A groundwork: two problems behind "div then expand"
+
+Trying the Route-A *order* — `div_T = cyl.div(T)` on an abstract field, then
+`expand_in_basis(div_T, frame)` — surfaced two issues:
+
+1. **`unroll_sums` dropped `field_derivs` (bug, fixed).**  Five index-substitution
+   helpers (`substitute`, `substitute_index`, `substitute_concrete` in
+   `derivation.cpp`; `substitute_index_id[s]` in `summation.cpp`) rebuilt a
+   `TensorObject` as `{name, rank, traits, slots}` — a 4-field construction that
+   silently drops the 5th member, `field_derivs`.  So materializing `∂_r T_{lk}`
+   into concrete `T_{rr}` lost the `∂_r`.  Fix: copy the whole object and only
+   replace `slots`.  This is a real correctness bug independent of Route A.
+
+2. **Expansion and differentiation do not commute in a moving frame (deep).**
+   Even with (1) fixed, `expand_in_basis(∂_θ T)` yields `∂_θ T_ij e_i e_j` —
+   *component derivatives only* — whereas the true `∂_θ(T_ij e_i e_j)` carries
+   the connection terms `T_ij ∂_θ e_i e_j + …`.  `cyl.div(T)` on an abstract `T`
+   returns `e_i·∂_i T`; expanding *afterwards* can never recover the connection,
+   because the `∂` was committed before a frame existed to differentiate.  In
+   cylindrical this loses exactly the `(T_rr−T_θθ)/r`, `(T_rθ+T_θr)/r`, `T_rz/r`
+   terms (the radial `∂_r` terms are correct because `∂_r e_i = 0`).
+
+**Consequence for Route A:** it must be **expand-then-differentiate under the
+hood** (Route B internally), never differentiate-then-expand.  Open question /
+protection: `expand_in_basis` of a field-derivative on a non-trivial-connection
+frame should refuse or warn rather than silently return the connection-free
+answer.
+
 ## Still deferred
 
 - **Route A** — abstract `T`, expanded under the hood; a one-call

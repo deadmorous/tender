@@ -39,8 +39,12 @@ auto substitute_index_id(Context& ctx, Expr const* e, int old_id, int new_id)
             }
             if (!changed)
                 return e;
-            return ctx.make<Expr>(
-                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+            // Copy the whole object so field_derivs (the ∂ directions of a
+            // field, vibe 000073) survive index substitution — rebuilding with
+            // only name/rank/traits/slots silently drops the derivative.
+            TensorObject obj = *t;
+            obj.slots = std::move(slots);
+            return ctx.make<Expr>(std::move(obj));
         });
 }
 
@@ -70,8 +74,12 @@ auto substitute_index_ids(
             }
             if (!changed)
                 return e;
-            return ctx.make<Expr>(
-                TensorObject{t->name, t->rank, t->traits, std::move(slots)});
+            // Copy the whole object so field_derivs (the ∂ directions of a
+            // field, vibe 000073) survive index substitution — rebuilding with
+            // only name/rank/traits/slots silently drops the derivative.
+            TensorObject obj = *t;
+            obj.slots = std::move(slots);
+            return ctx.make<Expr>(std::move(obj));
         });
 }
 
