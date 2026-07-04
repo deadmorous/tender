@@ -311,3 +311,53 @@ Status: design takeaway, not scheduled.  Interacts with DT-level items in vibe
 000071 (cross-chart differentiation) and Obs 1 (frame naming) here.
 
 *(more observations to be appended as they are found)*
+
+## Resolution — fix iteration (2026-07-04)
+
+Implemented the actionable observations.  All 738 C++ + 201 Python tests pass.
+
+- **Obs 1 — RESOLVED.**  `physical_basis` now detects an identity/Cartesian chart
+  (frame coincides with the reference basis: `e_i == reference.basis(i)` for all
+  i) and returns the *reference basis itself*.  So the Cartesian frame shares the
+  reference `basis_id` and prints `i, j, k`, and `express` / `to_reference` /
+  `grad` all agree.  Curvilinear frames (`e_r ≠ i`) are untouched.
+- **Obs 2 — RESOLVED (bug).**  The `physical_frame` cache is now validated by a
+  structural fingerprint of the chart (its coords + embedding `Expr` pointers,
+  stable under hash-consing), stored in `Context::ChartFrame`.  A `chart_id`
+  reused for a different geometry fails the fingerprint match and rebuilds
+  instead of returning the stale frame.  (No stderr warning — the library has no
+  logging layer; silent rebuild turns the old silent-*wrong* behaviour into
+  silent-*right*.)
+- **Obs 3 — RESOLVED.**  New `validate_chart` (chart.hpp/cpp), called from the
+  `CoordinateChart` Python constructor: rejects coords that are not slot 0..n-1
+  of one `chart_id`, a foreign `chart_id`, or an embedding whose size ≠
+  `reference.dim()`, with a specific message.  `slot=` stays derivable from list
+  order; `ws.coords` remains the ergonomic minter.
+- **Obs 6 — RESOLVED.**  New `chart.position()` returns the position vector in
+  the chart's own frame (`= express(radius_vector)`, e.g. cylindrical
+  `r e_r + z e_z`).  `grad(position())` folds to `I` with no mixed frame.
+  `radius_vector()` stays the WCS geometry primitive.  (This is the small,
+  chart-scoped slice of DT 1; the invariant reference/actual configuration atoms
+  + deformation gradient remain deferred to the cross-chart "tree of CS" work.)
+- **Obs 8 — RESOLVED (both facets).**  (a) `express` now re-expresses *every*
+  leg of a tensor of any rank — it rewrites each reference direction `i_a` into
+  its target-frame expansion `Σ_k (i_a·e_k) e_k` — so a rank-2 dyad lands fully
+  in the target frame (no leftover `i, j`).  (b) `express` and `to_reference`
+  auto-fold a *completed* resolution of identity `Σ_k e_k⊗e_k → I` (guarded, a
+  no-op on partial sums), so `cart.express(∇R) = I` and `cyl.to_reference(∇R) = I`
+  directly.  The C++ `to_reference` free function stays raw (express uses it
+  internally); the fold is applied at the Python binding / inside `express`.
+- **Obs 4, 7 — no code (confirmed non-issues); now covered by regression tests.**
+
+### Still deferred
+
+- **Obs 5 amendment** (share a coordinate — e.g. `z` — across charts along an
+  identity embedding direction) and **DT 1's full form** (invariant
+  configuration-bound position atoms `r`/`R`, deformation gradient `F = Grad R`)
+  belong with the cross-chart "tree of CS" work (vibe 000071 P7 F3), still
+  dormant.
+- **Known scalar-simplifier gap** (carried from vibe 000071): a WCS round-trip of
+  a rank-2 express leaves a coefficient like `sin⁴θ + 2 sin²θ cos²θ + cos⁴θ`
+  (= `(sin²θ+cos²θ)² = 1`) uncollapsed — `simplify_scalars` does not fold a
+  squared Pythagorean sum.  Same root as the 3-term symmetric ∇∇f form; a
+  common-denominator / power-of-sum normaliser would close both.

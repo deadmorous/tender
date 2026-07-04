@@ -615,6 +615,144 @@ TEST(Chart, BasisToBasisExpansion)
     EXPECT_TRUE(eq(ctx, express(ctx, c.chart, to_reference(ctx, e_r)), e_r));
 }
 
+// vibe 000072 Obs 1: an identity (Cartesian) chart's physical frame IS the
+// reference basis — same basis id and vectors — so it prints i, j, k (not
+// e_x, e_y, e_z) and a completed resolution of identity folds without a naming
+// split.  A curvilinear frame stays a distinct "e" basis.
+TEST(Chart, CartesianFrameReusesReferenceBasis)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart cart{ref, {x, y, z}, {x, y, z}};
+    auto fb = physical_frame(ctx, cart);
+    EXPECT_EQ(fb.basis_id(), ref.basis_id());
+    for (int k = 0; k < 3; ++k)
+        EXPECT_TRUE(structural_eq(fb.direction(ctx, k), ref.direction(ctx, k)));
+
+    // A genuinely curvilinear frame is a *different* basis.
+    auto c = make_cyl(ctx);
+    EXPECT_NE(physical_frame(ctx, c.chart).basis_id(), ref.basis_id());
+}
+
+// vibe 000072 Obs 2: the physical-frame cache is validated by the chart's
+// geometry fingerprint, so reusing a chart_id for a different chart rebuilds
+// the frame instead of returning the stale one.
+TEST(Chart, PhysicalFrameRebuildsOnChartIdReuse)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    // Spherical on chart_id 5.
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 5, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 5, 1);
+    auto* ph = make_coordinate(ctx, make_tensor_name("\\varphi"), 5, 2);
+    CoordinateChart sph{
+        ref,
+        {r, th, ph},
+        {mul(ctx, mul(ctx, r, sin_(ctx, th)), cos_(ctx, ph)),
+         mul(ctx, mul(ctx, r, sin_(ctx, th)), sin_(ctx, ph)),
+         mul(ctx, r, cos_(ctx, th))}};
+    int const sid = physical_frame(ctx, sph).basis_id();
+
+    // Reuse chart_id 5 for a cylindrical chart (different embedding).
+    auto* z2 = make_coordinate(ctx, make_tensor_name("z"), 5, 2);
+    CoordinateChart cyl{
+        ref,
+        {r, th, z2},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z2}};
+    int const cid = physical_frame(ctx, cyl).basis_id();
+    EXPECT_NE(cid, sid); // not the stale spherical frame
+
+    // Re-fetching the spherical chart rebuilds its own frame, distinct from the
+    // cylindrical one that now holds chart_id 5's slot.
+    EXPECT_NE(physical_frame(ctx, sph).basis_id(), cid);
+}
+
+// vibe 000072 Obs 6: position() is the radius vector in the chart's own frame
+// (cylindrical r e_r + z e_z), so grad(position) folds to I with no mixed
+// frame.
+TEST(Chart, IntrinsicPosition)
+{
+    Context ctx;
+    auto c = make_cyl(ctx);
+    auto fb = physical_frame(ctx, c.chart);
+    auto* want = make_sum(
+        ctx,
+        mul(ctx, c.r, fb.direction(ctx, 0)),
+        mul(ctx, c.z, fb.direction(ctx, 2)));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, position(ctx, c.chart)),
+        steps::canonicalize(ctx, want)));
+    EXPECT_TRUE(structural_eq(
+        gradient(ctx, c.chart, position(ctx, c.chart)), make_identity(ctx)));
+}
+
+// vibe 000072 Obs 8: express re-expresses *every* leg (not just one) and folds
+// a completed resolution of identity.  A cross-frame ∇R re-expressed in the
+// Cartesian frame becomes I; a rank-2 dyad round-trips through the frame.
+TEST(Chart, ExpressAllLegsAndFold)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart cart{ref, {x, y, z}, {x, y, z}};
+    auto c = make_cyl(ctx);
+
+    // ∇R (cyl frame, from the WCS radius vector) re-expressed in Cartesian → I.
+    auto* gradR = gradient(ctx, c.chart, radius_vector(ctx, c.chart));
+    EXPECT_TRUE(structural_eq(express(ctx, cart, gradR), make_identity(ctx)));
+
+    // A rank-2 dyad i⊗j re-expressed in the cylindrical frame has *both* legs
+    // on e_r/e_θ (a one-leg projection would leave i or j behind):
+    //   i⊗j = sinθcosθ e_r e_r + cos²θ e_r e_θ − sin²θ e_θ e_r − sinθcosθ e_θ
+    //   e_θ.
+    auto fbc = physical_frame(ctx, c.chart);
+    auto* er = fbc.direction(ctx, 0);
+    auto* et = fbc.direction(ctx, 1);
+    auto* cs = cos_(ctx, c.th);
+    auto* sn = sin_(ctx, c.th);
+    auto* ij = make_tensor_product(ctx, c.ref.basis(0), c.ref.basis(1));
+    auto* want = make_sum(
+        ctx,
+        make_sum(
+            ctx,
+            make_sum(
+                ctx,
+                mul(ctx, mul(ctx, sn, cs), mul(ctx, er, er)),
+                mul(ctx, mul(ctx, cs, cs), mul(ctx, er, et))),
+            make_negate(ctx, mul(ctx, mul(ctx, sn, sn), mul(ctx, et, er)))),
+        make_negate(ctx, mul(ctx, mul(ctx, sn, cs), mul(ctx, et, et))));
+    EXPECT_TRUE(structural_eq(
+        steps::simplify_scalars(
+            ctx, steps::canonicalize(ctx, express(ctx, c.chart, ij))),
+        steps::simplify_scalars(ctx, steps::canonicalize(ctx, want))));
+}
+
+// vibe 000072 Obs 3: validate_chart rejects coords not in slot order 0..n-1, a
+// foreign chart_id, or an embedding whose size differs from reference.dim().
+TEST(Chart, ValidateChartRejectsBadShape)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    auto* emb0 = mul(ctx, r, cos_(ctx, th));
+    auto* emb1 = mul(ctx, r, sin_(ctx, th));
+    EXPECT_NO_THROW(
+        validate_chart(CoordinateChart{ref, {r, th, z}, {emb0, emb1, z}}));
+    EXPECT_THROW(
+        validate_chart(CoordinateChart{ref, {th, r, z}, {emb0, emb1, z}}),
+        std::invalid_argument); // slots 1,0,2
+    EXPECT_THROW(
+        validate_chart(CoordinateChart{ref, {r, th, z}, {emb0, emb1}}),
+        std::invalid_argument); // embedding size 2 ≠ 3
+}
+
 // ∇f: the 1/h_i factors are the curvilinear content — for cylindrical
 // ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z, so ∇θ = (1/r) e_θ and ∇r² = 2r e_r,
 // each returned intrinsically on the frame's own e_r, e_θ (vibe 000071).

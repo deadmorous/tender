@@ -275,6 +275,36 @@ auto inv_h(Context& ctx, Expr const* h) -> Expr const*
 
 } // namespace
 
+void validate_chart(CoordinateChart const& chart)
+{
+    int const n = static_cast<int>(chart.coords.size());
+    if (n == 0)
+        throw std::invalid_argument("CoordinateChart: no coordinates given");
+    if (static_cast<int>(chart.embedding.size()) != chart.reference.dim())
+        throw std::invalid_argument(
+            "CoordinateChart: embedding must have one component per reference "
+            "direction (embedding.size() == reference.dim())");
+    int chart_id = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        auto const* t = std::get_if<TensorObject>(&chart.coords[i]->node);
+        if (!t || !t->traits || !t->traits->coordinate)
+            throw std::invalid_argument(
+                "CoordinateChart: every coord must be a coordinate() atom");
+        auto const& cr = *t->traits->coordinate;
+        if (i == 0)
+            chart_id = cr.chart_id;
+        else if (cr.chart_id != chart_id)
+            throw std::invalid_argument(
+                "CoordinateChart: all coords must share one chart_id");
+        if (cr.slot != i)
+            throw std::invalid_argument(
+                "CoordinateChart: coords must occupy slots 0..n-1 in list order "
+                "(coord i must have slot i); use Workspace.coords() to mint them "
+                "with slots assigned automatically");
+    }
+}
+
 auto radius_vector(Context& ctx, CoordinateChart const& chart) -> Expr const*
 {
     Expr const* R = nullptr;
@@ -329,6 +359,27 @@ auto physical_basis(Context& ctx, CoordinateChart const& chart) -> Basis
                 "coordinate variable");
         value_names.push_back(make_index_name(t->name.v.view()));
     }
+    // vibe 000072 Obs 1/8: when the physical frame coincides with the reference
+    // basis — an identity/Cartesian chart where e_i == reference.basis(i) for
+    // every i — reuse the reference basis itself.  Then the frame prints under
+    // the reference's own vector names (i, j, k) and shares its basis id, so
+    // express / to_reference / grad all agree and a completed resolution of
+    // identity folds without a naming split.  A genuinely curvilinear frame
+    // (e_r ≠ i) falls through to a fresh "e" basis.
+    if (static_cast<int>(vectors.size()) == chart.reference.dim())
+    {
+        bool coincides = true;
+        for (int i = 0; i < static_cast<int>(vectors.size()); ++i)
+            if (!structural_eq(
+                    steps::canonicalize(ctx, vectors[i]),
+                    chart.reference.basis(i)))
+            {
+                coincides = false;
+                break;
+            }
+        if (coincides)
+            return chart.reference;
+    }
     return make_orthonormal_basis(
         ctx,
         chart.reference.space(),
@@ -363,6 +414,19 @@ auto connection_coefficients(
     return connection_at(ctx, chart, physical_basis(ctx, chart), i, j);
 }
 
+// A structural fingerprint of a chart: its coordinate and embedding Expr
+// pointers, which are stable under hash-consing, so two charts with the same
+// geometry share one fingerprint and two different geometries never do (vibe
+// 000072 Obs 2).
+auto chart_fingerprint(CoordinateChart const& chart) -> std::vector<Expr const*>
+{
+    std::vector<Expr const*> fp;
+    fp.reserve(chart.coords.size() + chart.embedding.size());
+    fp.insert(fp.end(), chart.coords.begin(), chart.coords.end());
+    fp.insert(fp.end(), chart.embedding.begin(), chart.embedding.end());
+    return fp;
+}
+
 auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
 {
     int const n = static_cast<int>(chart.coords.size());
@@ -375,9 +439,14 @@ auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
     int const chart_id = c0->traits->coordinate->chart_id;
 
     // Idempotent per chart: reuse the frame if already built, so the user's
-    // fields and the operators share the same e_i atoms and connection.
-    if (int const cached = ctx.chart_frame(chart_id))
-        if (auto const* b = ctx.basis(cached))
+    // fields and the operators share the same e_i atoms and connection.  The
+    // cache is validated by the chart's geometry fingerprint (vibe 000072 Obs
+    // 2): a chart_id reused for a *different* chart fails the match and falls
+    // through to rebuild, rather than silently returning the stale frame.
+    auto fingerprint = chart_fingerprint(chart);
+    if (auto const* cf = ctx.chart_frame(chart_id);
+        cf && cf->fingerprint == fingerprint)
+        if (auto const* b = ctx.basis(cf->basis_id))
             return *b;
 
     Basis const basis = physical_basis(ctx, chart);
@@ -416,7 +485,7 @@ auto physical_frame(Context& ctx, CoordinateChart const& chart) -> Basis
                     make_scalar(ctx, Rational{0});
         }
     ctx.register_connection(conn, basis.basis_id());
-    ctx.register_chart_frame(chart_id, basis.basis_id());
+    ctx.register_chart_frame(chart_id, basis.basis_id(), std::move(fingerprint));
     return basis;
 }
 
@@ -647,29 +716,65 @@ auto to_reference(Context& ctx, Expr const* v) -> Expr const*
 auto express(Context& ctx, CoordinateChart const& target, Expr const* v)
     -> Expr const*
 {
-    // Re-express `v` in `target`'s physical frame (vibe 000071 P4): first bring
-    // it to the shared reference (WCS) frame, then project each reference
-    // direction onto target's orthonormal frame,
-    //     w = Σ_k (w · e_k) e_k,
-    // with the components w·e_k taken in the reference frame and the result
-    // written on target's symbolic e_k atoms.
+    // Re-express `v` in `target`'s physical frame (vibe 000071 P4; generalised
+    // to every leg in vibe 000072 Obs 8): first bring it to the shared
+    // reference (WCS) frame, then rewrite each reference direction i_a into its
+    // target-frame expansion
+    //     i_a = Σ_k (i_a · e_k) e_k,
+    // which projects *all* legs of a tensor of any rank (not just the one an
+    // outer dot would contract) onto target's symbolic e_k atoms.
     Basis const tf = physical_frame(ctx, target);
+    Basis const& ref = target.reference;
     Expr const* w = to_reference(ctx, v);
+
+    // Each reference axis a's expansion in the target frame, precomputed once.
     int const n = tf.dim();
-    Expr const* out = nullptr;
-    for (int k = 0; k < n; ++k)
+    std::vector<Expr const*> expansion(static_cast<std::size_t>(ref.dim()));
+    for (int a = 0; a < ref.dim(); ++a)
     {
-        // component c_k = w · e_k, reduced in the reference frame.
-        Expr const* ck = reduce_dot(ctx, target.reference, w, tf.basis(k));
-        if (auto const* s = std::get_if<ScalarLiteral>(&ck->node);
-            s && s->value.is_zero())
-            continue;
-        Expr const* term = make_tensor_product(ctx, ck, tf.direction(ctx, k));
-        out = out ? make_sum(ctx, out, term) : term;
+        Expr const* ea = nullptr;
+        for (int k = 0; k < n; ++k)
+        {
+            // component (i_a · e_k), reduced in the reference frame.
+            Expr const* ck = reduce_dot(ctx, ref, ref.basis(a), tf.basis(k));
+            if (auto const* s = std::get_if<ScalarLiteral>(&ck->node);
+                s && s->value.is_zero())
+                continue;
+            Expr const* term =
+                make_tensor_product(ctx, ck, tf.direction(ctx, k));
+            ea = ea ? make_sum(ctx, ea, term) : term;
+        }
+        expansion[static_cast<std::size_t>(a)] =
+            ea ? ea : make_scalar(ctx, Rational{0});
     }
-    if (!out)
-        return make_scalar(ctx, Rational{0});
-    return steps::simplify_scalars(ctx, steps::canonicalize(ctx, out));
+
+    // Replace every reference basis vector atom in w by its target expansion.
+    Expr const* out = rewrite_tree(
+        ctx,
+        w,
+        [&](Context&, Expr const* node) -> Expr const*
+        {
+            for (int a = 0; a < ref.dim(); ++a)
+                if (structural_eq(node, ref.basis(a)))
+                    return expansion[static_cast<std::size_t>(a)];
+            return node;
+        });
+    out = steps::expand_products(ctx, out);
+    out = steps::simplify_scalars(ctx, steps::canonicalize(ctx, out));
+    // vibe 000072 Obs 8: collapse a completed resolution of identity
+    // Σ_k e_k⊗e_k in the target frame back to I (guarded — a no-op otherwise).
+    return fold_resolution_of_identity(ctx, out, tf);
+}
+
+auto position(Context& ctx, CoordinateChart const& chart) -> Expr const*
+{
+    // The position vector in the chart's own physical frame (vibe 000072 Obs
+    // 6): radius_vector is assembled in the reference (WCS) frame from the
+    // embedding and is the geometry primitive the metric / scale factors derive
+    // from; position projects it onto the frame's e_i (e.g. cylindrical r e_r +
+    // z e_z), staying intrinsic so grad(position) folds to I without a mixed
+    // frame.
+    return express(ctx, chart, radius_vector(ctx, chart));
 }
 
 } // namespace tender

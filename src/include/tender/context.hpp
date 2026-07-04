@@ -18,6 +18,11 @@ class Basis;
 // derivation.hpp).
 struct BasisConnection;
 
+// Forward declaration: the chart-frame cache stores a fingerprint of Expr
+// pointers (vibe 000072 Obs 2); pointers only, so the full definition (in
+// expr.hpp) is not needed here.
+struct Expr;
+
 // Context is the single argument passed to every factory function. It owns:
 //   - a ResourceList (arena-style lifetime for all allocated objects)
 //   - a shared id factory (produces contiguous CountableIndex ids)
@@ -91,20 +96,34 @@ public:
         return it == connection_registry_->end() ? nullptr : it->second;
     }
 
+    // A cached physical frame: its basis id plus a structural fingerprint of
+    // the chart that built it (the coords + embedding Expr pointers, stable
+    // under hash-consing).  The fingerprint lets physical_frame detect a
+    // chart_id reused for a *different* geometry and rebuild instead of
+    // returning a stale frame (vibe 000072 Obs 2).
+    struct ChartFrame final
+    {
+        int basis_id = 0;
+        std::vector<Expr const*> fingerprint;
+    };
+
     // Cache the physical-frame basis id for a chart (vibe 000071), so
     // physical_frame is idempotent per chart and every caller — the user
     // building fields and the operators — resolves the *same* frame (hence the
-    // same e_i atoms and connection).  Keyed by the chart's id.
-    void register_chart_frame(int chart_id, int basis_id)
+    // same e_i atoms and connection).  Keyed by the chart's id, validated by
+    // the geometry fingerprint (vibe 000072 Obs 2).
+    void register_chart_frame(
+        int chart_id, int basis_id, std::vector<Expr const*> fingerprint)
     {
-        (*chart_frame_registry_)[chart_id] = basis_id;
+        (*chart_frame_registry_)[chart_id] =
+            ChartFrame{basis_id, std::move(fingerprint)};
     }
 
-    // The cached physical-frame basis id for a chart, or 0 if none built yet.
-    auto chart_frame(int chart_id) const -> int
+    // The cached physical frame for a chart, or nullptr if none built yet.
+    auto chart_frame(int chart_id) const -> ChartFrame const*
     {
         auto it = chart_frame_registry_->find(chart_id);
-        return it == chart_frame_registry_->end() ? 0 : it->second;
+        return it == chart_frame_registry_->end() ? nullptr : &it->second;
     }
 
     // Create a child context: shares the id factory (ids remain contiguous)
@@ -129,9 +148,9 @@ private:
     // basis id to its chart's derivative table.
     std::shared_ptr<std::map<int, BasisConnection const*>> connection_registry_{
         std::make_shared<std::map<int, BasisConnection const*>>()};
-    // Chart → physical-frame basis id cache (vibe 000071), shared likewise.
-    std::shared_ptr<std::map<int, int>> chart_frame_registry_{
-        std::make_shared<std::map<int, int>>()};
+    // Chart → physical-frame cache (vibe 000071), shared likewise.
+    std::shared_ptr<std::map<int, ChartFrame>> chart_frame_registry_{
+        std::make_shared<std::map<int, ChartFrame>>()};
 
     // Private copy constructor: shares the id factory and basis registry (basis
     // ids stay globally unique across the group), but starts with FRESH

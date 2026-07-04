@@ -33,7 +33,7 @@ I = ws.identity()
 # --- vibe 71: intrinsic operators in the chart's own frame ------------------
 fb = cyl.physical_frame()  # e_r, e_θ, e_z with a known connection
 e_r, e_th, e_z = (fb.direction(i) for i in range(3))
-R = r * e_r + z * e_z  # the position vector on the frame
+R = cyl.position()  # the position vector in the frame: r e_r + z e_z (vibe 72)
 
 grad_R = cyl.grad(R)  # ∇R = I (Σ_i e_i⊗e_i, in the frame)
 f = t.field("f", 0, deps=[r], ctx=ws.ctx)  # a radial field f(r)

@@ -1211,11 +1211,11 @@ NB_MODULE(_core, m)
                 emb.reserve(embedding.size());
                 for (auto const& f: embedding)
                     emb.push_back(f.expr);
-                new (self) PyChart{
-                    reference.ctx_keep,
-                    reference.ctx,
-                    CoordinateChart{
-                        reference.basis, std::move(cs), std::move(emb)}};
+                CoordinateChart chart{
+                    reference.basis, std::move(cs), std::move(emb)};
+                validate_chart(chart); // vibe 000072 Obs 3
+                new (self)
+                    PyChart{reference.ctx_keep, reference.ctx, std::move(chart)};
             },
             "reference"_a,
             "coords"_a,
@@ -1240,7 +1240,15 @@ NB_MODULE(_core, m)
             [](PyChart const& c) -> PyExpr {
                 return PyExpr{c.ctx_keep, c.ctx, radius_vector(*c.ctx, c.chart)};
             },
-            "The position vector R = Σ_a f^a(q) u_a in the reference frame.")
+            "The position vector R = Σ_a f^a(q) u_a in the reference (WCS) frame "
+            "(the geometry primitive; for the intrinsic form use position()).")
+        .def(
+            "position",
+            [](PyChart const& c) -> PyExpr
+            { return PyExpr{c.ctx_keep, c.ctx, position(*c.ctx, c.chart)}; },
+            "The position vector in this chart's own physical frame, e.g. "
+            "cylindrical r e_r + z e_z (vibe 000072).  grad(position()) folds to "
+            "I with no mixed-frame result.")
         .def(
             "field",
             [](PyChart const& c, std::string const& name, int rank) -> PyExpr
@@ -1408,7 +1416,15 @@ NB_MODULE(_core, m)
         .def(
             "to_reference",
             [](PyChart const& c, PyExpr const& v) -> PyExpr
-            { return PyExpr{c.ctx_keep, c.ctx, to_reference(*c.ctx, v.expr)}; },
+            {
+                // vibe 000072 Obs 8: fold a completed resolution of identity in
+                // the reference frame (e.g. i⊗i + j⊗j + k⊗k → I).
+                Expr const* w = to_reference(*c.ctx, v.expr);
+                return PyExpr{
+                    c.ctx_keep,
+                    c.ctx,
+                    fold_resolution_of_identity(*c.ctx, w, c.chart.reference)};
+            },
             "v"_a,
             "Re-express v in the reference (WCS) frame (vibe 000071 P4): each "
             "physical-frame e_i becomes its Cartesian expansion, e.g. e_r → "

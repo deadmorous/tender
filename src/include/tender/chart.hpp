@@ -33,9 +33,25 @@ struct CoordinateChart final
     std::vector<Expr const*> embedding;
 };
 
+// Validate a chart's shape (vibe 000072 Obs 3): non-empty; embedding size
+// equals reference.dim(); every coord is a coordinate() atom; all coords share
+// one chart_id and occupy slots 0..n-1 in list order.  Throws
+// std::invalid_argument with a specific message otherwise — catching, e.g., a
+// stale slot= or a chart_id typo at construction rather than as a confusing
+// later result.
+void validate_chart(CoordinateChart const& chart);
+
 // The position (radius) vector R = Σ_a f^a(q) ⊗ u_a, the embedding written in
-// the reference frame's constant vectors u_a (vibe 000069 step 2).
+// the reference frame's constant vectors u_a (vibe 000069 step 2).  This is the
+// geometry primitive the tangent basis / metric / scale factors derive from, so
+// it stays in the reference (WCS) frame; for the intrinsic form see `position`.
 [[nodiscard]] auto radius_vector(Context& ctx, CoordinateChart const& chart)
+    -> Expr const*;
+
+// The position vector in the chart's own physical frame, e.g. cylindrical
+// r e_r + z e_z (vibe 000072 Obs 6): radius_vector projected onto the frame's
+// e_i.  Stays intrinsic so grad(position) folds to I without a mixed frame.
+[[nodiscard]] auto position(Context& ctx, CoordinateChart const& chart)
     -> Expr const*;
 
 // The i-th holonomic (tangent) basis vector g_i = ∂R/∂q^i (step 3), as a vector

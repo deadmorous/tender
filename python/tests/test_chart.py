@@ -306,6 +306,120 @@ def test_basis_to_basis_expansion():
     assert td.algebraic_eq(chart.express(chart.to_reference(e_r)), e_r)
 
 
+def test_intrinsic_position():
+    # vibe 000072 Obs 6: position() is the radius vector in the chart's own frame
+    # (r e_r + z e_z), so grad(position) folds to I with no mixed frame.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    fb = chart.physical_frame()
+    want = r * fb.direction(0) + z * fb.direction(2)
+    assert td.structural_eq(
+        td.canonicalize(chart.position()), td.canonicalize(want)
+    )
+    assert td.structural_eq(chart.grad(chart.position()), t.identity(ctx))
+
+
+def test_cartesian_frame_reuses_reference():
+    # vibe 000072 Obs 1: the identity chart's physical frame IS the reference
+    # basis, so it prints i, j, k (shared basis id), and express keeps those names.
+    ctx = t.Context()
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=7, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=7, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=7, slot=2, ctx=ctx)
+    chart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
+    fb = chart.physical_frame()
+    assert fb.basis_id == ref.basis_id
+    R = chart.radius_vector()
+    # express prints under the reference names i, j, k — not e_x, e_y, e_z.
+    ex_latex = chart.express(R).latex()
+    assert "\\mathbf{i}" in ex_latex and "e_{x}" not in ex_latex
+    assert td.algebraic_eq(chart.to_reference(chart.express(R)), R)
+    # A curvilinear frame is a distinct basis.
+    _, _, _, cyl = make_cylindrical(ctx)
+    assert cyl.physical_frame().basis_id != ref.basis_id
+
+
+def test_express_folds_and_projects_all_legs():
+    # vibe 000072 Obs 8: a cross-frame ∇R re-expressed in the Cartesian frame
+    # folds to I (express and to_reference both collapse the resolution), and a
+    # rank-2 dyad gets *both* legs projected onto the target frame.
+    ctx = t.Context()
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=7, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=7, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=7, slot=2, ctx=ctx)
+    cart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
+    r, th, zc, cyl = make_cylindrical(ctx)
+
+    grad_R = cyl.grad(cyl.radius_vector())
+    assert td.structural_eq(cart.express(grad_R), t.identity(ctx))
+    assert td.structural_eq(cyl.to_reference(grad_R), t.identity(ctx))
+
+    # i⊗j in the cylindrical frame: both legs on e_r/e_θ (no leftover i, j).
+    fb = cyl.physical_frame()
+    er, et = fb.direction(0), fb.direction(1)
+    cs, sn = t.cos(th), t.sin(th)
+    want = (
+        sn * cs * (er * er)
+        + cs * cs * (er * et)
+        - sn * sn * (et * er)
+        - sn * cs * (et * et)
+    )
+    ij = ref.basis(0) * ref.basis(1)
+    assert td.structural_eq(
+        td.simplify_scalars(td.canonicalize(cyl.express(ij))),
+        td.simplify_scalars(td.canonicalize(want)),
+    )
+
+
+def test_physical_frame_rebuilds_on_chart_id_reuse():
+    # vibe 000072 Obs 2: reusing a chart_id for a different chart rebuilds the
+    # frame (fingerprint-validated cache) instead of returning the stale one.
+    ctx = t.Context()
+    ref = tb.wcs(ctx)
+    r = t.coordinate("r", chart_id=5, slot=0, nonneg=True, ctx=ctx)
+    th = t.coordinate(r"\theta", chart_id=5, slot=1, ctx=ctx)
+    ph = t.coordinate(r"\varphi", chart_id=5, slot=2, ctx=ctx)
+    sph = tc.CoordinateChart(
+        ref,
+        [r, th, ph],
+        [
+            r * t.sin(th) * t.cos(ph),
+            r * t.sin(th) * t.sin(ph),
+            r * t.cos(th),
+        ],
+    )
+    sid = sph.physical_frame().basis_id
+
+    z = t.coordinate("z", chart_id=5, slot=2, ctx=ctx)
+    cyl = tc.CoordinateChart(
+        ref, [r, th, z], [r * t.cos(th), r * t.sin(th), z]
+    )
+    assert cyl.physical_frame().basis_id != sid  # not the stale spherical frame
+
+
+def test_chart_construction_validates_slots():
+    # vibe 000072 Obs 3: coords must be slot 0..n-1 of one chart_id, and the
+    # embedding must have one component per reference direction.
+    import pytest
+
+    ctx = t.Context()
+    ref = tb.wcs(ctx)
+    r = t.coordinate("r", chart_id=2, slot=0, ctx=ctx)
+    th = t.coordinate(r"\theta", chart_id=2, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=2, slot=2, ctx=ctx)
+
+    with pytest.raises(ValueError, match="slots 0"):
+        tc.CoordinateChart(ref, [th, r, z], [r, th, z])  # slots 1,0,2
+    with pytest.raises(ValueError, match="one component per reference"):
+        tc.CoordinateChart(ref, [r, th], [r, th])  # embedding size 2 ≠ 3
+
+    other = t.coordinate("s", chart_id=3, slot=2, ctx=ctx)  # foreign chart_id
+    with pytest.raises(ValueError, match="one chart_id"):
+        tc.CoordinateChart(ref, [r, th, other], [r, th, other])
+
+
 def test_tensor_field_operators():
     # A tensor field is no longer seen as constant (vibe 000070 P7): div T is a
     # symbolic vector, grad f a symbolic vector of partials, and a field declared

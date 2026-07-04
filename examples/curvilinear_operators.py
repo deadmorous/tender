@@ -166,9 +166,10 @@ show(
 
 # Each operator is ∇ applied intrinsically in the chart's own frame (vibe
 # 000071) and returns an invariant tensor — the result stays on e_r, e_θ, e_z,
-# with no trigonometry and no return to WCS.  The position vector on the frame is
-# R = r e_r + z e_z; grad raises the rank by one, so ∇R = Σ_i e_i ⊗ e_i = I.
-R_frame = r * e[0] + z * e[2]  # the same R, expressed intrinsically
+# with no trigonometry and no return to WCS.  The position vector in the frame,
+# R = r e_r + z e_z, comes straight from the chart (vibe 000072); grad raises the
+# rank by one, so ∇R = Σ_i e_i ⊗ e_i = I.
+R_frame = cyl.position()  # the position vector, intrinsic to the frame
 grad_R = cyl.grad(R_frame)  # ∇R = I
 grad_theta = cyl.grad(th)  # ∇θ = (1/r) e_θ
 grad_r2 = cyl.grad(r**2)  # ∇r² = 2r e_r
