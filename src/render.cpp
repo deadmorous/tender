@@ -317,7 +317,13 @@ struct Renderer
     {
         return visit(
             mpk::mix::Overloads{
-                [](TensorObject const&) { return ATOM_PREC; },
+                // A field derivative renders with a ∂_q prefix that binds
+                // looser than juxtaposition, so ∂_r T_rr as a product factor
+                // needs parentheses: "∂_r T_rr \, r" would misread as ∂_r(T_rr
+                // r) (vibe 000073).  Give it CONTRACT_PREC so a product child
+                // wraps it, while a plain (bare) tensor stays an atom.
+                [](TensorObject const& t)
+                { return t.field_derivs.empty() ? ATOM_PREC : CONTRACT_PREC; },
                 [](ScalarLiteral const&) { return ATOM_PREC; },
                 [](ExplicitSum const&) { return ATOM_PREC; },
                 [](NoSum const&) { return ATOM_PREC; },

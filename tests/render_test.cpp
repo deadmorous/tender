@@ -752,3 +752,18 @@ TEST(RenderBasisNames, DisplayLabelMarksIndices)
     m.assign(i, make_index_name("i"));
     EXPECT_EQ(render_latex(*e_i, m, &ctx), "\\mathbf{e}_{i'}");
 }
+
+// vibe 000073: a field derivative ∂_q T renders with a prefix that binds looser
+// than juxtaposition, so as a product factor it must be parenthesized — else
+// "∂_r f \, r" reads as ∂_r(f r) rather than (∂_r f) r.
+TEST(Render, FieldDerivativeWrapsAsProductFactor)
+{
+    Context ctx;
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* df = make_field_derivative(
+        ctx, f, make_tensor_name("r"), CoordinateRef{1, 0, false});
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 1, 0, false);
+    EXPECT_EQ(
+        latex(*make_tensor_product(ctx, df, r)), "(\\partial_{r} f) \\, r");
+    EXPECT_EQ(latex(*df), "\\partial_{r} f"); // standalone: no parentheses
+}

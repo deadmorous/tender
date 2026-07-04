@@ -182,3 +182,13 @@ def test_partial_polar_tangent_vectors():
 
     g_phi = td.canonicalize(-(r * t.sin(phi) * i) + r * t.cos(phi) * j)
     assert td.algebraic_eq(td.partial(R, phi), g_phi)
+
+
+def test_field_derivative_parenthesized_in_product():
+    # vibe 000073: ∂_r f as a product factor must be parenthesized so it does not
+    # read as ∂_r(f·r); standalone it stays bare.
+    ctx = t.Context()
+    r = t.coordinate("r", ctx=ctx)
+    f = t.field("f", 0, ctx=ctx)
+    assert (td.partial(f, r) * r).latex() == r"(\partial_{r} f) \, r"
+    assert td.partial(f, r).latex() == r"\partial_{r} f"
