@@ -121,6 +121,15 @@ void validate_chart(CoordinateChart const& chart);
 // Every operator takes and returns an invariant `Expr`; nothing assumes a
 // particular basis for T.
 
+// The invariant ∇ operator itself (vibe 000077), as a first-class expression:
+// ∇ = Σ_i (1/h_i) e_i ∂_{q^i}, a sum of terms each a scalar · frame vector ·
+// unapplied ∂ operator.  This is the operator grad/div/rot are built from —
+// apply it with a product (⊗, ·, ×) — and the raw material for user-defined
+// operators (v·∇, the material derivative, …).  Inspectable and renderable
+// without applying it to anything.
+[[nodiscard]] auto del(Context& ctx, CoordinateChart const& chart)
+    -> Expr const*;
+
 // grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, raising the rank by one.  For a scalar
 // f this is the familiar ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z; for the
 // position vector R it is the identity tensor ∇R = Σ_i e_i ⊗ e_i = I.

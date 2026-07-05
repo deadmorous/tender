@@ -1195,3 +1195,67 @@ TEST(Chart, CylindricalRot)
             ctx,
             mul(ctx, make_scalar(ctx, Rational{2}), fb.direction(ctx, 2)))));
 }
+
+// ---- first-class ∇ operator (vibe 000077, step C) ----------------------
+
+// del(chart) is the invariant operator Σ_i (1/h_i) e_i ∂_{q^i}: a rank-1
+// expression (the e_i part), built without applying it to anything.
+TEST(Chart, DelOperatorIsRankOneAndInspectable)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+
+    auto* nabla = del(ctx, chart);
+    EXPECT_EQ(infer_rank(nabla), std::optional{1}); // ∇ is a vector operator
+    // It renders with ∂ operators (it is unapplied, not a value).
+    IndexNameMap map;
+    auto s = render_latex(*nabla, map, &ctx);
+    EXPECT_NE(s.find("\\partial_{"), std::string::npos);
+}
+
+// Applying the first-class ∇ with ⊗ reproduces the gradient: apply_operators
+// of (∇ ⊗ f) equals chart.gradient(f) for a scalar field.
+TEST(Chart, DelAppliedWithTensorProductIsGradient)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+
+    auto* via_operator = steps::apply_operators(
+        ctx, make_tensor_product(ctx, del(ctx, chart), f));
+    EXPECT_TRUE(eq(ctx, via_operator, gradient(ctx, chart, f)));
+}
+
+// The cylindrical ∇ carries the 1/r scale on the θ term: its θ-direction
+// derivative is (1/r) ∂_θ, so applying ∇ to a scalar field picks up the 1/r.
+TEST(Chart, DelCylindricalHasInverseScaleFactor)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 2, 0, /*nonneg=*/true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+
+    // ∇f via the operator equals chart.gradient(f) (which carries the 1/r).
+    auto* via_operator = steps::apply_operators(
+        ctx, make_tensor_product(ctx, del(ctx, chart), f));
+    EXPECT_TRUE(eq(ctx, via_operator, gradient(ctx, chart, f)));
+    // And the rendered operator shows a 1/r (the θ scale factor).
+    IndexNameMap map;
+    auto s = render_latex(*del(ctx, chart), map, &ctx);
+    EXPECT_NE(s.find("frac{1}{r}"), std::string::npos);
+}

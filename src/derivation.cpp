@@ -3269,6 +3269,61 @@ namespace
 
 auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*;
 
+// Fold a contraction (·, :, ··, ×) with a literal-0 operand to 0 (whole tree).
+// Differentiating a product/contraction of constants leaves `0 × b` / `a · 0`
+// terms; folding them keeps canonicalize (which rejects a bare 0 operand) from
+// tripping, exactly as reduce_dot/reduce_cross do inline.
+auto fold_zero_contractions(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& c, Expr const* n) -> Expr const*
+        {
+            auto is_zero = [](Expr const* z)
+            {
+                auto const* s = std::get_if<ScalarLiteral>(&z->node);
+                return s && s->value.is_zero();
+            };
+            auto zero_if = [&](Expr const* l, Expr const* r) -> Expr const* {
+                return (is_zero(l) || is_zero(r)) ?
+                           make_scalar(c, Rational{0}) :
+                           n;
+            };
+            if (auto const* d = std::get_if<Dot>(&n->node))
+                return zero_if(d->left, d->right);
+            if (auto const* d = std::get_if<DDot>(&n->node))
+                return zero_if(d->left, d->right);
+            if (auto const* d = std::get_if<DDotAlt>(&n->node))
+                return zero_if(d->left, d->right);
+            if (auto const* d = std::get_if<Cross>(&n->node))
+                return zero_if(d->left, d->right);
+            return n;
+        });
+}
+
+// canonicalize that tolerates an ill-formed intermediate (like `partial`): on a
+// throw, fold zero contractions and retry, else return the input unchanged so
+// the caller's own reductions can finish.
+auto canon_tolerant(Context& ctx, Expr const* e) -> Expr const*
+{
+    try
+    {
+        return canonicalize(ctx, e);
+    }
+    catch (std::invalid_argument const&)
+    {
+        try
+        {
+            return canonicalize(ctx, fold_zero_contractions(ctx, e));
+        }
+        catch (std::invalid_argument const&)
+        {
+            return fold_zero_contractions(ctx, e);
+        }
+    }
+}
+
 // Apply the operators of one flat product `factors` (left-to-right order).
 auto apply_product_operators(Context& ctx, std::vector<Expr const*> const& facs)
     -> Expr const*
@@ -3306,10 +3361,39 @@ auto apply_product_operators(Context& ctx, std::vector<Expr const*> const& facs)
     return apply_operators_impl(ctx, combined);
 }
 
+// The contraction family a differential operator can commute out of: an
+// operator at the end of the left operand acts on the right operand,
+// `op(A ∂, B) → op(A, ∂▷B)` (∇·T, ∇×T, …).  Returns the operands and a
+// rebuilder for the specific product; nullopt for a non-contraction node.
+struct ContractionView final
+{
+    Expr const* left;
+    Expr const* right;
+    Expr const* (*rebuild)(Context&, Expr const*, Expr const*);
+};
+
+auto as_contraction(Expr const* e) -> std::optional<ContractionView>
+{
+    if (auto const* d = std::get_if<Dot>(&e->node))
+        return ContractionView{d->left, d->right, &make_dot};
+    if (auto const* d = std::get_if<DDot>(&e->node))
+        return ContractionView{d->left, d->right, &make_ddot};
+    if (auto const* d = std::get_if<DDotAlt>(&e->node))
+        return ContractionView{d->left, d->right, &make_ddot_alt};
+    if (auto const* d = std::get_if<Cross>(&e->node))
+        return ContractionView{d->left, d->right, &make_cross};
+    return std::nullopt;
+}
+
 auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
 {
-    // Distribute to a sum of products first, so each term is a flat product.
-    e = expand_products(ctx, canonicalize(ctx, e));
+    // Distribute products over sums *first*, before any canonicalization — an
+    // operand of ∇ (`∇⊗f`, `∇·v`) may be a plain scalar, and canon would
+    // commute it to the *left* of the operator (which is hidden inside ∇'s
+    // sum), leaving the ∂ trailing and unapplied.  Distributing first pins each
+    // operand to the right of its operator, and the operator-aware canon then
+    // keeps it there.
+    e = expand_products(ctx, e);
     // Walk the additive structure; apply operators inside each product term.
     std::function<Expr const*(Expr const*)> go =
         [&](Expr const* n) -> Expr const*
@@ -3320,6 +3404,44 @@ auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
             return make_difference(ctx, go(s->left), go(s->right));
         if (auto const* s = std::get_if<Negate>(&n->node))
             return make_negate(ctx, go(s->operand));
+        // A contraction `op(L, R)`.
+        if (auto cv = as_contraction(n))
+        {
+            // Distribute the contraction over an additive left operand (∇ is a
+            // sum of terms, so `(Σ_i term_i) · T` → Σ_i term_i · T), bringing
+            // each operator adjacent to the operand it acts on.
+            if (auto const* s = std::get_if<Sum>(&cv->left->node))
+                return go(make_sum(
+                    ctx,
+                    cv->rebuild(ctx, s->left, cv->right),
+                    cv->rebuild(ctx, s->right, cv->right)));
+            if (auto const* s = std::get_if<Difference>(&cv->left->node))
+                return go(make_difference(
+                    ctx,
+                    cv->rebuild(ctx, s->left, cv->right),
+                    cv->rebuild(ctx, s->right, cv->right)));
+            if (auto const* s = std::get_if<Negate>(&cv->left->node))
+                return go(
+                    make_negate(ctx, cv->rebuild(ctx, s->operand, cv->right)));
+            // The left operand ends in an operator: it commutes out onto the
+            // (resolved) right operand — `∇·T`, `∇×T`.  Everything left of the
+            // operator stays put.
+            Expr const* right = go(cv->right);
+            std::vector<Expr const*> lf;
+            flatten_factors(cv->left, lf);
+            if (!lf.empty() && std::holds_alternative<Deriv>(lf.back()->node))
+            {
+                auto const& d = std::get<Deriv>(lf.back()->node);
+                Expr const* dR = partial(ctx, right, d.wrt);
+                Expr const* lpre = nullptr;
+                for (std::size_t k = 0; k + 1 < lf.size(); ++k)
+                    lpre = lpre ? make_tensor_product(ctx, lpre, lf[k]) : lf[k];
+                Expr const* contracted = lpre ? cv->rebuild(ctx, lpre, dR) : dR;
+                // lpre may still carry operators; re-distribute and recurse.
+                return apply_operators_impl(ctx, contracted);
+            }
+            return cv->rebuild(ctx, go(cv->left), right);
+        }
         std::vector<Expr const*> facs;
         flatten_factors(n, facs);
         return apply_product_operators(ctx, facs);
@@ -3331,7 +3453,7 @@ auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
 
 auto apply_operators(Context& ctx, Expr const* e) -> Expr const*
 {
-    return canonicalize(ctx, apply_operators_impl(ctx, e));
+    return canon_tolerant(ctx, apply_operators_impl(ctx, e));
 }
 
 // ---- targeted scalar simplifier (vibe 000069 M3) -----------------------

@@ -705,8 +705,16 @@ auto del_apply(
     Expr const* acc = make_scalar(ctx, Rational{0});
     for (int i = 0; i < n; ++i)
     {
+        // ∂_{q^i} T through the first-class operator (vibe 000077 step C):
+        // apply_operators(∂_{q^i} ⊗ T) is the operator ∂_{q^i} acting on T,
+        // which is exactly the partial derivative — so ∇ = Σ_i (1/h_i) e_i
+        // ∂_{q^i} now drives grad/div/rot, each a particular product ⊙ of e_i
+        // with ∂_i T.
         Expr const* di = steps::simplify_scalars(
-            ctx, steps::partial(ctx, T, chart.coords[i]));
+            ctx,
+            steps::apply_operators(
+                ctx,
+                make_tensor_product(ctx, make_deriv(ctx, chart.coords[i]), T)));
         // A coordinate the field does not depend on contributes nothing.
         if (auto const* s = std::get_if<ScalarLiteral>(&di->node);
             s && s->value.is_zero())
@@ -721,6 +729,28 @@ auto del_apply(
     if (fold_identity)
         acc = fold_resolution_of_identity(ctx, acc, fb);
     return acc;
+}
+
+auto del(Context& ctx, CoordinateChart const& chart) -> Expr const*
+{
+    Basis const fb = physical_frame(ctx, chart);
+    int const n = static_cast<int>(chart.coords.size());
+    Expr const* acc = nullptr;
+    for (int i = 0; i < n; ++i)
+    {
+        // The i-th operator term (1/h_i) e_i ∂_{q^i}: scalar · vector ·
+        // operator, the ∂ last so it acts rightward on whatever ∇ is applied
+        // to.
+        Expr const* term = make_tensor_product(
+            ctx,
+            make_tensor_product(
+                ctx,
+                inv_h(ctx, scale_factor(ctx, chart, i)),
+                fb.direction(ctx, i)),
+            make_deriv(ctx, chart.coords[i]));
+        acc = acc ? make_sum(ctx, acc, term) : term;
+    }
+    return acc ? acc : make_scalar(ctx, Rational{0});
 }
 
 auto gradient(

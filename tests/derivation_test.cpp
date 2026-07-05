@@ -3974,3 +3974,27 @@ TEST(ApplyOperators, TrailingOperatorStaysBare)
     EXPECT_TRUE(structural_eq(
         steps::apply_operators(ctx, bare), steps::canonicalize(ctx, bare)));
 }
+
+// An operator commutes out of a contraction onto the operand to its right
+// (vibe 000077 step C): (a ∂_x)·v → a·(∂_x v), the shape ∇· and ∇× take.
+TEST(ApplyOperators, CommutesOutOfContraction)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1); // const
+                                                                     // vec
+    auto* v = make_field(ctx, make_tensor_name("v"), 1, {}); // vector field
+    auto* dx = make_deriv(ctx, x);
+
+    // (a ∂_x) · v  →  a · (∂_x v)
+    auto* expr = make_dot(ctx, make_tensor_product(ctx, a, dx), v);
+    auto* got = steps::apply_operators(ctx, expr);
+    auto* want = make_dot(ctx, a, steps::partial(ctx, v, x));
+    EXPECT_TRUE(algebraic_eq(ctx, got, want));
+
+    // (a ∂_x) × v  →  a × (∂_x v)
+    auto* xexpr = make_cross(ctx, make_tensor_product(ctx, a, dx), v);
+    auto* xgot = steps::apply_operators(ctx, xexpr);
+    auto* xwant = make_cross(ctx, a, steps::partial(ctx, v, x));
+    EXPECT_TRUE(algebraic_eq(ctx, xgot, xwant));
+}
