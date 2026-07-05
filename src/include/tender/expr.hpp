@@ -212,6 +212,23 @@ struct Pow final
     Expr const* exponent;
 };
 
+// A first-class differential operator (vibe 000077): the derivation ∂/∂(wrt),
+// "differentiate with respect to the tensor object `wrt`".  `wrt` is a
+// structural reference to that object — a coordinate today (a rank-0
+// CoordinateRef TensorObject), any object later; the operator's *rank* is the
+// rank of `wrt` (0 for a coordinate).
+//
+// This node is an *unapplied* operator: it acts, by convention, on everything
+// to its right within its enclosing product (Leibniz greedily), and it is
+// order-sensitive — canon must not commute it past its neighbours (else
+// `e_i ∂_i` and `∂_i e_i` would collapse).  Application (the scope marks and
+// the unapplied flag of the vibe-000077 lifecycle) arrives in the next step;
+// here a Deriv is always the bare unapplied operator.
+struct Deriv final
+{
+    Expr const* wrt;
+};
+
 // ---- Binary operation nodes --------------------------------------------
 
 struct Sum final
@@ -303,7 +320,8 @@ struct Expr final
         ExplicitSum,
         NoSum,
         ScalarFn,
-        Pow>;
+        Pow,
+        Deriv>;
 
     Node node;
 
@@ -392,6 +410,10 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
     -> Expr const*;
 [[nodiscard]] auto make_pow(Context&, Expr const* base, Expr const* exponent)
     -> Expr const*;
+
+// The unapplied differential operator ∂/∂(wrt) (vibe 000077).  `wrt` is the
+// tensor object differentiated against (a coordinate for now).
+[[nodiscard]] auto make_deriv(Context&, Expr const* wrt) -> Expr const*;
 
 // Unary
 [[nodiscard]] auto make_negate(Context&, Expr const*) -> Expr const*;

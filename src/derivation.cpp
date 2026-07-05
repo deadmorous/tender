@@ -104,6 +104,7 @@ auto find_index_space(Expr const* e, int id) -> IndexSpace const*
                     go(s.base);
                     go(s.exponent);
                 },
+                [&](Deriv const& s) { go(s.wrt); },
             },
             *node);
     };
@@ -310,6 +311,7 @@ auto find_space_from_concrete(Expr const* e) -> IndexSpace const*
                     go(s.base);
                     go(s.exponent);
                 },
+                [&](Deriv const& s) { go(s.wrt); },
             },
             *node);
     };
@@ -397,6 +399,7 @@ void collect_concrete_values(Expr const* e, std::vector<int>& out)
                     go(s.base);
                     go(s.exponent);
                 },
+                [&](Deriv const& s) { go(s.wrt); },
             },
             *node);
     };
@@ -589,6 +592,11 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                 auto const* pb = std::get_if<Pow>(&b->node);
                 return pb && structural_eq(pa.base, pb->base)
                        && structural_eq(pa.exponent, pb->exponent);
+            },
+            [&](Deriv const& da) -> bool
+            {
+                auto const* db = std::get_if<Deriv>(&b->node);
+                return db && structural_eq(da.wrt, db->wrt);
             },
         },
         a->node);
@@ -816,6 +824,8 @@ auto has_free_index_for(
                 return has_free_index_for(s.base, indices, bound)
                        || has_free_index_for(s.exponent, indices, bound);
             },
+            [&](Deriv const& s) -> bool
+            { return has_free_index_for(s.wrt, indices, bound); },
         },
         *e);
 }
@@ -886,6 +896,9 @@ auto is_component_valued(Expr const* e) -> bool
                 return is_component_valued(p.base)
                        && is_component_valued(p.exponent);
             },
+            // A differential operator is not a commuting component value
+            // (vibe 000077): its position carries meaning.
+            [](Deriv const&) { return false; },
         },
         *e);
 }
@@ -946,6 +959,10 @@ auto infer_rank(Expr const* e) -> std::optional<int>
             // Scalar fields are rank 0.
             [](ScalarFn const&) -> std::optional<int> { return 0; },
             [](Pow const&) -> std::optional<int> { return 0; },
+            // A differential operator's rank is that of the object it
+            // differentiates with respect to (vibe 000077): a coordinate ⇒ 0.
+            [](Deriv const& d) -> std::optional<int>
+            { return infer_rank(d.wrt); },
         },
         *e);
 }
@@ -2400,6 +2417,11 @@ auto map_children(Context& ctx, Expr const* e, Rec const& rec) -> Expr const*
                            e :
                            make_pow(ctx, base, exp);
             },
+            [&](Deriv const& s) -> Expr const*
+            {
+                auto* w = rec(s.wrt);
+                return w == s.wrt ? e : make_deriv(ctx, w);
+            },
         },
         *e);
 }
@@ -2787,6 +2809,7 @@ auto has_explicit_sum_for(
                     go(s.base);
                     go(s.exponent);
                 },
+                [&](Deriv const& s) { go(s.wrt); },
             },
             *node);
     };
@@ -3190,6 +3213,16 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
                         p.base));
                 return make_tensor_product(
                     ctx, make_pow(ctx, p.base, p.exponent), inner);
+            },
+            [&](Deriv const&) -> Expr const*
+            {
+                // Differentiating an (unapplied) operator is operator
+                // composition, whose Leibniz/commutation rules arrive with
+                // application (vibe 000077, step B).  Until then, refuse rather
+                // than guess.
+                throw std::invalid_argument(
+                    "diff: differentiating a ∂ operator (operator composition) "
+                    "is not supported yet");
             },
         },
         *e);

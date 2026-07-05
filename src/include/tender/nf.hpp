@@ -130,10 +130,21 @@ struct Pow final
     Nf const* exponent;
 };
 
+// A first-class differential operator ∂/∂(wrt) (vibe 000077): the unapplied
+// derivation, mirroring the surface `Expr` `Deriv`.  `wrt` is the object
+// differentiated against (a coordinate `TensorObject` for now), reused from the
+// `Atom` machinery for compare/hash.  It is an *operator*, so `place_factors`
+// keeps it in the positional (tensor) region — never sorted among the
+// commutative scalars — so its order relative to its neighbours is preserved.
+struct Deriv final
+{
+    TensorObject wrt;
+};
+
 struct Factor final
 {
-    using Node =
-        std::variant<Atom, Contraction, Cross, Paren, Unary, Div, ScalarFn, Pow>;
+    using Node = std::
+        variant<Atom, Contraction, Cross, Paren, Unary, Div, ScalarFn, Pow, Deriv>;
 
     Node node;
 
@@ -231,6 +242,9 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
 
 [[nodiscard]] auto make_pow(Context&, Nf const* base, Nf const* exponent)
     -> Factor const*;
+
+// The differential operator ∂/∂(wrt) (vibe 000077).
+[[nodiscard]] auto make_deriv(Context&, TensorObject wrt) -> Factor const*;
 
 [[nodiscard]] auto make_nf(Context&, std::vector<Term> terms) -> Nf const*;
 

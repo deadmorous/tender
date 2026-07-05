@@ -1,7 +1,8 @@
 #include <tender/nf_match.hpp>
 
 #include <mpk/mix/util/overloads.hpp>
-#include <tender/expr.hpp> // TensorObject, SlotBinding
+#include <tender/expr.hpp>         // TensorObject, SlotBinding
+#include <tender/tensor_order.hpp> // tensor_object_cmp
 
 #include <algorithm>
 #include <functional>
@@ -151,7 +152,9 @@ auto factor_rank(Factor const* f) -> std::optional<int>
             [](Div const& d) -> std::optional<int> { return nf_rank(d.num); },
             // Scalar fields are rank 0.
             [](ScalarFn const&) -> std::optional<int> { return 0; },
-            [](Pow const&) -> std::optional<int> { return 0; }},
+            [](Pow const&) -> std::optional<int> { return 0; },
+            // A ∂ operator's rank is that of its wrt-object (vibe 000077).
+            [](Deriv const& d) -> std::optional<int> { return d.wrt.rank; }},
         *f);
 }
 
@@ -323,6 +326,11 @@ auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
                 return t && match_nf(p.base, t->base, bnd)
                        && match_nf(p.exponent, t->exponent, bnd);
             },
+            [&](Deriv const& p) -> bool
+            {
+                auto const* t = std::get_if<Deriv>(&tgt->node);
+                return t && tensor_object_cmp(p.wrt, t->wrt) == 0;
+            },
         },
         *pat);
 }
@@ -409,6 +417,14 @@ void collect_factor_ids(Factor const* f, std::set<int>& out)
             {
                 collect_nf_ids(p.base, out);
                 collect_nf_ids(p.exponent, out);
+            },
+            [&](Deriv const& d)
+            {
+                for (auto const& s: d.wrt.slots)
+                    if (s.index)
+                        if (auto const* ci =
+                                std::get_if<CountableIndex>(&*s.index))
+                            out.insert(ci->id);
             },
         },
         *f);
@@ -650,6 +666,17 @@ auto inst_factor(
                     inst_nf(ctx, p.base, bnd),
                     inst_nf(ctx, p.exponent, bnd));
             },
+            [&](Deriv const& d) -> Factor const*
+            {
+                auto slots = d.wrt.slots;
+                for (auto& s: slots)
+                    if (s.index)
+                        s.index = remap_assoc(*s.index, bnd, fresh);
+                return make_deriv(
+                    ctx,
+                    TensorObject{
+                        d.wrt.name, d.wrt.rank, d.wrt.traits, std::move(slots)});
+            },
         },
         *f);
 }
@@ -834,6 +861,7 @@ auto rewrite_in_factor(Context& ctx, ChainRule const& cr, Factor const* f)
             [&](Div const&) -> Factor const* { return nullptr; },
             [&](ScalarFn const&) -> Factor const* { return nullptr; },
             [&](Pow const&) -> Factor const* { return nullptr; },
+            [&](Deriv const&) -> Factor const* { return nullptr; },
         },
         *f);
 }

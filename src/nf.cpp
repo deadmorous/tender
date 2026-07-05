@@ -77,6 +77,11 @@ auto make_pow(Context& ctx, Nf const* base, Nf const* exponent) -> Factor const*
     return ctx.make<Factor>(Pow{.base = base, .exponent = exponent});
 }
 
+auto make_deriv(Context& ctx, TensorObject wrt) -> Factor const*
+{
+    return ctx.make<Factor>(Deriv{.wrt = std::move(wrt)});
+}
+
 auto make_nf(Context& ctx, std::vector<Term> terms) -> Nf const*
 {
     return ctx.make<Nf>(Nf{.terms = std::move(terms)});
@@ -146,6 +151,10 @@ auto equal(Factor const& a, Factor const& b) -> bool
                 auto const& fb = std::get<Pow>(b.node);
                 return equal(fa.base, fb.base)
                        && equal(fa.exponent, fb.exponent);
+            },
+            [&](Deriv const& fa) -> bool {
+                return tensor_object_cmp(fa.wrt, std::get<Deriv>(b.node).wrt)
+                       == 0;
             },
         },
         a);
@@ -257,6 +266,8 @@ auto compare(Factor const& a, Factor const& b) -> int
                     return c;
                 return compare(*fa.exponent, *fb.exponent);
             },
+            [&](Deriv const& fa) -> int
+            { return tensor_object_cmp(fa.wrt, std::get<Deriv>(b.node).wrt); },
         },
         a);
 }
@@ -405,6 +416,8 @@ auto hash(Factor const& f) -> std::size_t
                 h = hash_mix(h, p.exponent ? hash(*p.exponent) : 0);
                 return hash_mix(tag, h);
             },
+            [&](Deriv const& d) -> std::size_t
+            { return hash_mix(tag, hash_tensor_object(d.wrt)); },
         },
         f);
 }

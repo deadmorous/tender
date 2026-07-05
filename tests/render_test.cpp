@@ -767,3 +767,17 @@ TEST(Render, FieldDerivativeWrapsAsProductFactor)
         latex(*make_tensor_product(ctx, df, r)), "(\\partial_{r} f) \\, r");
     EXPECT_EQ(latex(*df), "\\partial_{r} f"); // standalone: no parentheses
 }
+
+// ---- ∂ operator (vibe 000077, step A) ----------------------------------
+
+TEST(Render, DerivOperator)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* dx = make_deriv(ctx, x);
+    EXPECT_EQ(latex(*dx), "\\partial_{x}");
+    // In a product the operator renders in position, left of its (rightward)
+    // operand: ∂_x acting on a field f.
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    EXPECT_EQ(latex(*make_tensor_product(ctx, dx, f)), "\\partial_{x} \\, f");
+}

@@ -119,6 +119,7 @@ static bool is_scalar_expr(Expr const& e)
             [](ScalarFn const&) { return true; },
             [](Pow const& p)
             { return is_scalar_expr(*p.base) && is_scalar_expr(*p.exponent); },
+            [](Deriv const&) { return false; },
         },
         e);
 }
@@ -343,6 +344,10 @@ struct Renderer
                 // Function application / superscript — self-delimiting, atomic.
                 [](ScalarFn const&) { return ATOM_PREC; },
                 [](Pow const&) { return ATOM_PREC; },
+                // A ∂ operator: the subscript self-delimits it, so it needs no
+                // wrapping as a product child (∂_x f, not (∂_x) f) — vibe
+                // 000077.
+                [](Deriv const&) { return ATOM_PREC; },
             },
             e);
     }
@@ -524,6 +529,10 @@ struct Renderer
                     return sub(*p.base, ATOM_PREC) + "^{" + render(*p.exponent)
                            + "}";
                 },
+                // ∂/∂(wrt), an unapplied operator (vibe 000077): the derivative
+                // symbol subscripted by the object it differentiates against.
+                [&](Deriv const& d) -> std::string
+                { return "\\partial_{" + render(*d.wrt) + "}"; },
             },
             e);
     }
@@ -554,6 +563,8 @@ struct NfRenderer
                 [](nf::Div const&) { return ATOM_PREC; },   // \frac is atomic
                 [](nf::ScalarFn const&) { return ATOM_PREC; },
                 [](nf::Pow const&) { return ATOM_PREC; },
+                [](nf::Deriv const&) { return ATOM_PREC; }, // subscript
+                                                            // self-delimits
             },
             f);
     }
@@ -649,6 +660,14 @@ struct NfRenderer
                     if (wrap)
                         base = "(" + base + ")";
                     return base + "^{" + render_nf(*p.exponent) + "}";
+                },
+                [&](nf::Deriv const& d) -> std::string
+                {
+                    mpk::mix::EnumFlags<RenderHint> hints;
+                    if (d.wrt.traits)
+                        hints = d.wrt.traits->render_hints;
+                    return "\\partial_{" + name_str(d.wrt.name, d.wrt.rank)
+                           + slots_str(map, d.wrt.slots, hints, ctx) + "}";
                 },
             },
             f);

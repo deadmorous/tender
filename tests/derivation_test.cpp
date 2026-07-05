@@ -3833,3 +3833,57 @@ TEST(Derivation, DistributeContractionThroughScalarDiv)
     EXPECT_TRUE(
         algebraic_eq(ctx, dist2, expected2) || algebraic_eq(ctx, dist2, alt2));
 }
+
+// ---- first-class ∂ operator (vibe 000077, step A) ----------------------
+
+// A ∂ operator has the rank of its wrt-object (0 for a coordinate), compares
+// by wrt, and survives canonicalization opaquely.
+TEST(Deriv, RankIdentityAndCanon)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1, false);
+    auto* dx = make_deriv(ctx, x);
+    auto* dy = make_deriv(ctx, y);
+
+    EXPECT_EQ(infer_rank(dx), std::optional{0});        // coordinate ⇒ 0
+    EXPECT_TRUE(structural_eq(dx, make_deriv(ctx, x))); // by wrt
+    EXPECT_FALSE(structural_eq(dx, dy));
+    // Opaque through canon (unchanged, stable).
+    auto* c = steps::canonicalize(ctx, dx);
+    EXPECT_TRUE(structural_eq(c, dx));
+    EXPECT_TRUE(structural_eq(steps::canonicalize(ctx, c), c));
+}
+
+// The operator is order-sensitive: canon must NOT commute a ∂ past a
+// neighbouring scalar, so `∂_x · x` (operator then operand) stays distinct from
+// `x · ∂_x` (scalar then operator) — the property that lets application in step
+// B tell "differentiate x" from "x times the operator".
+TEST(Deriv, CanonPreservesOperatorOrder)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* dx = make_deriv(ctx, x);
+
+    auto* dx_x = steps::canonicalize(ctx, make_tensor_product(ctx, dx, x));
+    auto* x_dx = steps::canonicalize(ctx, make_tensor_product(ctx, x, dx));
+    EXPECT_FALSE(structural_eq(dx_x, x_dx));
+    // Each is stable under a second canon.
+    EXPECT_TRUE(structural_eq(dx_x, steps::canonicalize(ctx, dx_x)));
+    EXPECT_TRUE(structural_eq(x_dx, steps::canonicalize(ctx, x_dx)));
+}
+
+// Two operators compose non-commutatively in structure (order kept), so
+// `∂_x ∂_y` and `∂_y ∂_x` are distinct expressions until a rule identifies
+// them.
+TEST(Deriv, OperatorCompositionKeepsOrder)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1, false);
+    auto* dx = make_deriv(ctx, x);
+    auto* dy = make_deriv(ctx, y);
+    auto* dxdy = steps::canonicalize(ctx, make_tensor_product(ctx, dx, dy));
+    auto* dydx = steps::canonicalize(ctx, make_tensor_product(ctx, dy, dx));
+    EXPECT_FALSE(structural_eq(dxdy, dydx));
+}

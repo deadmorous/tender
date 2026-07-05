@@ -259,6 +259,9 @@ struct NfEGraph::Impl final
                 { return add_node(NfENode{NfEKind::Atom, f, {}}); },
                 [&](Pow const&) -> EClassId
                 { return add_node(NfENode{NfEKind::Atom, f, {}}); },
+                // A ∂ operator (vibe 000077) rides the generic Atom path too.
+                [&](Deriv const&) -> EClassId
+                { return add_node(NfENode{NfEKind::Atom, f, {}}); },
             },
             *f);
     }

@@ -130,6 +130,15 @@ auto rewrite_tree(Context& ctx, Expr const* e, F const& f) -> Expr const*
                            e :
                            make_pow(ctx, base, exp);
             },
+
+            // Differential operator (vibe 000077): recurse into `wrt` (a label
+            // object; a no-op for a plain coordinate, but keeps future indexed
+            // wrt-objects consistent).
+            [&](Deriv const& s) -> Expr const*
+            {
+                auto* w = rewrite_tree(ctx, s.wrt, f);
+                return w == s.wrt ? e : make_deriv(ctx, w);
+            },
         },
         *e);
 

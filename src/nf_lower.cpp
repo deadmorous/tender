@@ -268,6 +268,17 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
         auto sf = encapsulate(ctx, u->operand);
         return {sf.sign, make_unary(ctx, UnaryOp::Transpose, sf.factor)};
     }
+    // A ∂ operator (vibe 000077): its wrt-object is a bare TensorObject (a
+    // coordinate today); carry it into the nf Deriv factor.
+    if (auto const* d = std::get_if<tender::Deriv>(&factor->node))
+    {
+        auto const* w = std::get_if<TensorObject>(&d->wrt->node);
+        if (!w)
+            throw std::invalid_argument(
+                "encapsulate: ∂ operator wrt-object must be a bare tensor "
+                "object (a coordinate)");
+        return {1, make_deriv(ctx, *w)};
+    }
 
     if (auto const* c = std::get_if<tender::Cross>(&factor->node))
     {
@@ -346,6 +357,17 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
 auto place_factors(Context& ctx, ProductParts const& pp) -> Term
 {
     Term t{.coeff = pp.coeff};
+    // A differential operator acts on everything to its right (vibe 000077),
+    // so once a term contains one, *no* factor may be commuted — a scalar to an
+    // operator's right is its operand (`∂_x x`) and must stay distinct from one
+    // to its left (`x ∂_x`).  Detect an operator anywhere in the product and,
+    // if present, keep every factor positional (the tensor region) so the whole
+    // left-to-right order is preserved.
+    bool const has_operator = std::any_of(
+        pp.factors.begin(),
+        pp.factors.end(),
+        [](Expr const* f)
+        { return std::holds_alternative<tender::Deriv>(f->node); });
     for (auto const* f: pp.factors)
     {
         // Region by *result* rank: a known scalar (rank 0) joins the
@@ -357,7 +379,7 @@ auto place_factors(Context& ctx, ProductParts const& pp) -> Term
         auto rank = infer_rank(f);
         auto enc = encapsulate(ctx, f);
         t.coeff *= Rational{enc.sign}; // lift anticommutation sign into coeff
-        if (rank == std::optional<int>{0})
+        if (rank == std::optional<int>{0} && !has_operator)
             t.scalars.push_back(enc.factor);
         else
             t.tensors.push_back(enc.factor);
@@ -736,6 +758,10 @@ auto raise_factor(Context& ctx, Factor const& f) -> Expr const*
                 return tender::make_pow(
                     ctx, raise(ctx, *p.base), raise(ctx, *p.exponent));
             },
+            // ∂ operator (vibe 000077): rebuild the surface Deriv over its
+            // wrt-object wrapped back into an Expr.
+            [&](Deriv const& d) -> Expr const*
+            { return tender::make_deriv(ctx, ctx.make<Expr>(d.wrt)); },
         },
         f);
 }

@@ -110,6 +110,11 @@ auto make_pow(Context& ctx, Expr const* base, Expr const* exponent)
     return ctx.make<Expr>(Pow{base, exponent});
 }
 
+auto make_deriv(Context& ctx, Expr const* wrt) -> Expr const*
+{
+    return ctx.make<Expr>(Deriv{wrt});
+}
+
 // ---- Unary factory -----------------------------------------------------
 
 auto make_negate(Context& ctx, Expr const* operand) -> Expr const*
