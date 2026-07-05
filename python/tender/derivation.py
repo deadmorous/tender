@@ -365,5 +365,8 @@ def structural_eq(a, b):
 
 
 def algebraic_eq(a, b):
-    """Algebraic equality in theory T0: ``structural_eq`` of the canonical forms."""
+    """Algebraic equality: ``structural_eq`` of the canonical forms (theory T0),
+    falling back to checking that ``simplify_scalars(a - b)`` is the literal 0 —
+    so fraction shapes that T0 keeps apart (``x/r + y/r`` vs ``(x+y)/r``) compare
+    equal (vibe 000074)."""
     return _core._algebraic_eq(a, b)

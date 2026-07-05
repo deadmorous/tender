@@ -337,6 +337,69 @@ TEST(Chart, RouteAExpandAndComponents)
     EXPECT_FALSE(eq(ctx, comps_A[0], make_scalar(ctx, Rational{0})));
 }
 
+// vibe 000074: component_matrix surfaces a rank-2 tensor as the physical
+// component matrix e_i·T·e_j; components refuses a rank-2 input loudly.
+TEST(Chart, ComponentMatrixOfSymmetricField)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto* T = make_field(ctx, make_tensor_name("T"), 2, {}, /*symmetric=*/true);
+
+    auto m = component_matrix(ctx, chart, T);
+    ASSERT_EQ(m.size(), 3u);
+    for (auto const& row: m)
+        ASSERT_EQ(row.size(), 3u);
+    // Every entry is a scalar (rank 0) and nonzero — the minted component.
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+        {
+            EXPECT_EQ(infer_rank(m[i][j]), std::optional<int>{0});
+            EXPECT_FALSE(eq(ctx, m[i][j], make_scalar(ctx, Rational{0})));
+        }
+    // Symmetry folds: the matrix itself is symmetric, entry by entry.
+    for (int i = 0; i < 3; ++i)
+        for (int j = i + 1; j < 3; ++j)
+            EXPECT_TRUE(eq(ctx, m[i][j], m[j][i]));
+    // Off-diagonal entries are distinct components.
+    EXPECT_FALSE(eq(ctx, m[0][1], m[0][2]));
+    EXPECT_FALSE(eq(ctx, m[0][0], m[1][1]));
+
+    // components refuses the rank-2 input, pointing at component_matrix.
+    EXPECT_THROW((void)components(ctx, chart, T), std::invalid_argument);
+}
+
+// vibe 000074: component_matrix of an explicit dyad picks out the single
+// entry — no abstract field involved, so this exercises the pure projection.
+TEST(Chart, ComponentMatrixOfDyad)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto fb = physical_frame(ctx, chart);
+    auto* dyad = make_tensor_product(
+        ctx, fb.direction(ctx, 1), fb.direction(ctx, 1)); // e_θ ⊗ e_θ
+    auto m = component_matrix(ctx, chart, dyad);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            EXPECT_TRUE(
+                eq(ctx,
+                   m[i][j],
+                   make_scalar(ctx, Rational{i == 1 && j == 1 ? 1 : 0})));
+}
+
 // vibe 000073: a bare basis has no connection Ω, so expanding a field
 // derivative ∂T on a moving frame would silently drop the connection terms.
 // expand_in_basis refuses loudly; on a constant (Cartesian) frame, where

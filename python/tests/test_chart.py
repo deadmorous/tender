@@ -657,3 +657,49 @@ def test_rot_of_constant_is_zero():
     a = t.tensor("a", rank=1, ctx=ctx)
     b = t.tensor("b", rank=1, ctx=ctx)
     assert td.algebraic_eq(chart.rot(a % b), t.scalar(0, ctx=ctx))
+
+
+def test_components_of_rank2_returns_matrix():
+    # vibe 000074: components of a rank-2 tensor returns the nested component
+    # matrix m[i][j] = e_i·T·e_j, with the abstract field expanded first and
+    # the symmetry folded (m[1][0] is T_rθ, not T_θr).
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    T = t.field("T", 2, symmetric=True, ctx=ctx)
+    M = chart.components(T)
+    assert len(M) == 3 and all(len(row) == 3 for row in M)
+    assert M[0][1].latex() == r"T_{r\theta}"
+    assert M[1][0].latex() == r"T_{r\theta}"  # symmetry folded
+    assert M[1][1].latex() == r"T_{\theta\theta}"
+    assert M[2][2].latex() == "T_{zz}"
+
+
+def test_component_matrix_of_explicit_dyad():
+    # vibe 000074: an explicit dyad picks out a single matrix entry, and a row
+    # that projects out to zero must not poison the reduction (the 0·e_j
+    # guard in reduce_dot).
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    e = [chart.physical_frame().direction(k) for k in range(3)]
+    M = chart.components(e[1] * e[1])
+    for i in range(3):
+        for j in range(3):
+            assert M[i][j].latex() == ("1" if i == j == 1 else "0")
+
+
+def test_textbook_check_needs_no_fraction_workaround():
+    # vibe 000074, the papercut that motivated the algebraic_eq fallback: the
+    # θ-equation of ∇·T matches its textbook form directly — no manual
+    # simplify_scalars(a - b) reshaping.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    T = t.field("T", 2, symmetric=True, ctx=ctx)
+    M = chart.components(T)
+    div_th = chart.components(chart.div(T))[1]
+    rhs = (
+        td.partial(M[0][1], r)
+        + td.partial(M[1][1], th) / r
+        + td.partial(M[1][2], z)
+        + 2 * M[0][1] / r
+    )
+    assert td.algebraic_eq(div_th, rhs)

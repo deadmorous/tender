@@ -3767,3 +3767,26 @@ TEST(CollectTerms, GroupsByDyadSummingScalarCoefficients)
     EXPECT_EQ(count(tex, "\\mathbf{e} \\, \\mathbf{g}"), 1);
     EXPECT_EQ(count(tex, "\\mathbf{g} \\, \\mathbf{e}"), 1);
 }
+
+// vibe 000074: algebraic_eq closes the fraction-shape gap of theory T0 — the
+// canonical forms keep x/r + y/r and (x+y)/r apart, so algebraic_eq falls back
+// to checking that the difference simplifies to the literal 0.
+TEST(Derivation, AlgebraicEqFoldsFractionShapes)
+{
+    Context ctx;
+    auto* x = make_field(ctx, make_tensor_name("x"), 0, {});
+    auto* y = make_field(ctx, make_tensor_name("y"), 0, {});
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 1, 0, /*nonneg=*/true);
+    auto* split =
+        make_sum(ctx, make_scalar_div(ctx, x, r), make_scalar_div(ctx, y, r));
+    auto* joined = make_scalar_div(ctx, make_sum(ctx, x, y), r);
+    // T0 alone keeps the two shapes apart …
+    EXPECT_FALSE(structural_eq(
+        steps::canonicalize(ctx, split), steps::canonicalize(ctx, joined)));
+    // … the fallback closes the gap …
+    EXPECT_TRUE(algebraic_eq(ctx, split, joined));
+    // … and genuinely different expressions still compare unequal.
+    EXPECT_FALSE(algebraic_eq(
+        ctx, make_scalar_div(ctx, x, r), make_scalar_div(ctx, y, r)));
+}

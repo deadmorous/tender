@@ -594,11 +594,33 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
         a->node);
 }
 
-// Algebraic equality in theory T0: structural_eq of the two canonical forms.
-auto algebraic_eq(Context& ctx, Expr const* a, Expr const* b) -> bool
+namespace
+{
+
+// The T0 decision procedure: structural_eq of the two canonical forms.  This
+// is the comparator simplify_scalars' own helpers use (trig-square pairing,
+// fraction-factor bagging) — those must not re-enter simplify_scalars, so
+// they call this instead of the public algebraic_eq below.
+auto algebraic_eq_t0(Context& ctx, Expr const* a, Expr const* b) -> bool
 {
     return structural_eq(
         steps::canonicalize(ctx, a), steps::canonicalize(ctx, b));
+}
+
+} // namespace
+
+// Algebraic equality: the T0 decision procedure, plus a scalar fallback for
+// what T0 keeps apart — fraction shapes.  Canonical forms distinguish
+// x/r + y/r from (x+y)/r, so when T0 says "different", check whether the
+// difference simplifies to the literal 0 (vibe 000074).
+auto algebraic_eq(Context& ctx, Expr const* a, Expr const* b) -> bool
+{
+    if (algebraic_eq_t0(ctx, a, b))
+        return true;
+    Expr const* d = steps::simplify_scalars(
+        ctx, steps::canonicalize(ctx, make_difference(ctx, a, b)));
+    auto const* s = std::get_if<ScalarLiteral>(&d->node);
+    return s && s->value.is_zero();
 }
 
 namespace
@@ -3323,8 +3345,8 @@ auto pythagorean_fold(Context& ctx, Expr const* e) -> Expr const*
                 {
                     if (ci.kind == cj.kind) // need one sin and one cos
                         continue;
-                    if (algebraic_eq(ctx, ci.arg, cj.arg)
-                        && algebraic_eq(ctx, ci.remainder, cj.remainder))
+                    if (algebraic_eq_t0(ctx, ci.arg, cj.arg)
+                        && algebraic_eq_t0(ctx, ci.remainder, cj.remainder))
                     {
                         result.push_back(ci.remainder);
                         used[i] = used[j] = true;
@@ -3537,7 +3559,7 @@ struct FactorBag final
 void bag_add(Context& ctx, FactorBag& bag, Expr const* base, long exp)
 {
     for (auto& kv: bag.bases)
-        if (algebraic_eq(ctx, kv.first, base))
+        if (algebraic_eq_t0(ctx, kv.first, base))
         {
             kv.second += exp;
             return;
@@ -3677,7 +3699,7 @@ auto combine_fractions(Context& ctx, Expr const* e) -> Expr const*
             long const need = -kv.second;
             bool found = false;
             for (auto& db: dbases)
-                if (algebraic_eq(ctx, db.first, kv.first))
+                if (algebraic_eq_t0(ctx, db.first, kv.first))
                 {
                     db.second = std::max(db.second, need);
                     found = true;

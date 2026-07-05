@@ -1459,17 +1459,38 @@ NB_MODULE(_core, m)
             "surface an invariant like div(T) into frame components.")
         .def(
             "components",
-            [](PyChart const& c, PyExpr const& v) -> std::vector<PyExpr>
+            [](PyChart const& c, PyExpr const& v) -> nb::object
             {
+                auto wrap = [&c](Expr const* e) -> PyExpr
+                { return PyExpr{c.ctx_keep, c.ctx, e}; };
+                // Rank-2 input → the component matrix e_i·v·e_j (vibe 000074).
+                if (auto const rk = infer_rank(v.expr); rk && *rk == 2)
+                {
+                    auto m = component_matrix(*c.ctx, c.chart, v.expr);
+                    std::vector<std::vector<PyExpr>> mat;
+                    mat.reserve(m.size());
+                    for (auto const& row: m)
+                    {
+                        std::vector<PyExpr> r;
+                        r.reserve(row.size());
+                        for (auto const* e: row)
+                            r.push_back(wrap(e));
+                        mat.push_back(std::move(r));
+                    }
+                    return nb::cast(mat);
+                }
                 auto cs = components(*c.ctx, c.chart, v.expr);
                 std::vector<PyExpr> out;
                 out.reserve(cs.size());
                 for (auto const* e: cs)
-                    out.push_back(PyExpr{c.ctx_keep, c.ctx, e});
-                return out;
+                    out.push_back(wrap(e));
+                return nb::cast(out);
             },
             "v"_a,
-            "The scalar components [c_0, c_1, …] of a vector v on this chart's "
-            "physical frame: c_i = v·e_i, reduced (vibe 000073).  Surfaces an "
-            "invariant vector (e.g. div(T)) as its numbered frame components.");
+            "The physical components of v on this chart's frame, reduced.  For "
+            "a vector: the list [c_0, c_1, …], c_i = v·e_i (vibe 000073) — "
+            "surfaces an invariant like div(T) as its frame components.  For a "
+            "rank-2 tensor: the nested list m[i][j] = e_i·v·e_j (vibe 000074), "
+            "with an abstract field expanded first, so m[i][j] is the minted "
+            "physical component T_ij (symmetry folded: m[1][0] is T_rθ).");
 }

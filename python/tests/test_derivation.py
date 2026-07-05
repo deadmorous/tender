@@ -790,3 +790,20 @@ def test_simplify_is_canonicalize_then_implicitize():
     assert td.structural_eq(
         td.simplify(expanded), td.implicitize(td.canonicalize(expanded))
     )
+
+
+# ---- algebraic_eq fraction fallback (vibe 000074) --------------------------
+
+def test_algebraic_eq_folds_fraction_shapes():
+    # Canonical forms (theory T0) keep x/r + y/r and (x+y)/r apart; the
+    # fallback checks that the difference simplifies to the literal 0, so the
+    # two shapes compare equal — no manual simplify_scalars(a - b) needed.
+    ctx = tender.Context()
+    x = tender.field("x", 0, ctx=ctx)
+    y = tender.field("y", 0, ctx=ctx)
+    r = tender.coordinate("r", chart_id=1, slot=0, nonneg=True, ctx=ctx)
+    assert not td.structural_eq(
+        td.canonicalize(x / r + y / r), td.canonicalize((x + y) / r)
+    )
+    assert td.algebraic_eq(x / r + y / r, (x + y) / r)
+    assert not td.algebraic_eq(x / r, y / r)

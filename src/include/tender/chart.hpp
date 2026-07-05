@@ -212,10 +212,21 @@ void validate_chart(CoordinateChart const& chart);
 // The scalar components of a vector `v` on the chart's physical frame, one per
 // direction i: c_i = v · e_i, reduced (vibe 000073).  Surfaces an invariant
 // vector (e.g. an operator result) as the numbered frame components, so the
-// caller need not spell out the project-then-reduce pipeline by hand.
+// caller need not spell out the project-then-reduce pipeline by hand.  Throws
+// std::invalid_argument on a rank-≥2 input (use component_matrix for rank 2).
 [[nodiscard]] auto components(
     Context& ctx,
     CoordinateChart const& chart,
     Expr const* v) -> std::vector<Expr const*>;
+
+// The physical component matrix of a rank-2 tensor `v` on the chart's frame:
+// out[i][j] = e_i · v · e_j, reduced (vibe 000074).  Expands abstract fields
+// first, so component_matrix(T) of a symmetric stress field is the matrix of
+// minted components T_ij with the symmetry folded (out[1][0] is T_rθ, not
+// T_θr).  The Python `chart.components` dispatches here on a rank-2 input.
+[[nodiscard]] auto component_matrix(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* v) -> std::vector<std::vector<Expr const*>>;
 
 } // namespace tender

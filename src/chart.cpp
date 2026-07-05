@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace tender
@@ -193,6 +194,27 @@ auto reduce_dot(Context& ctx, Basis const& ref, Expr const* u, Expr const* v)
     -> Expr const*
 {
     Expr const* e = distribute_bilinear(ctx, u, v, &make_dot);
+    // A dot with a zero operand is zero — a fully projected-out operand (e.g.
+    // the row e_r·(e_θ⊗e_θ) → 0 fed back in by component_matrix) makes 0·e_j,
+    // which is malformed for encapsulate.  Fold it first, as reduce_cross
+    // does for 0×b (vibe 000074).
+    e = rewrite_tree(
+        ctx,
+        e,
+        [](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const* d = std::get_if<Dot>(&node->node);
+            if (!d)
+                return node;
+            auto is_zero = [](Expr const* z)
+            {
+                auto const* s = std::get_if<ScalarLiteral>(&z->node);
+                return s && s->value.is_zero();
+            };
+            return (is_zero(d->left) || is_zero(d->right)) ?
+                       make_scalar(c, Rational{0}) :
+                       node;
+        });
     // Push the dot through any ⊗ fence it now straddles: a connection term such
     // as e_θ·∂_θ(e_θ⊗e_r) → e_θ·((−e_r)⊗e_r) leaves a raw ⊗ inside the dot
     // operand, which canonicalize's encapsulate rejects.  Fence-distribute
@@ -885,6 +907,11 @@ auto expand(Context& ctx, CoordinateChart const& chart, Expr const* v)
 auto components(Context& ctx, CoordinateChart const& chart, Expr const* v)
     -> std::vector<Expr const*>
 {
+    if (auto const rk = infer_rank(v); rk && *rk >= 2)
+        throw std::invalid_argument(
+            "components: input has rank " + std::to_string(*rk)
+            + " — components projects a vector onto the frame; use "
+              "component_matrix for a rank-2 tensor");
     Basis const fb = physical_frame(ctx, chart);
     // Expand-first (vibe 000073), so an abstract vector field f surfaces as its
     // frame components [f_r, f_θ, f_z].  A no-op on an already-explicit vector
@@ -894,6 +921,29 @@ auto components(Context& ctx, CoordinateChart const& chart, Expr const* v)
     out.reserve(static_cast<std::size_t>(fb.dim()));
     for (int i = 0; i < fb.dim(); ++i)
         out.push_back(reduce_dot(ctx, fb, w, fb.direction(ctx, i)));
+    return out;
+}
+
+auto component_matrix(Context& ctx, CoordinateChart const& chart, Expr const* v)
+    -> std::vector<std::vector<Expr const*>>
+{
+    Basis const fb = physical_frame(ctx, chart);
+    // Expand-first, like components: an abstract rank-2 field T surfaces as
+    // Σ T_kl e_k ⊗ e_l before projection, so the matrix entries come out as
+    // the minted physical components (with symmetry folded, T_θr → T_rθ).
+    Expr const* w = expand_fields(ctx, fb, v);
+    std::vector<std::vector<Expr const*>> out;
+    out.reserve(static_cast<std::size_t>(fb.dim()));
+    for (int i = 0; i < fb.dim(); ++i)
+    {
+        // e_i·T once per row, then (e_i·T)·e_j per column.
+        Expr const* row_vec = reduce_dot(ctx, fb, fb.direction(ctx, i), w);
+        std::vector<Expr const*> row;
+        row.reserve(static_cast<std::size_t>(fb.dim()));
+        for (int j = 0; j < fb.dim(); ++j)
+            row.push_back(reduce_dot(ctx, fb, row_vec, fb.direction(ctx, j)));
+        out.push_back(std::move(row));
+    }
     return out;
 }
 

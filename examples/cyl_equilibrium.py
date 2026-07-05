@@ -122,29 +122,22 @@ show(
 #   (∇·T)_r = ∂_r T_rr + (1/r)∂_θ T_rθ + ∂_z T_rz + (T_rr − T_θθ)/r
 #   (∇·T)_θ = ∂_r T_rθ + (1/r)∂_θ T_θθ + ∂_z T_θz + 2 T_rθ/r
 #   (∇·T)_z = ∂_r T_rz + (1/r)∂_θ T_θz + ∂_z T_zz + T_rz/r
-def reduce_scalar(x):
-    x = tb.simplify_basis_dot(td.expand_products(x), frame)
-    return td.simplify_scalars(td.fold_arithmetic(td.eval_delta_concrete(td.canonicalize(x))))
+# cyl.components on the rank-2 field is the physical component matrix
+# Tc[i][j] = e_i·T·e_j (vibe 000074), symmetry folded (Tc[1][0] *is* T_rθ);
+# algebraic_eq sees through fraction shapes, so the check is direct.
+Tc = cyl.components(T)
+d = td.partial
 
-
-def Tij(i, j):  # the physical stress component T_ij = e_i · T · e_j
-    return reduce_scalar(e[i] @ T_cyl @ e[j])
-
-
-def d(comp_expr, coord):
-    return td.simplify_scalars(td.partial(comp_expr, coord))
-
-
-def same(a, b):  # algebraically equal (algebraic_eq keeps fraction shapes apart)
-    return td.simplify_scalars(a - b).latex() == "0"
-
-
-assert same(div_r, d(Tij(0, 0), r) + d(Tij(0, 1), th) / r + d(Tij(0, 2), z)
-            + (Tij(0, 0) - Tij(1, 1)) / r)
-assert same(div_th, d(Tij(0, 1), r) + d(Tij(1, 1), th) / r + d(Tij(1, 2), z)
-            + 2 * Tij(0, 1) / r)
-assert same(div_z, d(Tij(0, 2), r) + d(Tij(1, 2), th) / r + d(Tij(2, 2), z)
-            + Tij(0, 2) / r)
+assert td.algebraic_eq(
+    div_r,
+    d(Tc[0][0], r) + d(Tc[0][1], th) / r + d(Tc[0][2], z)
+    + (Tc[0][0] - Tc[1][1]) / r)
+assert td.algebraic_eq(
+    div_th,
+    d(Tc[0][1], r) + d(Tc[1][1], th) / r + d(Tc[1][2], z) + 2 * Tc[0][1] / r)
+assert td.algebraic_eq(
+    div_z,
+    d(Tc[0][2], r) + d(Tc[1][2], th) / r + d(Tc[2][2], z) + Tc[0][2] / r)
 print("\n[assert] ∇·T matches the standard cylindrical equilibrium equations ✓")
 
 # ---------------------------------------------------------------------------
