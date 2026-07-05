@@ -3790,3 +3790,46 @@ TEST(Derivation, AlgebraicEqFoldsFractionShapes)
     EXPECT_FALSE(algebraic_eq(
         ctx, make_scalar_div(ctx, x, r), make_scalar_div(ctx, y, r)));
 }
+
+// vibe 000075: distribute_contraction sees through a scalar quotient wrapping
+// an operand — op(L, X/s) = op(L, X)/s — including a sum the quotient was
+// hiding from the entry expand_products.
+TEST(Derivation, DistributeContractionThroughScalarDiv)
+{
+    Context ctx;
+    auto* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto* w = make_tensor_object(ctx, make_tensor_name("w"), {}, 1);
+    auto* s = make_tensor_object(ctx, make_tensor_name("s"), {}, 0);
+
+    // a·((u⊗v)/s) → ((a·u)⊗v)/s
+    auto* quot = make_scalar_div(ctx, make_tensor_product(ctx, u, v), s);
+    auto* dist = steps::distribute_contraction(ctx, make_dot(ctx, a, quot));
+    auto* expected = make_scalar_div(
+        ctx, make_tensor_product(ctx, make_dot(ctx, a, u), v), s);
+    EXPECT_TRUE(algebraic_eq(ctx, dist, expected));
+
+    // a·((u⊗v + w⊗v)/s): the quotient hides a sum — distribute over it too.
+    auto* sum = make_sum(
+        ctx, make_tensor_product(ctx, u, v), make_tensor_product(ctx, w, v));
+    auto* dist2 = steps::distribute_contraction(
+        ctx, make_dot(ctx, a, make_scalar_div(ctx, sum, s)));
+    // Each addend's ⊗ fence is distributed; the quotient wraps per addend
+    // (the fence distributor re-applies the peeled /s at the node it fired).
+    auto* expected2 = make_sum(
+        ctx,
+        make_scalar_div(
+            ctx, make_tensor_product(ctx, make_dot(ctx, a, u), v), s),
+        make_scalar_div(
+            ctx, make_tensor_product(ctx, make_dot(ctx, a, w), v), s));
+    auto* alt2 = make_scalar_div(
+        ctx,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, make_dot(ctx, a, u), v),
+            make_tensor_product(ctx, make_dot(ctx, a, w), v)),
+        s);
+    EXPECT_TRUE(
+        algebraic_eq(ctx, dist2, expected2) || algebraic_eq(ctx, dist2, alt2));
+}

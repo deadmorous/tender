@@ -703,3 +703,71 @@ def test_textbook_check_needs_no_fraction_workaround():
         + 2 * M[0][1] / r
     )
     assert td.algebraic_eq(div_th, rhs)
+
+
+def make_cartesian(ctx):
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=7, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=7, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=7, slot=2, ctx=ctx)
+    return x, y, z, tc.CoordinateChart(ref, [x, y, z], [x, y, z])
+
+
+def test_grad_of_trace_of_field():
+    # vibe 000075 gap A: grad(tr ε) self-prepares — the Trace wrapper around
+    # the expanded field opens on the dyads instead of tripping encapsulate.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    eps = t.field(r"\varepsilon", 2, symmetric=True, ctx=ctx)
+    g = chart.grad(eps.tr())          # must not raise
+    direct = chart.components(g)
+    via_expand = chart.components(chart.grad(chart.expand(eps.tr())))
+    for a, b in zip(direct, via_expand):
+        assert td.algebraic_eq(a, b)
+    assert not td.algebraic_eq(direct[0], t.scalar(0, ctx=ctx))
+
+
+def test_projection_sees_through_identity_and_quotient():
+    # vibe 000075 gaps B+C: θ·I projects to θδ_ij (the atomic I is opened in
+    # the frame), and a symmetrized quotient (D+Dᵀ)/2 — even nested inside a
+    # product — reduces instead of leaving e_i·(X/2) stuck.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    I = t.identity(ctx=ctx)
+    v = t.field("v", 1, ctx=ctx)
+    D = chart.grad(v)
+    theta = chart.expand(D.tr())
+    expr = theta * I - 2 * ((D + D.transpose()) / 2)
+    M = chart.components(expr)
+    Dm = chart.components(D)
+    for i in range(3):
+        for j in range(3):
+            expect = -(Dm[i][j] + Dm[j][i])
+            if i == j:
+                expect = theta + expect
+            assert td.algebraic_eq(M[i][j], expect), (i, j)
+
+
+def test_cartesian_strain_compatibility_invariant_form():
+    # vibe 000075: inc ε = ∇×(∇×ε)ᵀ equals the (sign-corrected) invariant form
+    #   −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + 2(∇∇·ε)ˢ
+    # componentwise in a Cartesian chart — tender caught the lost '−' in the
+    # hand derivation (a×(c×B)ᵀ = −a×Bᵀ×c, not a×B×c).
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    eps = t.field(r"\varepsilon", 2, symmetric=True, ctx=ctx)
+    I = t.identity(ctx=ctx)
+
+    M = chart.components(chart.rot(chart.rot(eps).transpose()))
+    theta = eps.tr()
+    A = chart.grad(chart.div(eps))
+    rhs = -(chart.grad(chart.grad(theta)) - chart.laplacian(theta) * I
+            + chart.div(chart.div(eps)) * I + chart.laplacian(eps)
+            - 2 * ((A + A.transpose()) / 2))
+    R = chart.components(rhs)
+    for i in range(3):
+        for j in range(3):
+            assert td.algebraic_eq(M[i][j], R[i][j]), (i, j)
+    # trace of the identity: tr(inc ε) = Δθ − ∇∇··ε
+    assert td.algebraic_eq(M[0][0] + M[1][1] + M[2][2],
+                           chart.laplacian(theta) - chart.div(chart.div(eps)))

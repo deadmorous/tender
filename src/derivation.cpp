@@ -1236,21 +1236,34 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
                           Expr const* r,
                           Mk mk) -> Expr const*
     {
-        // See through a Negate wrapping either operand — a connection term such
-        // as ∂_θ e_θ = −e_r yields op(L, −(A⊗B)), whose ⊗ must still be
-        // fence-distributed (vibe 000073).  Peel the signs, distribute, then
-        // re-apply: op(L, −X) = −op(L, X).
+        // See through a Negate or a scalar quotient wrapping either operand — a
+        // connection term such as ∂_θ e_θ = −e_r yields op(L, −(A⊗B)), and a
+        // symmetrized term like (A + Aᵀ)/2 yields op(L, X/2); in both cases the
+        // ⊗ inside must still be fence-distributed (vibes 000073/000075).  Peel
+        // the wrappers, distribute, then re-apply: op(L, −X) = −op(L, X) and
+        // op(L, X/s) = op(L, X)/s.
         int sign = 1;
-        while (auto const* n = std::get_if<Negate>(&l->node))
+        std::vector<Expr const*> divisors;
+        auto peel = [&](Expr const*& side)
         {
-            l = n->operand;
-            sign = -sign;
-        }
-        while (auto const* n = std::get_if<Negate>(&r->node))
-        {
-            r = n->operand;
-            sign = -sign;
-        }
+            for (;;)
+            {
+                if (auto const* n = std::get_if<Negate>(&side->node))
+                {
+                    side = n->operand;
+                    sign = -sign;
+                }
+                else if (auto const* q = std::get_if<ScalarDiv>(&side->node))
+                {
+                    side = q->left;
+                    divisors.push_back(q->right);
+                }
+                else
+                    break;
+            }
+        };
+        peel(l);
+        peel(r);
         Expr const* res = nullptr;
         if (auto const* rp = std::get_if<TensorProduct>(&r->node))
         {
@@ -1268,8 +1281,28 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
                       make_tensor_product(c, mk(c, lp->left, r), lp->right) :
                       make_tensor_product(c, lp->left, mk(c, lp->right, r));
         }
+        // Peeling a wrapper may expose a sum that the entry expand_products
+        // never saw (it was hidden under the quotient): distribute over it so
+        // the next fixpoint pass reaches each addend's ⊗ fence.
+        bool const peeled = sign < 0 || !divisors.empty();
+        if (!res && peeled)
+        {
+            if (auto const* s = std::get_if<Sum>(&l->node))
+                res = make_sum(c, mk(c, s->left, r), mk(c, s->right, r));
+            else if (auto const* d = std::get_if<Difference>(&l->node))
+                res = make_difference(c, mk(c, d->left, r), mk(c, d->right, r));
+            else if (auto const* s2 = std::get_if<Sum>(&r->node))
+                res = make_sum(c, mk(c, l, s2->left), mk(c, l, s2->right));
+            else if (auto const* d2 = std::get_if<Difference>(&r->node))
+                res =
+                    make_difference(c, mk(c, l, d2->left), mk(c, l, d2->right));
+            else if (!divisors.empty())
+                res = mk(c, l, r); // hoist the quotient out of the contraction
+        }
         if (!res)
             return node; // no ⊗ fence to distribute → unchanged
+        for (auto const* dv: divisors)
+            res = make_scalar_div(c, res, dv);
         return sign < 0 ? make_negate(c, res) : res;
     };
     auto one_pass = [&](Expr const* x)

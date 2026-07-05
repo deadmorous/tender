@@ -64,6 +64,12 @@ auto distribute_bilinear(Context& ctx, Expr const* l, Expr const* r, BinOp op)
             distribute_bilinear(ctx, d->right, r, op));
     if (auto const* n = std::get_if<Negate>(&l->node))
         return make_negate(ctx, distribute_bilinear(ctx, n->operand, r, op));
+    // A scalar quotient commutes with the contraction: (X/s) op r → (X op r)/s
+    // — so a symmetrized term like (A + Aᵀ)/2 does not fence the reduction
+    // (vibe 000075).
+    if (auto const* q = std::get_if<ScalarDiv>(&l->node))
+        return make_scalar_div(
+            ctx, distribute_bilinear(ctx, q->left, r, op), q->right);
     if (auto const* s = std::get_if<Sum>(&r->node))
         return make_sum(
             ctx,
@@ -76,6 +82,9 @@ auto distribute_bilinear(Context& ctx, Expr const* l, Expr const* r, BinOp op)
             distribute_bilinear(ctx, l, d->right, op));
     if (auto const* n = std::get_if<Negate>(&r->node))
         return make_negate(ctx, distribute_bilinear(ctx, l, n->operand, op));
+    if (auto const* q = std::get_if<ScalarDiv>(&r->node))
+        return make_scalar_div(
+            ctx, distribute_bilinear(ctx, l, q->left, op), q->right);
     return op(ctx, l, r);
 }
 
@@ -589,9 +598,12 @@ auto reduce_field(Context& ctx, Basis const& fb, Expr const* T) -> Expr const*
         prev = T;
         T = steps::distribute_contraction(ctx, T); // fence a×(u⊗v) → (a×u)⊗v
         T = simplify_basis_cross(ctx, T, fb); // frame crosses → √g ε e^k
+        T = simplify_basis_dot(ctx, T, fb); // frame dots → δ (a tr ε operand
+                                            // leaves e_i·e_j, vibe 000075)
         T = steps::canonicalize(ctx, T);
         T = steps::unroll_sums(ctx, T);
         T = steps::eval_eps_concrete(ctx, T);
+        T = steps::eval_delta_concrete(ctx, T);
         T = steps::fold_arithmetic(ctx, T);
         T = steps::canonicalize(ctx, T);
     }
@@ -618,7 +630,7 @@ auto is_expandable_leaf(TensorObject const& t) -> bool
 // contractions unreduced.
 auto expand_fields(Context& ctx, Basis const& fb, Expr const* v) -> Expr const*
 {
-    return rewrite_tree(
+    Expr const* out = rewrite_tree(
         ctx,
         v,
         [&](Context& c, Expr const* node) -> Expr const*
@@ -657,6 +669,14 @@ auto expand_fields(Context& ctx, Basis const& fb, Expr const* v) -> Expr const*
                 ex = steps::simplify_scalars(c, steps::canonicalize(c, ex));
             return ex;
         });
+    // A tr/vec/transpose wrapper around a field is opaque to the
+    // differentiator once the field inside has become an explicit
+    // Σ T_ij e_i ⊗ e_j — open it on the dyads now (tr(a⊗b) → a·b, …), so
+    // grad(tr ε) and friends self-prepare (vibe 000075).  Only needed when
+    // something actually expanded; an already-explicit operand is unchanged.
+    if (out != v)
+        out = steps::expand_dyad_ops(ctx, out);
+    return out;
 }
 
 // Σ_i (1/h_i) e_i ⊙ ∂_{q^i} T on the physical frame `fb`.  `combine(e_i, ∂_i
@@ -917,6 +937,9 @@ auto components(Context& ctx, CoordinateChart const& chart, Expr const* v)
     // frame components [f_r, f_θ, f_z].  A no-op on an already-explicit vector
     // (its e_i carry slots, so nothing is an expandable field leaf).
     Expr const* w = expand_fields(ctx, fb, v);
+    // An atomic identity tensor would leave e_i·I unreduced — expand it into
+    // Σ e_k ⊗ e_k so the projection dots evaluate (vibe 000075).
+    w = expand_identity_frame(ctx, fb, w);
     std::vector<Expr const*> out;
     out.reserve(static_cast<std::size_t>(fb.dim()));
     for (int i = 0; i < fb.dim(); ++i)
@@ -932,6 +955,9 @@ auto component_matrix(Context& ctx, CoordinateChart const& chart, Expr const* v)
     // Σ T_kl e_k ⊗ e_l before projection, so the matrix entries come out as
     // the minted physical components (with symmetry folded, T_θr → T_rθ).
     Expr const* w = expand_fields(ctx, fb, v);
+    // A term like (Δθ)·I needs the identity opened into Σ e_k ⊗ e_k, or the
+    // projection leaves (e_i·I)·e_j unreduced (vibe 000075).
+    w = expand_identity_frame(ctx, fb, w);
     std::vector<std::vector<Expr const*>> out;
     out.reserve(static_cast<std::size_t>(fb.dim()));
     for (int i = 0; i < fb.dim(); ++i)

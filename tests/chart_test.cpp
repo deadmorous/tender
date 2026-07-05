@@ -375,6 +375,84 @@ TEST(Chart, ComponentMatrixOfSymmetricField)
     EXPECT_THROW((void)components(ctx, chart, T), std::invalid_argument);
 }
 
+// vibe 000075 gap A: an invariant wrapper (tr) around an abstract field must
+// self-prepare — grad(tr ε) previously tripped canonicalize's encapsulate on
+// the un-opened Trace(Σ ε_ij e_i⊗e_j).  It must agree with the manual
+// workaround grad(expand(tr ε)).
+TEST(Chart, GradOfTraceOfField)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+    auto* T = make_field(ctx, make_tensor_name("T"), 2, {}, /*symmetric=*/true);
+    auto* theta = make_trace(ctx, T);
+
+    Expr const* direct = nullptr;
+    ASSERT_NO_THROW(direct = gradient(ctx, chart, theta));
+    Expr const* via_expand = gradient(ctx, chart, expand(ctx, chart, theta));
+    auto cd = components(ctx, chart, direct);
+    auto ce = components(ctx, chart, via_expand);
+    for (int i = 0; i < 3; ++i)
+        EXPECT_TRUE(
+            eq(ctx,
+               steps::simplify_scalars(ctx, make_difference(ctx, cd[i], ce[i])),
+               make_scalar(ctx, Rational{0})));
+    EXPECT_FALSE(eq(ctx, cd[0], make_scalar(ctx, Rational{0})));
+}
+
+// vibe 000075 gaps B+C: projection sees through an atomic identity tensor
+// (θ·I would leave (e_i·I)·e_j unreduced) and through a scalar quotient
+// fence, including one nested inside a product (2·(X/2)).
+TEST(Chart, ComponentMatrixSeesThroughIdentityAndQuotient)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 7, 2);
+    CoordinateChart chart{ref, {x, y, z}, {x, y, z}};
+    auto fb = physical_frame(ctx, chart);
+
+    // 5·I → 5 δ_ij.
+    auto* five_I = make_tensor_product(
+        ctx, make_scalar(ctx, Rational{5}), make_identity(ctx));
+    auto mI = component_matrix(ctx, chart, five_I);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            EXPECT_TRUE(
+                eq(ctx, mI[i][j], make_scalar(ctx, Rational{i == j ? 5 : 0})));
+
+    // (e_x⊗e_x + e_y⊗e_y)/2 → diag(1/2, 1/2, 0).
+    auto* dyads = make_sum(
+        ctx,
+        make_tensor_product(ctx, fb.direction(ctx, 0), fb.direction(ctx, 0)),
+        make_tensor_product(ctx, fb.direction(ctx, 1), fb.direction(ctx, 1)));
+    auto* half = make_scalar_div(ctx, dyads, make_scalar(ctx, Rational{2}));
+    auto mQ = component_matrix(ctx, chart, half);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            EXPECT_TRUE(
+                eq(ctx,
+                   mQ[i][j],
+                   make_scalar(
+                       ctx, i == j && i < 2 ? Rational{1, 2} : Rational{0})));
+
+    // The quotient nested inside a product — 2·(X/2) — needs the fence
+    // distributor to peel the ScalarDiv it exposes.
+    auto* nested =
+        make_tensor_product(ctx, make_scalar(ctx, Rational{2}), half);
+    auto mN = component_matrix(ctx, chart, nested);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            EXPECT_TRUE(eq(
+                ctx,
+                mN[i][j],
+                make_scalar(ctx, i == j && i < 2 ? Rational{1} : Rational{0})));
+}
+
 // vibe 000074: component_matrix of an explicit dyad picks out the single
 // entry — no abstract field involved, so this exercises the pure projection.
 TEST(Chart, ComponentMatrixOfDyad)
