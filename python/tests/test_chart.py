@@ -365,6 +365,24 @@ def test_route_a_div_of_abstract_field_and_components():
         assert td.simplify_scalars(eqs[i] - red(div_ref @ e[i])).latex() == "0"
 
 
+def test_symmetric_field_folds_shear_term():
+    # vibe 000073: a symmetric rank-2 field folds T_θr → T_rθ, so the
+    # θ-component of ∇·T carries the classic 2 T_rθ/r shear term (not
+    # T_rθ + T_θr).
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    T = t.field("T", 2, deps=[r, th], symmetric=True, ctx=ctx)
+    eq_th = td.simplify_scalars(chart.components(chart.div(T))[1]).latex()
+    assert "2 \\, T_{r\\theta}" in eq_th
+    assert "T_{\\theta r}" not in eq_th  # folded away
+
+
+def test_symmetric_only_rank_2():
+    ctx = t.Context()
+    with pytest.raises((ValueError, RuntimeError)):
+        t.field("A", 3, symmetric=True, ctx=ctx)
+
+
 def test_expand_of_invariant_matches_div_components():
     # vibe 000073: chart.expand(div(T)) surfaces the same components as
     # chart.components(div(T)) — the general 'expand an invariant' path.

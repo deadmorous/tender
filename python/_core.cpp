@@ -451,6 +451,7 @@ NB_MODULE(_core, m)
         [](std::string const& name,
            int rank,
            std::optional<std::vector<PyExpr>> deps,
+           bool symmetric,
            nb::object ctx_arg) -> PyExpr
         {
             auto [ctx, keep] = resolve_ctx(ctx_arg);
@@ -468,16 +469,18 @@ NB_MODULE(_core, m)
             return PyExpr{
                 keep,
                 ctx,
-                make_field(*ctx, make_tensor_name(name), rank, refs)};
+                make_field(*ctx, make_tensor_name(name), rank, refs, symmetric)};
         },
         "name"_a,
         "rank"_a,
         "deps"_a = nb::none(),
+        "symmetric"_a = false,
         "ctx"_a = nb::none(),
         "Create a tensor field of the given rank (vibe 000070).  With no deps "
         "it depends on all coordinates (∂ never silently zero); pass deps=[...] "
         "of coordinate variables (possibly from different charts) to restrict "
-        "its dependence.  A rank-0 field is a scalar field.");
+        "its dependence.  A rank-0 field is a scalar field.  symmetric=True "
+        "marks a rank-2 field symmetric (T_ij = T_ji), so T_θr folds to T_rθ.");
 
     // ---- scalar fields (vibe 000069 M1) -------------------------------- //
 

@@ -365,11 +365,16 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 // position — the default, so ∂ is never silently zero); a non-empty list
 // restricts dependence to those coordinates (which may belong to different
 // charts).  A rank-0 field is a scalar field.
+//
+// `symmetric` marks a rank-2 field symmetric (T_ij = T_ji, vibe 000073): its
+// components inherit the slot-swap symmetry so T_θr canonicalizes to T_rθ and a
+// pair such as (T_rθ + T_θr)/r folds to 2 T_rθ/r.  Only rank 2 is supported.
 [[nodiscard]] auto make_field(
     Context&,
     TensorName,
     int rank,
-    std::vector<CoordinateRef> deps = {}) -> Expr const*;
+    std::vector<CoordinateRef> deps = {},
+    bool symmetric = false) -> Expr const*;
 
 // The partial derivative ∂_q of a field (vibe 000070 P7): a fresh field of the
 // same rank, name and dependence as `base`, with q appended to its (sorted)

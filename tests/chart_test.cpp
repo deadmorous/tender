@@ -246,6 +246,56 @@ TEST(Chart, CylindricalDivEThetaDyad)
     EXPECT_TRUE(eq(ctx, div, want));
 }
 
+// vibe 000073: a symmetric rank-2 field folds T_θr → T_rθ after expansion (the
+// component inherits the slot-swap symmetry); symmetric is rank-2 only.
+TEST(Chart, SymmetricFieldFoldsComponents)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart chart{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto fb = physical_frame(ctx, chart);
+    auto* T = make_field(ctx, make_tensor_name("T"), 2, {}, /*symmetric=*/true);
+    auto* Tc = steps::canonicalize(
+        ctx,
+        steps::unroll_sums(
+            ctx, expand_in_basis(ctx, T, fb, Variance::Covariant)));
+    // T_θr and T_rθ are the same component: e_θ·T·e_r = e_r·T·e_θ.
+    auto* c_tr = steps::simplify_scalars(
+        ctx,
+        simplify_basis_dot(
+            ctx,
+            steps::expand_products(
+                ctx,
+                make_dot(
+                    ctx,
+                    make_dot(ctx, fb.direction(ctx, 1), Tc),
+                    fb.direction(ctx, 0))),
+            fb));
+    auto* c_rt = steps::simplify_scalars(
+        ctx,
+        simplify_basis_dot(
+            ctx,
+            steps::expand_products(
+                ctx,
+                make_dot(
+                    ctx,
+                    make_dot(ctx, fb.direction(ctx, 0), Tc),
+                    fb.direction(ctx, 1))),
+            fb));
+    EXPECT_TRUE(eq(ctx, c_tr, c_rt));
+
+    // symmetric is only defined for rank 2.
+    EXPECT_THROW(
+        (void)make_field(ctx, make_tensor_name("A"), 3, {}, true),
+        std::invalid_argument);
+}
+
 // vibe 000073 Route A: chart.expand materializes an abstract field into frame
 // components (a field derivative via the connection), the operators
 // expand-first on an abstract field, and chart.components surfaces the scalar

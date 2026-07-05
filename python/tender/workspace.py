@@ -39,9 +39,14 @@ class Workspace:
         """A named tensor object in this workspace's context."""
         return _core.tensor(name, rank, ctx=self.ctx)
 
-    def field(self, name, rank, deps=None):
-        """A tensor field (vibe 000070 P7); deps=None means all coordinates."""
-        return _core.field(name, rank, deps=deps, ctx=self.ctx)
+    def field(self, name, rank, deps=None, symmetric=False):
+        """A tensor field (vibe 000070 P7); deps=None means all coordinates.
+
+        ``symmetric=True`` marks a rank-2 field symmetric (T_ij = T_ji).
+        """
+        return _core.field(
+            name, rank, deps=deps, symmetric=symmetric, ctx=self.ctx
+        )
 
     def scalar(self, value):
         """A scalar literal (int or Rational)."""

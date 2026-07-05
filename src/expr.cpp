@@ -42,7 +42,8 @@ auto make_field(
     Context& ctx,
     TensorName name,
     int rank,
-    std::vector<CoordinateRef> deps) -> Expr const*
+    std::vector<CoordinateRef> deps,
+    bool symmetric) -> Expr const*
 {
     FieldDeps fd;
     if (deps.empty())
@@ -52,10 +53,22 @@ auto make_field(
         fd.all = false;
         fd.only = std::move(deps);
     }
+    TensorTraits traits{.field = std::move(fd)};
+    if (symmetric)
+    {
+        if (rank != 2)
+            throw std::invalid_argument(
+                "make_field: symmetric is only supported for a rank-2 field");
+        // The slot swap is a value-preserving generator (T_ij = T_ji), like the
+        // metric g (vibe 000073).  Expanded components inherit it, so T_θr
+        // canonicalizes to T_rθ.
+        traits.symmetry =
+            SymmetrySpec{PermutationSpec{false, Permutation<2>{{1, 0}}}};
+    }
     return ctx.make<Expr>(TensorObject{
         .name = std::move(name),
         .rank = rank,
-        .traits = TensorTraits{.field = std::move(fd)},
+        .traits = std::move(traits),
         .slots = {}});
 }
 

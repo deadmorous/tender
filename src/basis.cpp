@@ -357,15 +357,21 @@ auto expand_in_basis(
             // coordinate dependence (vibe 000073): carry the source's FieldDeps
             // and any accumulated ∂ directions onto the indexed component, so
             // ∂_q T_ij is nonzero and div / grad can differentiate the
-            // components rather than treating them as constants.
+            // components rather than treating them as constants.  Carry the
+            // (anti)symmetry too, so a symmetric field's T_θr canonicalizes to
+            // T_rθ — but not `well_known` or `coordinate`, which name the whole
+            // tensor, not a component.
             TensorObject comp{
                 .name = t->name,
                 .rank = 0,
                 .traits = std::nullopt,
                 .slots = std::move(coord_slots),
                 .field_derivs = t->field_derivs};
-            if (t->traits && t->traits->field)
-                comp.traits = TensorTraits{.field = t->traits->field};
+            if (t->traits)
+                comp.traits = TensorTraits{
+                    .symmetry = t->traits->symmetry,
+                    .antisymmetry = t->traits->antisymmetry,
+                    .field = t->traits->field};
             Expr const* const coord = c.make<Expr>(std::move(comp));
             return make_tensor_product(c, coord, polyad);
         });
