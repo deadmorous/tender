@@ -77,48 +77,10 @@ class DifferentialExpr:
     """
 
     def __init__(self, kind, operand, coord=None):
-        # kind ∈ {"grad", "div", "rot", "laplacian", "partial",
-        #         "directional", "transpose", "trace"}
+        # kind ∈ {"grad", "div", "rot", "laplacian", "partial"}
         self.kind = kind
         self.operand = operand
         self.coord = coord  # set for "partial"
-
-    # -- tensor-algebra composition (vibe 000076) --
-    #
-    # ∇ expressions compose with the invariant tensor operators, so the strain
-    # incompatibility ``inc ε = ∇×(∇×ε)ᵀ`` is written directly:
-    # ``(nabla % (nabla % eps)).transpose()`` — or, matching the hand notation,
-    # ``nabla % (nabla % eps).transpose()``.  These stay symbolic; ``.abstract``
-    # lowers the whole tree to a first-class ``Del`` expression.
-
-    def transpose(self):
-        """The transpose (·)ᵀ of this ∇ expression (a deferred rank-2 op)."""
-        return DifferentialExpr("transpose", self)
-
-    def tr(self):
-        """The trace tr(·) of this ∇ expression."""
-        return DifferentialExpr("trace", self)
-
-    def abstract(self):
-        """Lower to a first-class abstract ``Del`` expression (vibe 000076):
-        the chart-free invariant operator tree, on which ``expand_nabla`` and
-        the reassembly operate.  Unlike :meth:`evaluate`, no chart is consulted
-        and nothing is expanded into components."""
-        inner = self.operand
-        inner = inner.abstract() if isinstance(inner, DifferentialExpr) else inner
-        if self.kind == "grad":
-            return inner.grad()
-        if self.kind == "div":
-            return inner.div()
-        if self.kind == "rot":
-            return inner.curl()
-        if self.kind == "laplacian":
-            return inner.grad().div()  # Δ ≡ ∇·∇
-        if self.kind == "transpose":
-            return inner.transpose()
-        if self.kind == "trace":
-            return inner.tr()
-        raise ValueError(f"cannot lower {self.kind!r} to an abstract Del")
 
     # -- evaluation (explicit, decision 2) --
 
@@ -141,10 +103,6 @@ class DifferentialExpr:
             # (v·∇)T = v · ∇T.  Keep grad's resolution of identity unfolded so
             # (v·∇)R = v · Σ_k e_k⊗e_k = v reduces through the frame dot.
             return chart.dot(self.coord, chart.grad(inner, fold_identity=False))
-        if self.kind == "transpose":
-            return inner.transpose()
-        if self.kind == "trace":
-            return inner.tr()
         raise ValueError(f"unknown differential operator {self.kind!r}")
 
     # -- symbolic rendering (stays inspectable before evaluation) --
@@ -163,10 +121,6 @@ class DifferentialExpr:
             return "\\partial_{" + _coord_name(self.coord) + "} " + op
         if self.kind == "directional":
             return "(" + self.coord.latex() + " \\cdot \\nabla) " + op
-        if self.kind == "transpose":
-            return op + "^{\\mathsf{T}}"
-        if self.kind == "trace":
-            return "\\operatorname{tr}(" + self.operand.latex() + ")"
         raise ValueError(f"unknown differential operator {self.kind!r}")
 
     def __repr__(self):

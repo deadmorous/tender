@@ -119,7 +119,6 @@ static bool is_scalar_expr(Expr const& e)
             [](ScalarFn const&) { return true; },
             [](Pow const& p)
             { return is_scalar_expr(*p.base) && is_scalar_expr(*p.exponent); },
-            [](Del const&) { return false; },
         },
         e);
 }
@@ -344,8 +343,6 @@ struct Renderer
                 // Function application / superscript — self-delimiting, atomic.
                 [](ScalarFn const&) { return ATOM_PREC; },
                 [](Pow const&) { return ATOM_PREC; },
-                // ∇⊙T is a prefix operator binding like a contraction.
-                [](Del const&) { return CONTRACT_PREC; },
             },
             e);
     }
@@ -527,28 +524,6 @@ struct Renderer
                     return sub(*p.base, ATOM_PREC) + "^{" + render(*p.exponent)
                            + "}";
                 },
-                [&](Del const& d) -> std::string
-                {
-                    // ∇⊙T (vibe 000076).  A nested ∇ chains bare (∇∇θ, ∇×∇×ε —
-                    // the theory's own notation); an additive or contraction
-                    // operand is wrapped so "∇ a + b" / "∇ a·b" is not misread.
-                    auto del_operand = [&](Expr const& op) -> std::string
-                    {
-                        return std::holds_alternative<Del>(op.node) ?
-                                   render(op) :
-                                   sub(op, TENSOR_PREC);
-                    };
-                    // ∇·∇ renders as the Laplacian Δ (its name in the theory).
-                    auto const* inner = std::get_if<Del>(&d.operand->node);
-                    if (d.kind == DelKind::Div && inner
-                        && inner->kind == DelKind::Grad)
-                        return "\\Delta " + del_operand(*inner->operand);
-                    std::string sym =
-                        d.kind == DelKind::Grad ? "\\nabla " :
-                        d.kind == DelKind::Div  ? "\\nabla \\cdot " :
-                                                  "\\nabla \\times ";
-                    return sym + del_operand(*d.operand);
-                },
             },
             e);
     }
@@ -575,19 +550,8 @@ struct NfRenderer
                 [](nf::Cross const&) { return CONTRACT_PREC; },
                 [](nf::Paren const&)
                 { return ATOM_PREC; }, // self-parenthesized
-                [](nf::Unary const& u)
-                {
-                    // tr/vec/transpose are self-delimiting; ∇⊙ is a prefix that
-                    // binds like a contraction (vibe 000076).
-                    switch (u.op)
-                    {
-                        case nf::UnaryOp::DelGrad:
-                        case nf::UnaryOp::DelDiv:
-                        case nf::UnaryOp::DelCurl: return CONTRACT_PREC;
-                        default: return ATOM_PREC;
-                    }
-                },
-                [](nf::Div const&) { return ATOM_PREC; }, // \frac is atomic
+                [](nf::Unary const&) { return ATOM_PREC; }, // self-delimiting
+                [](nf::Div const&) { return ATOM_PREC; },   // \frac is atomic
                 [](nf::ScalarFn const&) { return ATOM_PREC; },
                 [](nf::Pow const&) { return ATOM_PREC; },
             },
@@ -668,34 +632,6 @@ struct NfRenderer
                         case nf::UnaryOp::Transpose:
                             return sub(*u.operand, ATOM_PREC)
                                    + "^{\\mathsf{T}}";
-                        case nf::UnaryOp::DelGrad:
-                        case nf::UnaryOp::DelDiv:
-                        case nf::UnaryOp::DelCurl:
-                        {
-                            // A nested ∇ chains bare (∇∇θ, ∇×∇×ε); other
-                            // operands wrap below TENSOR_PREC (vibe 000076).
-                            auto del_operand =
-                                [&](nf::Factor const& op) -> std::string
-                            {
-                                return std::holds_alternative<nf::Unary>(
-                                           op.node) ?
-                                           render_factor(op) :
-                                           sub(op, TENSOR_PREC);
-                            };
-                            // ∇·∇ renders as the Laplacian Δ.
-                            auto const* inner =
-                                std::get_if<nf::Unary>(&u.operand->node);
-                            if (u.op == nf::UnaryOp::DelDiv && inner
-                                && inner->op == nf::UnaryOp::DelGrad)
-                                return "\\Delta "
-                                       + del_operand(*inner->operand);
-                            std::string sym = u.op == nf::UnaryOp::DelGrad ?
-                                                  "\\nabla " :
-                                              u.op == nf::UnaryOp::DelDiv ?
-                                                  "\\nabla \\cdot " :
-                                                  "\\nabla \\times ";
-                            return sym + del_operand(*u.operand);
-                        }
                     }
                     return "?"; // unreachable
                 },

@@ -104,7 +104,6 @@ auto find_index_space(Expr const* e, int id) -> IndexSpace const*
                     go(s.base);
                     go(s.exponent);
                 },
-                [&](Del const& s) { go(s.operand); },
             },
             *node);
     };
@@ -311,7 +310,6 @@ auto find_space_from_concrete(Expr const* e) -> IndexSpace const*
                     go(s.base);
                     go(s.exponent);
                 },
-                [&](Del const& s) { go(s.operand); },
             },
             *node);
     };
@@ -399,7 +397,6 @@ void collect_concrete_values(Expr const* e, std::vector<int>& out)
                     go(s.base);
                     go(s.exponent);
                 },
-                [&](Del const& s) { go(s.operand); },
             },
             *node);
     };
@@ -592,12 +589,6 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                 auto const* pb = std::get_if<Pow>(&b->node);
                 return pb && structural_eq(pa.base, pb->base)
                        && structural_eq(pa.exponent, pb->exponent);
-            },
-            [&](Del const& da) -> bool
-            {
-                auto const* db = std::get_if<Del>(&b->node);
-                return db && da.kind == db->kind
-                       && structural_eq(da.operand, db->operand);
             },
         },
         a->node);
@@ -825,8 +816,6 @@ auto has_free_index_for(
                 return has_free_index_for(s.base, indices, bound)
                        || has_free_index_for(s.exponent, indices, bound);
             },
-            [&](Del const& s) -> bool
-            { return has_free_index_for(s.operand, indices, bound); },
         },
         *e);
 }
@@ -897,8 +886,6 @@ auto is_component_valued(Expr const* e) -> bool
                 return is_component_valued(p.base)
                        && is_component_valued(p.exponent);
             },
-            // ∇⊙T is an invariant operator (vibe 000076), not a coordinate.
-            [](Del const&) { return false; },
         },
         *e);
 }
@@ -959,23 +946,6 @@ auto infer_rank(Expr const* e) -> std::optional<int>
             // Scalar fields are rank 0.
             [](ScalarFn const&) -> std::optional<int> { return 0; },
             [](Pow const&) -> std::optional<int> { return 0; },
-            // ∇⊙T (vibe 000076): grad raises the rank, div lowers it, curl
-            // preserves it — the operand rank shifted by the operator.
-            [](Del const& s) -> std::optional<int>
-            {
-                auto const r = infer_rank(s.operand);
-                if (!r)
-                    return std::nullopt;
-                switch (s.kind)
-                {
-                    case DelKind::Grad: return *r + 1;
-                    case DelKind::Div:
-                        return *r >= 1 ? std::optional<int>{*r - 1} :
-                                         std::nullopt;
-                    case DelKind::Curl: return *r;
-                }
-                return std::nullopt;
-            },
         },
         *e);
 }
@@ -2430,11 +2400,6 @@ auto map_children(Context& ctx, Expr const* e, Rec const& rec) -> Expr const*
                            e :
                            make_pow(ctx, base, exp);
             },
-            [&](Del const& s) -> Expr const*
-            {
-                auto* o = rec(s.operand);
-                return o == s.operand ? e : make_del(ctx, s.kind, o);
-            },
         },
         *e);
 }
@@ -2822,7 +2787,6 @@ auto has_explicit_sum_for(
                     go(s.base);
                     go(s.exponent);
                 },
-                [&](Del const& s) { go(s.operand); },
             },
             *node);
     };
@@ -3226,17 +3190,6 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
                         p.base));
                 return make_tensor_product(
                     ctx, make_pow(ctx, p.base, p.exponent), inner);
-            },
-            [&](Del const&) -> Expr const*
-            {
-                // ∂_q does not commute with the invariant ∇ in a moving frame
-                // (vibe 000076): pushing ∂ inside a ∇ would silently drop the
-                // frame's connection terms.  A Del is meant to be expanded in a
-                // chart (`expand_nabla`) before any coordinate differentiation,
-                // so refuse rather than guess.
-                throw std::invalid_argument(
-                    "diff: cannot differentiate an abstract ∇ operator; expand "
-                    "it in a chart first (expand_nabla)");
             },
         },
         *e);

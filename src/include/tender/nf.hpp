@@ -96,13 +96,6 @@ enum class UnaryOp : uint8_t
     Trace,           // tr
     VectorInvariant, // vec
     Transpose,       // ^T
-    // Invariant differential operators (vibe 000076): ∇⊙ kept opaque, so a Del
-    // rides through canon as a linear unary factor (region by result rank, like
-    // any other).  DelGrad raises the rank, DelDiv lowers it, DelCurl
-    // preserves.
-    DelGrad, // ∇⊗
-    DelDiv,  // ∇·
-    DelCurl, // ∇×
 };
 
 struct Unary final

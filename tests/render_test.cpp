@@ -767,37 +767,3 @@ TEST(Render, FieldDerivativeWrapsAsProductFactor)
         latex(*make_tensor_product(ctx, df, r)), "(\\partial_{r} f) \\, r");
     EXPECT_EQ(latex(*df), "\\partial_{r} f"); // standalone: no parentheses
 }
-
-// ---- ∇ operator (vibe 000076) ------------------------------------------
-
-TEST(Render, DelOperators)
-{
-    Context ctx;
-    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
-    auto* v = make_field(ctx, make_tensor_name("v"), 1, {});
-
-    EXPECT_EQ(latex(*make_del(ctx, DelKind::Grad, f)), "\\nabla f");
-    EXPECT_EQ(
-        latex(*make_del(ctx, DelKind::Div, v)), "\\nabla \\cdot \\mathbf{v}");
-    EXPECT_EQ(
-        latex(*make_del(ctx, DelKind::Curl, v)), "\\nabla \\times \\mathbf{v}");
-    // ∇⊗∇f renders as a nested (chained-bare) grad.
-    EXPECT_EQ(
-        latex(*make_del(ctx, DelKind::Grad, make_del(ctx, DelKind::Grad, f))),
-        "\\nabla \\nabla f");
-    // ∇·∇f folds to the Laplacian Δf.
-    EXPECT_EQ(
-        latex(*make_del(ctx, DelKind::Div, make_del(ctx, DelKind::Grad, f))),
-        "\\Delta f");
-}
-
-TEST(Render, DelWrapsAdditiveOperand)
-{
-    Context ctx;
-    auto* a = make_field(ctx, make_tensor_name("a"), 0, {});
-    auto* b = make_field(ctx, make_tensor_name("b"), 0, {});
-    // ∇(a + b) must parenthesize the sum.
-    EXPECT_EQ(
-        latex(*make_del(ctx, DelKind::Grad, make_sum(ctx, a, b))),
-        "\\nabla (a + b)");
-}

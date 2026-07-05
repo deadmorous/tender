@@ -48,26 +48,6 @@ enum class ScalarFnKind : uint8_t
     Sqrt,
 };
 
-// The invariant differential operator ∇ applied to a tensor field (vibe 000076,
-// gap D of strain compatibility).  A first-class, coordinate-free node so the
-// named operators of the theory (∇∇θ, Δε, (∇∇·ε)ˢ, …) have a renderable Expr
-// representation that a derivation can reassemble *into*, rather than the
-// expanded component forms `chart.grad/div/…` emit.  The three kinds are the
-// three products ∇ can form with its operand:
-//
-//   Grad  ∇⊗T  raises the rank by one       (∇f, ∇⊗∇θ = ∇∇θ)
-//   Div   ∇·T   lowers the rank by one       (∇·v, ∇·ε)
-//   Curl  ∇×T   preserves the rank (3D)      (∇×v, ∇×ε)
-//
-// Everything else is composition: Δ ≡ ∇·∇ = Div∘Grad, the double divergence
-// ∇∇··ε = Div∘Div ε, and inc ε = Curl(Transpose(Curl(ε))).
-enum class DelKind : uint8_t
-{
-    Grad, // ∇⊗
-    Div,  // ∇·
-    Curl, // ∇×
-};
-
 // Reference to a coordinate of a coordinate chart (vibe 000069 M1).  Stamped on
 // a rank-0 TensorObject's traits to mark it as a chart coordinate the
 // differentiator recognises (∂_{q^i} q^j = δ_ij).  chart_id == 0 means the
@@ -222,17 +202,6 @@ struct ScalarFn final
     Expr const* operand;
 };
 
-// ∇ applied to a tensor field (vibe 000076): the invariant differential
-// operator kept opaque — it is R-linear (distributes over sums, pulls numeric
-// scalars) but Leibniz over products is deliberately *not* an auto-rule, so a
-// Del stays intact through canon until a chart expands it (`expand_nabla`) or a
-// reassembly folds an expanded frame sum back into it.
-struct Del final
-{
-    DelKind kind;
-    Expr const* operand;
-};
-
 // base raised to a power, both rank-0 (vibe 000069 M1).  Kept distinct from a
 // repeated ⊗ product so the scalar simplifier can recognise patterns such as
 // cos² + sin² (M3).  The exponent is an Expr (usually a ScalarLiteral, e.g.
@@ -334,8 +303,7 @@ struct Expr final
         ExplicitSum,
         NoSum,
         ScalarFn,
-        Pow,
-        Del>;
+        Pow>;
 
     Node node;
 
@@ -423,11 +391,6 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 [[nodiscard]] auto make_scalar_fn(Context&, ScalarFnKind, Expr const* operand)
     -> Expr const*;
 [[nodiscard]] auto make_pow(Context&, Expr const* base, Expr const* exponent)
-    -> Expr const*;
-
-// The invariant differential operator ∇ ⊙ T (vibe 000076): grad (⊗), div (·),
-// or curl (×) of a tensor field, kept as an opaque `Del` node.
-[[nodiscard]] auto make_del(Context&, DelKind, Expr const* operand)
     -> Expr const*;
 
 // Unary

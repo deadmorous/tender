@@ -86,38 +86,3 @@ def test_directional_derivative_custom_operator():
     op = nabla.along(v)
     assert op.latex().endswith("\\cdot \\nabla)")
     assert td.algebraic_eq((op * R).evaluate(cart), v)
-
-
-def test_abstract_del_nodes_and_inc_epsilon():
-    # vibe 000076 (gap D): ∇ expressions are first-class abstract Del nodes.
-    # The strain incompatibility inc ε = ∇×(∇×ε)ᵀ builds directly, both as a
-    # PyExpr method chain and in nabla notation, and the two agree.
-    ws = t.Workspace()
-    eps = t.field(r"\varepsilon", 2, symmetric=True, ctx=ws.ctx)
-
-    inc = eps.curl().transpose().curl()
-    assert inc.rank == 2
-    assert inc.latex() == (
-        "\\nabla \\times (\\nabla \\times "
-        "\\boldsymbol{\\varepsilon})^{\\mathsf{T}}"
-    )
-    # nabla-notation build lowers to the same first-class expression.
-    sym = nabla % (nabla % eps).transpose()
-    assert td.structural_eq(sym.abstract(), inc)
-
-    # The reassembly-target operators render in the theory's own notation.
-    theta = eps.tr()
-    assert theta.grad().grad().latex().startswith("\\nabla \\nabla")
-    assert eps.grad().div().latex() == "\\Delta \\boldsymbol{\\varepsilon}"
-    assert eps.div().div().latex().startswith("\\nabla \\cdot \\nabla \\cdot")
-
-    # Rank shifts: grad +1, div -1, curl same; div of a scalar is ill-formed.
-    f = t.field("f", 0, ctx=ws.ctx)
-    v = t.field("v", 1, ctx=ws.ctx)
-    assert f.grad().rank == 1
-    assert v.div().rank == 0
-    assert v.curl().rank == 1
-    assert f.div().rank is None
-
-    # Opaque through canonicalization (stable, unchanged).
-    assert td.structural_eq(td.canonicalize(inc), inc)

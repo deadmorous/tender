@@ -145,19 +145,6 @@ auto factor_rank(Factor const* f) -> std::optional<int>
                     case UnaryOp::Trace: return 0;
                     case UnaryOp::VectorInvariant: return 1;
                     case UnaryOp::Transpose: return factor_rank(u.operand);
-                    // ∇⊙ shifts the operand rank (vibe 000076).
-                    case UnaryOp::DelGrad:
-                    {
-                        auto r = factor_rank(u.operand);
-                        return r ? std::optional<int>{*r + 1} : std::nullopt;
-                    }
-                    case UnaryOp::DelDiv:
-                    {
-                        auto r = factor_rank(u.operand);
-                        return (r && *r >= 1) ? std::optional<int>{*r - 1} :
-                                                std::nullopt;
-                    }
-                    case UnaryOp::DelCurl: return factor_rank(u.operand);
                 }
                 return std::nullopt;
             },

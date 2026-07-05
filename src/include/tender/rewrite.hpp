@@ -130,13 +130,6 @@ auto rewrite_tree(Context& ctx, Expr const* e, F const& f) -> Expr const*
                            e :
                            make_pow(ctx, base, exp);
             },
-
-            // Invariant differential operator (vibe 000076).
-            [&](Del const& s) -> Expr const*
-            {
-                auto* op = rewrite_tree(ctx, s.operand, f);
-                return op == s.operand ? e : make_del(ctx, s.kind, op);
-            },
         },
         *e);
 
