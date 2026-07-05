@@ -3887,3 +3887,90 @@ TEST(Deriv, OperatorCompositionKeepsOrder)
     auto* dydx = steps::canonicalize(ctx, make_tensor_product(ctx, dy, dx));
     EXPECT_FALSE(structural_eq(dxdy, dydx));
 }
+
+// ---- operator application: Leibniz = commutation (vibe 000077, step B) --
+
+// The elementary rules fire through application: ∂_x x = 1, ∂_x y = 0 (distinct
+// coordinates independent), ∂_x f is the formal derivative field.
+TEST(ApplyOperators, ElementaryRules)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1, false);
+    auto* dx = make_deriv(ctx, x);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+
+    // ∂_x x = 1
+    EXPECT_TRUE(structural_eq(
+        steps::apply_operators(ctx, make_tensor_product(ctx, dx, x)),
+        make_scalar(ctx, Rational{1})));
+    // ∂_x y = 0
+    EXPECT_TRUE(structural_eq(
+        steps::apply_operators(ctx, make_tensor_product(ctx, dx, y)),
+        make_scalar(ctx, Rational{0})));
+    // ∂_x f = the formal derivative field (nonzero, and equals partial()).
+    auto* df = steps::apply_operators(ctx, make_tensor_product(ctx, dx, f));
+    EXPECT_TRUE(structural_eq(df, steps::partial(ctx, f, x)));
+    EXPECT_FALSE(structural_eq(df, make_scalar(ctx, Rational{0})));
+}
+
+// The user's worked example: (∂_x x)·f with ∂_x unapplied acts greedily on
+// everything to its right → ∂_x(x·f) = f + x ∂_x f.  Whereas x·∂_x·f (x to the
+// operator's left) leaves x undifferentiated → x ∂_x f.
+TEST(ApplyOperators, GreedyRightwardVsLeftOperand)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* dx = make_deriv(ctx, x);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+
+    // ∂_x x f  =  f + x ∂_x f
+    auto* greedy = steps::apply_operators(
+        ctx, make_tensor_product(ctx, make_tensor_product(ctx, dx, x), f));
+    auto* dxf = steps::partial(ctx, f, x);
+    auto* expect_greedy = make_sum(ctx, f, make_tensor_product(ctx, x, dxf));
+    EXPECT_TRUE(algebraic_eq(ctx, greedy, expect_greedy));
+
+    // x ∂_x f  =  x ∂_x f   (x is not differentiated)
+    auto* left = steps::apply_operators(
+        ctx, make_tensor_product(ctx, make_tensor_product(ctx, x, dx), f));
+    EXPECT_TRUE(algebraic_eq(ctx, left, make_tensor_product(ctx, x, dxf)));
+    // The two arrangements differ.
+    EXPECT_FALSE(algebraic_eq(ctx, greedy, left));
+}
+
+// Operator composition ∂_x ∂_y f applies innermost (rightmost) first, giving
+// the second derivative ∂_x∂_y f = ∂_y∂_x f (mixed partials coincide).
+TEST(ApplyOperators, CompositionSecondDerivative)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1, false);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* dx = make_deriv(ctx, x);
+    auto* dy = make_deriv(ctx, y);
+
+    auto* dxdyf = steps::apply_operators(
+        ctx, make_tensor_product(ctx, make_tensor_product(ctx, dx, dy), f));
+    // Equals the twice-applied partial, and the mixed partial is symmetric.
+    auto* direct = steps::partial(ctx, steps::partial(ctx, f, y), x);
+    EXPECT_TRUE(algebraic_eq(ctx, dxdyf, direct));
+    auto* dydxf = steps::apply_operators(
+        ctx, make_tensor_product(ctx, make_tensor_product(ctx, dy, dx), f));
+    EXPECT_TRUE(algebraic_eq(ctx, dxdyf, dydxf));
+    EXPECT_FALSE(algebraic_eq(ctx, dxdyf, make_scalar(ctx, Rational{0})));
+}
+
+// A bare operator with no operand to its right stays unapplied (∇ passed
+// around): applying does nothing.
+TEST(ApplyOperators, TrailingOperatorStaysBare)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* dx = make_deriv(ctx, x);
+    // f ∂_x : operator is last, nothing to its right.
+    auto* bare = make_tensor_product(ctx, f, dx);
+    EXPECT_TRUE(structural_eq(
+        steps::apply_operators(ctx, bare), steps::canonicalize(ctx, bare)));
+}

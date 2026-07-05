@@ -248,6 +248,15 @@ auto canonicalize(Context& ctx, Expr const* e) -> Expr const*;
 // the 0-and 1-folding leaves a clean expression (e.g. ∂_φ(r cos φ) → −r sin φ).
 auto partial(Context& ctx, Expr const* e, Expr const* coord) -> Expr const*;
 
+// Apply the first-class ∂ operators in `e` (vibe 000077 step B): application is
+// Leibniz.  Each unapplied `Deriv` operator acts on everything to its right in
+// its product term, evaluated through `partial` (so ∂_x x = 1, ∂_x f is the
+// formal derivative field, products fan out by the product rule).  Operators
+// are applied rightmost-first; a trailing operator with no operand to its right
+// is left bare (an unapplied operator).  Self-preparing (distributes first),
+// result canonicalized.
+auto apply_operators(Context& ctx, Expr const* e) -> Expr const*;
+
 // Targeted scalar-field simplifier (vibe 000069 M3): the specific identities
 // the orthogonal-curvilinear geometry pipeline needs, applied to a fixed point
 // on top of canonicalize.  Deliberately small (decision 1 — e-graph promotion

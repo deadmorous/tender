@@ -3250,6 +3250,90 @@ auto partial(Context& ctx, Expr const* e, Expr const* coord) -> Expr const*
     }
 }
 
+// ---- operator application (vibe 000077 step B) -------------------------
+//
+// Application is Leibniz is commutation: an unapplied ∂ operator (a `Deriv`
+// factor) acts on everything to its right in its product.  `apply_operators`
+// carries that out by reusing the existing Leibniz engine (`partial`/`diff`):
+// in each additive product term it finds the *rightmost* operator, hands the
+// product of the factors to its right to `partial`, and splices the result back
+// (the left factors — everything the operator does not reach — are untouched).
+// Rightmost-first means the operand handed to `partial` never itself contains
+// an operator, so the elementary rules (∂_x x = 1, ∂_x f formal, connection
+// terms) fire cleanly; each pass removes one operator, so the recursion
+// terminates.  A trailing operator with nothing to its right stays bare (an
+// unapplied operator, e.g. a ∇ being passed around).
+
+namespace
+{
+
+auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*;
+
+// Apply the operators of one flat product `factors` (left-to-right order).
+auto apply_product_operators(Context& ctx, std::vector<Expr const*> const& facs)
+    -> Expr const*
+{
+    auto product = [&](std::vector<Expr const*> const& fs) -> Expr const*
+    {
+        Expr const* acc = nullptr;
+        for (auto const* f: fs)
+            acc = acc ? make_tensor_product(ctx, acc, f) : f;
+        return acc;
+    };
+
+    // Rightmost operator in the product.
+    int op = -1;
+    for (int k = 0; k < static_cast<int>(facs.size()); ++k)
+        if (std::holds_alternative<Deriv>(facs[k]->node))
+            op = k;
+    if (op < 0)
+        return product(facs); // no operator: nothing to apply
+    if (op == static_cast<int>(facs.size()) - 1)
+        return product(facs); // trailing bare operator: nothing to its right
+
+    auto const& d = std::get<Deriv>(facs[op]->node);
+    std::vector<Expr const*> right(facs.begin() + op + 1, facs.end());
+    // Apply this operator to its rightward operand (Leibniz + elementary
+    // rules).
+    Expr const* applied = partial(ctx, product(right), d.wrt);
+    // Splice: the untouched left factors, then the applied result.
+    std::vector<Expr const*> left(facs.begin(), facs.begin() + op);
+    Expr const* combined = left.empty() ?
+                               applied :
+                               make_tensor_product(ctx, product(left), applied);
+    // The result may hold new sums (Leibniz) and further (left) operators;
+    // re-distribute and recurse.
+    return apply_operators_impl(ctx, combined);
+}
+
+auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
+{
+    // Distribute to a sum of products first, so each term is a flat product.
+    e = expand_products(ctx, canonicalize(ctx, e));
+    // Walk the additive structure; apply operators inside each product term.
+    std::function<Expr const*(Expr const*)> go =
+        [&](Expr const* n) -> Expr const*
+    {
+        if (auto const* s = std::get_if<Sum>(&n->node))
+            return make_sum(ctx, go(s->left), go(s->right));
+        if (auto const* s = std::get_if<Difference>(&n->node))
+            return make_difference(ctx, go(s->left), go(s->right));
+        if (auto const* s = std::get_if<Negate>(&n->node))
+            return make_negate(ctx, go(s->operand));
+        std::vector<Expr const*> facs;
+        flatten_factors(n, facs);
+        return apply_product_operators(ctx, facs);
+    };
+    return go(e);
+}
+
+} // namespace
+
+auto apply_operators(Context& ctx, Expr const* e) -> Expr const*
+{
+    return canonicalize(ctx, apply_operators_impl(ctx, e));
+}
+
 // ---- targeted scalar simplifier (vibe 000069 M3) -----------------------
 
 namespace
