@@ -886,10 +886,14 @@ auto components(Context& ctx, CoordinateChart const& chart, Expr const* v)
     -> std::vector<Expr const*>
 {
     Basis const fb = physical_frame(ctx, chart);
+    // Expand-first (vibe 000073), so an abstract vector field f surfaces as its
+    // frame components [f_r, f_θ, f_z].  A no-op on an already-explicit vector
+    // (its e_i carry slots, so nothing is an expandable field leaf).
+    Expr const* w = expand_fields(ctx, fb, v);
     std::vector<Expr const*> out;
     out.reserve(static_cast<std::size_t>(fb.dim()));
     for (int i = 0; i < fb.dim(); ++i)
-        out.push_back(reduce_dot(ctx, fb, v, fb.direction(ctx, i)));
+        out.push_back(reduce_dot(ctx, fb, w, fb.direction(ctx, i)));
     return out;
 }
 

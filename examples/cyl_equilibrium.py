@@ -10,15 +10,17 @@ fall out and match the standard textbook form.
   0. Cylindrical chart      x = r cosθ,  y = r sinθ,  z = z
   1. Physical frame         e_r, e_θ, e_z  (orthonormal, derived from the map)
   2. Frame connection       ∂_j e_i         (how the frame turns)
-  3. Stress in the frame     T = Σ T_ij e_i ⊗ e_j                         (eq 4)
-  4. Divergence              ∇·T,  projected onto e_r, e_θ, e_z           (eq 7)
-  5. Cross-check             vs the standard cylindrical equilibrium equations
-  6. Boiler formula          r-only, no shear  →  ∂_r T_rr + (T_rr−T_θθ)/r + f_r
+  3. Stress in the frame     T = Σ T_ij e_i ⊗ e_j  (symmetric)            (eq 4)
+  4. Divergence              ∇·T,  per frame component                    (eq 7)
+  5. Balance law             ∇·T + f = 0,  three scalar equations         (eq 8)
+  6. Axisymmetric, no shear  →  one radial equation                       (eq 9)
+  7. Boiler formula          thin pipe under pressure  →  T_θθ ≈ R p / d  (eq 10)
 
-Route A: the abstract field T goes straight into ``cyl.div``, which expands it
-in the frame under the hood and differentiates (step 4 is a one-liner —
-``cyl.components(cyl.div(T))``).  Step 3 shows the same expansion explicitly for
-the reader.  Writes a LaTeX summary to ``out/``.
+Route A: the abstract symmetric field T goes straight into ``cyl.div``, which
+expands it in the frame under the hood and differentiates; ``cyl.components``
+surfaces the scalar equations (step 4 is ``cyl.components(cyl.div(T))``).  Step 3
+shows the same expansion explicitly for the reader.  Writes a LaTeX summary to
+``out/``.
 """
 
 import pathlib
@@ -93,84 +95,100 @@ show(
 # 3. The stress field, represented in the cylindrical frame  (eq 4)
 # ---------------------------------------------------------------------------
 
-# T is an abstract rank-2 field; expand_in_basis writes it on the frame as
-# Σ T_ij e_i ⊗ e_j, minting the physical components T_ij as *fields* of the
-# coordinates — so the divergence can differentiate them (vibe 000073).
-T = ws.field("T", 2)  # depends on r, θ, z
+# T is an abstract *symmetric* rank-2 stress field.  expand_in_basis writes it
+# on the frame as Σ T_ij e_i ⊗ e_j, minting the physical components T_ij as
+# *fields* of the coordinates (so ∇ can differentiate them) that inherit the
+# symmetry, so T_θr folds to T_rθ (vibe 000073).
+T = ws.field("T", 2, symmetric=True)  # T_ij = T_ji, depends on r, θ, z
 T_cyl = td.canonicalize(td.unroll_sums(tb.expand_in_basis(T, frame, tb.Variance.Covariant)))
 show("3. Stress in the frame  T = Σ T_ij e_i e_j", [("T", T_cyl)])
 
-
-def reduce_scalar(x):
-    """Contract a scalar built from frame dots down to a plain expression."""
-    x = tb.simplify_basis_dot(td.expand_products(x), frame)
-    return td.simplify_scalars(td.fold_arithmetic(td.eval_delta_concrete(td.canonicalize(x))))
-
-
-def Tij(i, j):
-    """The physical stress component T_ij = e_i · T · e_j (for the cross-check)."""
-    return reduce_scalar(e[i] @ T_cyl @ e[j])
-
-
 # ---------------------------------------------------------------------------
-# 4. The divergence ∇·T, projected onto the frame  (eq 7)  — Route A
+# 4. The divergence ∇·T, per frame component  (eq 7)  — Route A
 # ---------------------------------------------------------------------------
 
 # Route A: hand the *abstract* field T straight to the operator.  cyl.div
 # expands it in the chart's frame under the hood, then differentiates the
 # components AND the moving basis vectors (via the connection ∂_θ e_i), returning
-# the invariant result.  cyl.components surfaces the three scalar equations —
+# the invariant result.  cyl.components surfaces the three scalar components —
 # no manual expand / project / reduce pipeline.
-div_T = cyl.div(T)  # T abstract; the operator expands-then-differentiates
-div_r, div_th, div_z = cyl.components(div_T)
+div_r, div_th, div_z = cyl.components(cyl.div(T))
 show(
     "4. ∇·T, per frame component (eq 7)",
     [("(∇·T)_r", div_r), ("(∇·T)_θ", div_th), ("(∇·T)_z", div_z)],
 )
 
-# ---------------------------------------------------------------------------
-# 5. Cross-check against the standard cylindrical equilibrium equations
-# ---------------------------------------------------------------------------
-
-# The textbook divergence of a rank-2 field (contracting the first index):
-#   (∇·T)_r = ∂_r T_rr + (1/r)∂_θ T_θr + ∂_z T_zr + (T_rr − T_θθ)/r
-#   (∇·T)_θ = ∂_r T_rθ + (1/r)∂_θ T_θθ + ∂_z T_zθ + (T_rθ + T_θr)/r
+# Cross-check against the standard cylindrical divergence of a symmetric stress:
+#   (∇·T)_r = ∂_r T_rr + (1/r)∂_θ T_rθ + ∂_z T_rz + (T_rr − T_θθ)/r
+#   (∇·T)_θ = ∂_r T_rθ + (1/r)∂_θ T_θθ + ∂_z T_θz + 2 T_rθ/r
 #   (∇·T)_z = ∂_r T_rz + (1/r)∂_θ T_θz + ∂_z T_zz + T_rz/r
+def reduce_scalar(x):
+    x = tb.simplify_basis_dot(td.expand_products(x), frame)
+    return td.simplify_scalars(td.fold_arithmetic(td.eval_delta_concrete(td.canonicalize(x))))
+
+
+def Tij(i, j):  # the physical stress component T_ij = e_i · T · e_j
+    return reduce_scalar(e[i] @ T_cyl @ e[j])
+
+
 def d(comp_expr, coord):
     return td.simplify_scalars(td.partial(comp_expr, coord))
 
 
-expect_r = d(Tij(0, 0), r) + d(Tij(1, 0), th) / r + d(Tij(2, 0), z) + (Tij(0, 0) - Tij(1, 1)) / r
-expect_th = d(Tij(0, 1), r) + d(Tij(1, 1), th) / r + d(Tij(2, 1), z) + (Tij(0, 1) + Tij(1, 0)) / r
-expect_z = d(Tij(0, 2), r) + d(Tij(1, 2), th) / r + d(Tij(2, 2), z) + Tij(0, 2) / r
-
-# div_r combines its terms over the common denominator r, while the textbook
-# form is written term-by-term; they are algebraically equal, so compare the
-# simplified difference (algebraic_eq alone compares canonical form, which keeps
-# the two fraction shapes distinct).
-def same(a, b):
+def same(a, b):  # algebraically equal (algebraic_eq keeps fraction shapes apart)
     return td.simplify_scalars(a - b).latex() == "0"
 
 
-assert same(div_r, expect_r), "r-component disagrees with textbook"
-assert same(div_th, expect_th), "θ-component disagrees with textbook"
-assert same(div_z, expect_z), "z-component disagrees with textbook"
+assert same(div_r, d(Tij(0, 0), r) + d(Tij(0, 1), th) / r + d(Tij(0, 2), z)
+            + (Tij(0, 0) - Tij(1, 1)) / r)
+assert same(div_th, d(Tij(0, 1), r) + d(Tij(1, 1), th) / r + d(Tij(1, 2), z)
+            + 2 * Tij(0, 1) / r)
+assert same(div_z, d(Tij(0, 2), r) + d(Tij(1, 2), th) / r + d(Tij(2, 2), z)
+            + Tij(0, 2) / r)
 print("\n[assert] ∇·T matches the standard cylindrical equilibrium equations ✓")
 
-# Note the θ-component carries (T_rθ + T_θr)/r.  For a *symmetric* stress
-# (T_θr = T_rθ) this is the classic 2 T_rθ / r shear term.
-
 # ---------------------------------------------------------------------------
-# 6. The boiler formula: axisymmetric, no shear, radial load only  (eq 9)
+# 5. The balance law  ∇·T + f = 0,  three scalar equations  (eq 8)
 # ---------------------------------------------------------------------------
 
-# Assume T and f depend on r only and there is no shear.  The θ- and
-# z-equations vanish; the r-equation is the boiler formula.  With only radial
-# dependence, ∂_θ T_θr = ∂_z T_zr = 0, so:
-boiler = td.simplify_scalars(d(Tij(0, 0), r) + (Tij(0, 0) - Tij(1, 1)) / r)
+# The volume load is a vector field; cyl.components surfaces its frame components
+# f_r, f_θ, f_z.  The balance equations are (∇·T)_i + f_i = 0.
+f = ws.field("f", 1)  # body force per unit volume
+f_r, f_th, f_z = cyl.components(f)
 show(
-    "6. Boiler formula (radial equilibrium)",
-    [("∂_r T_rr + (T_rr − T_θθ)/r + f_r = 0", boiler)],
+    "5. Balance law  ∇·T + f = 0  (eq 8)",
+    [(f"({lbl}) = 0", td.simplify_scalars(dv + fi))
+     for lbl, dv, fi in (("e_r", div_r, f_r),
+                         ("e_θ", div_th, f_th),
+                         ("e_z", div_z, f_z))],
+)
+
+# ---------------------------------------------------------------------------
+# 6. Axisymmetric, no shear, radial load only  →  one equation  (eq 9)
+# ---------------------------------------------------------------------------
+
+# Assume T and f depend on r only, with no shear (T_rθ = T_θz = T_rz = 0) and
+# f_θ = f_z = 0.  The θ- and z-equations vanish; only the radial one survives.
+# Rebuild the fields with r-only dependence and read the r-equation.
+T_r = ws.field("T", 2, deps=[r], symmetric=True)
+f_rr = cyl.components(ws.field("f", 1, deps=[r]))[0]
+radial = td.simplify_scalars(cyl.components(cyl.div(T_r))[0] + f_rr)
+show(
+    "6. Axisymmetric radial equilibrium (eq 9)",
+    [("∂_r T_rr + (T_rr − T_θθ)/r + f_r = 0", radial)],
+)
+
+# ---------------------------------------------------------------------------
+# 7. The boiler formula: a thin pipe under internal pressure  (eq 10)
+# ---------------------------------------------------------------------------
+
+# A pipe of inner radius R and thickness d ≪ R, pressure p inside, no body force
+# (f_r = 0).  Then eq (9) is ∂_r T_rr + (T_rr − T_θθ)/r = 0.  T_rr runs from −p at
+# r = R to 0 at r = R + d, so ∂_r T_rr ≈ p/d ≈ const.  With r/d ≫ 1 the (r/d)·p
+# term dominates T_rr ∈ [−p, 0], giving the hoop stress T_θθ ≈ R p / d.
+show(
+    "7. Boiler formula (eq 10)",
+    [("thin pipe, pressure p", r"T_{\theta\theta} \approx \dfrac{R\,p}{d}")],
 )
 
 # ---------------------------------------------------------------------------

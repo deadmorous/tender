@@ -377,6 +377,18 @@ def test_symmetric_field_folds_shear_term():
     assert "T_{\\theta r}" not in eq_th  # folded away
 
 
+def test_components_of_abstract_vector_field():
+    # vibe 000073: components expands-first, so an abstract vector field f
+    # surfaces as its frame components [f_r, f_θ, f_z].
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    f = t.field("f", 1, ctx=ctx)
+    fr, fth, fz = chart.components(f)
+    assert fr.latex() == "f_{r}"
+    assert fth.latex() == r"f_{\theta}"
+    assert fz.latex() == "f_{z}"
+
+
 def test_symmetric_only_rank_2():
     ctx = t.Context()
     with pytest.raises((ValueError, RuntimeError)):
