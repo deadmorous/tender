@@ -110,6 +110,11 @@ auto make_pow(Context& ctx, Expr const* base, Expr const* exponent)
     return ctx.make<Expr>(Pow{base, exponent});
 }
 
+auto make_del(Context& ctx, DelKind kind, Expr const* operand) -> Expr const*
+{
+    return ctx.make<Expr>(Del{kind, operand});
+}
+
 // ---- Unary factory -----------------------------------------------------
 
 auto make_negate(Context& ctx, Expr const* operand) -> Expr const*

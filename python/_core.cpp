@@ -367,6 +367,25 @@ NB_MODULE(_core, m)
             [](PyExpr const& a) -> PyExpr
             { return derive(a, make_transpose(*a.ctx, a.expr)); },
             "Transpose A^T (transpose(a⊗b) = b⊗a).")
+        // Abstract ∇ operators (vibe 000076): chart-free, first-class Del
+        // nodes.  grad ⊗ raises the rank, div · lowers it, curl × preserves it.
+        // These build the invariant operator symbolically; a chart expands them
+        // later (expand_nabla).
+        .def(
+            "grad",
+            [](PyExpr const& a) -> PyExpr
+            { return derive(a, make_del(*a.ctx, DelKind::Grad, a.expr)); },
+            "Abstract gradient ∇⊗A (raises the rank by one).")
+        .def(
+            "div",
+            [](PyExpr const& a) -> PyExpr
+            { return derive(a, make_del(*a.ctx, DelKind::Div, a.expr)); },
+            "Abstract divergence ∇·A (lowers the rank by one).")
+        .def(
+            "curl",
+            [](PyExpr const& a) -> PyExpr
+            { return derive(a, make_del(*a.ctx, DelKind::Curl, a.expr)); },
+            "Abstract curl ∇×A (preserves the rank; 3D).")
         // rendering
         .def(
             "_repr_latex_",

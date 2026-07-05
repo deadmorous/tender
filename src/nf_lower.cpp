@@ -268,6 +268,16 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
         auto sf = encapsulate(ctx, u->operand);
         return {sf.sign, make_unary(ctx, UnaryOp::Transpose, sf.factor)};
     }
+    // ∇⊙T (vibe 000076): opaque linear unary — the operand's lifted sign passes
+    // through, and the Del kind maps to its UnaryOp.
+    if (auto const* u = std::get_if<Del>(&factor->node))
+    {
+        auto sf = encapsulate(ctx, u->operand);
+        auto const op = u->kind == DelKind::Grad ? UnaryOp::DelGrad :
+                        u->kind == DelKind::Div  ? UnaryOp::DelDiv :
+                                                   UnaryOp::DelCurl;
+        return {sf.sign, make_unary(ctx, op, sf.factor)};
+    }
 
     if (auto const* c = std::get_if<tender::Cross>(&factor->node))
     {
@@ -722,6 +732,12 @@ auto raise_factor(Context& ctx, Factor const& f) -> Expr const*
                         return make_vector_invariant(ctx, operand);
                     case UnaryOp::Transpose:
                         return make_transpose(ctx, operand);
+                    case UnaryOp::DelGrad:
+                        return make_del(ctx, DelKind::Grad, operand);
+                    case UnaryOp::DelDiv:
+                        return make_del(ctx, DelKind::Div, operand);
+                    case UnaryOp::DelCurl:
+                        return make_del(ctx, DelKind::Curl, operand);
                 }
                 return operand; // unreachable
             },
