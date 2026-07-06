@@ -141,10 +141,27 @@ struct Deriv final
     TensorObject wrt;
 };
 
+// The chart-free ∇ operator (vibe 000078), mirroring the surface `Expr`
+// `Nabla`: a childless rank-1 invariant operator factor.  Like `Deriv` it is an
+// operator, so `place_factors` keeps it positional (never among the commutative
+// scalars) so its order relative to its neighbours is preserved.
+struct Nabla final
+{
+};
+
 struct Factor final
 {
-    using Node = std::
-        variant<Atom, Contraction, Cross, Paren, Unary, Div, ScalarFn, Pow, Deriv>;
+    using Node = std::variant<
+        Atom,
+        Contraction,
+        Cross,
+        Paren,
+        Unary,
+        Div,
+        ScalarFn,
+        Pow,
+        Deriv,
+        Nabla>;
 
     Node node;
 
@@ -245,6 +262,9 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
 
 // The differential operator ∂/∂(wrt) (vibe 000077).
 [[nodiscard]] auto make_deriv(Context&, TensorObject wrt) -> Factor const*;
+
+// The chart-free ∇ operator (vibe 000078).
+[[nodiscard]] auto make_nabla(Context&) -> Factor const*;
 
 [[nodiscard]] auto make_nf(Context&, std::vector<Term> terms) -> Nf const*;
 

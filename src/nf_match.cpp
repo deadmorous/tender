@@ -154,7 +154,9 @@ auto factor_rank(Factor const* f) -> std::optional<int>
             [](ScalarFn const&) -> std::optional<int> { return 0; },
             [](Pow const&) -> std::optional<int> { return 0; },
             // A ∂ operator's rank is that of its wrt-object (vibe 000077).
-            [](Deriv const& d) -> std::optional<int> { return d.wrt.rank; }},
+            [](Deriv const& d) -> std::optional<int> { return d.wrt.rank; },
+            // ∇ is a rank-1 vector operator (vibe 000078).
+            [](Nabla const&) -> std::optional<int> { return 1; }},
         *f);
 }
 
@@ -331,6 +333,8 @@ auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
                 auto const* t = std::get_if<Deriv>(&tgt->node);
                 return t && tensor_object_cmp(p.wrt, t->wrt) == 0;
             },
+            [&](Nabla const&) -> bool
+            { return std::holds_alternative<Nabla>(tgt->node); },
         },
         *pat);
 }
@@ -426,6 +430,7 @@ void collect_factor_ids(Factor const* f, std::set<int>& out)
                                 std::get_if<CountableIndex>(&*s.index))
                             out.insert(ci->id);
             },
+            [&](Nabla const&) {},
         },
         *f);
 }
@@ -677,6 +682,7 @@ auto inst_factor(
                     TensorObject{
                         d.wrt.name, d.wrt.rank, d.wrt.traits, std::move(slots)});
             },
+            [&](Nabla const&) -> Factor const* { return nf::make_nabla(ctx); },
         },
         *f);
 }
@@ -862,6 +868,7 @@ auto rewrite_in_factor(Context& ctx, ChainRule const& cr, Factor const* f)
             [&](ScalarFn const&) -> Factor const* { return nullptr; },
             [&](Pow const&) -> Factor const* { return nullptr; },
             [&](Deriv const&) -> Factor const* { return nullptr; },
+            [&](Nabla const&) -> Factor const* { return nullptr; },
         },
         *f);
 }

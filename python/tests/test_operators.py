@@ -122,3 +122,21 @@ def test_first_class_nabla_reproduces_grad():
     assert td.algebraic_eq(td.apply_operators(nab * f), cart.grad(f))
     # the ∇ symbol's .at bridge gives the same operator.
     assert td.structural_eq(nabla.at(cart), nab)
+
+
+def test_chart_free_nabla_node():
+    # vibe 000078 increment 1: t.nabla() is the chart-free ∇ operator *Expr* — a
+    # rank-1 invariant vector operator, distinct from the deferred operators.py
+    # symbol.  grad/div/rot are the ordinary product nodes with ∇ on the left.
+    ctx = t.Context()
+    nab = t.nabla(ctx=ctx)
+    assert nab.latex() == "\\nabla"
+    assert nab.rank == 1
+    eps = t.field(r"\varepsilon", 2, symmetric=True, ctx=ctx)
+    assert (nab * eps).latex().startswith("\\nabla ")     # grad ∇⊗ε
+    assert (nab @ eps).latex().startswith("\\nabla \\cdot")  # div ∇·ε
+    assert (nab % eps).latex().startswith("\\nabla \\times")  # rot ∇×ε
+    # inc ε = ∇×(∇×ε)ᵀ builds chart-free with ε abstract (no components).
+    inc = nab % (nab % eps).transpose()
+    assert inc.rank == 2
+    assert "varepsilon_{" not in inc.latex()

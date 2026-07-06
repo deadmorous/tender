@@ -436,6 +436,7 @@ TEST(Visit, DispatchesCorrectAlternative)
             [](ScalarFn const&) {},
             [](Pow const&) {},
             [](Deriv const&) {},
+            [](Nabla const&) {},
         },
         *e);
     EXPECT_TRUE(scalar_seen);
@@ -521,6 +522,10 @@ TEST(Visit, TreeDepthCounter)
         auto operator()(Deriv const& d) const -> int
         {
             return 1 + visit(*this, *d.wrt);
+        }
+        auto operator()(Nabla const&) const -> int
+        {
+            return 1;
         }
     };
 

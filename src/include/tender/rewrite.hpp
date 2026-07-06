@@ -139,6 +139,8 @@ auto rewrite_tree(Context& ctx, Expr const* e, F const& f) -> Expr const*
                 auto* w = rewrite_tree(ctx, s.wrt, f);
                 return w == s.wrt ? e : make_deriv(ctx, w);
             },
+            // ∇ is a childless operator leaf (vibe 000078).
+            [&](Nabla const&) -> Expr const* { return e; },
         },
         *e);
 

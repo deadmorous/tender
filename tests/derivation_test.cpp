@@ -3888,6 +3888,61 @@ TEST(Deriv, OperatorCompositionKeepsOrder)
     EXPECT_FALSE(structural_eq(dxdy, dydx));
 }
 
+// ---- chart-free ∇ operator (vibe 000078, increment 1) -----------------
+
+// ∇ is a rank-1 invariant vector operator: any two ∇ are equal, it survives
+// canon opaquely, and it is order-sensitive exactly like ∂ (never commuted past
+// a neighbour), so grad/div/rot keep ∇ on the left.
+TEST(Nabla, RankIdentityAndCanon)
+{
+    Context ctx;
+    auto* del = make_nabla(ctx);
+
+    EXPECT_EQ(infer_rank(del), std::optional{1});     // rank-1 vector operator
+    EXPECT_TRUE(structural_eq(del, make_nabla(ctx))); // data-free ⇒ all equal
+    // Opaque and stable through canon.
+    auto* c = steps::canonicalize(ctx, del);
+    EXPECT_TRUE(structural_eq(c, del));
+    EXPECT_TRUE(structural_eq(steps::canonicalize(ctx, c), c));
+}
+
+// ∇ acts rightward: canon must not commute it past a neighbouring scalar, so
+// `∇ x` (operator then operand) stays distinct from `x ∇`.
+TEST(Nabla, CanonPreservesOperatorOrder)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* del = make_nabla(ctx);
+
+    auto* del_x = steps::canonicalize(ctx, make_tensor_product(ctx, del, x));
+    auto* x_del = steps::canonicalize(ctx, make_tensor_product(ctx, x, del));
+    EXPECT_FALSE(structural_eq(del_x, x_del));
+    EXPECT_TRUE(structural_eq(del_x, steps::canonicalize(ctx, del_x)));
+    EXPECT_TRUE(structural_eq(x_del, steps::canonicalize(ctx, x_del)));
+}
+
+// grad/div/rot are the ordinary product nodes with ∇ on the left; each keeps ∇
+// positional and opaque through canon (no premature expansion, ε untouched).
+TEST(Nabla, GradDivRotAreProductsWithNablaLeft)
+{
+    Context ctx;
+    auto* eps = make_field(ctx, make_tensor_name("e"), 2, {}, /*sym=*/true);
+    auto* del = make_nabla(ctx);
+
+    auto* grad = make_tensor_product(ctx, del, eps); // ∇⊗ε
+    auto* div = make_dot(ctx, del, eps);             // ∇·ε
+    auto* rot = make_cross(ctx, del, eps);           // ∇×ε
+    for (auto const* e: {grad, div, rot})
+    {
+        auto* c = steps::canonicalize(ctx, e);
+        EXPECT_TRUE(structural_eq(c, steps::canonicalize(ctx, c)));
+    }
+    // inc ε = ∇×(∇×ε)ᵀ builds chart-free with ε abstract.
+    auto* inc =
+        make_cross(ctx, del, make_transpose(ctx, make_cross(ctx, del, eps)));
+    EXPECT_EQ(infer_rank(inc), std::optional{2});
+}
+
 // ---- operator application: Leibniz = commutation (vibe 000077, step B) --
 
 // The elementary rules fire through application: ∂_x x = 1, ∂_x y = 0 (distinct

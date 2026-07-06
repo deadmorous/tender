@@ -120,6 +120,7 @@ static bool is_scalar_expr(Expr const& e)
             [](Pow const& p)
             { return is_scalar_expr(*p.base) && is_scalar_expr(*p.exponent); },
             [](Deriv const&) { return false; },
+            [](Nabla const&) { return false; },
         },
         e);
 }
@@ -348,6 +349,8 @@ struct Renderer
                 // wrapping as a product child (∂_x f, not (∂_x) f) — vibe
                 // 000077.
                 [](Deriv const&) { return ATOM_PREC; },
+                // ∇ (and its Δ form) are atomic symbols.
+                [](Nabla const&) { return ATOM_PREC; },
             },
             e);
     }
@@ -533,6 +536,8 @@ struct Renderer
                 // symbol subscripted by the object it differentiates against.
                 [&](Deriv const& d) -> std::string
                 { return "\\partial_{" + render(*d.wrt) + "}"; },
+                // The chart-free ∇ operator (vibe 000078).
+                [&](Nabla const&) -> std::string { return "\\nabla"; },
             },
             e);
     }
@@ -565,6 +570,7 @@ struct NfRenderer
                 [](nf::Pow const&) { return ATOM_PREC; },
                 [](nf::Deriv const&) { return ATOM_PREC; }, // subscript
                                                             // self-delimits
+                [](nf::Nabla const&) { return ATOM_PREC; },
             },
             f);
     }
@@ -669,6 +675,7 @@ struct NfRenderer
                     return "\\partial_{" + name_str(d.wrt.name, d.wrt.rank)
                            + slots_str(map, d.wrt.slots, hints, ctx) + "}";
                 },
+                [&](nf::Nabla const&) -> std::string { return "\\nabla"; },
             },
             f);
     }

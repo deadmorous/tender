@@ -82,6 +82,11 @@ auto make_deriv(Context& ctx, TensorObject wrt) -> Factor const*
     return ctx.make<Factor>(Deriv{.wrt = std::move(wrt)});
 }
 
+auto make_nabla(Context& ctx) -> Factor const*
+{
+    return ctx.make<Factor>(Nabla{});
+}
+
 auto make_nf(Context& ctx, std::vector<Term> terms) -> Nf const*
 {
     return ctx.make<Nf>(Nf{.terms = std::move(terms)});
@@ -156,6 +161,7 @@ auto equal(Factor const& a, Factor const& b) -> bool
                 return tensor_object_cmp(fa.wrt, std::get<Deriv>(b.node).wrt)
                        == 0;
             },
+            [&](Nabla const&) -> bool { return true; },
         },
         a);
 }
@@ -268,6 +274,7 @@ auto compare(Factor const& a, Factor const& b) -> int
             },
             [&](Deriv const& fa) -> int
             { return tensor_object_cmp(fa.wrt, std::get<Deriv>(b.node).wrt); },
+            [&](Nabla const&) -> int { return 0; },
         },
         a);
 }
@@ -418,6 +425,7 @@ auto hash(Factor const& f) -> std::size_t
             },
             [&](Deriv const& d) -> std::size_t
             { return hash_mix(tag, hash_tensor_object(d.wrt)); },
+            [&](Nabla const&) -> std::size_t { return hash_mix(tag, 0); },
         },
         f);
 }

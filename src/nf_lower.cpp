@@ -279,6 +279,9 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
                 "object (a coordinate)");
         return {1, make_deriv(ctx, *w)};
     }
+    // The chart-free ∇ operator (vibe 000078): a childless operator factor.
+    if (std::holds_alternative<tender::Nabla>(factor->node))
+        return {1, nf::make_nabla(ctx)};
 
     if (auto const* c = std::get_if<tender::Cross>(&factor->node))
     {
@@ -367,7 +370,10 @@ auto place_factors(Context& ctx, ProductParts const& pp) -> Term
         pp.factors.begin(),
         pp.factors.end(),
         [](Expr const* f)
-        { return std::holds_alternative<tender::Deriv>(f->node); });
+        {
+            return std::holds_alternative<tender::Deriv>(f->node)
+                   || std::holds_alternative<tender::Nabla>(f->node);
+        });
     for (auto const* f: pp.factors)
     {
         // Region by *result* rank: a known scalar (rank 0) joins the
@@ -762,6 +768,9 @@ auto raise_factor(Context& ctx, Factor const& f) -> Expr const*
             // wrt-object wrapped back into an Expr.
             [&](Deriv const& d) -> Expr const*
             { return tender::make_deriv(ctx, ctx.make<Expr>(d.wrt)); },
+            // ∇ operator (vibe 000078): rebuild the surface Nabla.
+            [&](Nabla const&) -> Expr const*
+            { return tender::make_nabla(ctx); },
         },
         f);
 }

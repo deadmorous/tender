@@ -781,3 +781,16 @@ TEST(Render, DerivOperator)
     auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
     EXPECT_EQ(latex(*make_tensor_product(ctx, dx, f)), "\\partial_{x} \\, f");
 }
+
+// ---- chart-free ∇ operator (vibe 000078, increment 1) ------------------
+
+TEST(Render, NablaOperator)
+{
+    Context ctx;
+    auto* del = make_nabla(ctx);
+    EXPECT_EQ(latex(*del), "\\nabla");
+    // grad/div/rot as ∇ combined with ⊗ / · / ×.
+    auto* eps = make_field(ctx, make_tensor_name("e"), 2, {}, /*sym=*/true);
+    EXPECT_EQ(latex(*make_dot(ctx, del, eps)), "\\nabla \\cdot \\mathbf{e}");
+    EXPECT_EQ(latex(*make_cross(ctx, del, eps)), "\\nabla \\times \\mathbf{e}");
+}

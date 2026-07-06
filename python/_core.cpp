@@ -482,6 +482,19 @@ NB_MODULE(_core, m)
         "its dependence.  A rank-0 field is a scalar field.  symmetric=True "
         "marks a rank-2 field symmetric (T_ij = T_ji), so T_θr folds to T_rθ.");
 
+    m.def(
+        "nabla",
+        [](nb::object ctx_arg) -> PyExpr
+        {
+            auto [ctx, keep] = resolve_ctx(ctx_arg);
+            return PyExpr{keep, ctx, make_nabla(*ctx)};
+        },
+        "ctx"_a = nb::none(),
+        "The chart-free ∇ operator (vibe 000078): a rank-1 invariant vector "
+        "operator Expr.  Combine with the product operators — nabla*T (grad), "
+        "nabla@T (div), nabla%T (rot) — to write differential expressions "
+        "coordinate-free; a chart later expands each ∇ to Σ_i (1/h_i) e_i ∂_i.");
+
     // ---- scalar fields (vibe 000069 M1) -------------------------------- //
 
     m.def(

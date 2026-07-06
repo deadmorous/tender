@@ -105,6 +105,7 @@ auto find_index_space(Expr const* e, int id) -> IndexSpace const*
                     go(s.exponent);
                 },
                 [&](Deriv const& s) { go(s.wrt); },
+                [&](Nabla const&) {},
             },
             *node);
     };
@@ -312,6 +313,7 @@ auto find_space_from_concrete(Expr const* e) -> IndexSpace const*
                     go(s.exponent);
                 },
                 [&](Deriv const& s) { go(s.wrt); },
+                [&](Nabla const&) {},
             },
             *node);
     };
@@ -400,6 +402,7 @@ void collect_concrete_values(Expr const* e, std::vector<int>& out)
                     go(s.exponent);
                 },
                 [&](Deriv const& s) { go(s.wrt); },
+                [&](Nabla const&) {},
             },
             *node);
     };
@@ -599,6 +602,9 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                 auto const* db = std::get_if<Deriv>(&b->node);
                 return db && structural_eq(da.wrt, db->wrt);
             },
+            // ∇ carries no data — any two ∇ operators are structurally equal.
+            [&](Nabla const&) -> bool
+            { return std::holds_alternative<Nabla>(b->node); },
         },
         a->node);
 }
@@ -827,6 +833,7 @@ auto has_free_index_for(
             },
             [&](Deriv const& s) -> bool
             { return has_free_index_for(s.wrt, indices, bound); },
+            [&](Nabla const&) -> bool { return false; },
         },
         *e);
 }
@@ -900,6 +907,7 @@ auto is_component_valued(Expr const* e) -> bool
             // A differential operator is not a commuting component value
             // (vibe 000077): its position carries meaning.
             [](Deriv const&) { return false; },
+            [](Nabla const&) { return false; },
         },
         *e);
 }
@@ -964,6 +972,8 @@ auto infer_rank(Expr const* e) -> std::optional<int>
             // differentiates with respect to (vibe 000077): a coordinate ⇒ 0.
             [](Deriv const& d) -> std::optional<int>
             { return infer_rank(d.wrt); },
+            // ∇ is a rank-1 vector operator (vibe 000078).
+            [](Nabla const&) -> std::optional<int> { return 1; },
         },
         *e);
 }
@@ -2423,6 +2433,7 @@ auto map_children(Context& ctx, Expr const* e, Rec const& rec) -> Expr const*
                 auto* w = rec(s.wrt);
                 return w == s.wrt ? e : make_deriv(ctx, w);
             },
+            [&](Nabla const&) -> Expr const* { return e; },
         },
         *e);
 }
@@ -2811,6 +2822,7 @@ auto has_explicit_sum_for(
                     go(s.exponent);
                 },
                 [&](Deriv const& s) { go(s.wrt); },
+                [&](Nabla const&) {},
             },
             *node);
     };
@@ -3224,6 +3236,13 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
                 throw std::invalid_argument(
                     "diff: differentiating a ∂ operator (operator composition) "
                     "is not supported yet");
+            },
+            [&](Nabla const&) -> Expr const*
+            {
+                // Likewise for the ∇ operator: expand it in a chart first.
+                throw std::invalid_argument(
+                    "diff: differentiating a ∇ operator is not supported; "
+                    "expand ∇ in a chart first");
             },
         },
         *e);

@@ -115,6 +115,11 @@ auto make_deriv(Context& ctx, Expr const* wrt) -> Expr const*
     return ctx.make<Expr>(Deriv{wrt});
 }
 
+auto make_nabla(Context& ctx) -> Expr const*
+{
+    return ctx.make<Expr>(Nabla{});
+}
+
 // ---- Unary factory -----------------------------------------------------
 
 auto make_negate(Context& ctx, Expr const* operand) -> Expr const*

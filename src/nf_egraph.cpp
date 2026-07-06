@@ -262,6 +262,9 @@ struct NfEGraph::Impl final
                 // A ∂ operator (vibe 000077) rides the generic Atom path too.
                 [&](Deriv const&) -> EClassId
                 { return add_node(NfENode{NfEKind::Atom, f, {}}); },
+                // The ∇ operator (vibe 000078) likewise.
+                [&](Nabla const&) -> EClassId
+                { return add_node(NfENode{NfEKind::Atom, f, {}}); },
             },
             *f);
     }

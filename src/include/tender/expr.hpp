@@ -241,6 +241,19 @@ struct Deriv final
     Expr const* wrt;
 };
 
+// The chart-free ∇ operator (vibe 000078): a rank-1 invariant vector operator
+// atom with no children.  This is the bare "∇ is a rank-1 vector operator" of
+// the settled design — *not* the fused grad/div/rot node we retired.  grad, div
+// and rot are ordinary product nodes with `Nabla` on the left (`∇⊗T`, `∇·T`,
+// `∇×T`); `∇·∇` renders `Δ`.  Like `Deriv`, it is operator-aware: canon keeps
+// it positional (it acts rightward, Leibniz-greedily), never commuted past its
+// neighbours.  A chart supplies its expansion `Σ_i (1/h_i) e_i ∂_i` at
+// evaluation time (`expand_nabla`); until then it stays abstract, so `inc ε =
+// ∇×(∇×ε)ᵀ` can be written and inspected without a coordinate system.
+struct Nabla final
+{
+};
+
 // ---- Binary operation nodes --------------------------------------------
 
 struct Sum final
@@ -333,7 +346,8 @@ struct Expr final
         NoSum,
         ScalarFn,
         Pow,
-        Deriv>;
+        Deriv,
+        Nabla>;
 
     Node node;
 
@@ -427,6 +441,9 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 // The unapplied differential operator ∂/∂(wrt) (vibe 000077).  `wrt` is the
 // tensor object differentiated against (a coordinate for now).
 [[nodiscard]] auto make_deriv(Context&, Expr const* wrt) -> Expr const*;
+
+// The chart-free ∇ operator (vibe 000078): a rank-1 invariant vector operator.
+[[nodiscard]] auto make_nabla(Context&) -> Expr const*;
 
 // Unary
 [[nodiscard]] auto make_negate(Context&, Expr const*) -> Expr const*;
