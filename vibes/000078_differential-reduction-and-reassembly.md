@@ -1,0 +1,141 @@
+# 000078 — differential reduction & reassembly (strain-compat gap-D core)
+
+Continues vibe 000077.  The operator foundation gives us `inc ε = ∇×(∇×ε)ᵀ`
+built with ε **abstract** and ∇ expanded:
+
+    inc ε = Σ_{a,b} u_a × (u_b × ∂_a∂_b ε)ᵀ          (WCS, ε never componentised)
+
+but it stops there — the nested cross of concrete frame vectors with an
+*abstract* rank-2 `∂_a∂_b ε` cannot reduce, and there is no way to fold the
+result back into the named invariant operators.  This vibe designs the two
+missing phases that carry it to the closed identity
+
+    inc ε = −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + 2(∇∇·ε)ˢ ,   θ = tr ε.
+
+## The two phases
+
+- **Reduction (Phase 1).**  Turn the cross structure `e_i × (e_j × ε)ᵀ` into a
+  sum of dyad / dot / trace terms via the `a×B×c` identity — with the frame
+  vectors *free-indexed* and ε abstract.
+- **Reassembly (Phase 2).**  Fold `Σ … e_i ∂_i … ε` back into the invariant
+  operators, by reading, for each ∂, the *role* of its index.  This is the novel
+  engine: the differential analogue of `reassemble` (basis.hpp), which already
+  folds `Σ_i a_i e_i → a` for the non-differential case.
+
+## Representation — settled by prior decisions, now grounded
+
+Two decisions the user already made (the very first design fork of gap D) come
+back into force, now that the operator foundation exists:
+
+1. **Abstract implicit-summation index** (not the concrete 9-pair expansion).
+   The identity fires **once** on `e_i × (e_j × ε)ᵀ` with `i,j` summed, and — the
+   decisive reason — reassembly then just *reads the index contractions*
+   (frame-free vs contracted-with-ε vs δ-contracted), which is frame-independent
+   and clean.  The concrete path would need fragile 9-term cycle recognition.
+2. **A chart-free ∇ operator** as the invariant representation.  This is *not* the
+   fused `Del{grad/div/rot}` we retired — it is the bare **rank-1 ∇ operator**
+   (the "∇ is a rank-1 vector operator" decision), with grad/div/rot = ∇ combined
+   with `⊗`/`·`/`×`.  It serves three roles at once: the natural chart-free way to
+   *write* `inc ε = ∇×(∇×ε)ᵀ`, the thing that *expands* to `Σ_i e_i ∂_i` in a
+   chart, and the *reassembly target* (∇∇θ, Δε, … as `Nabla`-operator Exprs).
+
+## The pieces
+
+### A. Chart-free ∇ operator (`Nabla` node)
+
+A rank-1 invariant operator atom, operator-aware exactly like `Deriv` (canon
+keeps it positional; it acts rightward).  `∇⊗T`, `∇·T`, `∇×T` are the ordinary
+product nodes with `Nabla` on the left.  Renders `\nabla`; `∇·∇` renders `Δ`.
+Reuses all the operator-aware infrastructure of steps A–C.  `inc ε` becomes
+chart-free: `Nabla × (Nabla × ε)ᵀ`.
+
+### B. Free-index ∂ and ∇-expansion in a chart
+
+The one genuinely new expr-model capability, and the reason `DerivMark::link`
+exists: a derivative whose **direction is a summation index**, tied to a frame
+vector.
+
+- `DerivMark` gains an abstract-index direction: `link != 0` means "the ∂
+  direction is the `CountableIndex` with this id" (rather than the concrete
+  `wrt`), so `e_i` (a frame vector carrying index `i`) and `∂_i ε` (ε with a mark
+  linked to `i`) **sum together** under the existing Einstein machinery.
+- `expand_nabla(chart, e)` rewrites each `Nabla` → `e_i (1/h_i) ∂_i` with a fresh
+  shared index `i`: an indexed frame vector `e_i` (basis direction with a
+  `CountableIndex` slot) times a free-index `∂_i`.  In a constant frame (WCS)
+  `∂_i e_j = 0`, so applying the operators leaves `e_i × (e_j × ∂_i∂_j ε)ᵀ`, the
+  free-index interior.
+- Summation detection, canon, and render learn the abstract-index mark (it is an
+  index occurrence; it renders `∂_i` with the index letter).
+
+### C. Phase-1 reduction — the a×B×c identity, once
+
+Apply `a×(c×B)ᵀ → …` to the free-index interior `e_i × (e_j × ε)ᵀ` (a=e_i,
+c=e_j, B=ε).  Using vibe 000075's *sign-corrected* form and the 5-term
+expansion, this yields (schematically, i,j summed, ∂_i∂_j riding along):
+
+    θ(e_j⊗e_i − δ_ij I) + (e_i e_j··ε)I + δ_ij ε − e_j⊗(e_i·ε) − (e_i⊗e_j·ε)ᵀ
+
+Mechanism: express the identity as a tender `Identity` and fire `apply_identity`
+on the cross-with-rank-2 pattern (binding a,c to the free frame vectors, B to ε),
+or extend the vibe-000063 cross-removal engine.  **Open:** which — a declared
+Identity vs. a dedicated reducer (the LHS has a transpose inside a cross, which
+stresses the matcher).
+
+### D. Phase-2 reassembly — read each ∂'s index role  ← the heart
+
+After Phase 1 the expression is a sum of terms, each
+
+    coeff · [free frame vectors / δ's / I] · [∂_i∂_j (θ or ε)]     (i,j summed)
+
+Every abstract ∂-index appears twice (Einstein): once on its ∂-mark, once as
+either **(a)** a *free* frame vector `e_i`, **(b)** a `δ_ij` shared with the other
+∂, or **(c)** a slot of ε (`e_i·ε`).  Reassembly classifies each ∂ by its partner
+and rebuilds with `Nabla`:
+
+| ∂-index partner | meaning | fold |
+|---|---|---|
+| free frame vector `e_i` (a dyad leg) | a gradient leg | `e_i ⊗ … ∂_i` → `∇ ⊗ …` |
+| `δ_ij` with the other ∂ | the two ∂'s contract | `∂_i∂_i` → `∇·∇ = Δ` |
+| a slot of ε (`e_i·ε`) | a divergence of ε | `(e_i·ε) ∂_i` → `∇·ε` |
+| both ∂'s into ε (`ε_ij`) | double divergence | `∂_i∂_j ε_ij` → `∇∇··ε` |
+
+So each term rebuilds to a `Nabla`-operator composition on θ or ε:
+
+    Σ e_j⊗e_i ∂_i∂_j θ           → ∇∇θ
+    Σ δ_ij ∂_i∂_j θ              → Δθ
+    Σ (e_i e_j··ε) ∂_i∂_j        → ∇∇··ε
+    Σ δ_ij ∂_i∂_j ε              → Δε
+    Σ e_j⊗(e_i·ε) ∂_i∂_j         → ∇(∇·ε) = ∇∇·ε
+    Σ (e_i⊗e_j·ε)ᵀ ∂_i∂_j        → (∇∇·ε)ᵀ
+
+collapsing to `inc ε = −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + (∇∇·ε + (∇∇·ε)ᵀ)`, i.e. the
+closed identity with `2(∇∇·ε)ˢ`.  The engine is a focused walk: per term, find
+the ∂-marks, resolve each index's partner, classify (grad / Laplacian /
+divergence), emit the `Nabla` structure; it is the differential sibling of
+`reassemble`.
+
+## Increment plan (each buildable/testable)
+
+1. **`Nabla` node** — chart-free rank-1 ∇ operator (build, render, operator-aware
+   canon, grad/div/rot as ∇⊙, Δ = ∇·∇).  `inc ε` written chart-free.
+2. **Free-index ∂ + `expand_nabla`** — abstract-index `DerivMark`; expand `Nabla`
+   → `e_i ∂_i`; verify `inc ε` expands to the free-index interior with ε abstract.
+3. **Phase-1 reduction** — a×B×c on the free-index interior (once), sign-corrected.
+4. **Phase-2 reassembly** — the index-role engine folding to `Nabla` operators.
+5. **Showcase** — `inc ε` derived as performed = the closed identity; verify vs
+   the known form; then the cylindrical evaluation of the compatibility equations.
+
+## Open questions for review
+
+- **Q1.**  Confirm the abstract free-index path (identity once) over the concrete
+  9-pair path.  (Recommended; matches the original decision and makes reassembly
+  clean.)
+- **Q2.**  `DerivMark::link` as the abstract-index direction — a `CountableIndex`
+  id tying `∂_i` to `e_i` under Einstein summation.  Confirm this is the
+  mechanism (vs. a separate operator factor).
+- **Q3.**  Phase-1: declare the `a×(c×B)ᵀ` identity and use `apply_identity`, or
+  build a dedicated cross-with-rank-2 reducer (extending vibe 000063)?  The
+  transpose-inside-cross LHS is the risk.
+- **Q4.**  Reassembly scope: build it targeted to the strain-compat patterns
+  first, or as a general "fold frame-indexed ∂-derivatives into ∇" engine from
+  the start?  (Lean: general mechanism, validated on these patterns.)
