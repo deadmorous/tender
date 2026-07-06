@@ -159,6 +159,41 @@ builds with ε abstract; `DerivMark{coord_name, wrt, link}` exists with `link`
 reserved.  Build these five increments, each buildable/testable, `clang-format`
 + tests green before each commit.
 
+### Progress
+
+- **Increment 1 DONE** (commit `cc0c54f`).  `Nabla` node added and threaded;
+  grad/div/rot = ∇⊙; `inc ε = ∇×(∇×ε)ᵀ` builds chart-free; `t.nabla(ctx=…)`.
+- **Increment 2 DONE** (commit `f09e3f1`).  Free-index ∂: `DerivMark` gained
+  `free` (a dedicated flag — index ids can be 0, so `link != 0` won't do),
+  `link` (direction id tied to e_i) and `free_slot`.  Summation counts a free
+  mark; `substitute_index_ids` α-renames it with e_i; render shows ∂_i.  New
+  free-index path in `diff`/`partial` via `make_coordinate_direction` wrt;
+  `apply_operators` recurses into transpose/trace/vec.  `chart.expand_nabla`
+  lowers `inc ε` → `e_i × (e_j × ∂_i∂_j ε)ᵀ` (i,j summed, ε abstract);
+  `chart.componentize_nabla` unrolls to concrete directions.  **Verified: all 9
+  components equal brute-force rot·rotᵀ.**
+
+- **Increment 3 IN PROGRESS.**  `id_axBxc` *derives correctly in the current
+  tender* via the notebook recipe (`expand_in_basis(co) → apply_identity(alt) →
+  expand_in_basis → simplify_basis_cross → simplify_basis_dot → contract_delta →
+  contract_eps_pair → contract_delta → contract_eps_pair → contract_delta →
+  reassemble`), giving `a×B×c = −(a·c)trB·I + (a·Bᵀ·c)I + (a·c)Bᵀ − c⊗(B·a) −
+  (Bᵀ·c)⊗a + trB·c⊗a` — matches the vibe's 5-term form.  The prerequisite
+  `id_axIxb_alt` (`c⊗a = a×I×c + (a·c)I`) also derives.  **Open:** the nested
+  transpose-cross helper `a×(c×B)ᵀ = −a×Bᵀ×c` does *not* reduce with the same
+  chain — it leaves a residual bare `e_k × e_j` that `simplify_basis_cross` will
+  not fire on inside the larger product (a reduction-ordering quirk the sandbox
+  notebook tuned by hand).  Two robust ways forward for the helper: (a) find the
+  interleaved expand / simplify_basis_cross fixpoint chain that clears the
+  residual cross; (b) *prove* the helper at the component level (`component_matrix`
+  of both sides over concrete a,c,B — the same brute-force check increment 2
+  used), then reuse it.  Phase-1's output can then be produced either by
+  `apply_identity` on the free-index interior (matcher-stressing: transpose inside
+  cross) or by direct substitution a→e_i, c→e_j, B→∂_i∂_j ε into the derived
+  `id_axBxc` RHS.  Increment 2's `componentize_nabla` + `component_matrix` is the
+  brute-force oracle to verify whichever path.  NEXT: finish the helper, then the
+  reassembly engine (increment 4).
+
 **Increment 1 — chart-free `Nabla` operator node.**
 - `struct Nabla final {};` in `expr.hpp` (a rank-1 invariant operator atom, no
   children); add to the `Expr` variant; `make_nabla`.  Thread through the same
