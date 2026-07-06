@@ -125,17 +125,84 @@ divergence), emit the `Nabla` structure; it is the differential sibling of
 5. **Showcase** — `inc ε` derived as performed = the closed identity; verify vs
    the known form; then the cylindrical evaluation of the compatibility equations.
 
-## Open questions for review
+## Decisions (confirmed by the user)
 
-- **Q1.**  Confirm the abstract free-index path (identity once) over the concrete
-  9-pair path.  (Recommended; matches the original decision and makes reassembly
-  clean.)
-- **Q2.**  `DerivMark::link` as the abstract-index direction — a `CountableIndex`
-  id tying `∂_i` to `e_i` under Einstein summation.  Confirm this is the
-  mechanism (vs. a separate operator factor).
-- **Q3.**  Phase-1: declare the `a×(c×B)ᵀ` identity and use `apply_identity`, or
-  build a dedicated cross-with-rank-2 reducer (extending vibe 000063)?  The
-  transpose-inside-cross LHS is the risk.
-- **Q4.**  Reassembly scope: build it targeted to the strain-compat patterns
-  first, or as a general "fold frame-indexed ∂-derivatives into ∇" engine from
-  the start?  (Lean: general mechanism, validated on these patterns.)
+- **Q1 — abstract free-index path.** ✓  Identity fires once; reassembly reads
+  index roles.
+- **Q2 — `DerivMark::link` as the abstract-index direction.** ✓  A
+  `CountableIndex` id ties `∂_i` to `e_i` under Einstein summation.
+- **Q4 — general reassembly engine.** ✓  Build the general "fold frame-indexed
+  ∂-derivatives into ∇" mechanism, validated on the strain-compat patterns.
+- **Q3 — derive the identities in-codebase, `a×B×c` as the sole primitive.**  Do
+  *not* hand-assert or wrestle a transpose-inside-cross matcher.  Mirror
+  `../tender-sandbox/identities.ipynb`: prove each identity by expanding both
+  sides in WCS and self-verifying with `algebraic_eq`, then reuse via
+  `apply_identity`.  The chain:
+  1. Derive `id_axBxc : a×B×c = trB(c⊗a − (a·c)I) + (c·B·a)I + (a·c)Bᵀ −
+     c⊗(B·a) − (c·B)⊗a`.  Recipe (from the notebook): `expand_in_basis(co)` →
+     `simplify_basis_cross` → `simplify_basis_dot` → `contract_eps_pair` →
+     `contract_delta` (repeat contract steps) → `reassemble`, self-verified
+     against the 5-term RHS.
+  2. Derive the **nested-cross helper** that turns the strain interior into
+     `a×B×c` form using ε **symmetry**: the user's `a×(b×ε) = −a×ε×b` (worked out
+     — with/without the outer transpose and exact sign — during derivation;
+     tender catches sign slips as in vibe 000075).  So the interior
+     `e_i × (e_j × ε)ᵀ` reduces first to `∓ e_i × ε × e_j`, then `id_axBxc`
+     applies once.
+  These derived identities live in a small library (extend `tender/identities`,
+  vibe 000046) with a self-check test.
+
+## Implementation plan (self-contained — resume here after compaction)
+
+State at handoff: operator foundation A–E committed (vibe 000077); `inc ε`
+builds with ε abstract; `DerivMark{coord_name, wrt, link}` exists with `link`
+reserved.  Build these five increments, each buildable/testable, `clang-format`
++ tests green before each commit.
+
+**Increment 1 — chart-free `Nabla` operator node.**
+- `struct Nabla final {};` in `expr.hpp` (a rank-1 invariant operator atom, no
+  children); add to the `Expr` variant; `make_nabla`.  Thread through the same
+  sites `Deriv` touched (compiler-guided): `rewrite_tree`/`map_children` (leaf),
+  `structural_eq` (all equal), `infer_rank` (→ 1), `is_component_valued` (false),
+  `has_free_index_for` (false), `find_index_space` (skip), render (`\nabla`; and
+  `Nabla·Nabla` → `\Delta`), `diff` (throw — expand first), and the nf layer
+  (`nf::Nabla` positional factor: lower/raise/rank=1/compare/hash/egraph via the
+  Atom path).  Extend `place_factors`' operator detection to include `Nabla`.
+- grad/div/rot/Δ are `Nabla` with `⊗`/`·`/`×`/`·∇`.  `inc ε` = `nabla % (nabla %
+  eps).transpose()` chart-free.  Tests: rank, render (`∇×(∇×ε)ᵀ`, `∇∇θ`, `Δθ`),
+  canon keeps it positional/opaque.
+
+**Increment 2 — free-index ∂ and `expand_nabla`.**
+- Teach the abstract-index `DerivMark` (`link` = the `CountableIndex` id): a
+  free-index differentiation that *stamps a mark* `link=i` on a field (∂_i ε) and
+  gives 0 on a constant frame vector (WCS), rather than concrete `partial`.
+- Summation detection (`summation.cpp`) counts a mark's `link` index as an
+  occurrence, so `e_i` (frame vector with slot index i) and `∂_i ε` (mark
+  link=i) contract; render shows `∂_i` with the index letter.
+- `expand_nabla(chart, e)`: replace each `Nabla` with `e_i (1/h_i) ∂_i` — a fresh
+  shared `CountableIndex` i, an indexed frame vector `e_i`, a free-index `∂_i` —
+  then apply the operators (Step B machinery, free-index variant).  Verify `inc
+  ε` expands to `e_i × (e_j × ∂_i∂_j ε)ᵀ` (i,j summed, ε abstract), and that its
+  components match brute-force `inc ε`.
+
+**Increment 3 — Phase-1 reduction (derive + apply identities).**
+- Derive `id_axBxc` and the nested-cross helper (Q3 recipe above); self-check
+  test.  Apply them (`apply_identity`) to the free-index interior → the 5-term
+  form `θ(e_j⊗e_i − δ_ij I) + (e_i e_j··ε)I + δ_ij ε − e_j⊗(e_i·ε) −
+  (e_i⊗e_j·ε)ᵀ`.  Verify components vs brute force.
+
+**Increment 4 — Phase-2 reassembly (the heart).**
+- New engine `reassemble_del(ctx, e)`: per additive term, find the ∂-marks,
+  resolve each abstract index's partner, classify (free frame vector → grad leg;
+  `δ_ij` with the other ∂ → Laplacian; ε-slot → divergence; both into ε → double
+  divergence), and emit the `Nabla` composition on θ/ε.  The differential
+  sibling of `basis.hpp::reassemble`.  Fold to `∇∇θ, Δθ, ∇∇··ε, Δε, ∇∇·ε,
+  (∇∇·ε)ᵀ`; symmetrize the last pair to `2(∇∇·ε)ˢ`.  Verify the reassembled
+  `inc ε` equals the known closed identity (build the RHS with `Nabla` operators;
+  `algebraic_eq` after a common expansion, or componentwise).
+
+**Increment 5 — showcase + cylindrical.**
+- `examples/strain_compatibility.py`: the full pipeline `inc ε` (chart-free) →
+  `expand_nabla` → apply → reduce → reassemble → closed identity, verified.  Then
+  the cylindrical evaluation of the compatibility equations (the original task
+  #26 endpoint).  Keep the notebook stripped.
