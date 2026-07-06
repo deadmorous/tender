@@ -39,7 +39,7 @@ auto substitute_index_id(Context& ctx, Expr const* e, int old_id, int new_id)
             }
             if (!changed)
                 return e;
-            // Copy the whole object so field_derivs (the ∂ directions of a
+            // Copy the whole object so deriv marks (the applied ∂s of a
             // field, vibe 000073) survive index substitution — rebuilding with
             // only name/rank/traits/slots silently drops the derivative.
             TensorObject obj = *t;
@@ -74,7 +74,7 @@ auto substitute_index_ids(
             }
             if (!changed)
                 return e;
-            // Copy the whole object so field_derivs (the ∂ directions of a
+            // Copy the whole object so deriv marks (the applied ∂s of a
             // field, vibe 000073) survive index substitution — rebuilding with
             // only name/rank/traits/slots silently drops the derivative.
             TensorObject obj = *t;

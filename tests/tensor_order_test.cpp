@@ -24,7 +24,7 @@ auto obj(
     char const* name,
     std::optional<int> rank,
     std::vector<SlotBinding> slots = {},
-    std::vector<FieldDerivDir> derivs = {}) -> TensorObject
+    std::vector<DerivMark> derivs = {}) -> TensorObject
 {
     return TensorObject{
         make_tensor_name(name),
@@ -129,8 +129,8 @@ TEST(TensorOrder, TensorObjectCmpPerSlot)
 // multi-index makes the comparison symmetric.
 TEST(TensorOrder, TensorObjectCmpFieldDerivs)
 {
-    FieldDerivDir dx{make_tensor_name("x"), CoordinateRef{1, 0, false}};
-    FieldDerivDir dy{make_tensor_name("y"), CoordinateRef{1, 1, false}};
+    DerivMark dx{make_tensor_name("x"), CoordinateRef{1, 0, false}};
+    DerivMark dy{make_tensor_name("y"), CoordinateRef{1, 1, false}};
 
     auto base = obj("T", 2);
     auto d_x = obj("T", 2, {}, {dx});
@@ -143,7 +143,7 @@ TEST(TensorOrder, TensorObjectCmpFieldDerivs)
     // Differ by a single direction's (chart_id, slot).
     auto d_y = obj("T", 2, {}, {dy});
     EXPECT_NE(tensor_object_cmp(d_x, d_y), 0);
-    FieldDerivDir dx_other{make_tensor_name("x"), CoordinateRef{2, 0, false}};
+    DerivMark dx_other{make_tensor_name("x"), CoordinateRef{2, 0, false}};
     auto d_x2 = obj("T", 2, {}, {dx_other});
     EXPECT_NE(tensor_object_cmp(d_x, d_x2), 0); // chart_id differs
 }

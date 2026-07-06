@@ -309,7 +309,7 @@ auto expand_in_basis(
             // the connection terms and yield only the coordinate part d*T (vibe
             // 000073).  Refuse loudly and point at the chart operator, which
             // expands the field *then* differentiates.
-            if (!t->field_derivs.empty()
+            if (!t->deriv_marks.empty()
                 && has_moving_connection(c, basis.basis_id()))
                 throw std::invalid_argument(
                     "expand_in_basis: cannot expand a field derivative (∂T) in "
@@ -366,7 +366,7 @@ auto expand_in_basis(
                 .rank = 0,
                 .traits = std::nullopt,
                 .slots = std::move(coord_slots),
-                .field_derivs = t->field_derivs};
+                .deriv_marks = t->deriv_marks};
             if (t->traits)
                 comp.traits = TensorTraits{
                     .symmetry = t->traits->symmetry,

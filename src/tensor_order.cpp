@@ -86,18 +86,20 @@ auto tensor_object_cmp(TensorObject const& a, TensorObject const& b) -> int
         if (int c = index_assoc_cmp(sa.index, sb.index))
             return c;
     }
-    // Field-derivative directions are part of identity (vibe 000070 P7): ∂_x T
+    // Applied-derivative marks are part of identity (vibe 000077 step D): ∂_x T
     // ≠ T, and the sorted multi-index makes ∂_x∂_y T = ∂_y∂_x T.
-    if (a.field_derivs.size() != b.field_derivs.size())
-        return a.field_derivs.size() < b.field_derivs.size() ? -1 : 1;
-    for (std::size_t i = 0; i < a.field_derivs.size(); ++i)
+    if (a.deriv_marks.size() != b.deriv_marks.size())
+        return a.deriv_marks.size() < b.deriv_marks.size() ? -1 : 1;
+    for (std::size_t i = 0; i < a.deriv_marks.size(); ++i)
     {
-        auto const& da = a.field_derivs[i].ref;
-        auto const& db = b.field_derivs[i].ref;
-        if (da.chart_id != db.chart_id)
-            return da.chart_id < db.chart_id ? -1 : 1;
-        if (da.slot != db.slot)
-            return da.slot < db.slot ? -1 : 1;
+        auto const& da = a.deriv_marks[i];
+        auto const& db = b.deriv_marks[i];
+        if (da.wrt.chart_id != db.wrt.chart_id)
+            return da.wrt.chart_id < db.wrt.chart_id ? -1 : 1;
+        if (da.wrt.slot != db.wrt.slot)
+            return da.wrt.slot < db.wrt.slot ? -1 : 1;
+        if (da.link != db.link)
+            return da.link < db.link ? -1 : 1;
     }
     return 0;
 }

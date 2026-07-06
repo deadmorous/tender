@@ -180,6 +180,33 @@ working).
 expansion with ε kept abstract (native now — "don't expand" is a resting state),
 apply `a×B×c` once to `e_i × ε × e_j`, reassemble into named operators.
 
+## Step D as built — one representation, FieldDerivDir retired
+
+`FieldDerivDir` is **deleted**.  A field's applied derivatives now live on the
+`TensorObject` as `deriv_marks : [DerivMark]`, where `DerivMark { coord_name,
+wrt, link }` is understood as **an applied `Deriv` operator** — its closed form.
+So differentiation has one representation across its lifecycle: the `Deriv` node
+(steps A–C) is the *unapplied* operator; application (Leibniz, via
+`partial`/`make_field_derivative`) *closes* it into a mark on the differentiated
+object.  `apply_operators(∂_x ⊗ T)` yields exactly `partial(T, x)` — a plain,
+closed `TensorObject`, which (being a value, not an operator) does not keep
+differentiating rightward.
+
+Engineering choice (flagged to the user, who chose full deletion): the closed
+derivative is kept **self-contained on the atom** (the mark carries its `wrt`
+direction) rather than as a two-factor "inert applied operator + atom-links-to-it"
+form.  The two-factor form makes the closed value awkward (a scalar-region
+operator co-travelling with its atom, needing inert-when-scoped handling
+everywhere) for no gain over a self-contained mark.  `DerivMark::link` (0 for an
+ordinary closed concrete derivative) is the summation-style tie reserved for the
+one case a self-contained mark cannot express — the **free/abstract index** `∂_i`
+tied to a summed `e_i` — which strain compatibility needs and which will set
+`link` when it builds that form.
+
+Threaded through structural_eq, tensor_object_cmp, render (∂ prefix), the
+chart's field expansion, and expand_in_basis; every 000069–075 curvilinear test
+stays green.
+
 ## Deferred / open
 
 - Tensor-valued `wrt` (`dΠ/dε`) — model accommodates it (operator rank =

@@ -324,7 +324,7 @@ struct Renderer
                 // r) (vibe 000073).  Give it CONTRACT_PREC so a product child
                 // wraps it, while a plain (bare) tensor stays an atom.
                 [](TensorObject const& t)
-                { return t.field_derivs.empty() ? ATOM_PREC : CONTRACT_PREC; },
+                { return t.deriv_marks.empty() ? ATOM_PREC : CONTRACT_PREC; },
                 [](ScalarLiteral const&) { return ATOM_PREC; },
                 [](ExplicitSum const&) { return ATOM_PREC; },
                 [](NoSum const&) { return ATOM_PREC; },
@@ -437,11 +437,11 @@ struct Renderer
                     mpk::mix::EnumFlags<RenderHint> hints;
                     if (t.traits)
                         hints = t.traits->render_hints;
-                    // A field's accumulated partial derivatives render in
-                    // operator form ∂_x T (vibe 000070 P7, decision 2), one
-                    // ∂-factor per sorted direction.
+                    // A field's applied-derivative marks render in operator
+                    // form ∂_x T (vibe 000077 step D), one ∂-factor per sorted
+                    // mark.
                     std::string prefix;
-                    for (auto const& d: t.field_derivs)
+                    for (auto const& d: t.deriv_marks)
                         prefix += "\\partial_{"
                                   + std::string{d.coord_name.v.view()} + "} ";
                     return prefix + name_str(t.name, t.rank)

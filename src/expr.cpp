@@ -83,17 +83,17 @@ auto make_field_derivative(
         throw std::invalid_argument(
             "make_field_derivative: base must be a field (make_field)");
     TensorObject d = *t;
-    d.field_derivs.push_back(FieldDerivDir{std::move(coord_name), coord});
+    d.deriv_marks.push_back(DerivMark{std::move(coord_name), coord});
     // Keep the multi-index sorted by (chart_id, slot) so mixed partials are
     // symmetric and hash-cons to one node (∂_x∂_y T = ∂_y∂_x T).
     std::sort(
-        d.field_derivs.begin(),
-        d.field_derivs.end(),
-        [](FieldDerivDir const& a, FieldDerivDir const& b)
+        d.deriv_marks.begin(),
+        d.deriv_marks.end(),
+        [](DerivMark const& a, DerivMark const& b)
         {
-            if (a.ref.chart_id != b.ref.chart_id)
-                return a.ref.chart_id < b.ref.chart_id;
-            return a.ref.slot < b.ref.slot;
+            if (a.wrt.chart_id != b.wrt.chart_id)
+                return a.wrt.chart_id < b.wrt.chart_id;
+            return a.wrt.slot < b.wrt.slot;
         });
     return ctx.make<Expr>(std::move(d));
 }

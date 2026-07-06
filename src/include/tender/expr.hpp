@@ -82,17 +82,28 @@ struct FieldDeps final
     std::vector<CoordinateRef> only = {};
 };
 
-// One direction of a field's accumulated partial derivative (vibe 000070 P7):
-// the coordinate's display name (for ∂_x rendering) and its (chart_id, slot)
-// identity.  A base field has none; ∂_q T appends q and keeps the list sorted
-// by (chart_id, slot) so mixed partials are symmetric (T_{,xy} = T_{,yx}).
-// Unlike the rest of the traits this IS part of structural identity (it
-// distinguishes ∂_x T from T), so it lives on the TensorObject, not in
-// TensorTraits.
-struct FieldDerivDir final
+// An applied differential-operator mark on a field (vibe 000077, step D): one
+// derivation ∂/∂(wrt) that has been *applied* to (closed onto) this object —
+// the closed form of a `Deriv` operator.  `wrt` is the coordinate
+// differentiated against (its (chart_id, slot) identity), `coord_name` its
+// display letter (for ∂_x rendering).  A base field carries none; applying ∂_q
+// appends a mark and keeps the list sorted by (chart_id, slot) so mixed
+// partials coincide (∂_x∂_y T = ∂_y∂_x T).  `link` (0 = an ordinary closed
+// concrete derivative, the common case) is a summation-style tie to a
+// free-index operator, reserved for the abstract-index ∂_i case (∂_i tied to a
+// summed e_i).  Unlike the rest of the traits these marks ARE part of
+// structural identity (they distinguish ∂_x T from T), so they live on the
+// TensorObject, not in TensorTraits.
+//
+// This replaces the old `FieldDerivDir`: a mark is now understood as an applied
+// `Deriv` — the operator (vibe 000077 steps A–C) is the unapplied form,
+// application (Leibniz) closes it into a mark here, so differentiation has one
+// representation across its lifecycle.
+struct DerivMark final
 {
     TensorName coord_name;
-    CoordinateRef ref;
+    CoordinateRef wrt;
+    int link = 0;
 };
 
 // Value-preserving permutation generators for a tensor object (e.g. even
@@ -123,8 +134,8 @@ struct TensorTraits
     std::optional<CoordinateRef> coordinate = {};
     // Set on a tensor declared as a field (vibe 000070 P7): its coordinate
     // dependence.  Identity-neutral like the rest of the traits — field-ness is
-    // consistent per tensor name.  The *derivative* directions, which DO bear
-    // identity, live on TensorObject::field_derivs instead.
+    // consistent per tensor name.  The *applied derivatives*, which DO bear
+    // identity, live on TensorObject::deriv_marks instead.
     std::optional<FieldDeps> field = {};
 };
 
@@ -155,11 +166,12 @@ struct TensorObject final
     std::optional<int> rank;
     std::optional<TensorTraits> traits;
     std::vector<SlotBinding> slots;
-    // Accumulated partial-derivative directions of a field (vibe 000070 P7),
-    // sorted by (chart_id, slot).  Empty on a base tensor; ∂_q of a field
-    // appends q.  Part of structural identity (compared by structural_eq /
-    // tensor_object_cmp), so ∂_x T and T are distinct and ∂_x∂_y T = ∂_y∂_x T.
-    std::vector<FieldDerivDir> field_derivs = {};
+    // Applied differential-operator marks (vibe 000077 step D): the derivations
+    // closed onto this field, sorted by (chart_id, slot).  Empty on a base
+    // tensor; applying ∂_q appends a mark.  Part of structural identity
+    // (compared by structural_eq / tensor_object_cmp), so ∂_x T and T are
+    // distinct and ∂_x∂_y T = ∂_y∂_x T.
+    std::vector<DerivMark> deriv_marks = {};
 };
 
 // A numeric scalar literal.
@@ -394,11 +406,12 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
     std::vector<CoordinateRef> deps = {},
     bool symmetric = false) -> Expr const*;
 
-// The partial derivative ∂_q of a field (vibe 000070 P7): a fresh field of the
-// same rank, name and dependence as `base`, with q appended to its (sorted)
-// derivative directions.  `base` must be a field (its TensorObject carries a
-// FieldDeps trait); `coord_name`/`coord` identify q.  Differentiating again
-// appends further directions, kept sorted so mixed partials coincide.
+// Apply ∂_q to a field, closing the operator into a mark (vibe 000070 P7, marks
+// per vibe 000077 step D): a fresh field of the same rank, name and dependence
+// as `base`, with q appended to its (sorted) applied-derivative marks.  `base`
+// must be a field (its TensorObject carries a FieldDeps trait);
+// `coord_name`/`coord` identify q.  Applying again appends further marks, kept
+// sorted so mixed partials coincide.
 [[nodiscard]] auto make_field_derivative(
     Context&,
     Expr const* base,

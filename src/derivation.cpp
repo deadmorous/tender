@@ -140,7 +140,7 @@ auto substitute(Context& ctx, Expr const* e, int idx_id, ConcreteIndex val)
             }
             if (!changed)
                 return e;
-            // Copy the whole object so field_derivs (the ∂ directions of a
+            // Copy the whole object so deriv marks (the applied ∂s of a
             // field, vibe 000073) survive index substitution — rebuilding with
             // only name/rank/traits/slots silently drops the derivative.
             TensorObject obj = *t;
@@ -179,7 +179,7 @@ auto substitute_index(Context& ctx, Expr const* e, int from_id, IndexAssoc to)
             }
             if (!changed)
                 return e;
-            // Copy the whole object so field_derivs (the ∂ directions of a
+            // Copy the whole object so deriv marks (the applied ∂s of a
             // field, vibe 000073) survive index substitution — rebuilding with
             // only name/rank/traits/slots silently drops the derivative.
             TensorObject obj = *t;
@@ -477,14 +477,15 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                     if (!index_assoc_eq(sa.index, sb.index))
                         return false;
                 }
-                // Field-derivative directions bear identity (vibe 000070 P7).
-                if (ta.field_derivs.size() != tb->field_derivs.size())
+                // Applied-derivative marks bear identity (vibe 000077 step D).
+                if (ta.deriv_marks.size() != tb->deriv_marks.size())
                     return false;
-                for (std::size_t i = 0; i < ta.field_derivs.size(); ++i)
+                for (std::size_t i = 0; i < ta.deriv_marks.size(); ++i)
                 {
-                    auto const& da = ta.field_derivs[i].ref;
-                    auto const& db = tb->field_derivs[i].ref;
-                    if (da.chart_id != db.chart_id || da.slot != db.slot)
+                    auto const& da = ta.deriv_marks[i];
+                    auto const& db = tb->deriv_marks[i];
+                    if (da.wrt.chart_id != db.wrt.chart_id
+                        || da.wrt.slot != db.wrt.slot || da.link != db.link)
                         return false;
                 }
                 return true;
@@ -666,7 +667,7 @@ auto substitute_concrete(
             }
             if (!changed)
                 return e;
-            // Copy the whole object so field_derivs (the ∂ directions of a
+            // Copy the whole object so deriv marks (the applied ∂s of a
             // field, vibe 000073) survive index substitution — rebuilding with
             // only name/rank/traits/slots silently drops the derivative.
             TensorObject obj = *t;

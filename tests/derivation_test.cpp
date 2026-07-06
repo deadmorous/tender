@@ -3998,3 +3998,30 @@ TEST(ApplyOperators, CommutesOutOfContraction)
     auto* xwant = make_cross(ctx, a, steps::partial(ctx, v, x));
     EXPECT_TRUE(algebraic_eq(ctx, xgot, xwant));
 }
+
+// ---- one derivative representation (vibe 000077 step D) -----------------
+
+// A mark is the closed form of an applied operator: applying ∂_x to a field
+// (via apply_operators) yields exactly what partial() does — a plain, closed
+// TensorObject carrying the derivative mark — and that closed value does NOT
+// keep differentiating rightward (it is not an operator any more).
+TEST(DerivMark, MarkIsClosedFormOfAppliedOperator)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* T = make_field(ctx, make_tensor_name("T"), 2, {});
+    auto* a = make_field(ctx, make_tensor_name("a"), 1, {});
+    auto* dx = make_deriv(ctx, x);
+
+    // Applying the operator == the primitive partial; the result is a plain
+    // (closed) TensorObject, not something still holding a Deriv.
+    auto* dxT = steps::apply_operators(ctx, make_tensor_product(ctx, dx, T));
+    EXPECT_TRUE(structural_eq(dxT, steps::partial(ctx, T, x)));
+    EXPECT_TRUE(std::holds_alternative<TensorObject>(dxT->node));
+
+    // The closed derivative does not reach rightward: (∂_x T)·a differentiates
+    // only T, leaving a untouched — same as dotting the partial with a.
+    auto* dotted = steps::apply_operators(ctx, make_dot(ctx, dxT, a));
+    EXPECT_TRUE(
+        algebraic_eq(ctx, dotted, make_dot(ctx, steps::partial(ctx, T, x), a)));
+}

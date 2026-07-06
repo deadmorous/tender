@@ -638,8 +638,8 @@ auto expand_fields(Context& ctx, Basis const& fb, Expr const* v) -> Expr const*
             auto const* t = std::get_if<TensorObject>(&node->node);
             if (!t || !is_expandable_leaf(*t))
                 return node;
-            auto const derivs = t->field_derivs;
-            // The base field with its ∂ directions stripped (slots stay empty).
+            auto const derivs = t->deriv_marks;
+            // The base field with its ∂ marks stripped (slots stay empty).
             // Built field-by-field so the whole-object copy does not confuse
             // -O3's maybe-uninitialized analysis.
             Expr const* base = c.make<Expr>(TensorObject{
@@ -647,7 +647,7 @@ auto expand_fields(Context& ctx, Basis const& fb, Expr const* v) -> Expr const*
                 .rank = t->rank,
                 .traits = t->traits,
                 .slots = t->slots,
-                .field_derivs = {}});
+                .deriv_marks = {}});
             Expr const* ex = steps::unroll_sums(
                 c, expand_in_basis(c, base, fb, Variance::Covariant));
             for (auto const& dd: derivs)
@@ -655,9 +655,9 @@ auto expand_fields(Context& ctx, Basis const& fb, Expr const* v) -> Expr const*
                 Expr const* q = make_coordinate(
                     c,
                     dd.coord_name,
-                    dd.ref.chart_id,
-                    dd.ref.slot,
-                    dd.ref.nonneg);
+                    dd.wrt.chart_id,
+                    dd.wrt.slot,
+                    dd.wrt.nonneg);
                 ex = steps::partial(c, ex, q);
             }
             // Fold the differentiated expansion before it meets an outer
