@@ -42,6 +42,8 @@ __all__ = [
     "collect_terms",
     "canonicalize",
     "partial",
+    "deriv",
+    "apply_operators",
     "simplify_scalars",
     "implicitize",
     "simplify",
@@ -268,6 +270,28 @@ def partial(expr, coord):
     ``partial(r * cos(phi), phi)`` is ``-r sin phi``.
     """
     return _d._partial(expr, coord)
+
+
+def deriv(coord):
+    """The first-class unapplied ∂/∂coord operator (vibe 000077).
+
+    A ``Deriv`` node — a composable operator that acts on everything to its
+    right when multiplied.  ``deriv(x) * f`` builds the (unapplied) product
+    ``∂_x f``; :func:`apply_operators` then carries out the differentiation
+    (Leibniz).  ``coord`` must be a coordinate variable (``tender.coordinate``).
+    """
+    return _d._deriv(coord)
+
+
+def apply_operators(expr):
+    """Apply the first-class ∂ operators in ``expr`` by Leibniz (vibe 000077).
+
+    Each unapplied :func:`deriv` operator acts on everything to its right in
+    its product term (``∂_x x = 1``, ``∂_x(x·f) = f + x ∂_x f``), operators
+    applied rightmost-first, a trailing operator with no operand left bare.
+    ``apply_operators(deriv(x) * f)`` is the derivative ``∂_x f``.
+    """
+    return _d._apply_operators(expr)
 
 
 def simplify_scalars(expr):

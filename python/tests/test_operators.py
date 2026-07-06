@@ -86,3 +86,39 @@ def test_directional_derivative_custom_operator():
     op = nabla.along(v)
     assert op.latex().endswith("\\cdot \\nabla)")
     assert td.algebraic_eq((op * R).evaluate(cart), v)
+
+
+def test_first_class_deriv_and_apply_operators():
+    # vibe 000077 steps A/B: td.deriv is the unapplied ∂ operator; apply_operators
+    # carries out application (Leibniz = commutation).
+    ws = t.Workspace()
+    x = ws.coords("x")[0]
+    f = t.field("f", 0, ctx=ws.ctx)
+
+    dx = td.deriv(x)
+    assert dx.latex() == "\\partial_{x}"
+    # unapplied: operator then operand (a product), then apply
+    assert (dx * f).latex() == "\\partial_{x} \\, f"
+    assert td.structural_eq(td.apply_operators(dx * f), td.partial(f, x))
+    # ∂_x x = 1
+    assert td.structural_eq(
+        td.apply_operators(dx * x), t.scalar(1, ctx=ws.ctx))
+    # the (∂_x x)·f example: unapplied ∂_x acts greedily → f + x ∂_x f
+    greedy = td.apply_operators(dx * x * f)
+    expect = f + x * td.partial(f, x)
+    assert td.algebraic_eq(greedy, expect)
+
+
+def test_first_class_nabla_reproduces_grad():
+    # vibe 000077 step C: chart.nabla() is the first-class ∇; applying it with ⊗
+    # equals the gradient.  nabla.at(chart) exposes the same from the ∇ symbol.
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    f = cart.field("f", 0)
+
+    nab = cart.nabla()
+    assert "\\partial_{" in nab.latex()          # inspectable, carries ∂ operators
+    assert nab.rank == 1                          # a vector operator
+    assert td.algebraic_eq(td.apply_operators(nab * f), cart.grad(f))
+    # the ∇ symbol's .at bridge gives the same operator.
+    assert td.structural_eq(nabla.at(cart), nab)

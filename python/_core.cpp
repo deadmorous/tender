@@ -839,6 +839,22 @@ NB_MODULE(_core, m)
         "variable (chain/product/quotient rules; constants → 0).");
 
     md.def(
+        "_deriv",
+        [](PyExpr const& coord) -> PyExpr
+        { return derive(coord, make_deriv(*coord.ctx, coord.expr)); },
+        "coord"_a,
+        "The first-class unapplied ∂/∂coord operator (vibe 000077): a Deriv "
+        "node acting on whatever it multiplies to its right.");
+
+    md.def(
+        "_apply_operators",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::apply_operators(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Apply the first-class ∂ operators in expr by Leibniz (vibe 000077): "
+        "each unapplied Deriv acts on everything to its right in its term.");
+
+    md.def(
         "_simplify_scalars",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::simplify_scalars(*e.ctx, e.expr)); },
@@ -1341,6 +1357,14 @@ NB_MODULE(_core, m)
             "The physical-basis connection (rotation) coefficients γ^k_{ij} "
             "re-expressing ∂_{q^j} e_i = Σ_k γ^k_{ij} e_k in the local frame "
             "(one scalar per direction k).")
+        .def(
+            "nabla",
+            [](PyChart const& c) -> PyExpr
+            { return PyExpr{c.ctx_keep, c.ctx, del(*c.ctx, c.chart)}; },
+            "The first-class invariant ∇ operator Σ_i (1/h_i) e_i ∂_{q^i} "
+            "(vibe 000077): a composable, inspectable operator expression.  "
+            "Apply it with a product (⊗/·/×) then apply_operators, or use "
+            "grad/div/rot which do exactly that.")
         .def(
             "grad",
             [](PyChart const& c, PyExpr const& f, bool fold_identity) -> PyExpr

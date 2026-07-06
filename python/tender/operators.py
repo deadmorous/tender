@@ -154,6 +154,13 @@ class Nabla:
         ∇ (vibe 000070 P8).  Apply with ``nabla.along(v) * T``."""
         return _DirectionalOp(v)
 
+    def at(self, chart):
+        """The first-class ∇ operator expression for ``chart`` (vibe 000077):
+        ``Σ_i (1/h_i) e_i ∂_{q^i}`` as a composable, inspectable ``Expr``.  Apply
+        it with a product and :func:`tender.derivation.apply_operators` — e.g.
+        ``apply_operators(nabla.at(chart) * T)`` is the gradient of ``T``."""
+        return chart.nabla()
+
     def latex(self):
         return "\\nabla"
 
