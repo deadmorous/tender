@@ -140,3 +140,51 @@ def test_chart_free_nabla_node():
     inc = nab % (nab % eps).transpose()
     assert inc.rank == 2
     assert "varepsilon_{" not in inc.latex()
+
+
+def test_expand_nabla_free_index_interior():
+    # vibe 000078 increment 2: expand_nabla lowers the chart-free inc ε =
+    # ∇×(∇×ε)ᵀ to the free-index interior e_i × (e_j × ∂_i∂_j ε)ᵀ — ε stays
+    # abstract (no components), only second derivatives appear.
+    ctx = t.Context()
+    import tender.basis as tb
+    import tender.chart as tc
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=9, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=9, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=9, slot=2, ctx=ctx)
+    cart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
+    eps = t.field(r"\varepsilon", 2, symmetric=True, ctx=ctx)
+    nab = t.nabla(ctx=ctx)
+
+    inc = nab % (nab % eps).transpose()
+    ex = cart.expand_nabla(inc)
+    assert ex.rank == 2
+    assert "varepsilon_{" not in ex.latex()   # ε never componentised
+    assert "partial" in ex.latex()            # ∂'s present
+
+
+def test_expand_nabla_components_match_brute_force():
+    # The free-index inc ε, componentised, equals brute-force ∇×(∇×ε)ᵀ term by
+    # term — the classic strain-compatibility component (∂²_zz ε_yy − 2 ∂²_yz
+    # ε_yz + ∂²_yy ε_zz) falls out of the (0,0) entry.
+    ctx = t.Context()
+    import tender.basis as tb
+    import tender.chart as tc
+    ref = tb.wcs(ctx)
+    x = t.coordinate("x", chart_id=9, slot=0, ctx=ctx)
+    y = t.coordinate("y", chart_id=9, slot=1, ctx=ctx)
+    z = t.coordinate("z", chart_id=9, slot=2, ctx=ctx)
+    cart = tc.CoordinateChart(ref, [x, y, z], [x, y, z])
+    eps = t.field(r"\varepsilon", 2, symmetric=True, ctx=ctx)
+    nab = t.nabla(ctx=ctx)
+
+    free_form = cart.componentize_nabla(cart.expand_nabla(nab % (nab % eps).transpose()))
+    brute = cart.rot(cart.rot(eps).transpose())
+    a = cart.components(free_form)
+    b = cart.components(brute)
+    assert all(
+        td.algebraic_eq(cart.expand(a[i][j]), b[i][j])
+        for i in range(3)
+        for j in range(3)
+    )

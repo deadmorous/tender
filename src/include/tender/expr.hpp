@@ -89,11 +89,15 @@ struct FieldDeps final
 // display letter (for ∂_x rendering).  A base field carries none; applying ∂_q
 // appends a mark and keeps the list sorted by (chart_id, slot) so mixed
 // partials coincide (∂_x∂_y T = ∂_y∂_x T).  `link` (0 = an ordinary closed
-// concrete derivative, the common case) is a summation-style tie to a
-// free-index operator, reserved for the abstract-index ∂_i case (∂_i tied to a
-// summed e_i).  Unlike the rest of the traits these marks ARE part of
-// structural identity (they distinguish ∂_x T from T), so they live on the
-// TensorObject, not in TensorTraits.
+// concrete derivative, the common case) is the abstract-direction tie of a
+// *free-index* ∂ (vibe 000078): when non-zero it is the `CountableIndex` id of
+// the summation direction, so this ∂_i and the frame vector `e_i` that carries
+// the same id contract under implicit (Einstein) summation, and `free_slot`
+// describes that index occurrence (level/realm/space) for summation detection,
+// index renaming and rendering (∂_i with the index letter).  For a concrete
+// mark (`link == 0`) `free_slot` is unused.  Unlike the rest of the traits
+// these marks ARE part of structural identity (they distinguish ∂_x T from T),
+// so they live on the TensorObject, not in TensorTraits.
 //
 // This replaces the old `FieldDerivDir`: a mark is now understood as an applied
 // `Deriv` — the operator (vibe 000077 steps A–C) is the unapplied form,
@@ -104,6 +108,11 @@ struct DerivMark final
     TensorName coord_name;
     CoordinateRef wrt;
     int link = 0;
+    IndexSlot free_slot = {};
+    // Discriminates a free-index (abstract-direction) mark from a concrete one.
+    // A dedicated flag rather than `link != 0` because a direction index id may
+    // legitimately be 0 (index ids and the sentinel would otherwise collide).
+    bool free = false;
 };
 
 // Value-preserving permutation generators for a tensor object (e.g. even
@@ -431,6 +440,26 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
     Expr const* base,
     TensorName coord_name,
     CoordinateRef coord) -> Expr const*;
+
+// Apply a *free-index* ∂_i to a field (vibe 000078): like make_field_derivative
+// but the direction is the summation index `dir` (a CountableIndex tied to a
+// frame vector e_i), recorded as a mark with `link = dir.id` and `free_slot`
+// (the index occurrence descriptor).  `base` must be a field depending on all
+// coordinates (a specific dependence set cannot license a uniform ∂_i).
+[[nodiscard]] auto make_field_derivative_free(
+    Context&,
+    Expr const* base,
+    CountableIndex dir,
+    IndexSlot free_slot) -> Expr const*;
+
+// A rank-0 coordinate-*direction* object q_i (vibe 000078): a coordinate atom
+// carrying a `CountableIndex` slot, used as the `wrt` of a free-index ∂_i
+// operator.  Its presence of a countable slot on a coordinate is what marks the
+// derivative direction as an (Einstein-summed) frame index rather than a fixed
+// coordinate.
+[[nodiscard]] auto make_coordinate_direction(
+    Context&, TensorName, int chart_id, CountableIndex dir, IndexSlot slot)
+    -> Expr const*;
 
 // Elementary scalar function and power (vibe 000069 M1).
 [[nodiscard]] auto make_scalar_fn(Context&, ScalarFnKind, Expr const* operand)

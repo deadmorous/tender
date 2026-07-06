@@ -1379,6 +1379,31 @@ NB_MODULE(_core, m)
             "Apply it with a product (⊗/·/×) then apply_operators, or use "
             "grad/div/rot which do exactly that.")
         .def(
+            "expand_nabla",
+            [](PyChart const& c, PyExpr const& e) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, expand_nabla(*c.ctx, c.chart, e.expr)};
+            },
+            "e"_a,
+            "Expand every chart-free ∇ (t.nabla()) in e into the free-index "
+            "frame form e_i ∂_i and apply the operators (vibe 000078).  Keeps a "
+            "nested ∇×(∇×ε)ᵀ abstract in ε (→ e_i×(e_j×∂_i∂_j ε)ᵀ, i,j summed).  "
+            "Constant unit-scale (Cartesian) frames only.")
+        .def(
+            "componentize_nabla",
+            [](PyChart const& c, PyExpr const& e) -> PyExpr
+            {
+                return PyExpr{
+                    c.ctx_keep,
+                    c.ctx,
+                    componentize_nabla(*c.ctx, c.chart, e.expr)};
+            },
+            "e"_a,
+            "Lower a free-index ∇ expansion (expand_nabla output) to concrete "
+            "components: unroll each summed frame direction e_i→e_d, ∂_i→∂_{q^d} "
+            "(vibe 000078).  Lets the abstract free-index interior be checked "
+            "component-by-component against the brute-force chart operators.")
+        .def(
             "grad",
             [](PyChart const& c, PyExpr const& f, bool fold_identity) -> PyExpr
             {

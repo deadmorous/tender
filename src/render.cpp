@@ -445,8 +445,18 @@ struct Renderer
                     // mark.
                     std::string prefix;
                     for (auto const& d: t.deriv_marks)
-                        prefix += "\\partial_{"
-                                  + std::string{d.coord_name.v.view()} + "} ";
+                    {
+                        // A free-index mark ∂_i renders with the direction
+                        // index's letter (vibe 000078); a concrete mark ∂_x
+                        // with the coordinate name.
+                        std::string dir =
+                            d.free ? std::string{map.name_for(
+                                                        CountableIndex{d.link},
+                                                        d.free_slot.space)
+                                                     .v.view()} :
+                                     std::string{d.coord_name.v.view()};
+                        prefix += "\\partial_{" + dir + "} ";
+                    }
                     return prefix + name_str(t.name, t.rank)
                            + slots_str(map, t.slots, hints, ctx);
                 },

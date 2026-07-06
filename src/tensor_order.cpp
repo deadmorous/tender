@@ -98,6 +98,8 @@ auto tensor_object_cmp(TensorObject const& a, TensorObject const& b) -> int
             return da.wrt.chart_id < db.wrt.chart_id ? -1 : 1;
         if (da.wrt.slot != db.wrt.slot)
             return da.wrt.slot < db.wrt.slot ? -1 : 1;
+        if (da.free != db.free)
+            return da.free < db.free ? -1 : 1;
         if (da.link != db.link)
             return da.link < db.link ? -1 : 1;
     }

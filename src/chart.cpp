@@ -753,6 +753,189 @@ auto del(Context& ctx, CoordinateChart const& chart) -> Expr const*
     return acc ? acc : make_scalar(ctx, Rational{0});
 }
 
+auto expand_nabla(Context& ctx, CoordinateChart const& chart, Expr const* e)
+    -> Expr const*
+{
+    Basis const fb = physical_frame(ctx, chart);
+    int const cid = chart_id_of(chart);
+    int const n = static_cast<int>(chart.coords.size());
+    // The free-index expansion keeps ∇ = e_i ∂_i as a *single*
+    // implicitly-summed term (not the n-fold concrete unrolling of `del`), so a
+    // nested ∇×(∇×ε)ᵀ stays abstract in ε.  A moving frame's ∂_i e_j ≠ 0 and
+    // its per-direction scale factors 1/h_i cannot ride a summed index
+    // uniformly, so this targets a constant unit-scale (Cartesian/WCS) frame;
+    // assert that here.
+    for (int i = 0; i < n; ++i)
+    {
+        auto const* h = std::get_if<ScalarLiteral>(
+            &steps::simplify_scalars(ctx, scale_factor(ctx, chart, i))->node);
+        if (!h || h->value != Rational{1})
+            throw std::invalid_argument(
+                "expand_nabla: the free-index ∇ expansion currently supports "
+                "only a constant unit-scale (Cartesian) frame; use the chart "
+                "operators (grad/div/rot) for curvilinear charts");
+    }
+    Expr const* replaced = rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* nd) -> Expr const*
+        {
+            if (!std::holds_alternative<Nabla>(nd->node))
+                return nd;
+            // A fresh shared direction index i: the indexed frame vector e_i
+            // and a free-index ∂_i carrying the same id, which sum together
+            // under the existing Einstein machinery.  ∂ last, acting rightward.
+            CountableIndex const i{c.alloc_index_id()};
+            Expr const* ei = fb.covariant_vector(c, i);
+            IndexSlot const slot =
+                std::get<TensorObject>(ei->node).slots[0].slot;
+            Expr const* di = make_deriv(
+                c,
+                make_coordinate_direction(
+                    c, make_tensor_name("q"), cid, i, slot));
+            return make_tensor_product(c, ei, di);
+        });
+    Expr const* out = steps::apply_operators(ctx, replaced);
+    // ∂_i of a constant frame vector left `Cross(0, …) → 0` addends; the
+    // nested-cross interior blocks full canonicalization (that is Phase-1's
+    // job), so fold those zero addends here for a clean free-index interior.
+    return rewrite_tree(
+        ctx,
+        out,
+        [](Context&, Expr const* n) -> Expr const*
+        {
+            auto is0 = [](Expr const* z)
+            {
+                auto const* s = std::get_if<ScalarLiteral>(&z->node);
+                return s && s->value.is_zero();
+            };
+            if (auto const* s = std::get_if<Sum>(&n->node))
+                return is0(s->left) ? s->right : is0(s->right) ? s->left : n;
+            if (auto const* s = std::get_if<Difference>(&n->node))
+                return is0(s->right) ? s->left : n;
+            return n;
+        });
+}
+
+namespace
+{
+
+// The first free-index direction id occurring on any ∂-mark in `e`, if any.
+auto first_free_link(Context& ctx, Expr const* e) -> std::optional<int>
+{
+    std::optional<int> found;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node))
+                for (auto const& m: t->deriv_marks)
+                    if (m.free && !found)
+                        found = m.link;
+            return n;
+        });
+    return found;
+}
+
+// Fix the free direction index `link_id` to concrete direction `value`:
+// concretize every frame-vector slot carrying it (e_i → e_value) and turn every
+// free ∂-mark tied to it into the concrete ∂_{coord} mark.
+auto concretize_dir(
+    Context& ctx,
+    Expr const* e,
+    int link_id,
+    int value,
+    TensorName coord_name,
+    CoordinateRef coord_ref) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* n) -> Expr const*
+        {
+            // A summation binder over the index being fixed loses its purpose —
+            // drop it, keeping the (already-concretized) body.
+            if (auto const* s = std::get_if<ExplicitSum>(&n->node))
+                if (s->index.id == link_id)
+                    return s->body;
+            if (auto const* s = std::get_if<NoSum>(&n->node))
+                if (s->index.id == link_id)
+                    return s->body;
+            auto const* t = std::get_if<TensorObject>(&n->node);
+            if (!t)
+                return n;
+            auto slots = t->slots;
+            bool changed = false;
+            for (auto& sb: slots)
+                if (sb.index)
+                    if (auto const* ci =
+                            std::get_if<CountableIndex>(&*sb.index))
+                        if (ci->id == link_id)
+                        {
+                            sb.index = ConcreteIndex{value};
+                            changed = true;
+                        }
+            auto marks = t->deriv_marks;
+            for (auto& m: marks)
+                if (m.free && m.link == link_id)
+                {
+                    m.free = false;
+                    m.coord_name = coord_name;
+                    m.wrt = coord_ref;
+                    m.link = 0;
+                    m.free_slot = {};
+                    changed = true;
+                }
+            if (!changed)
+                return n;
+            std::sort(
+                marks.begin(),
+                marks.end(),
+                [](DerivMark const& a, DerivMark const& b)
+                {
+                    if (a.wrt.chart_id != b.wrt.chart_id)
+                        return a.wrt.chart_id < b.wrt.chart_id;
+                    if (a.wrt.slot != b.wrt.slot)
+                        return a.wrt.slot < b.wrt.slot;
+                    return a.link < b.link;
+                });
+            TensorObject obj = *t;
+            obj.slots = std::move(slots);
+            obj.deriv_marks = std::move(marks);
+            return c.make<Expr>(std::move(obj));
+        });
+}
+
+} // namespace
+
+auto componentize_nabla(
+    Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*
+{
+    Basis const fb = physical_frame(ctx, chart);
+    auto const id = first_free_link(ctx, e);
+    if (!id)
+        return e; // fully concrete already
+    auto const vals = fb.space()->values();
+    int const n = fb.dim();
+    Expr const* acc = nullptr;
+    for (int d = 0; d < n; ++d)
+    {
+        auto const* ct = std::get_if<TensorObject>(&chart.coords[d]->node);
+        Expr const* term = concretize_dir(
+            ctx,
+            e,
+            *id,
+            vals[static_cast<std::size_t>(d)],
+            ct->name,
+            *ct->traits->coordinate);
+        // Recurse for any remaining free direction indices (nested ∂_i∂_j …).
+        term = componentize_nabla(ctx, chart, term);
+        acc = acc ? make_sum(ctx, acc, term) : term;
+    }
+    return acc ? acc : make_scalar(ctx, Rational{0});
+}
+
 auto gradient(
     Context& ctx,
     CoordinateChart const& chart,

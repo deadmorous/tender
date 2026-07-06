@@ -72,6 +72,25 @@ auto make_field(
         .slots = {}});
 }
 
+// Keep a field's applied-derivative marks in a canonical order so mixed
+// partials coincide and hash-cons to one node: by (chart_id, slot) for concrete
+// marks (∂_x∂_y T = ∂_y∂_x T), with the free-index `link` as the final
+// tiebreaker for abstract-direction ∂_i marks (vibe 000078).
+static void sort_deriv_marks(std::vector<DerivMark>& marks)
+{
+    std::sort(
+        marks.begin(),
+        marks.end(),
+        [](DerivMark const& a, DerivMark const& b)
+        {
+            if (a.wrt.chart_id != b.wrt.chart_id)
+                return a.wrt.chart_id < b.wrt.chart_id;
+            if (a.wrt.slot != b.wrt.slot)
+                return a.wrt.slot < b.wrt.slot;
+            return a.link < b.link;
+        });
+}
+
 auto make_field_derivative(
     Context& ctx,
     Expr const* base,
@@ -84,18 +103,47 @@ auto make_field_derivative(
             "make_field_derivative: base must be a field (make_field)");
     TensorObject d = *t;
     d.deriv_marks.push_back(DerivMark{std::move(coord_name), coord});
-    // Keep the multi-index sorted by (chart_id, slot) so mixed partials are
-    // symmetric and hash-cons to one node (∂_x∂_y T = ∂_y∂_x T).
-    std::sort(
-        d.deriv_marks.begin(),
-        d.deriv_marks.end(),
-        [](DerivMark const& a, DerivMark const& b)
-        {
-            if (a.wrt.chart_id != b.wrt.chart_id)
-                return a.wrt.chart_id < b.wrt.chart_id;
-            return a.wrt.slot < b.wrt.slot;
-        });
+    sort_deriv_marks(d.deriv_marks);
     return ctx.make<Expr>(std::move(d));
+}
+
+auto make_field_derivative_free(
+    Context& ctx,
+    Expr const* base,
+    CountableIndex dir,
+    IndexSlot free_slot) -> Expr const*
+{
+    auto const* t = std::get_if<TensorObject>(&base->node);
+    if (!t || !t->traits || !t->traits->field)
+        throw std::invalid_argument(
+            "make_field_derivative_free: base must be a field (make_field)");
+    TensorObject d = *t;
+    // The direction is a summation index, tied to a frame vector e_i via link.
+    // (coord_name is unused for a free mark — render uses the index letter —
+    // but must be a valid TensorName.)
+    d.deriv_marks.push_back(DerivMark{
+        make_tensor_name("q"), CoordinateRef{}, dir.id, free_slot, true});
+    sort_deriv_marks(d.deriv_marks);
+    return ctx.make<Expr>(std::move(d));
+}
+
+auto make_coordinate_direction(
+    Context& ctx,
+    TensorName name,
+    int chart_id,
+    CountableIndex dir,
+    IndexSlot slot) -> Expr const*
+{
+    // A coordinate atom carrying a countable slot: the countable slot on a
+    // coordinate is the signal (read by as_diff_coord) that ∂ is a free-index
+    // frame direction rather than a fixed coordinate.  slot = -1 in the
+    // CoordinateRef marks "no fixed coordinate slot".
+    return ctx.make<Expr>(TensorObject{
+        .name = std::move(name),
+        .rank = 0,
+        .traits =
+            TensorTraits{.coordinate = CoordinateRef{chart_id, -1, false}},
+        .slots = {SlotBinding{slot, IndexAssoc{dir}}}});
 }
 
 auto make_scalar_fn(Context& ctx, ScalarFnKind kind, Expr const* operand)

@@ -130,6 +130,26 @@ void validate_chart(CoordinateChart const& chart);
 [[nodiscard]] auto del(Context& ctx, CoordinateChart const& chart)
     -> Expr const*;
 
+// Expand every chart-free ∇ (Nabla) operator in `e` into the *free-index* frame
+// form e_i ∂_i — a single implicitly-summed term with a fresh direction index
+// per ∇ (an indexed frame vector e_i times a free-index ∂_i tied to it) — then
+// apply the operators (vibe 000078).  Unlike `del`'s concrete n-term unrolling,
+// this keeps a nested ∇×(∇×ε)ᵀ abstract in ε: it lowers to
+// `e_i × (e_j × ∂_i∂_j ε)ᵀ` (i,j summed), the free-index interior the a×B×c
+// reduction then folds.  Targets a constant unit-scale (Cartesian/WCS) frame;
+// throws for curvilinear charts (use grad/div/rot there).
+[[nodiscard]] auto expand_nabla(
+    Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*;
+
+// Lower a free-index ∇ expansion (the output of expand_nabla) to concrete
+// components (vibe 000078): unroll each summed frame direction index over the
+// chart's directions, fixing the frame vector e_i → e_d and the free ∂_i → the
+// concrete ∂_{q^d} for each direction d.  A no-op once nothing free remains.
+// The bridge that lets the abstract free-index interior be checked, component
+// by component, against the brute-force chart operators.
+[[nodiscard]] auto componentize_nabla(
+    Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*;
+
 // grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, raising the rank by one.  For a scalar
 // f this is the familiar ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z; for the
 // position vector R it is the identity tensor ∇R = Σ_i e_i ⊗ e_i = I.

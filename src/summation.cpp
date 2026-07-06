@@ -72,6 +72,17 @@ auto substitute_index_ids(
                         changed = true;
                     }
             }
+            // A free-index derivative mark's direction (link) is a summation
+            // index too, so α-rename it in lockstep with the frame vector it
+            // ties to (vibe 000078) — else ∂_i and e_i would desync.
+            auto marks = t->deriv_marks;
+            for (auto& m: marks)
+                if (m.free)
+                    if (auto it = remap.find(m.link); it != remap.end())
+                    {
+                        m.link = it->second;
+                        changed = true;
+                    }
             if (!changed)
                 return e;
             // Copy the whole object so deriv marks (the applied ∂s of a
@@ -79,6 +90,7 @@ auto substitute_index_ids(
             // only name/rank/traits/slots silently drops the derivative.
             TensorObject obj = *t;
             obj.slots = std::move(slots);
+            obj.deriv_marks = std::move(marks);
             return ctx.make<Expr>(std::move(obj));
         });
 }
@@ -134,6 +146,15 @@ void collect_term_uses(
                     if (!ci || bound.count(ci->id))
                         continue;
                     uses[ci->id].push_back({sb.slot.level, sb.slot.realm});
+                }
+                // A free-index derivative ∂_i (vibe 000078) is an occurrence of
+                // its direction index `link`, so e_i and ∂_i ε contract.
+                for (auto const& m: t.deriv_marks)
+                {
+                    if (!m.free || bound.count(m.link))
+                        continue;
+                    uses[m.link].push_back(
+                        {m.free_slot.level, m.free_slot.realm});
                 }
             },
             [&](Negate const& n) { collect_term_uses(n.operand, bound, uses); },

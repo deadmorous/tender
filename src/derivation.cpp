@@ -488,7 +488,8 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                     auto const& da = ta.deriv_marks[i];
                     auto const& db = tb->deriv_marks[i];
                     if (da.wrt.chart_id != db.wrt.chart_id
-                        || da.wrt.slot != db.wrt.slot || da.link != db.link)
+                        || da.wrt.slot != db.wrt.slot || da.free != db.free
+                        || da.link != db.link)
                         return false;
                 }
                 return true;
@@ -2985,18 +2986,29 @@ namespace
 {
 
 // The coordinate we differentiate by: its display name and chart identity.
+// `free_index` is set for a *free-index* ∂_i (vibe 000078) — differentiation
+// along a summed frame direction rather than a fixed coordinate; `free_slot`
+// then describes that index occurrence (for the mark it stamps).
 struct DiffCoord final
 {
     TensorName name;
     CoordinateRef ref;
+    std::optional<CountableIndex> free_index = {};
+    IndexSlot free_slot = {};
 };
 
 // Recognise a coordinate variable (rank-0 TensorObject with a CoordinateRef).
+// A coordinate carrying a CountableIndex slot is a free-index frame direction
+// (make_coordinate_direction, vibe 000078); a plain coordinate is a fixed one.
 auto as_diff_coord(Expr const* e) -> std::optional<DiffCoord>
 {
     auto const* t = std::get_if<TensorObject>(&e->node);
     if (!t || !t->traits || !t->traits->coordinate)
         return std::nullopt;
+    for (auto const& sb: t->slots)
+        if (sb.index)
+            if (auto const* ci = std::get_if<CountableIndex>(&*sb.index))
+                return DiffCoord{t->name, *t->traits->coordinate, *ci, sb.slot};
     return DiffCoord{t->name, *t->traits->coordinate};
 }
 
@@ -3118,6 +3130,18 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
                 if (t.traits && t.traits->field)
                 {
                     auto const& fd = *t.traits->field;
+                    // Free-index ∂_i (vibe 000078): stamp an abstract-direction
+                    // mark.  A uniform ∂_i is only meaningful for a field that
+                    // depends on every coordinate.
+                    if (q.free_index)
+                    {
+                        if (!fd.all)
+                            throw std::invalid_argument(
+                                "diff: free-index ∂_i needs a field depending "
+                                "on all coordinates");
+                        return make_field_derivative_free(
+                            ctx, e, *q.free_index, q.free_slot);
+                    }
                     bool const depends =
                         fd.all
                         || std::any_of(
@@ -3424,6 +3448,15 @@ auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
             return make_difference(ctx, go(s->left), go(s->right));
         if (auto const* s = std::get_if<Negate>(&n->node))
             return make_negate(ctx, go(s->operand));
+        // Recurse into the linear unary invariants (transpose/trace/vec): an
+        // operator nested inside, e.g. the ∇ of the inner (∇×ε) in ∇×(∇×ε)ᵀ,
+        // must be applied before the outer operator reaches this operand.
+        if (auto const* u = std::get_if<Transpose>(&n->node))
+            return make_transpose(ctx, go(u->operand));
+        if (auto const* u = std::get_if<Trace>(&n->node))
+            return make_trace(ctx, go(u->operand));
+        if (auto const* u = std::get_if<VectorInvariant>(&n->node))
+            return make_vector_invariant(ctx, go(u->operand));
         // A contraction `op(L, R)`.
         if (auto cv = as_contraction(n))
         {

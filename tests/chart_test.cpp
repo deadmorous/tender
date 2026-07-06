@@ -1259,3 +1259,104 @@ TEST(Chart, DelCylindricalHasInverseScaleFactor)
     auto s = render_latex(*del(ctx, chart), map, &ctx);
     EXPECT_NE(s.find("frac{1}{r}"), std::string::npos);
 }
+
+// ---- free-index ∇ expansion (vibe 000078, increment 2) -----------------
+
+// A Cartesian (WCS) chart with an identity embedding — the constant unit-scale
+// frame `expand_nabla` targets.
+namespace
+{
+auto cartesian_chart(Context& ctx, Basis const& ref) -> CoordinateChart
+{
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 9, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 9, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 9, 2);
+    return CoordinateChart{ref, {x, y, z}, {x, y, z}};
+}
+} // namespace
+
+// expand_nabla lowers the chart-free inc ε = ∇×(∇×ε)ᵀ to the free-index
+// interior e_i × (e_j × ∂_i∂_j ε)ᵀ — ε stays abstract (no components), only
+// second derivatives ∂_i∂_j appear, and the result is still rank 2.
+TEST(Chart, ExpandNablaKeepsEpsilonAbstract)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto* nab = make_nabla(ctx);
+    auto* inc =
+        make_cross(ctx, nab, make_transpose(ctx, make_cross(ctx, nab, eps)));
+
+    auto* ex = expand_nabla(ctx, chart, inc);
+    EXPECT_EQ(infer_rank(ex), std::optional{2});
+    IndexNameMap map;
+    auto s = render_latex(*ex, map, &ctx);
+    EXPECT_EQ(s.find("varepsilon_{"), std::string::npos); // ε never
+                                                          // componentised
+    EXPECT_NE(s.find("partial"), std::string::npos);      // ∂'s present
+}
+
+// The abstract free-index inc ε, once componentised, matches brute-force
+// ∇×(∇×ε)ᵀ term by term — the free-index path computes the same tensor.
+TEST(Chart, ExpandNablaComponentsMatchBruteForce)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto* nab = make_nabla(ctx);
+    auto* inc =
+        make_cross(ctx, nab, make_transpose(ctx, make_cross(ctx, nab, eps)));
+
+    auto* free_form =
+        componentize_nabla(ctx, chart, expand_nabla(ctx, chart, inc));
+    auto* brute = rot(ctx, chart, make_transpose(ctx, rot(ctx, chart, eps)));
+
+    auto a = component_matrix(ctx, chart, free_form);
+    auto b = component_matrix(ctx, chart, brute);
+    ASSERT_EQ(a.size(), b.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+        for (std::size_t j = 0; j < a[i].size(); ++j)
+            EXPECT_TRUE(eq(ctx, expand(ctx, chart, a[i][j]), b[i][j]))
+                << "component (" << i << "," << j << ")";
+}
+
+// A single ∇ operator reproduces the chart operator after componentisation:
+// ∇·v == div, ∇×ε == rot, componentwise.
+TEST(Chart, ExpandNablaSingleOperatorsMatchChart)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* v = make_field(ctx, make_tensor_name("v"), 1, {});
+    auto* nab = make_nabla(ctx);
+
+    auto* div_free = componentize_nabla(
+        ctx, chart, expand_nabla(ctx, chart, make_dot(ctx, nab, v)));
+    EXPECT_TRUE(
+        eq(ctx, expand(ctx, chart, div_free), divergence(ctx, chart, v)));
+}
+
+// expand_nabla refuses a curvilinear (non-unit-scale) chart: the free-index
+// ∂_i cannot carry the moving frame's per-direction scale factors.
+TEST(Chart, ExpandNablaRejectsCurvilinear)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 3, 0, /*nonneg=*/true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 3, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 3, 2);
+    CoordinateChart cyl{
+        ref,
+        {r, th, z},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), z}};
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    EXPECT_THROW(
+        (void)expand_nabla(
+            ctx, cyl, make_tensor_product(ctx, make_nabla(ctx), f)),
+        std::invalid_argument);
+}
