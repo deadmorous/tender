@@ -207,6 +207,31 @@ Threaded through structural_eq, tensor_object_cmp, render (∂ prefix), the
 chart's field expansion, and expand_in_basis; every 000069–075 curvilinear test
 stays green.
 
+## Strain compatibility on the foundation (the goal)
+
+With the operator layer in place, `inc ε = ∇×(∇×ε)ᵀ` is built with the first-class
+∇ and **ε stays abstract** while ∇ expands:
+
+    ∇×ε      = i × ∂_x ε + j × ∂_y ε + k × ∂_z ε
+    inc ε    = Σ_{a,b} u_a × (u_b × ∂_a∂_b ε)ᵀ         (ε never turned into ε_xy)
+
+This is exactly "expand ∇ only, keep ε abstract, commit the ∂'s to the left",
+now native (`apply_operators(nabla % (apply_operators(nabla % eps)).transpose())`).
+Verified: the operator ∇ reproduces grad/div/rot — applied with the matching
+product and expanded into the frame, `∇·v == chart.div(v)`, `∇×ε == chart.rot(ε)`,
+`∇⊗v == chart.grad(v)` (tests + `examples/strain_compatibility.py`).
+
+**Remaining (the gap-D reduction, unbuilt):** the interior `u_a × (u_b × B)ᵀ`
+(B = ∂_a∂_b ε, abstract rank-2) cannot reduce while B is abstract — canonicalize
+trips the nested-cross fence.  It needs the `a×B×c` identity applied to that
+interior (vibe 000075's sign-corrected `a×(c×B)ᵀ = −a×Bᵀ×c`, then the 5-term
+expansion), followed by reassembly of `Σ_{a,b} u_a ∂_a u_b ∂_b (…)` into the
+named invariant operators `∇∇θ, Δε, (∇∇·ε)ˢ, ∇∇··ε` — the closed identity
+`inc ε = −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + 2(∇∇·ε)ˢ`.  This is a genuine new
+reduction+reassembly subsystem (flagged in vibe 000075); it is where the
+free/abstract-index ∂_i (`DerivMark::link`) would let the identity fire **once**
+instead of over the 9 concrete pairs.
+
 ## Deferred / open
 
 - Tensor-valued `wrt` (`dΠ/dε`) — model accommodates it (operator rank =

@@ -771,3 +771,50 @@ def test_cartesian_strain_compatibility_invariant_form():
     # trace of the identity: tr(inc ε) = Δθ − ∇∇··ε
     assert td.algebraic_eq(M[0][0] + M[1][1] + M[2][2],
                            chart.laplacian(theta) - chart.div(chart.div(eps)))
+
+
+def test_strain_compat_nabla_expands_epsilon_stays_abstract():
+    # vibe 000077 (gap D on the operator foundation): building inc ε = ∇×(∇×ε)ᵀ
+    # with the first-class ∇ expands ∇ over the WCS frame while ε stays ABSTRACT
+    # (as second-derivative fields ∂_a∂_b ε) — the "expand ∇ only, keep ε
+    # abstract, commit ∂ to the left" the whole operator layer was built for.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    eps = t.field(r"\varepsilon", 2, symmetric=True, ctx=ctx)
+    nab = chart.nabla()
+
+    # ∇×ε: ∇ becomes i∂_x + j∂_y + k∂_z, ε stays a symbol (∂_a ε, not ε_xy).
+    curl = td.apply_operators(nab % eps)
+    s = curl.latex()
+    assert "\\partial_{x} \\boldsymbol{\\varepsilon}" in s  # abstract ∂_x ε
+    assert "varepsilon_{" not in s                          # NO components
+
+    # inc ε = ∇×(∇×ε)ᵀ builds with ε still abstract: second derivatives ∂_a∂_b ε,
+    # no component explosion anywhere.
+    inc = td.apply_operators(nab % curl.transpose())
+    assert "varepsilon_{" not in inc.latex()
+    assert "\\partial_{x} \\partial_{x} \\boldsymbol{\\varepsilon}" in inc.latex()
+
+
+def test_operator_nabla_reproduces_chart_operators_after_expand():
+    # The first-class ∇ reproduces grad/div/rot: applied with the matching
+    # product and then expanded into the frame, it equals chart.grad/div/rot.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    v = t.field("v", 1, ctx=ctx)
+    eps = t.field(r"\varepsilon", 2, symmetric=True, ctx=ctx)
+    nab = chart.nabla()
+
+    # ∇·v (expand the abstract result) == chart.div(v)
+    assert td.algebraic_eq(
+        chart.expand(td.apply_operators(nab @ v)), chart.div(v))
+    # ∇⊗v == chart.grad(v), componentwise
+    gm = chart.components(td.apply_operators(nab * v))
+    gc = chart.components(chart.grad(v))
+    assert all(td.algebraic_eq(gm[i][j], gc[i][j])
+               for i in range(3) for j in range(3))
+    # ∇×ε (expand) == chart.rot(ε), componentwise
+    rm = chart.components(chart.expand(td.apply_operators(nab % eps)))
+    rc = chart.components(chart.rot(eps))
+    assert all(td.algebraic_eq(rm[i][j], rc[i][j])
+               for i in range(3) for j in range(3))
