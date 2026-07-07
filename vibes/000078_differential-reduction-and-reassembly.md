@@ -194,6 +194,45 @@ reserved.  Build these five increments, each buildable/testable, `clang-format`
   brute-force oracle to verify whichever path.  NEXT: finish the helper, then the
   reassembly engine (increment 4).
 
+- **Increment 5 DONE** (commit `8504206`), and a prerequisite operator fix
+  (`7bdbf2d`).  The **closed identity is proven by tender**:
+
+      inc ε = −∇∇θ + Δθ·I − (∇∇··ε)·I − Δε + 2(∇∇·ε)ˢ ,   θ = tr ε
+
+  verified component-by-component against `inc ε = ∇×(∇×ε)ᵀ` in a **Cartesian
+  frame and a cylindrical frame** — the curvilinear endpoint (original task #26).
+  `examples/strain_compatibility.py` runs the full pipeline (chart-free inc ε →
+  `expand_nabla` free-index interior with ε abstract → the stated closed form →
+  componentwise verification), guarded by
+  `test_strain_compatibility_closed_identity_{cartesian,cylindrical}`.  The
+  verification route uses tender's mature M6 chart operators (grad/div/rot/
+  laplacian) for both sides — the reassembly *engine* is not needed to *prove*
+  the result, only to *produce* it automatically from the interior.
+  - Prerequisite fix (`7bdbf2d`): `apply_product_operators` now applies a
+    differentiated operand's own operators first (rightmost-first), so composed
+    operators whose operand contains an unapplied ∇ — grad(div ε), div(div ε),
+    Δε = div(grad ε) — expand instead of throwing "differentiating a ∂ operator".
+
+- **Increments 3 & 4 — the symbolic reduce→reassemble transforms — remain
+  blocked** on two distinct reduction-engine gaps (each a substantial piece of
+  its own), and are *not* required for the proven result above:
+  1. **Phase-1 (increment 3):** the nested transpose-cross helper
+     `a×(c×B)ᵀ = −a×Bᵀ×c` leaves a residual bare `e_k×e_j` that
+     `simplify_basis_cross` won't clear inside the larger product (matcher /
+     reduction-ordering).  `id_axBxc` itself derives correctly.
+  2. **Phase-2 (increment 4):** the reassembly engine needs Phase-1's reduced
+     form as input.  Separately, componentizing the reassembly *target*
+     operators through `expand_nabla` hits an `encapsulate` gap ("nested ⊗
+     inside an operand awaits fence distribution", `nf_lower.cpp`) on
+     `(∇∇·ε)ᵀ` and `∇∇··ε` — a nested-⊗-in-contraction that the nf lowering
+     does not yet distribute.  This is why the increment-5 verification routes
+     through the chart operators rather than `expand_nabla` on the RHS.
+  RESUME: (a) close the `encapsulate` / nested-⊗-in-contraction gap in
+  `nf_lower.cpp` (would let `expand_nabla` handle the full RHS and unblock a
+  symbolic route), then (b) build `reassemble_del` reading each ∂-index's role,
+  driven on a directly-constructed reduced interior (substitution into the
+  derived `id_axBxc`), verified against the increment-5 oracle.
+
 **Increment 1 — chart-free `Nabla` operator node.**
 - `struct Nabla final {};` in `expr.hpp` (a rank-1 invariant operator atom, no
   children); add to the `Expr` variant; `make_nabla`.  Thread through the same
