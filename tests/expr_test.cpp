@@ -172,6 +172,32 @@ TEST(MakeBinary, CrossStoresChildren)
     ASSERT_TRUE(std::holds_alternative<Cross>(e->node));
 }
 
+TEST(MakeBinary, ScalarOperandInContractionBecomesTensorProduct)
+{
+    // A scalar has no leg to contract, so `·` / `:` / `··` / `×` with a
+    // rank-0 operand is scalar multiplication, not a contraction (vibe 000078):
+    // the factory redirects to ⊗ so a bare scalar never lands in a contraction
+    // slot (which the reductions and nf lowering cannot encapsulate).
+    Context ctx;
+    auto* s = make_scalar(ctx, Rational{2});
+    auto* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1); // rank 1
+    EXPECT_TRUE(
+        std::holds_alternative<TensorProduct>(make_dot(ctx, s, v)->node));
+    EXPECT_TRUE(
+        std::holds_alternative<TensorProduct>(make_dot(ctx, v, s)->node));
+    EXPECT_TRUE(
+        std::holds_alternative<TensorProduct>(make_cross(ctx, s, v)->node));
+    EXPECT_TRUE(
+        std::holds_alternative<TensorProduct>(make_ddot(ctx, s, v)->node));
+    EXPECT_TRUE(
+        std::holds_alternative<TensorProduct>(make_ddot_alt(ctx, s, v)->node));
+    // Two non-scalar operands still build the contraction node.
+    EXPECT_TRUE(std::holds_alternative<Dot>(make_dot(ctx, v, v)->node));
+    // An unknown-rank (abstract, rankless) operand keeps the contraction.
+    auto* abstract = make_tensor_object(ctx, make_tensor_name("A"), {}, {});
+    EXPECT_TRUE(std::holds_alternative<Dot>(make_dot(ctx, abstract, v)->node));
+}
+
 // ---- Summation annotations ---------------------------------------------
 
 TEST(MakeExplicitSum, ConcreteRangeNullBound)

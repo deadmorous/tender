@@ -766,54 +766,74 @@ TEST(FoldArithmetic, NestedSumWithNegateLeftChild)
 // recurses into a tree.  The inner scalars get folded; the wrapper node is
 // rebuilt if its child changed.
 
+// A rank-n abstract tensor object (a non-scalar contraction operand — a scalar
+// operand would redirect the contraction to ⊗, vibe 000078).
+auto rk(Context& ctx, std::string_view name, int rank) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(name), {}, rank);
+}
+
 TEST(FoldArithmetic, DotChildFolds)
 {
-    // dot(1+1, 1+1) — fold_arithmetic folds the leaves, Dot is rebuilt.
+    // ((1+1) v)·w — fold_arithmetic recurses through the Dot into its operand
+    // and folds the inner (1+1) → 2; the Dot is rebuilt.  (The operand is a
+    // vector, not a bare scalar, which would be scalar multiplication.)
     Context ctx;
-    auto* one = make_scalar(ctx, Rational{1});
-    auto* sum = make_sum(ctx, one, one);
-    auto* expr = make_dot(ctx, sum, sum);
+    auto* sum = make_sum(
+        ctx, make_scalar(ctx, Rational{1}), make_scalar(ctx, Rational{1}));
+    auto* v = rk(ctx, "v", 1);
+    auto* expr = make_dot(ctx, make_tensor_product(ctx, sum, v), v);
     auto const* after = steps::fold_arithmetic(ctx, expr);
     auto const* d = std::get_if<Dot>(&after->node);
     ASSERT_NE(d, nullptr);
-    EXPECT_EQ(scalar_value(d->left), Rational{2});
-    EXPECT_EQ(scalar_value(d->right), Rational{2});
+    auto const* tp = std::get_if<TensorProduct>(&d->left->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(scalar_value(tp->left), Rational{2});
 }
 
 TEST(FoldArithmetic, DDotChildFolds)
 {
     Context ctx;
-    auto* one = make_scalar(ctx, Rational{1});
-    auto* sum = make_sum(ctx, one, one);
-    auto* expr = make_ddot(ctx, sum, sum);
+    auto* sum = make_sum(
+        ctx, make_scalar(ctx, Rational{1}), make_scalar(ctx, Rational{1}));
+    auto* A = rk(ctx, "A", 2);
+    auto* expr = make_ddot(ctx, make_tensor_product(ctx, sum, A), A);
     auto const* after = steps::fold_arithmetic(ctx, expr);
     auto const* d = std::get_if<DDot>(&after->node);
     ASSERT_NE(d, nullptr);
-    EXPECT_EQ(scalar_value(d->left), Rational{2});
+    auto const* tp = std::get_if<TensorProduct>(&d->left->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(scalar_value(tp->left), Rational{2});
 }
 
 TEST(FoldArithmetic, DDotAltChildFolds)
 {
     Context ctx;
-    auto* one = make_scalar(ctx, Rational{1});
-    auto* sum = make_sum(ctx, one, one);
-    auto* expr = make_ddot_alt(ctx, sum, sum);
+    auto* sum = make_sum(
+        ctx, make_scalar(ctx, Rational{1}), make_scalar(ctx, Rational{1}));
+    auto* A = rk(ctx, "A", 2);
+    auto* expr = make_ddot_alt(ctx, make_tensor_product(ctx, sum, A), A);
     auto const* after = steps::fold_arithmetic(ctx, expr);
     auto const* d = std::get_if<DDotAlt>(&after->node);
     ASSERT_NE(d, nullptr);
-    EXPECT_EQ(scalar_value(d->left), Rational{2});
+    auto const* tp = std::get_if<TensorProduct>(&d->left->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(scalar_value(tp->left), Rational{2});
 }
 
 TEST(FoldArithmetic, CrossChildFolds)
 {
     Context ctx;
-    auto* one = make_scalar(ctx, Rational{1});
-    auto* sum = make_sum(ctx, one, one);
-    auto* expr = make_cross(ctx, sum, sum);
+    auto* sum = make_sum(
+        ctx, make_scalar(ctx, Rational{1}), make_scalar(ctx, Rational{1}));
+    auto* v = rk(ctx, "v", 1);
+    auto* expr = make_cross(ctx, make_tensor_product(ctx, sum, v), v);
     auto const* after = steps::fold_arithmetic(ctx, expr);
     auto const* d = std::get_if<Cross>(&after->node);
     ASSERT_NE(d, nullptr);
-    EXPECT_EQ(scalar_value(d->left), Rational{2});
+    auto const* tp = std::get_if<TensorProduct>(&d->left->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_EQ(scalar_value(tp->left), Rational{2});
 }
 
 TEST(FoldArithmetic, ScalarDivChildFolds)
@@ -2998,9 +3018,15 @@ TEST(InferRank, UnknownLeafAndIllFormed)
     auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
     auto const* B = make_tensor_object(ctx, make_tensor_name("B")); // no rank
     EXPECT_EQ(infer_rank(make_tensor_product(ctx, B, a)), std::nullopt);
-    // A dot of two scalars would drive the rank to -2: ill-formed → nullopt.
+    // A double dot of two vectors would drive the rank to -2: ill-formed →
+    // nullopt (a genuine over-contraction that does not involve a scalar, so it
+    // is still built as a `··` node rather than redirected).
+    EXPECT_EQ(infer_rank(make_ddot(ctx, a, a)), std::nullopt);
+    // A scalar operand is not a contraction but scalar multiplication, so the
+    // factory redirects `s·s` to `s⊗s` — a well-formed rank-0 product, not the
+    // ill-formed contraction it once was (vibe 000078).
     auto const* s = make_scalar(ctx, Rational{2});
-    EXPECT_EQ(infer_rank(make_dot(ctx, s, s)), std::nullopt);
+    EXPECT_EQ(infer_rank(make_dot(ctx, s, s)), std::optional<int>{0});
 }
 
 // ---- distribute_contraction ------------------------------------------------

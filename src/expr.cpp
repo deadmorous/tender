@@ -215,25 +215,133 @@ auto make_scalar_div(Context& ctx, Expr const* left, Expr const* right)
     return ctx.make<Expr>(ScalarDiv{left, right});
 }
 
+auto infer_rank(Expr const* e) -> std::optional<int>
+{
+    // Rank arithmetic for a contraction that removes `removed` indices from the
+    // outer-product rank of its two operands; nullopt if either is unknown or
+    // the result is negative (ill-formed).
+    auto contracted = [](std::optional<int> l,
+                         std::optional<int> r,
+                         int removed) -> std::optional<int>
+    {
+        if (!l || !r || *l + *r - removed < 0)
+            return std::nullopt;
+        return *l + *r - removed;
+    };
+    return visit(
+        mpk::mix::Overloads{
+            [](TensorObject const& t) -> std::optional<int> { return t.rank; },
+            [](ScalarLiteral const&) -> std::optional<int> { return 0; },
+            [](Negate const& n) -> std::optional<int>
+            { return infer_rank(n.operand); },
+            // tr(A) is a scalar; vec(A) is a vector; transpose keeps the rank.
+            [](Trace const&) -> std::optional<int> { return 0; },
+            [](VectorInvariant const&) -> std::optional<int> { return 1; },
+            [](Transpose const& u) -> std::optional<int>
+            { return infer_rank(u.operand); },
+            // A sum keeps the shared rank of its operands; trust the known
+            // side.
+            [](Sum const& s) -> std::optional<int>
+            {
+                auto const l = infer_rank(s.left);
+                return l ? l : infer_rank(s.right);
+            },
+            [](Difference const& s) -> std::optional<int>
+            {
+                auto const l = infer_rank(s.left);
+                return l ? l : infer_rank(s.right);
+            },
+            // Outer product adds ranks; scalar division keeps the left rank.
+            [&](TensorProduct const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 0); },
+            [](ScalarDiv const& s) -> std::optional<int>
+            { return infer_rank(s.left); },
+            [&](Dot const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 2); },
+            [&](DDot const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 4); },
+            [&](DDotAlt const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 4); },
+            [&](Cross const& s) -> std::optional<int>
+            { return contracted(infer_rank(s.left), infer_rank(s.right), 1); },
+            [](ExplicitSum const& s) -> std::optional<int>
+            { return infer_rank(s.body); },
+            [](NoSum const& s) -> std::optional<int>
+            { return infer_rank(s.body); },
+            // Scalar fields are rank 0.
+            [](ScalarFn const&) -> std::optional<int> { return 0; },
+            [](Pow const&) -> std::optional<int> { return 0; },
+            // A differential operator's rank is that of the object it
+            // differentiates with respect to (vibe 000077): a coordinate ⇒ 0.
+            [](Deriv const& d) -> std::optional<int>
+            { return infer_rank(d.wrt); },
+            // ∇ is a rank-1 vector operator (vibe 000078).
+            [](Nabla const&) -> std::optional<int> { return 1; },
+        },
+        *e);
+}
+
+namespace
+{
+
+// A contraction with a scalar (rank-0) operand is not a contraction — a scalar
+// has no leg to contract — it is scalar multiplication.  Every `·` / `:` / `··`
+// / `×` factory funnels through here so such a node is *never* built: a scalar
+// operand redirects to `⊗` (which the layer above reads as multiplication),
+// keeping a bare scalar out of a contraction slot where the reductions and the
+// nf lowering would choke on it.  Only redirects when an operand is *known*
+// rank 0; an unknown (abstract, rankless) operand keeps the contraction.
+auto scalar_mult_or(
+    Context& ctx,
+    Expr const* left,
+    Expr const* right,
+    Expr const* (*contraction)(Context&, Expr const*, Expr const*))
+    -> Expr const*
+{
+    if (infer_rank(left) == std::optional<int>{0}
+        || infer_rank(right) == std::optional<int>{0})
+        return make_tensor_product(ctx, left, right);
+    return contraction(ctx, left, right);
+}
+
+auto raw_dot(Context& ctx, Expr const* l, Expr const* r) -> Expr const*
+{
+    return ctx.make<Expr>(Dot{l, r});
+}
+auto raw_ddot(Context& ctx, Expr const* l, Expr const* r) -> Expr const*
+{
+    return ctx.make<Expr>(DDot{l, r});
+}
+auto raw_ddot_alt(Context& ctx, Expr const* l, Expr const* r) -> Expr const*
+{
+    return ctx.make<Expr>(DDotAlt{l, r});
+}
+auto raw_cross(Context& ctx, Expr const* l, Expr const* r) -> Expr const*
+{
+    return ctx.make<Expr>(Cross{l, r});
+}
+
+} // namespace
+
 auto make_dot(Context& ctx, Expr const* left, Expr const* right) -> Expr const*
 {
-    return ctx.make<Expr>(Dot{left, right});
+    return scalar_mult_or(ctx, left, right, &raw_dot);
 }
 
 auto make_ddot(Context& ctx, Expr const* left, Expr const* right) -> Expr const*
 {
-    return ctx.make<Expr>(DDot{left, right});
+    return scalar_mult_or(ctx, left, right, &raw_ddot);
 }
 
 auto make_ddot_alt(Context& ctx, Expr const* left, Expr const* right)
     -> Expr const*
 {
-    return ctx.make<Expr>(DDotAlt{left, right});
+    return scalar_mult_or(ctx, left, right, &raw_ddot_alt);
 }
 
 auto make_cross(Context& ctx, Expr const* left, Expr const* right) -> Expr const*
 {
-    return ctx.make<Expr>(Cross{left, right});
+    return scalar_mult_or(ctx, left, right, &raw_cross);
 }
 
 // ---- Summation annotation factories ------------------------------------

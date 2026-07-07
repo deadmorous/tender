@@ -494,6 +494,13 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
     -> Expr const*;
 [[nodiscard]] auto make_cross(Context&, Expr const*, Expr const*) -> Expr const*;
 
+// The rank of an expression, or nullopt when a sub-object's rank is unknown or
+// the tree is ill-formed (a contraction removing more legs than the operands
+// have).  A pure structural query over the node kinds — the scalar/contraction
+// factories consult it to keep a scalar out of a contraction slot (`s·T →
+// s⊗T`).
+[[nodiscard]] auto infer_rank(Expr const* e) -> std::optional<int>;
+
 // Summation annotations
 [[nodiscard]] auto make_explicit_sum(
     Context&,

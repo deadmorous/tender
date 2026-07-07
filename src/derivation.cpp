@@ -913,71 +913,8 @@ auto is_component_valued(Expr const* e) -> bool
         *e);
 }
 
-auto infer_rank(Expr const* e) -> std::optional<int>
-{
-    // Rank arithmetic for a contraction that removes `removed` indices from the
-    // outer-product rank of its two operands; nullopt if either is unknown or
-    // the result is negative (ill-formed).
-    auto contracted = [](std::optional<int> l,
-                         std::optional<int> r,
-                         int removed) -> std::optional<int>
-    {
-        if (!l || !r || *l + *r - removed < 0)
-            return std::nullopt;
-        return *l + *r - removed;
-    };
-    return visit(
-        Overloads{
-            [](TensorObject const& t) -> std::optional<int> { return t.rank; },
-            [](ScalarLiteral const&) -> std::optional<int> { return 0; },
-            [](Negate const& n) -> std::optional<int>
-            { return infer_rank(n.operand); },
-            // tr(A) is a scalar; vec(A) is a vector; transpose keeps the rank.
-            [](Trace const&) -> std::optional<int> { return 0; },
-            [](VectorInvariant const&) -> std::optional<int> { return 1; },
-            [](Transpose const& u) -> std::optional<int>
-            { return infer_rank(u.operand); },
-            // A sum keeps the shared rank of its operands; trust the known
-            // side.
-            [](Sum const& s) -> std::optional<int>
-            {
-                auto const l = infer_rank(s.left);
-                return l ? l : infer_rank(s.right);
-            },
-            [](Difference const& s) -> std::optional<int>
-            {
-                auto const l = infer_rank(s.left);
-                return l ? l : infer_rank(s.right);
-            },
-            // Outer product adds ranks; scalar division keeps the left rank.
-            [&](TensorProduct const& s) -> std::optional<int>
-            { return contracted(infer_rank(s.left), infer_rank(s.right), 0); },
-            [](ScalarDiv const& s) -> std::optional<int>
-            { return infer_rank(s.left); },
-            [&](Dot const& s) -> std::optional<int>
-            { return contracted(infer_rank(s.left), infer_rank(s.right), 2); },
-            [&](DDot const& s) -> std::optional<int>
-            { return contracted(infer_rank(s.left), infer_rank(s.right), 4); },
-            [&](DDotAlt const& s) -> std::optional<int>
-            { return contracted(infer_rank(s.left), infer_rank(s.right), 4); },
-            [&](Cross const& s) -> std::optional<int>
-            { return contracted(infer_rank(s.left), infer_rank(s.right), 1); },
-            [](ExplicitSum const& s) -> std::optional<int>
-            { return infer_rank(s.body); },
-            [](NoSum const& s) -> std::optional<int>
-            { return infer_rank(s.body); },
-            // Scalar fields are rank 0.
-            [](ScalarFn const&) -> std::optional<int> { return 0; },
-            [](Pow const&) -> std::optional<int> { return 0; },
-            // A differential operator's rank is that of the object it
-            // differentiates with respect to (vibe 000077): a coordinate ⇒ 0.
-            [](Deriv const& d) -> std::optional<int>
-            { return infer_rank(d.wrt); },
-            // ∇ is a rank-1 vector operator (vibe 000078).
-            [](Nabla const&) -> std::optional<int> { return 1; },
-        },
-        *e);
-}
+// `infer_rank` now lives in expr.cpp (a pure structural query near the Expr
+// factories); it is declared in expr.hpp and used here unchanged.
 
 namespace
 {
