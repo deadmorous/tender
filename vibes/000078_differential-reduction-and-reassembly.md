@@ -222,16 +222,36 @@ reserved.  Build these five increments, each buildable/testable, `clang-format`
      reduction-ordering).  `id_axBxc` itself derives correctly.
   2. **Phase-2 (increment 4):** the reassembly engine needs Phase-1's reduced
      form as input.  Separately, componentizing the reassembly *target*
-     operators through `expand_nabla` hits an `encapsulate` gap ("nested ⊗
-     inside an operand awaits fence distribution", `nf_lower.cpp`) on
-     `(∇∇·ε)ᵀ` and `∇∇··ε` — a nested-⊗-in-contraction that the nf lowering
-     does not yet distribute.  This is why the increment-5 verification routes
-     through the chart operators rather than `expand_nabla` on the RHS.
-  RESUME: (a) close the `encapsulate` / nested-⊗-in-contraction gap in
-  `nf_lower.cpp` (would let `expand_nabla` handle the full RHS and unblock a
-  symbolic route), then (b) build `reassemble_del` reading each ∂-index's role,
-  driven on a directly-constructed reduced interior (substitution into the
-  derived `id_axBxc`), verified against the increment-5 oracle.
+     operators through `expand_nabla` hit an `encapsulate` throw ("nested ⊗
+     inside an operand awaits fence distribution", `nf_lower.cpp`).
+
+- **`encapsulate` gap investigated (commit `f5b1f3d`) — it decomposes into
+  three *distinct* root causes, one now fixed:**
+  1. **Zero-fence factor — FIXED.**  Differentiating a constant frame vector
+     (∂_i e_j = 0) leaves a literal 0 buried in a ⊗ / contraction fence, e.g.
+     `e_j ⊗ (0·∂_iε)` in a componentized transposed operator result; no
+     distribution removes it and `encapsulate` has no ⊗ arm.  Fix:
+     `fold_forced_zeros` in `lower_term` collapses any node forced to 0 by a
+     0 operand and drops additive zeros, before the all-`*` encapsulation — the
+     algebraic zero law (test `CanonicalizeNf.ZeroFenceInsideContractionFolds`).
+  2. **Scalar-in-contraction — OPEN.**  `∇∇··ε` (div div ε) via `expand_nabla`
+     reaches `encapsulate` with a bare literal `1` as a contraction operand
+     (from a concrete basis dot `e_a·e_a → 1` landing in a `·` chain rather than
+     the coefficient).  A scalar in a `·`/`×` slot is really scalar
+     multiplication; the reduce path leaves it malformed.
+  3. **Free-index transpose aliasing — OPEN.**  `expand_nabla` on a *transposed*
+     two-∇ form corrupts the ∂-marks: `(∇⊗(∇·ε))ᵀ` lowers to
+     `Σ (e_j·(∂_i∂_i ε)) e_i` — the two summation indices collapse (`∂_i∂_j →
+     ∂_i∂_i`).  `apply_operators` recursing through `Transpose` aliases the two
+     free-index directions.  (The non-transposed grad-div is correct:
+     `Σ e_i (e_j·(∂_i∂_j ε))`.)
+  RESUME: close (2) [fold a scalar-operand contraction into scalar mult in the
+  reduce path] and (3) [keep the two free-index ∂-links distinct across a
+  `Transpose` in `apply_operators`]; together with (1) they let `expand_nabla`
+  handle the full RHS and unblock a symbolic route.  Then build `reassemble_del`
+  reading each ∂-index's role, driven on a directly-constructed reduced interior
+  (substitution into the derived `id_axBxc`), verified against the increment-5
+  oracle.
 
 **Increment 1 — chart-free `Nabla` operator node.**
 - `struct Nabla final {};` in `expr.hpp` (a rank-1 invariant operator atom, no
