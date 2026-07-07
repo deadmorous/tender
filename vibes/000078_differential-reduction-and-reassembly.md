@@ -245,59 +245,70 @@ reserved.  Build these five increments, each buildable/testable, `clang-format`
      expr.hpp/expr.cpp so the factories can consult it without a layering
      violation.  Test `MakeBinary.ScalarOperandInContractionBecomesTensorProduct`.
 
-- **"Cause 3" split, once (1)+(2) were fixed, into two SEPARATE bugs:**
+- **"Cause 3" turned out to be THREE separate bugs — all now FIXED + committed:**
 
-  - **(3a) — free-index transpose aliasing — OPEN.**  `expand_nabla` on a
-    *transposed* two-∇ form corrupts the ∂-marks: `(∇⊗(∇·ε))ᵀ` lowers to
-    `Σ (e_j·(∂_i∂_i ε)) e_i` — the two summation indices collapse
-    (`∂_i∂_j → ∂_i∂_i`).  `apply_operators` recursing through `Transpose`
-    aliases the two free-index directions.  (Non-transposed grad-div is correct:
-    `Σ e_i (e_j·(∂_i∂_j ε))`.)  Localized to the increment-2 free-index path.
+  - **(3b) — FOUNDATIONAL contraction-model bug — FIXED (`8f0ecad`).**
+    `a·(b·T)` (any ordinary double contraction, e.g. `v·(w·σ)`) canonicalized to
+    the WRONG answer `(a·b)·T` — rank 0 silently became rank 2.  **Mechanism:**
+    the nf model stores a contraction as a *flat left-fold chain*
+    (`nf::Contraction{factors, ops}`), and `flatten_contraction` (`nf_lower.cpp`)
+    dropped the bracketing via `flatten(l)++[op]++flatten(r)` — the "000057
+    interface theorem".  Sound only for a genuine matrix chain; for a **fan-in /
+    right-nesting into a rank-≥2 operand**, `Dot(a, Dot(b,T))` flattened to
+    `[a,b,T]` when the faithful chain is `[b,T,a]` (= `b·T·a` = `a_j b_i T_ij`).
+    (This is *why* `∇·(∇·ε)` came out as `Δε`.)  **Fix:** replaced the flattener
+    with leg-aware `flatten_chain` — it tracks, per sub-chain, whether the result
+    exposes a free leg at each physical tip (`free_front`/`free_back`), and
+    orients/reorders a `·`'s operands so the contracted legs meet.  Prefers the
+    two transpose-free splices; only when a rank-≤1 sub-chain must be read
+    backwards does it emit a whole-chain transpose (vector = its transpose,
+    scalar orientation-free), so a matrix chain is never disturbed.  `:`/`··` and
+    unknown-rank operands keep the naive concat (no rank-1 connector possible).
+    Contained: single entry point, downstream flat-`Contraction` consumers
+    unchanged.  Tests: `CanonicalizeNf.{RightNestedFanInKeepsLegTopology,
+    RankTwoFanInInsertsTranspose}`, py `test_{right_nested_fan_in_stays_scalar,
+    rank2_fan_in_inserts_transpose}`.  Verified `a·(b·T)==b·(T·a)≠b·(Tᵀ·a)`.
 
-  - **(3b) — FOUNDATIONAL contraction-model bug — the next-session target.**
-    `a·(b·T)` (any ordinary double contraction, e.g. `v·(w·σ)`) canonicalizes to
-    the WRONG answer `(a·b)·T` — rank 0 silently becomes rank 2.  Repro:
-    `td.canonicalize(a @ (b @ T))` for vectors a,b and rank-2 T renders `a·b T`.
-    **Mechanism:** the nf model stores a contraction as a *flat linear chain*
-    (`nf::Contraction{factors, ops}`), and `flatten_contraction`
-    (`nf_lower.cpp`) drops the bracketing via `flatten(l) ++ [op] ++ flatten(r)`
-    — the "000057 interface theorem".  That reordering is valid ONLY for a
-    genuine matrix-chain `A·B·C` (each · joins adjacent interface legs).  For a
-    **fan-in / right-nesting into a higher-rank operand**, `Dot(a, Dot(b,T))`
-    flattens to the chain `[a,b,T]` when the correct chain is `[b,T,a]`
-    (= `b·T·a` = `a_j b_i T_ij`).  Left-nesting `(a·T)·b` flattens correctly to
-    `[a,T,b]`; only right-nesting into rank ≥ 2 is wrong.  (This is *why*
-    `∇·(∇·ε)` came out as `Δε`, and it also interacts with (2): the bad
-    `Dot(a·b scalar, T)` now redirects to `(a·b)⊗T`, so the wrong result renders
-    as a tensor product.)  **Library-wide correctness bug**, independent of the
-    strain-compat work.
+  - **(3a) — free-index ∂ aliasing (NOT transpose-specific) — FIXED (`26612fb`).**
+    `∇·(∇·ε)` via `expand_nabla` aliased the two ∂-summation indices
+    (`∂_i∂_j → ∂_i∂_i`), collapsing the double divergence (componentized:
+    `∂_x∂_xε_xy + ∂_y∂_yε_xy` instead of `2∂_x∂_yε_xy`).  Probing the marks: ε
+    carried two ∂-marks both with the SAME canonical link, while the frame
+    vectors kept distinct indices.  **Root cause (not the Transpose — plain
+    div-div hits it):** `partial` canonicalizes its *intermediate* result; during
+    operator application Leibniz differentiates a subterm (`e_j·∂_jε`) whose outer
+    frame vector `e_i` has not joined yet, so that subterm's index is still free.
+    Canonicalizing there α-renames the *contracted* dummy to a canonical negative
+    id; when `e_i` later joins and the whole term is re-canonicalized, the freed
+    index collides onto the same canonical id.  **Fix:** `partial` gained a
+    `canon` flag (default true for standalone diff — the chain-rule path needs the
+    0/1 fold); `apply_operators` passes `canon=false` at both call sites,
+    deferring all canonicalization to the single final `canon_tolerant` pass.
+    Test `Chart.ExpandNablaDivDivKeepsIndicesDistinct`, py
+    `test_expand_nabla_double_divergence_and_transpose`.
 
-  **User decision (this session): fix (3b) — correctness outranks any deadline
-  (there are none).  Investigate first, come back with a concrete fix design +
-  blast-radius assessment, then change the core.**
+  - **(3c) — transposed grad-div rank inflation — FIXED (`5c6f9ef`).**  Surfaced
+    once 3a landed: `(∇⊗(∇·ε))ᵀ` expanded to rank 3.  A transposed grad-div's
+    Leibniz term `∂_i e_j = 0` leaves a zero *product* `(e_i ⊗ 0 ⊗ ∂_jε)ᵀ`
+    (rank 3) that the `Transpose` fence hides from canonicalize, and
+    `expand_nabla`'s own cleanup only dropped literal-0 *addends*, not zero
+    products.  **Fix:** exposed `nf::fold_forced_zeros` (was file-local in
+    nf_lower.cpp) — it collapses any node forced to 0 by a literal-0 operand,
+    through ⊗/contraction/transpose fences, bottom-up — and use it as
+    `expand_nabla`'s cleanup.  `(∇⊗(∇·ε))ᵀ` now rank 2 == `(grad(div ε))ᵀ`.
+    Test `Chart.ExpandNablaTransposedGradDivKeepsRank`.
 
-  RESUME PLAN for (3b):
-  1. Reproduce & pin the semantics: enumerate what the flat
-     `Contraction{factors, ops}` chain is *defined* to mean (left-assoc? leg
-     topology?), and for which nestings `flatten(l)++op++flatten(r)` is sound.
-     Key cases: `A·B·C` (all rank 2 — sound), `(a·T)·b` (sound, `[a,T,b]`),
-     `a·(b·T)` (UNSOUND, produced `[a,b,T]`, should be `[b,T,a]`).
-  2. Decide the fix locus: either (i) make `flatten_contraction` compute the
-     correct chain ORDER from the operands' ranks / interface legs when it
-     right-descends into a higher-rank operand, or (ii) enrich the flat model to
-     track which interface leg each `·` joins (a bigger change).  Prefer (i) if
-     a rank-driven reordering rule is provably correct; it is the smaller change.
-  3. Guard with tests at BOTH layers: an nf-level test that
-     `canonicalize(a·(b·T))` keeps rank 0 and equals `b·T·a`; and the
-     `∇·(∇·ε)` via `expand_nabla` == `cart.div(cart.div(eps))` end-to-end check.
-  4. Re-run the full suite — the interface-theorem flattening underpins ALL
-     contraction canonicalization, so watch for churn in matrix-chain cases.
-  Then (3a) [keep the two free-index ∂-links distinct across a `Transpose` in
-  `apply_operators`], after which `expand_nabla` handles the full RHS and the
-  symbolic reduce→reassemble route (increments 3/4) is unblocked: build
-  `reassemble_del` reading each ∂-index's role, driven on a directly-constructed
-  reduced interior (substitution into the derived `id_axBxc`), verified against
-  the increment-5 oracle.
+  With 3a/3b/3c fixed, `expand_nabla` now handles **all** the operator
+  compositions the reassembly RHS needs — grad-div, div-grad (Δε), div-div,
+  and their transposes — each verified componentwise against the M6 chart
+  operators.  Suite: **785 C++ + 239 Python green.**
+
+  **NEXT: the symbolic reduce→reassemble route (increments 3/4) is unblocked.**
+  Build `reassemble_del` reading each ∂-index's role (free e→grad leg,
+  δ→Laplacian, e·ε→divergence), driven on a directly-constructed reduced
+  interior (substitution into the derived `id_axBxc`), verified against the
+  increment-5 oracle.  Increment 3 still needs the transpose-cross helper
+  `a×(c×B)ᵀ = −a×Bᵀ×c` (residual `e_k×e_j`; `id_axBxc` derives fine).
 
 **Increment 1 — chart-free `Nabla` operator node.**
 - `struct Nabla final {};` in `expr.hpp` (a rank-1 invariant operator atom, no
