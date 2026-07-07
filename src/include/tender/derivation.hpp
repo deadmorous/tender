@@ -244,9 +244,14 @@ auto canonicalize(Context& ctx, Expr const* e) -> Expr const*;
 // with summation binders.  Constancy is decided by the coordinate marker: only
 // the matching coordinate differentiates to 1; every other coordinate, and
 // every non-coordinate symbol (reference basis vectors, parameters, literals,
-// I/δ/ε), is constant and differentiates to 0.  The result is canonicalized, so
-// the 0-and 1-folding leaves a clean expression (e.g. ∂_φ(r cos φ) → −r sin φ).
-auto partial(Context& ctx, Expr const* e, Expr const* coord) -> Expr const*;
+// I/δ/ε), is constant and differentiates to 0.  With `canon` (default), the
+// result is canonicalized, so the 0-and 1-folding leaves a clean expression
+// (e.g. ∂_φ(r cos φ) → −r sin φ).  Operator application passes `canon = false`
+// to defer canonicalization to a single final pass — an intermediate canon of a
+// subterm with a still-free index α-renames its contracted dummy prematurely
+// and aliases indices once the term completes (vibe 000078 bug 3a).
+auto partial(Context& ctx, Expr const* e, Expr const* coord, bool canon = true)
+    -> Expr const*;
 
 // Apply the first-class ∂ operators in `e` (vibe 000077 step B): application is
 // Leibniz.  Each unapplied `Deriv` operator acts on everything to its right in

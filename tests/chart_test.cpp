@@ -1340,6 +1340,26 @@ TEST(Chart, ExpandNablaSingleOperatorsMatchChart)
         eq(ctx, expand(ctx, chart, div_free), divergence(ctx, chart, v)));
 }
 
+// ∇·(∇·ε) via expand_nabla equals the chart operators' div(div ε): the two
+// independent ∂-summation indices must stay distinct through operator
+// application — a premature intermediate canonicalize once aliased them to
+// ∂_i∂_i (vibe 000078 bug 3a), collapsing the double divergence.
+TEST(Chart, ExpandNablaDivDivKeepsIndicesDistinct)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto* nab = make_nabla(ctx);
+    auto* dd = make_dot(ctx, nab, make_dot(ctx, nab, eps));
+    auto* free = componentize_nabla(ctx, chart, expand_nabla(ctx, chart, dd));
+    EXPECT_TRUE(
+        eq(ctx,
+           expand(ctx, chart, free),
+           divergence(ctx, chart, divergence(ctx, chart, eps))));
+}
+
 // expand_nabla refuses a curvilinear (non-unit-scale) chart: the free-index
 // ∂_i cannot carry the moving frame's per-direction scale factors.
 TEST(Chart, ExpandNablaRejectsCurvilinear)

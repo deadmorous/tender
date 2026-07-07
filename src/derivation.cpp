@@ -3211,13 +3211,23 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
 
 } // namespace
 
-auto partial(Context& ctx, Expr const* e, Expr const* coord) -> Expr const*
+auto partial(Context& ctx, Expr const* e, Expr const* coord, bool canon)
+    -> Expr const*
 {
     auto q = as_diff_coord(coord);
     if (!q)
         throw std::invalid_argument(
             "partial: coord must be a coordinate variable (make_coordinate)");
     auto const* raw = diff(ctx, e, *q);
+    // During operator application (canon == false) the caller defers all
+    // canonicalization to a single final pass.  Canonicalizing *here* would
+    // α-rename this subterm's contracted dummy to a canonical id while another
+    // of its indices is still free (its frame vector has not joined yet); when
+    // that vector later joins and the whole term is re-canonicalized, the index
+    // collides onto the same canonical id — aliasing e.g. ∂_i∂_j → ∂_i∂_i in
+    // ∇·(∇·ε) (vibe 000078 bug 3a).  Deferring avoids the premature id.
+    if (!canon)
+        return raw;
     // Canonicalize to fold the 0/1 noise the rules generate.  canonicalize
     // throws on an ill-formed implicit sum; then the raw form is the best we
     // can return (it is still a correct derivative).
@@ -3333,8 +3343,8 @@ auto apply_product_operators(Context& ctx, std::vector<Expr const*> const& facs)
     // rules).  The operand may itself contain unapplied operators (e.g. the
     // inner ∇·ε of a grad-div ∇⊗(∇·ε)); resolve those first — rightmost-first —
     // so `partial` never meets a still-unapplied ∂ to differentiate.
-    Expr const* applied =
-        partial(ctx, apply_operators_impl(ctx, product(right)), d.wrt);
+    Expr const* applied = partial(
+        ctx, apply_operators_impl(ctx, product(right)), d.wrt, /*canon=*/false);
     // Splice: the untouched left factors, then the applied result.
     std::vector<Expr const*> left(facs.begin(), facs.begin() + op);
     Expr const* combined = left.empty() ?
@@ -3425,7 +3435,7 @@ auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
             if (!lf.empty() && std::holds_alternative<Deriv>(lf.back()->node))
             {
                 auto const& d = std::get<Deriv>(lf.back()->node);
-                Expr const* dR = partial(ctx, right, d.wrt);
+                Expr const* dR = partial(ctx, right, d.wrt, /*canon=*/false);
                 Expr const* lpre = nullptr;
                 for (std::size_t k = 0; k + 1 < lf.size(); ++k)
                     lpre = lpre ? make_tensor_product(ctx, lpre, lf[k]) : lf[k];
