@@ -209,3 +209,47 @@ def test_expand_nabla_nested_operator_compositions():
         for i in range(3)
         for j in range(3)
     )
+
+
+def _closed_identity_holds(chart, eps):
+    # inc ε == −∇∇θ + Δθ·I − (∇∇··ε)·I − Δε + 2(∇∇·ε)ˢ , componentwise.  Both
+    # sides are coordinate-free tensors, so this must hold in every frame.
+    theta = t.tr(eps)
+    inc = chart.components(chart.rot(chart.rot(eps).transpose()))
+    gg = chart.components(chart.grad(chart.grad(theta)))
+    de = chart.components(chart.div(chart.grad(eps)))
+    gd = chart.components(chart.grad(chart.div(eps)))
+    lap = chart.laplacian(theta)
+    dd = chart.div(chart.div(eps))
+
+    def is_zero(e):
+        return td.simplify_scalars(td.canonicalize(chart.expand(e))).latex() == "0"
+
+    for i in range(3):
+        for j in range(3):
+            r = (gg[i][j] * (-1)) + (de[i][j] * (-1)) + gd[i][j] + gd[j][i]
+            if i == j:
+                r = r + lap - dd
+            if not is_zero(chart.expand(inc[i][j]) - chart.expand(r)):
+                return False
+    return True
+
+
+def test_strain_compatibility_closed_identity_cartesian():
+    # vibe 000078 increment 5: the strain-compatibility closed identity, proven
+    # in a Cartesian frame.
+    ws = t.Workspace()
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    assert _closed_identity_holds(cart, eps)
+
+
+def test_strain_compatibility_closed_identity_cylindrical():
+    # vibe 000078 increment 5: the same identity in a *curvilinear* (cylindrical)
+    # frame — the connection terms fall out of the operators on their own.
+    ws = t.Workspace()
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    r, th, z = ws.coords("r", r"\theta", "z", nonneg=("r",))
+    cyl = ws.chart(ws.wcs(), [r, th, z], [r * t.cos(th), r * t.sin(th), z])
+    assert _closed_identity_holds(cyl, eps)
