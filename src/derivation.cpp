@@ -3393,8 +3393,11 @@ auto apply_product_operators(Context& ctx, std::vector<Expr const*> const& facs)
     auto const& d = std::get<Deriv>(facs[op]->node);
     std::vector<Expr const*> right(facs.begin() + op + 1, facs.end());
     // Apply this operator to its rightward operand (Leibniz + elementary
-    // rules).
-    Expr const* applied = partial(ctx, product(right), d.wrt);
+    // rules).  The operand may itself contain unapplied operators (e.g. the
+    // inner ∇·ε of a grad-div ∇⊗(∇·ε)); resolve those first — rightmost-first —
+    // so `partial` never meets a still-unapplied ∂ to differentiate.
+    Expr const* applied =
+        partial(ctx, apply_operators_impl(ctx, product(right)), d.wrt);
     // Splice: the untouched left factors, then the applied result.
     std::vector<Expr const*> left(facs.begin(), facs.begin() + op);
     Expr const* combined = left.empty() ?

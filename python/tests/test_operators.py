@@ -188,3 +188,24 @@ def test_expand_nabla_components_match_brute_force():
         for i in range(3)
         for j in range(3)
     )
+
+
+def test_expand_nabla_nested_operator_compositions():
+    # vibe 000078: a composed operator whose operand *itself* contains an
+    # unapplied ∇ — grad(div ε), div(div ε), Δε — must apply rightmost-first
+    # so the inner ∇ resolves before the outer ∂ differentiates it (regression:
+    # this used to throw "differentiating a ∂ operator").  The expanded free
+    # form matches the chart-operator composition, component by component.
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+
+    graddiv_free = cart.componentize_nabla(cart.expand_nabla(nab * (nab @ eps)))
+    a = cart.components(graddiv_free)
+    b = cart.components(cart.grad(cart.div(eps)))
+    assert all(
+        td.algebraic_eq(cart.expand(a[i][j]), b[i][j])
+        for i in range(3)
+        for j in range(3)
+    )
