@@ -1100,6 +1100,21 @@ TEST(CanonicalizeNf, DoubleDotOfDyadsExpands)
     EXPECT_TRUE(nf->terms[0].tensors.empty());
 }
 
+TEST(CanonicalizeNf, ZeroFenceInsideContractionFolds)
+{
+    // a·(b⊗0) → 0: a literal-0 operand buried inside a ⊗ fence inside a
+    // contraction (vibe 000078).  Differentiating a constant frame vector
+    // (∂_i e_j = 0) leaves exactly this shape — `e_j ⊗ (0·∂_iε)` — which
+    // `encapsulate` has no ⊗ arm for; the algebraic zero law must collapse the
+    // whole term first.  Before the fold this *threw*; now it vanishes.
+    Context ctx;
+    auto const* fence =
+        make_tensor_product(ctx, atom(ctx, "b"), make_scalar(ctx, Rational{0}));
+    auto const* e = make_dot(ctx, atom(ctx, "a"), fence);
+    auto const* nf = canonicalize_nf(ctx, e);
+    EXPECT_TRUE(nf->terms.empty()); // 0 has no terms
+}
+
 // ---- binder sinking over the additive layer (C13) ----------------------
 
 TEST(CanonicalizeNf, BinderDistributesOverSum)

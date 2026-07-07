@@ -1,6 +1,7 @@
 #include <tender/nf_lower.hpp>
 
 #include <tender/derivation.hpp> // infer_rank
+#include <tender/rewrite.hpp>    // rewrite_tree (fold_forced_zeros)
 #include <tender/summation.hpp>  // contracted_ids, substitute_index_ids, …
 #include <tender/tensor_symmetry.hpp> // canon_symmetry_slots
 
@@ -470,6 +471,69 @@ struct Dummy final
     Nf const* range = nullptr; // explicit symbolic range, else null
 };
 
+// Fold every subexpression forced to zero by a literal-0 operand down to a
+// bare 0, and drop additive zeros, in one bottom-up pass.  A differentiated
+// operand (∂_i e_j = 0 in a constant frame) or a projected-out basis leg leaves
+// zeros nested inside ⊗ / contraction fences — e.g. `e_j ⊗ (0·∂_iε)` — which
+// `encapsulate` has no arm for.  Collapsing them here turns a zero *term* into
+// coeff 0 (so `collect_terms` erases it) and a zero *factor* inside a live term
+// into a bare 0 that `multiplicative_flatten` folds into the coefficient — the
+// algebraic zero law, applied before the all-`*` encapsulation runs.  Bottom-up
+// so a deep zero (`Dot(0,·)` under a `⊗`) collapses its ancestors in the same
+// pass; a genuine sum keeps its non-zero addend rather than vanishing.
+auto fold_forced_zeros(Context& ctx, Expr const* e) -> Expr const*
+{
+    auto is0 = [](Expr const* z)
+    {
+        auto const* s = std::get_if<ScalarLiteral>(&z->node);
+        return s && s->value.is_zero();
+    };
+    // Unqualified `Cross` / `Dot` / … resolve to this namespace's `nf` Factor
+    // types; the Expr nodes and builders are the `tender::` ones.
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* n) -> Expr const*
+        {
+            Expr const* zero = nullptr;
+            auto to_zero = [&]() -> Expr const* {
+                return zero ? zero :
+                              (zero = tender::make_scalar(c, Rational{0}));
+            };
+            // Multiplicative / contraction nodes: a 0 operand forces 0.
+            if (auto const* d = std::get_if<tender::Dot>(&n->node))
+                return (is0(d->left) || is0(d->right)) ? to_zero() : n;
+            if (auto const* d = std::get_if<tender::DDot>(&n->node))
+                return (is0(d->left) || is0(d->right)) ? to_zero() : n;
+            if (auto const* d = std::get_if<tender::DDotAlt>(&n->node))
+                return (is0(d->left) || is0(d->right)) ? to_zero() : n;
+            if (auto const* x = std::get_if<tender::Cross>(&n->node))
+                return (is0(x->left) || is0(x->right)) ? to_zero() : n;
+            if (auto const* p = std::get_if<tender::TensorProduct>(&n->node))
+                return (is0(p->left) || is0(p->right)) ? to_zero() : n;
+            if (auto const* q = std::get_if<tender::ScalarDiv>(&n->node))
+                return is0(q->left) ? to_zero() : n; // 0 / s = 0
+            // Linear unaries of 0 are 0.
+            if (auto const* u = std::get_if<tender::Negate>(&n->node))
+                return is0(u->operand) ? to_zero() : n;
+            if (auto const* u = std::get_if<tender::Transpose>(&n->node))
+                return is0(u->operand) ? to_zero() : n;
+            if (auto const* u = std::get_if<tender::Trace>(&n->node))
+                return is0(u->operand) ? to_zero() : n;
+            if (auto const* u = std::get_if<tender::VectorInvariant>(&n->node))
+                return is0(u->operand) ? to_zero() : n;
+            // Additive zeros drop the vanishing addend (0 + x → x, x − 0 → x,
+            // 0 − x → −x) — the enclosing node is *not* forced to zero.
+            if (auto const* s = std::get_if<tender::Sum>(&n->node))
+                return is0(s->left) ? s->right : is0(s->right) ? s->left : n;
+            if (auto const* s = std::get_if<tender::Difference>(&n->node))
+                return is0(s->right) ? s->left :
+                       is0(s->left)  ? tender::make_negate(c, s->right) :
+                                       n;
+            return n;
+        });
+}
+
 } // namespace
 
 // ---- per-term lowering (passes 3+4+5) ----------------------------------
@@ -485,8 +549,11 @@ auto lower_term(Context& ctx, SignedExpr const& term) -> Term
     //    iterates to a fixpoint and never distributes over a genuine sum.
     std::vector<RawBinder> binders;
     auto const* body = strip_binders(term.body, binders);
-    auto const* distributed = steps::distribute_contraction(
-        ctx, steps::expand_double_dot(ctx, steps::expand_dyad_ops(ctx, body)));
+    auto const* distributed = fold_forced_zeros(
+        ctx,
+        steps::distribute_contraction(
+            ctx,
+            steps::expand_double_dot(ctx, steps::expand_dyad_ops(ctx, body))));
 
     // 2. Census the free index occurrences (for mode classification), and
     //    collect the term's bound indices:
