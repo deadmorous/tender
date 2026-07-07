@@ -133,23 +133,134 @@ auto binop_operands(Expr const* e) -> std::pair<Expr const*, Expr const*>
         *e);
 }
 
-// Flatten a contraction tree into operand / op sequences, dropping bracketing:
-// `o(l, r)` becomes flatten(l) ++ [o] ++ flatten(r), so the result holds
-// `operands.size() == ops.size() + 1` for any nesting (000057 interface
-// theorem).
-void flatten_contraction(
-    Expr const* e, std::vector<Expr const*>& operands, std::vector<COp>& ops)
+// A flattened contraction in left-fold order, annotated with where its result's
+// free legs live so a parent `·` can splice its operands correctly.
+//
+// The flat `Contraction` model reads `factors` as a left fold
+// `(((f0·f1)·f2)…)`. The bracketing of the *source* tree is immaterial only for
+// a clean matrix chain (the 000057 interface theorem): a rank-1 "connector" —
+// as in `a·(b·T)`, where `b` is fully consumed contracting into `T` — fans `a`
+// onto an *interior* leg of `T`, so the naive `flatten(l)++[op]++flatten(r)`
+// reads `(a·b)·T`, silently changing which legs meet (vibe 000078 bug 3b:
+// `a·(b·T)` came out `a·b T`, rank 0 → 2).  We therefore track, per sub-chain,
+// whether its result exposes a free leg at each physical tip, and orient /
+// reorder its operands so the contracted legs actually meet — transposing only
+// when a rank-≤1 sub-chain must be read backwards (a vector equals its
+// transpose; a scalar is orientation-free), which never disturbs a matrix
+// chain.
+struct FlatChain final
+{
+    std::vector<Expr const*> seq;
+    std::vector<COp> ops;
+    int rank = 0;
+    bool free_front = false; // result exposes a free leg at seq.front()
+    bool free_back = false;  // …and/or at seq.back()
+};
+
+// Reverse a contraction chain and transpose it as a whole: `(A·B·C)ᵀ =
+// Cᵀ·Bᵀ·Aᵀ`.  Rank-1 factors are left as-is (a vector equals its transpose;
+// skipping the notation avoids a spurious `aᵀ`).  Only ever applied to a
+// rank-≤1 result, where reading the chain backwards is benign.
+auto reverse_transpose(Context& ctx, FlatChain c) -> FlatChain
+{
+    FlatChain out;
+    out.rank = c.rank;
+    out.free_front = c.free_back;
+    out.free_back = c.free_front;
+    for (auto it = c.seq.rbegin(); it != c.seq.rend(); ++it)
+        out.seq.push_back(
+            infer_rank(*it) == std::optional<int>{1} ?
+                *it :
+                make_transpose(ctx, *it));
+    out.ops.assign(c.ops.rbegin(), c.ops.rend());
+    return out;
+}
+
+// `[left…] op [right…]`, junction `left.back` · `right.front`; no
+// reorientation.
+auto concat_chains(
+    FlatChain left, COp op, FlatChain right, int rank, bool ff, bool fb)
+    -> FlatChain
+{
+    left.ops.push_back(op);
+    left.seq.insert(left.seq.end(), right.seq.begin(), right.seq.end());
+    left.ops.insert(left.ops.end(), right.ops.begin(), right.ops.end());
+    left.rank = rank;
+    left.free_front = ff;
+    left.free_back = fb;
+    return left;
+}
+
+auto flatten_chain(Context& ctx, Expr const* e) -> FlatChain
 {
     auto op = contraction_op(e);
     if (!op)
     {
-        operands.push_back(e);
-        return;
+        auto r = infer_rank(e);
+        int rank = r.value_or(-1);
+        bool leg = !r || *r >= 1; // a leaf's leg(s) sit at both tips
+        return {{e}, {}, rank, leg, leg};
     }
-    auto [l, r] = binop_operands(e);
-    flatten_contraction(l, operands, ops);
-    ops.push_back(*op);
-    flatten_contraction(r, operands, ops);
+    auto [le, re] = binop_operands(e);
+    FlatChain x = flatten_chain(ctx, le);
+    FlatChain y = flatten_chain(ctx, re);
+
+    // Double contractions (`:` / `··`) act on rank-≥2 operands — no rank-1
+    // connector is possible — so naive concatenation is already faithful.
+    // Unknown-rank operands fall back the same way (we cannot leg-track without
+    // ranks).  Both preserve the historical behaviour.
+    if (*op != COp::Dot || x.rank < 0 || y.rank < 0)
+    {
+        int rank = (x.rank < 0 || y.rank < 0) ?
+                       -1 :
+                       x.rank + y.rank - (*op == COp::Dot ? 2 : 4);
+        bool leg = rank >= 1;
+        return concat_chains(std::move(x), *op, std::move(y), rank, leg, leg);
+    }
+
+    int const rank = x.rank + y.rank - 2;
+    bool const xff = x.rank >= 2; // an x on the left keeps a free leg up front
+    bool const yfb = y.rank >= 2; // a y on the right keeps a free leg at back
+
+    // x contributes its LAST free leg, y its FIRST.  A leg's tip: for a rank-≤1
+    // chain the (single) free leg can serve either role; a rank-≥2 chain's
+    // first leg is its front, last leg its back — fixed.
+    bool const x_last_back = x.free_back; // x's last leg at back
+    bool const x_last_front = x.free_front && x.rank <= 1; // …or at front
+                                                           // (rank≤1)
+    bool const y_first_front = y.free_front;              // y's first leg front
+    bool const y_first_back = y.free_back && y.rank <= 1; // …or at back
+                                                          // (rank≤1)
+
+    // Prefer the two transpose-free splices; else read one rank-≤1 side back.
+    if (x_last_back && y_first_front) // [x…]·[y…]
+        return concat_chains(
+            std::move(x), COp::Dot, std::move(y), rank, xff, yfb);
+    if (x_last_front && y_first_back) // [y…]·[x…]
+        return concat_chains(
+            std::move(y), COp::Dot, std::move(x), rank, yfb, xff);
+    if (x_last_back && y_first_back) // [x…]·[yᵀ…]
+    {
+        FlatChain yt = reverse_transpose(ctx, std::move(y));
+        return concat_chains(
+            std::move(x), COp::Dot, std::move(yt), rank, xff, yfb);
+    }
+    // x_last_front && y_first_front: [xᵀ…]·[y…]
+    FlatChain xt = reverse_transpose(ctx, std::move(x));
+    return concat_chains(std::move(xt), COp::Dot, std::move(y), rank, xff, yfb);
+}
+
+// Flatten a contraction tree into operand / op sequences in faithful left-fold
+// order (`operands.size() == ops.size() + 1`).  See `flatten_chain`.
+void flatten_contraction(
+    Context& ctx,
+    Expr const* e,
+    std::vector<Expr const*>& operands,
+    std::vector<COp>& ops)
+{
+    FlatChain c = flatten_chain(ctx, e);
+    operands.insert(operands.end(), c.seq.begin(), c.seq.end());
+    ops.insert(ops.end(), c.ops.begin(), c.ops.end());
 }
 
 // A bare rank-1 vector (the only operand cross anticommutation applies to).
@@ -232,7 +343,7 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
     {
         std::vector<Expr const*> operands;
         std::vector<COp> ops;
-        flatten_contraction(factor, operands, ops);
+        flatten_contraction(ctx, factor, operands, ops);
         std::vector<Factor const*> encapsulated;
         encapsulated.reserve(operands.size());
         int sign = +1;

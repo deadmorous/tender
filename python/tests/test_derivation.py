@@ -807,3 +807,30 @@ def test_algebraic_eq_folds_fraction_shapes():
     )
     assert td.algebraic_eq(x / r + y / r, (x + y) / r)
     assert not td.algebraic_eq(x / r, y / r)
+
+
+# ---- fan-in contraction leg topology (vibe 000078 bug 3b) ------------------
+
+def test_right_nested_fan_in_stays_scalar():
+    # a·(b·T): b is consumed contracting into T, so a fans onto T's other leg —
+    # the term is a scalar a_j b_i T_ij, NOT the rank-2 (a·b)·T the flat chain
+    # once mis-produced.  It must equal the fan-in-free b·(T·a), and differ from
+    # the transposed b·(Tᵀ·a) (so T's orientation is genuinely tracked).
+    a = tender.tensor("a", rank=1)
+    b = tender.tensor("b", rank=1)
+    T = tender.tensor("T", rank=2)
+    canon = td.canonicalize(a @ (b @ T))
+    assert canon.rank == 0
+    assert td.structural_eq(canon, td.canonicalize(b @ (T @ a)))
+    assert not td.structural_eq(canon, td.canonicalize(b @ (T.transpose() @ a)))
+
+
+def test_rank2_fan_in_inserts_transpose():
+    # T·(a·S), rank-2 T,S: a·S is a vector on S's free leg, so T fans onto S's
+    # second leg — faithfully T·Sᵀ·a.  Cross-checked against T·(Sᵀ·a).
+    a = tender.tensor("a", rank=1)
+    T = tender.tensor("T", rank=2)
+    S = tender.tensor("S", rank=2)
+    canon = td.canonicalize(T @ (a @ S))
+    assert canon.rank == 1
+    assert td.structural_eq(canon, td.canonicalize(T @ (S.transpose() @ a)))

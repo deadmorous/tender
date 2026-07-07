@@ -1115,6 +1115,47 @@ TEST(CanonicalizeNf, ZeroFenceInsideContractionFolds)
     EXPECT_TRUE(nf->terms.empty()); // 0 has no terms
 }
 
+TEST(CanonicalizeNf, RightNestedFanInKeepsLegTopology)
+{
+    // a·(b·T) is a *scalar* (a_j b_i T_ij): the vector b is fully consumed
+    // contracting into T, so a fans onto T's other leg — a right-nesting the
+    // flat left-fold chain must NOT reassociate to (a·b)·T (vibe 000078 bug 3b,
+    // which mis-flattened it to a rank-2 `a·b T`).  The faithful chain is
+    // b·T·a, so canon must agree with the independently built b·(T·a).
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* b = atom(ctx, "b");
+    auto const* T = atomr(ctx, "T", 2);
+    auto const* nested = make_dot(ctx, a, make_dot(ctx, b, T));
+    auto const* canon = steps::canonicalize(ctx, nested);
+    EXPECT_EQ(infer_rank(canon), std::optional<int>{0}); // scalar, not rank 2
+    // b·(T·a) is the same tensor built without the fan-in nesting.
+    auto const* oracle =
+        steps::canonicalize(ctx, make_dot(ctx, b, make_dot(ctx, T, a)));
+    EXPECT_TRUE(structural_eq(canon, oracle));
+    // …and genuinely T-oriented: b·(Tᵀ·a) (the transpose) must differ.
+    auto const* wrong = steps::canonicalize(
+        ctx, make_dot(ctx, b, make_dot(ctx, make_transpose(ctx, T), a)));
+    EXPECT_FALSE(structural_eq(canon, wrong));
+}
+
+TEST(CanonicalizeNf, RankTwoFanInInsertsTranspose)
+{
+    // T·(a·S), T,S rank 2: a·S is a vector on S's free leg, so T fans onto S's
+    // *second* leg — faithfully T·Sᵀ·a (a transpose the flattener must emit).
+    // Cross-checked against T·(Sᵀ·a), which contracts the same legs.
+    Context ctx;
+    auto const* a = atom(ctx, "a");
+    auto const* T = atomr(ctx, "T", 2);
+    auto const* S = atomr(ctx, "S", 2);
+    auto const* nested = make_dot(ctx, T, make_dot(ctx, a, S));
+    auto const* canon = steps::canonicalize(ctx, nested);
+    EXPECT_EQ(infer_rank(canon), std::optional<int>{1});
+    auto const* oracle = steps::canonicalize(
+        ctx, make_dot(ctx, T, make_dot(ctx, make_transpose(ctx, S), a)));
+    EXPECT_TRUE(structural_eq(canon, oracle));
+}
+
 // ---- binder sinking over the additive layer (C13) ----------------------
 
 TEST(CanonicalizeNf, BinderDistributesOverSum)
