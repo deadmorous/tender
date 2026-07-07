@@ -582,6 +582,8 @@ struct Dummy final
     Nf const* range = nullptr; // explicit symbolic range, else null
 };
 
+} // namespace
+
 // Fold every subexpression forced to zero by a literal-0 operand down to a
 // bare 0, and drop additive zeros, in one bottom-up pass.  A differentiated
 // operand (∂_i e_j = 0 in a constant frame) or a projected-out basis leg leaves
@@ -644,8 +646,6 @@ auto fold_forced_zeros(Context& ctx, Expr const* e) -> Expr const*
             return n;
         });
 }
-
-} // namespace
 
 // ---- per-term lowering (passes 3+4+5) ----------------------------------
 

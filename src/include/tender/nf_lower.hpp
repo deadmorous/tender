@@ -129,6 +129,15 @@ struct SignedFactor final
 // `ExplicitSum` (symbolic bound) is likewise deferred and throws.
 [[nodiscard]] auto lower_term(Context&, SignedExpr const& term) -> Term;
 
+// Fold every subexpression forced to zero by a literal-0 operand down to a bare
+// 0, and drop additive zeros, in one bottom-up pass (the algebraic zero law).
+// Differentiating a constant frame vector (∂_i e_j = 0) or projecting out a
+// basis leg leaves zeros buried inside ⊗ / contraction / transpose fences —
+// e.g. `(e_i ⊗ 0 ⊗ ∂_j ε)ᵀ` — which `canonicalize` cannot distribute into.  Run
+// this first to collapse them.  Used by `lower_term` and by `expand_nabla`'s
+// post-application cleanup (vibe 000078).
+[[nodiscard]] auto fold_forced_zeros(Context&, Expr const* e) -> Expr const*;
+
 // ---- pass 6: like-term collection + term-set ordering (C9) --------------
 
 // Collect a flat list of lowered terms into the canonical additive set: sort by

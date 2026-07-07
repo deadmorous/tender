@@ -1360,6 +1360,31 @@ TEST(Chart, ExpandNablaDivDivKeepsIndicesDistinct)
            divergence(ctx, chart, divergence(ctx, chart, eps))));
 }
 
+// (∇⊗(∇·ε))ᵀ via expand_nabla stays rank 2 and equals (grad(div ε))ᵀ.  A
+// transposed grad-div's Leibniz term ∂_i e_j = 0 leaves a rank-inflating
+// zero-product `(e_i ⊗ 0 ⊗ ∂_jε)ᵀ` that the transpose fence hides from
+// canonicalize; folding the algebraic zero law in the cleanup keeps the true
+// rank.  Needed for the reassembly target's 2(∇∇·ε)ˢ term (vibe 000078).
+TEST(Chart, ExpandNablaTransposedGradDivKeepsRank)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto* nab = make_nabla(ctx);
+    // (∇⊗(∇·ε))ᵀ
+    auto* gd = make_tensor_product(ctx, nab, make_dot(ctx, nab, eps));
+    auto* e = make_transpose(ctx, gd);
+    EXPECT_EQ(infer_rank(expand_nabla(ctx, chart, e)), std::optional{2});
+    auto* free = componentize_nabla(ctx, chart, expand_nabla(ctx, chart, e));
+    EXPECT_TRUE(
+        eq(ctx,
+           expand(ctx, chart, free),
+           make_transpose(
+               ctx, gradient(ctx, chart, divergence(ctx, chart, eps)))));
+}
+
 // expand_nabla refuses a curvilinear (non-unit-scale) chart: the free-index
 // ∂_i cannot carry the moving frame's per-direction scale factors.
 TEST(Chart, ExpandNablaRejectsCurvilinear)

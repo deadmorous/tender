@@ -211,6 +211,30 @@ def test_expand_nabla_nested_operator_compositions():
     )
 
 
+def test_expand_nabla_double_divergence_and_transpose():
+    # ∇·(∇·ε): the two ∂-summation indices must stay distinct (vibe 000078 bug
+    # 3a — a premature intermediate canon once aliased them, collapsing it).
+    # (∇⊗(∇·ε))ᵀ: a transposed grad-div's ∂_i e_j = 0 term must fold, keeping
+    # rank 2 (bug 3c).  Both are reassembly-target building blocks.
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+
+    def matches(free_expr, chart_expr):
+        f = cart.componentize_nabla(cart.expand_nabla(free_expr))
+        a = cart.components(f)
+        b = cart.components(chart_expr)
+        return all(
+            td.algebraic_eq(cart.expand(a[i][j]), b[i][j])
+            for i in range(3)
+            for j in range(3)
+        )
+
+    assert cart.expand_nabla(nab @ (nab @ eps)).rank == 0
+    assert matches((nab * (nab @ eps)).transpose(), cart.grad(cart.div(eps)).transpose())
+
+
 def _closed_identity_holds(chart, eps):
     # inc ε == −∇∇θ + Δθ·I − (∇∇··ε)·I − Δε + 2(∇∇·ε)ˢ , componentwise.  Both
     # sides are coordinate-free tensors, so this must hold in every frame.

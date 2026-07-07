@@ -2,6 +2,7 @@
 
 #include <tender/context.hpp>
 #include <tender/derivation.hpp>
+#include <tender/nf_lower.hpp>
 #include <tender/rewrite.hpp>
 
 #include <cmath>
@@ -796,25 +797,13 @@ auto expand_nabla(Context& ctx, CoordinateChart const& chart, Expr const* e)
             return make_tensor_product(c, ei, di);
         });
     Expr const* out = steps::apply_operators(ctx, replaced);
-    // ∂_i of a constant frame vector left `Cross(0, …) → 0` addends; the
-    // nested-cross interior blocks full canonicalization (that is Phase-1's
-    // job), so fold those zero addends here for a clean free-index interior.
-    return rewrite_tree(
-        ctx,
-        out,
-        [](Context&, Expr const* n) -> Expr const*
-        {
-            auto is0 = [](Expr const* z)
-            {
-                auto const* s = std::get_if<ScalarLiteral>(&z->node);
-                return s && s->value.is_zero();
-            };
-            if (auto const* s = std::get_if<Sum>(&n->node))
-                return is0(s->left) ? s->right : is0(s->right) ? s->left : n;
-            if (auto const* s = std::get_if<Difference>(&n->node))
-                return is0(s->right) ? s->left : n;
-            return n;
-        });
+    // ∂_i of a constant frame vector (∂_i e_j = 0) leaves zeros buried inside ⊗
+    // / contraction / transpose fences — `Cross(0, …)`, and `(e_i ⊗ 0 ⊗ ∂_jε)ᵀ`
+    // from a transposed grad-div, which a nested-cross / transpose interior
+    // blocks canonicalize from reaching (that is Phase-1's job).  Fold the
+    // algebraic zero law here so the free-index interior is clean and keeps its
+    // true rank (the stray zero-product term was rank-inflating the result).
+    return nf::fold_forced_zeros(ctx, out);
 }
 
 namespace
