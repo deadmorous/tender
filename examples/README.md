@@ -59,10 +59,14 @@ MathJax.
 | File | Description |
 |---|---|
 | `kronecker_delta.py` / `.ipynb` | Kronecker delta δ^i_j in 3D oblique space — renders to LaTeX |
+| `delta_trace.py` / `.ipynb` | Trace of the Kronecker delta δ^i_i = 3 by implicit summation |
+| `eps_delta.py` / `.ipynb` | The ε–δ identity ε_ijk ε_ilm = δ_jl δ_km − δ_jm δ_kl |
 | `basis_dot_product.py` / `.ipynb` | Dot product through a basis: deriving a·b = b·a from first principles |
 | `cross_identity.py` / `.ipynb` | Cross with the identity tensor: deriving the theorem a × I = I × a |
 | `basis_aware_coordinates.py` / `.ipynb` | Basis-aware indices & coordinate notation: familiar letters (i,j,k / e_r), basis identity, basis-aware steps, custom naming & labels |
 | `curvilinear_operators.py` / `.ipynb` | Curvilinear ∇/div/rot/Δ derived from a coordinate mapping: tangent basis → metric → scale factors → physical frame → ∂e connection → operators (cylindrical & spherical) |
+| `cyl_equilibrium.py` / `.ipynb` | Cylindrical equilibrium ∇·T + f = 0 worked through to the thin-pipe hoop-stress formula |
+| `strain_compatibility.py` / `.ipynb` | Strain compatibility inc ε = ∇×(∇×ε)ᵀ derived *as performed* — expand ∇, derive & apply the a×B×c cross-removal identity, reassemble into ∇ operators — then verified componentwise (Cartesian & cylindrical) |
 
 ## Notebook hygiene — stripping outputs before committing
 
