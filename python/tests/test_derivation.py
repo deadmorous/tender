@@ -834,3 +834,18 @@ def test_rank2_fan_in_inserts_transpose():
     canon = td.canonicalize(T @ (a @ S))
     assert canon.rank == 1
     assert td.structural_eq(canon, td.canonicalize(T @ (S.transpose() @ a)))
+
+
+# ---- symmetric transpose folds (vibe 000078) -------------------------------
+
+def test_symmetric_transpose_folds():
+    # A symmetric rank-2 tensor equals its transpose: εᵀ = ε.  A general rank-2
+    # keeps an explicit transpose.  Needed so (∂∂ε)ᵀ folds in the strain
+    # reduction.
+    ws = tender.Workspace()
+    E = ws.field("E", 2, symmetric=True)
+    S = ws.tensor("S", 2)
+    assert td.canonicalize(E.transpose()).latex() == E.latex()
+    assert td.algebraic_eq(E.transpose(), E)
+    assert "mathsf{T}" in td.canonicalize(S.transpose()).latex()  # Sᵀ stays
+    assert not td.algebraic_eq(S.transpose(), S)

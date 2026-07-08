@@ -1139,6 +1139,23 @@ TEST(CanonicalizeNf, RightNestedFanInKeepsLegTopology)
     EXPECT_FALSE(structural_eq(canon, wrong));
 }
 
+TEST(CanonicalizeNf, SymmetricTransposeFolds)
+{
+    // εᵀ = ε for a symmetric rank-2 tensor (the slot swap is a symmetry); a
+    // general rank-2 keeps an explicit transpose (vibe 000078).  The invariant
+    // form carries no slots, so the symmetry is probed via synthetic ones.
+    Context ctx;
+    auto const* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto const* gen = make_field(ctx, make_tensor_name("G"), 2, {});
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, make_transpose(ctx, eps)),
+        steps::canonicalize(ctx, eps)));
+    EXPECT_FALSE(structural_eq(
+        steps::canonicalize(ctx, make_transpose(ctx, gen)),
+        steps::canonicalize(ctx, gen)));
+}
+
 TEST(CanonicalizeNf, RankTwoFanInInsertsTranspose)
 {
     // T·(a·S), T,S rank 2: a·S is a vector on S's free leg, so T fans onto S's

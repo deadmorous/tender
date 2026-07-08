@@ -377,6 +377,35 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
     }
     if (auto const* u = std::get_if<Transpose>(&factor->node))
     {
+        // A rank-2 tensor symmetric under its slot swap folds `Tᵀ = T`
+        // (antisymmetric `Tᵀ = −T`): transpose is exactly that swap.  So
+        // `εᵀ = ε`, and — since the swap leaves the ∂-marks untouched —
+        // `(∂∂ε)ᵀ = ∂∂ε`, which the strain-compatibility reduction needs.  The
+        // invariant form carries no index slots, so probe the symmetry with two
+        // synthetic ones and compare the canonical orbits.
+        if (auto const* t = std::get_if<TensorObject>(&u->operand->node);
+            t && t->traits && t->rank && *t->rank == 2)
+        {
+            TensorObject probe = *t;
+            if (probe.slots.size() != 2)
+                probe.slots = {
+                    SlotBinding{
+                        IndexSlot{},
+                        IndexAssoc{CountableIndex{ctx.alloc_index_id()}}},
+                    SlotBinding{
+                        IndexSlot{},
+                        IndexAssoc{CountableIndex{ctx.alloc_index_id()}}}};
+            TensorObject swapped = probe;
+            std::swap(swapped.slots[0], swapped.slots[1]);
+            auto [cp, sp] = canon_symmetry_slots(probe);
+            auto [cs, ss] = canon_symmetry_slots(swapped);
+            if (sp != 0 && ss != 0 && slot_seq_cmp(cp, cs) == 0)
+            {
+                // Same orbit ⇒ the swap is a symmetry: `Tᵀ = (sp·ss)·T`.
+                auto sf = encapsulate(ctx, u->operand);
+                return {sp * ss * sf.sign, sf.factor};
+            }
+        }
         auto sf = encapsulate(ctx, u->operand);
         return {sf.sign, make_unary(ctx, UnaryOp::Transpose, sf.factor)};
     }
