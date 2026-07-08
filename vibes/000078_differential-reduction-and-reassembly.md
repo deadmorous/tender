@@ -204,15 +204,30 @@ reserved.  Build these five increments, each buildable/testable, `clang-format`
   | `+(∂∂ε·e_j)⊗e_i` | transpose of the above | `+(∇∇·ε)ᵀ` |
   Σ = `−∇∇θ + Δθ·I − (∇∇··ε)I − Δε + 2(∇∇·ε)ˢ` — the closed identity.
 
-- **Increment 4 (Phase-2 reassembly) — NEXT, needs a C++ engine.**  Python
-  exposes no `Expr` node/children introspection, so the ∂-index-role reader must
-  be C++ (sibling of `componentize_nabla` / `reassemble`).  Spec: per term, find
-  the ∂-marks on ε (link set L); for each link ℓ locate its partner frame vector
-  `e_ℓ` and classify — `e_ℓ·e_m` (both links) ⇒ δ ⇒ Laplacian pairing `∂_ℓ∂_ℓ =
-  Δ`; `e_ℓ·ε` ⇒ divergence leg; `e_ℓ` free in a dyad ⇒ gradient leg; `tr(ε)` ⇒
-  θ — then emit the `Nabla` composition.  Verify the reassembled result equals
-  the closed identity (increment-5 form) and componentwise.  The mapping table
-  above is the acceptance spec.
+- **Increment 4 (Phase-2 reassembly) DONE** (commit `8c44c15`).  `reassemble_del`
+  (chart.cpp, exposed to Python) is the C++ ∂-index-role reader — Python exposes
+  no `Expr` introspection.  Per additive term it drops the Σ binders, flattens
+  the ⊗ factors, and classifies: a δ-pair `e_ℓ·e_m` (two direction vectors) ⇒ a
+  Laplacian `Δ = ∇·(∇⊗·)`; a free frame vector ⇒ a gradient leg `∇⊗` (to the
+  field's right, `(…)ᵀ`); a `·`-contracted `e_ℓ·T` ⇒ a divergence `∇·`; `tr` of
+  the mark-stripped field ⇒ its scalar invariant.  Helpers `frame_dir_index`,
+  `fold_divergences` (recursive div folding), `reassemble_term`.  On the strain
+  interior it folds the six Phase-1 terms exactly to
+  `inc ε = −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + ∇∇·ε + (∇∇·ε)ᵀ`, checked by
+  `algebraic_eq` against the independently-built ∇-operator identity
+  (`test_strain_phase2_reassembly`).  It is the inverse of `expand_nabla` for
+  single operators — `reassemble_del(expand_nabla(∇⊗ε)) = ∇⊗ε`, same for `∇·ε`
+  and `∇·(∇·ε)` (C++ `ReassembleDel{RoundTripsSingleOperators,
+  RecoversDoubleDivergence}`).  **Known separate limitation:** `expand_nabla(∇·∇f)`
+  for a scalar `f` returns rank 2 (a div-of-grad-scalar bug in `expand_nabla`,
+  not reassembly), so that shape does not round-trip; it never arises in the
+  strain reduction.
+
+**vibe 000078 COMPLETE (increments 1–5).**  `inc ε` is now derived end-to-end
+"as performed" with ε abstract: expand ∇ (`expand_nabla`) → reduce the cross via
+the in-codebase-derived `a×B×c` / `id_inc` identities (`apply_identity`) →
+reassemble into ∇ operators (`reassemble_del`), reaching the closed
+compatibility identity that increment 5 independently proved by evaluation.
 
 - **Increment 5 DONE** (commit `8504206`), and a prerequisite operator fix
   (`7bdbf2d`).  The **closed identity is proven by tender**:
