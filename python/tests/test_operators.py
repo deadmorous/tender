@@ -2,12 +2,70 @@
 
 import tender as t
 import tender.derivation as td
+import tender.basis as tb
 from tender.operators import nabla, d, laplacian, evaluate
 
 
 def _chart(ws):
     x, y, z = ws.coords("x", "y", "z")
     return ws.chart(ws.wcs(), [x, y, z], [x, y, z]), (x, y, z)
+
+
+def _derive(initial, steps):
+    der = td.Derivation(initial)
+    for s in steps:
+        der.step(s)
+    return der.current
+
+
+def _cross_removal_identities(ctx):
+    # Derive the a×B×c cross-removal identity in-codebase (vibe 000078 Q3),
+    # then the strain interior identity a×(c×E)ᵀ = <cross-free δ/dyad RHS> for a
+    # symmetric E — the transpose-cross helper a×(c×E)ᵀ = −a×E×c composed with
+    # a×B×c.  Both are proven by construction, not hand-asserted.
+    basis = tb.wcs(ctx)
+    co = tb.Variance.Covariant
+    a = t.tensor("a", 1, ctx=ctx)
+    c = t.tensor("c", 1, ctx=ctx)
+    B = t.tensor("B", 2, ctx=ctx)
+    E = t.field("E", 2, ctx=ctx, symmetric=True)
+    I = t.identity(ctx)
+    axIxb = _derive(
+        a % I % c,
+        (
+            lambda x: tb.expand_in_basis(x, basis, co),
+            lambda x: tb.simplify_basis_cross(x, basis),
+            td.contract_eps_pair,
+            td.contract_delta,
+            lambda x: tb.reassemble(x, basis),
+        ),
+    )
+    id_alt = td.Identity(
+        "axIxb_alt", td.fold_equal_addends(axIxb + a @ c * I), a % I % c + a @ c * I
+    )
+    axBxc = _derive(
+        a % B % c,
+        (
+            lambda x: tb.expand_in_basis(x, basis, co),
+            td.apply_identity(id_alt),
+            lambda x: tb.expand_in_basis(x, basis, co),
+            lambda x: tb.simplify_basis_cross(x, basis),
+            lambda x: tb.simplify_basis_dot(x, basis),
+            td.contract_delta,
+            td.contract_eps_pair,
+            td.contract_delta,
+            td.contract_eps_pair,
+            td.contract_delta,
+            lambda x: tb.reassemble(x, basis),
+        ),
+    )
+    id_axBxc = td.Identity("axBxc", a % B % c, axBxc)
+    id_inc = td.Identity(
+        "inc",
+        a % (c % E).transpose(),
+        td.canonicalize(-td.apply_identity(id_axBxc)(a % E % c)),
+    )
+    return id_axBxc, id_inc
 
 
 def test_nabla_builds_symbolically():
@@ -277,3 +335,41 @@ def test_strain_compatibility_closed_identity_cylindrical():
     r, th, z = ws.coords("r", r"\theta", "z", nonneg=("r",))
     cyl = ws.chart(ws.wcs(), [r, th, z], [r * t.cos(th), r * t.sin(th), z])
     assert _closed_identity_holds(cyl, eps)
+
+
+def test_axbxc_identity_derives():
+    # vibe 000078 increment 3: a×B×c cross-removal derives in-codebase to the
+    # closed 6-term invariant form (the Q3 recipe), and applying it back to a
+    # frame-vector target is cross-free.
+    ws = t.Workspace()
+    id_axBxc, _ = _cross_removal_identities(ws.ctx)
+    B = t.tensor("B", 2, ctx=ws.ctx)
+    basis = tb.wcs(ws.ctx)
+    i, j = ws.ctx.alloc_index(), ws.ctx.alloc_index()
+    ei, ej = basis.covariant_vector(i), basis.covariant_vector(j)
+    out = td.apply_identity(id_axBxc)(ei % B % ej)
+    assert "times" not in out.latex()  # no cross products remain
+
+
+def test_strain_phase1_reduction():
+    # vibe 000078 increment 3 (Phase-1): the free-index interior
+    # inc ε = e_i×(e_j×∂_i∂_j ε)ᵀ reduces — ε abstract — through the derived
+    # a×(c×ε)ᵀ identity to a cross-free δ/dyad sum, equal component-by-component
+    # to the brute-force interior (the increment-2 oracle).
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+    _, id_inc = _cross_removal_identities(ws.ctx)
+
+    interior = cart.expand_nabla(nab % (nab % eps).transpose())
+    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    assert "times" not in phase1.latex()  # Phase-1 is cross-free
+
+    a = cart.components(cart.componentize_nabla(phase1))
+    b = cart.components(cart.componentize_nabla(interior))
+    assert all(
+        td.algebraic_eq(cart.expand(a[i][j]), cart.expand(b[i][j]))
+        for i in range(3)
+        for j in range(3)
+    )
