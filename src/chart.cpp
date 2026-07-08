@@ -1076,7 +1076,7 @@ auto reassemble_term(
 
 } // namespace
 
-auto reassemble_del(Context& ctx, CoordinateChart const& chart, Expr const* e)
+auto reassemble_nabla(Context& ctx, CoordinateChart const& chart, Expr const* e)
     -> Expr const*
 {
     Basis const fb = physical_frame(ctx, chart);

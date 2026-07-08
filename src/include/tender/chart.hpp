@@ -159,7 +159,7 @@ void validate_chart(CoordinateChart const& chart);
 // vectors the Laplacian (Δ = ∇·∇), and `tr` of the marked field its scalar
 // invariant.  The inverse of expand_nabla+reduction: e.g. the strain interior's
 // Phase-1 sum folds to −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + ∇∇·ε + (∇∇·ε)ᵀ.
-[[nodiscard]] auto reassemble_del(
+[[nodiscard]] auto reassemble_nabla(
     Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*;
 
 // grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, raising the rank by one.  For a scalar

@@ -1385,10 +1385,10 @@ TEST(Chart, ExpandNablaTransposedGradDivKeepsRank)
                ctx, gradient(ctx, chart, divergence(ctx, chart, eps)))));
 }
 
-// reassemble_del (vibe 000078 increment 4) is the inverse of expand_nabla for
+// reassemble_nabla (vibe 000078 increment 4) is the inverse of expand_nabla for
 // single operators: expanding ∇⊗ε / ∇·ε to the free-index form and reassembling
 // recovers the original operator expression.
-TEST(Chart, ReassembleDelRoundTripsSingleOperators)
+TEST(Chart, ReassembleNablaRoundTripsSingleOperators)
 {
     Context ctx;
     auto ref = wcs(ctx);
@@ -1399,14 +1399,14 @@ TEST(Chart, ReassembleDelRoundTripsSingleOperators)
     auto* grad = make_tensor_product(ctx, nab, eps); // ∇⊗ε
     auto* div = make_dot(ctx, nab, eps);             // ∇·ε
     EXPECT_TRUE(eq(
-        ctx, reassemble_del(ctx, chart, expand_nabla(ctx, chart, grad)), grad));
+        ctx, reassemble_nabla(ctx, chart, expand_nabla(ctx, chart, grad)), grad));
     EXPECT_TRUE(
-        eq(ctx, reassemble_del(ctx, chart, expand_nabla(ctx, chart, div)), div));
+        eq(ctx, reassemble_nabla(ctx, chart, expand_nabla(ctx, chart, div)), div));
 }
 
-// reassemble_del folds the double divergence ∇·(∇·ε) — the (1,1,2) fan-in —
+// reassemble_nabla folds the double divergence ∇·(∇·ε) — the (1,1,2) fan-in —
 // back from its free-index reduction to the operator form.
-TEST(Chart, ReassembleDelRecoversDoubleDivergence)
+TEST(Chart, ReassembleNablaRecoversDoubleDivergence)
 {
     Context ctx;
     auto ref = wcs(ctx);
@@ -1417,7 +1417,7 @@ TEST(Chart, ReassembleDelRecoversDoubleDivergence)
     auto* divdiv = make_dot(ctx, nab, make_dot(ctx, nab, eps)); // ∇·(∇·ε)
     EXPECT_TRUE(
         eq(ctx,
-           reassemble_del(ctx, chart, expand_nabla(ctx, chart, divdiv)),
+           reassemble_nabla(ctx, chart, expand_nabla(ctx, chart, divdiv)),
            divdiv));
 }
 

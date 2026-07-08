@@ -204,7 +204,7 @@ reserved.  Build these five increments, each buildable/testable, `clang-format`
   | `+(∂∂ε·e_j)⊗e_i` | transpose of the above | `+(∇∇·ε)ᵀ` |
   Σ = `−∇∇θ + Δθ·I − (∇∇··ε)I − Δε + 2(∇∇·ε)ˢ` — the closed identity.
 
-- **Increment 4 (Phase-2 reassembly) DONE** (commit `8c44c15`).  `reassemble_del`
+- **Increment 4 (Phase-2 reassembly) DONE** (commit `8c44c15`).  `reassemble_nabla`
   (chart.cpp, exposed to Python) is the C++ ∂-index-role reader — Python exposes
   no `Expr` introspection.  Per additive term it drops the Σ binders, flattens
   the ⊗ factors, and classifies: a δ-pair `e_ℓ·e_m` (two direction vectors) ⇒ a
@@ -216,7 +216,7 @@ reserved.  Build these five increments, each buildable/testable, `clang-format`
   `inc ε = −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + ∇∇·ε + (∇∇·ε)ᵀ`, checked by
   `algebraic_eq` against the independently-built ∇-operator identity
   (`test_strain_phase2_reassembly`).  It is the inverse of `expand_nabla` for
-  single operators — `reassemble_del(expand_nabla(∇⊗ε)) = ∇⊗ε`, same for `∇·ε`
+  single operators — `reassemble_nabla(expand_nabla(∇⊗ε)) = ∇⊗ε`, same for `∇·ε`
   and `∇·(∇·ε)` (C++ `ReassembleDel{RoundTripsSingleOperators,
   RecoversDoubleDivergence}`).  **Known separate limitation:** `expand_nabla(∇·∇f)`
   for a scalar `f` returns rank 2 (a div-of-grad-scalar bug in `expand_nabla`,
@@ -226,7 +226,7 @@ reserved.  Build these five increments, each buildable/testable, `clang-format`
 **vibe 000078 COMPLETE (increments 1–5).**  `inc ε` is now derived end-to-end
 "as performed" with ε abstract: expand ∇ (`expand_nabla`) → reduce the cross via
 the in-codebase-derived `a×B×c` / `id_inc` identities (`apply_identity`) →
-reassemble into ∇ operators (`reassemble_del`), reaching the closed
+reassemble into ∇ operators (`reassemble_nabla`), reaching the closed
 compatibility identity that increment 5 independently proved by evaluation.
 
 - **Increment 5 DONE** (commit `8504206`), and a prerequisite operator fix
@@ -339,7 +339,7 @@ compatibility identity that increment 5 independently proved by evaluation.
   operators.  Suite: **785 C++ + 239 Python green.**
 
   **NEXT: the symbolic reduce→reassemble route (increments 3/4) is unblocked.**
-  Build `reassemble_del` reading each ∂-index's role (free e→grad leg,
+  Build `reassemble_nabla` reading each ∂-index's role (free e→grad leg,
   δ→Laplacian, e·ε→divergence), driven on a directly-constructed reduced
   interior (substitution into the derived `id_axBxc`), verified against the
   increment-5 oracle.  Increment 3 still needs the transpose-cross helper
@@ -378,7 +378,7 @@ compatibility identity that increment 5 independently proved by evaluation.
   (e_i⊗e_j·ε)ᵀ`.  Verify components vs brute force.
 
 **Increment 4 — Phase-2 reassembly (the heart).**
-- New engine `reassemble_del(ctx, e)`: per additive term, find the ∂-marks,
+- New engine `reassemble_nabla(ctx, e)`: per additive term, find the ∂-marks,
   resolve each abstract index's partner, classify (free frame vector → grad leg;
   `δ_ij` with the other ∂ → Laplacian; ε-slot → divergence; both into ε → double
   divergence), and emit the `Nabla` composition on θ/ε.  The differential

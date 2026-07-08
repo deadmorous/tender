@@ -376,7 +376,7 @@ def test_strain_phase1_reduction():
 
 
 def test_strain_phase2_reassembly():
-    # vibe 000078 increment 4 (Phase-2, the heart): reassemble_del reads each
+    # vibe 000078 increment 4 (Phase-2, the heart): reassemble_nabla reads each
     # frame-vector ↔ ∂-mark pair's role in the Phase-1 sum and folds it back into
     # chart-free ∇ operators, yielding the closed compatibility identity
     #   inc ε = −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + ∇∇·ε + (∇∇·ε)ᵀ   (θ = tr ε).
@@ -389,7 +389,7 @@ def test_strain_phase2_reassembly():
 
     interior = cart.expand_nabla(nab % (nab % eps).transpose())
     phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
-    reass = cart.reassemble_del(phase1)
+    reass = cart.reassemble_nabla(phase1)
 
     th = t.tr(eps)
     closed = (
