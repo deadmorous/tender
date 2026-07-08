@@ -150,6 +150,18 @@ void validate_chart(CoordinateChart const& chart);
 [[nodiscard]] auto componentize_nabla(
     Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*;
 
+// Reassemble a reduced free-index expression back into chart-free ∇ operators
+// (vibe 000078 increment 4 — the Phase-2 heart).  The Phase-1 cross reduction
+// of a ∇-expression leaves a sum of terms in which every abstract direction
+// index pairs a frame vector e_ℓ with a ∂_ℓ mark on the field; this reads each
+// pair's role and folds it into a `Nabla`: a `⊗`-adjacent e_ℓ is a gradient leg
+// (∇⊗…), a contracted e_ℓ·T a divergence (∇·…), a pair e_ℓ·e_m of two direction
+// vectors the Laplacian (Δ = ∇·∇), and `tr` of the marked field its scalar
+// invariant.  The inverse of expand_nabla+reduction: e.g. the strain interior's
+// Phase-1 sum folds to −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + ∇∇·ε + (∇∇·ε)ᵀ.
+[[nodiscard]] auto reassemble_del(
+    Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*;
+
 // grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, raising the rank by one.  For a scalar
 // f this is the familiar ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z; for the
 // position vector R it is the identity tensor ∇R = Σ_i e_i ⊗ e_i = I.

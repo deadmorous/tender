@@ -1404,6 +1404,17 @@ NB_MODULE(_core, m)
             "(vibe 000078).  Lets the abstract free-index interior be checked "
             "component-by-component against the brute-force chart operators.")
         .def(
+            "reassemble_del",
+            [](PyChart const& c, PyExpr const& e) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, reassemble_del(*c.ctx, c.chart, e.expr)};
+            },
+            "e"_a,
+            "Reassemble a Phase-1-reduced free-index expression back into "
+            "chart-free ∇ operators (vibe 000078 increment 4): read each "
+            "frame-vector ↔ ∂-mark pair's role (⊗ leg → ∇⊗, contraction → ∇·, a "
+            "direction pair → Δ, tr → scalar invariant) and fold it into Nabla.")
+        .def(
             "grad",
             [](PyChart const& c, PyExpr const& f, bool fold_identity) -> PyExpr
             {

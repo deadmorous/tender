@@ -925,6 +925,191 @@ auto componentize_nabla(
     return acc ? acc : make_scalar(ctx, Rational{0});
 }
 
+// ---- Phase-2 reassembly: free-index ∂ → ∇ operators (vibe 000078) -------
+
+namespace
+{
+
+// A physical-frame direction vector e_ℓ carrying a countable (summation) index;
+// returns ℓ.  These are the abstract directions a reduced ∇-expression pairs
+// with ∂-marks — each folds back into a `Nabla`.
+auto frame_dir_index(Expr const* e, Basis const& fb) -> std::optional<int>
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    if (!t || t->name.v.view() != fb.vector_symbol().v.view()
+        || t->slots.size() != 1 || !t->slots[0].index
+        || t->slots[0].slot.basis_id != fb.basis_id())
+        return std::nullopt;
+    if (auto const* ci = std::get_if<CountableIndex>(&*t->slots[0].index))
+        return ci->id;
+    return std::nullopt;
+}
+
+auto is_identity_tensor(Expr const* e) -> bool
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    return t && t->traits && t->traits->well_known == WellKnownKind::Identity;
+}
+
+// Strip every free ∂-mark (they are the operator indices, becoming ∇'s).
+auto strip_free_marks(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& c, Expr const* n) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&n->node);
+            if (!t)
+                return n;
+            std::vector<DerivMark> keep;
+            for (auto const& m: t->deriv_marks)
+                if (!m.free)
+                    keep.push_back(m);
+            if (keep.size() == t->deriv_marks.size())
+                return n;
+            TensorObject o = *t;
+            o.deriv_marks = std::move(keep);
+            return c.make<Expr>(std::move(o));
+        });
+}
+
+// Fold the divergence legs of one operand blob: a frame vector contracted (`·`)
+// with the field is a divergence, so `e_ℓ·T` / `T·e_ℓ` → `∇·(folded T)`.  A
+// `tr` of the (mark-stripped) field is its scalar invariant.  Everything else
+// is the bare field (its ∂-marks stripped — the ∇'s now carry them).
+auto fold_divergences(
+    Context& ctx,
+    Basis const& fb,
+    Expr const* nabla,
+    Expr const* n) -> Expr const*
+{
+    if (auto const* d = std::get_if<Dot>(&n->node))
+    {
+        if (frame_dir_index(d->left, fb))
+            return make_dot(
+                ctx, nabla, fold_divergences(ctx, fb, nabla, d->right));
+        if (frame_dir_index(d->right, fb))
+            return make_dot(
+                ctx, nabla, fold_divergences(ctx, fb, nabla, d->left));
+        return make_dot(
+            ctx,
+            fold_divergences(ctx, fb, nabla, d->left),
+            fold_divergences(ctx, fb, nabla, d->right));
+    }
+    if (auto const* u = std::get_if<Trace>(&n->node))
+        return make_trace(ctx, fold_divergences(ctx, fb, nabla, u->operand));
+    return strip_free_marks(ctx, n);
+}
+
+// Reassemble one additive term (a ⊗-product) into ∇ operators.
+auto reassemble_term(
+    Context& ctx,
+    Basis const& fb,
+    Expr const* nabla,
+    Expr const* term) -> Expr const*
+{
+    // Flatten the top-level ⊗ chain into factors.
+    std::vector<Expr const*> factors;
+    std::function<void(Expr const*)> flat = [&](Expr const* n)
+    {
+        if (auto const* p = std::get_if<TensorProduct>(&n->node))
+        {
+            flat(p->left);
+            flat(p->right);
+        }
+        else
+            factors.push_back(n);
+    };
+    flat(term);
+
+    // Classify factors: δ-pairs `e_ℓ·e_m` (two directions ⇒ a Laplacian), free
+    // frame vectors (gradient legs), the identity, and the operand blob (the
+    // one factor carrying the field).
+    int laplacians = 0;
+    std::vector<Expr const*> identities;
+    std::vector<int> grad_positions;
+    Expr const* operand = nullptr;
+    int operand_pos = -1;
+    for (int i = 0; i < static_cast<int>(factors.size()); ++i)
+    {
+        Expr const* f = factors[static_cast<std::size_t>(i)];
+        if (auto const* d = std::get_if<Dot>(&f->node);
+            d && frame_dir_index(d->left, fb) && frame_dir_index(d->right, fb))
+        {
+            ++laplacians;
+            continue;
+        }
+        if (frame_dir_index(f, fb))
+        {
+            grad_positions.push_back(i);
+            continue;
+        }
+        if (is_identity_tensor(f))
+        {
+            identities.push_back(f);
+            continue;
+        }
+        operand = f;
+        operand_pos = i;
+    }
+    Expr const* cur = operand ? fold_divergences(ctx, fb, nabla, operand) :
+                                make_scalar(ctx, Rational{1});
+    // Gradient legs: a leg left of the operand is ∇⊗cur; a leg to its right is
+    // (∇⊗cur)ᵀ when cur already carries a leg (a scalar operand commutes, so no
+    // transpose there).  ∂'s commute, so ∇∇θ is symmetric regardless.
+    for (int pos: grad_positions)
+    {
+        bool const left = pos < operand_pos;
+        Expr const* g = make_tensor_product(ctx, nabla, cur);
+        cur = (!left && infer_rank(cur).value_or(0) >= 1) ?
+                  make_transpose(ctx, g) :
+                  g;
+    }
+    // Laplacians: Δ = ∇·(∇⊗·).
+    for (int k = 0; k < laplacians; ++k)
+        cur = make_dot(ctx, nabla, make_tensor_product(ctx, nabla, cur));
+    for (Expr const* id: identities)
+        cur = make_tensor_product(ctx, cur, id);
+    return cur;
+}
+
+} // namespace
+
+auto reassemble_del(Context& ctx, CoordinateChart const& chart, Expr const* e)
+    -> Expr const*
+{
+    Basis const fb = physical_frame(ctx, chart);
+    Expr const* const nabla = make_nabla(ctx);
+    // Summation binders are structural noise here (the frame-vector ↔ ∂-mark
+    // pairing is what carries the Einstein sum); drop them, then fold each
+    // additive term.
+    Expr const* body = rewrite_tree(
+        ctx,
+        e,
+        [](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* s = std::get_if<ExplicitSum>(&n->node))
+                return s->body;
+            if (auto const* s = std::get_if<NoSum>(&n->node))
+                return s->body;
+            return n;
+        });
+    std::function<Expr const*(Expr const*, int)> go =
+        [&](Expr const* n, int sign) -> Expr const*
+    {
+        if (auto const* s = std::get_if<Sum>(&n->node))
+            return make_sum(ctx, go(s->left, sign), go(s->right, sign));
+        if (auto const* s = std::get_if<Difference>(&n->node))
+            return make_sum(ctx, go(s->left, sign), go(s->right, -sign));
+        if (auto const* s = std::get_if<Negate>(&n->node))
+            return go(s->operand, -sign);
+        Expr const* r = reassemble_term(ctx, fb, nabla, n);
+        return sign < 0 ? make_negate(ctx, r) : r;
+    };
+    return go(body, +1);
+}
+
 auto gradient(
     Context& ctx,
     CoordinateChart const& chart,

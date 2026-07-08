@@ -1385,6 +1385,42 @@ TEST(Chart, ExpandNablaTransposedGradDivKeepsRank)
                ctx, gradient(ctx, chart, divergence(ctx, chart, eps)))));
 }
 
+// reassemble_del (vibe 000078 increment 4) is the inverse of expand_nabla for
+// single operators: expanding ∇⊗ε / ∇·ε to the free-index form and reassembling
+// recovers the original operator expression.
+TEST(Chart, ReassembleDelRoundTripsSingleOperators)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto* nab = make_nabla(ctx);
+    auto* grad = make_tensor_product(ctx, nab, eps); // ∇⊗ε
+    auto* div = make_dot(ctx, nab, eps);             // ∇·ε
+    EXPECT_TRUE(eq(
+        ctx, reassemble_del(ctx, chart, expand_nabla(ctx, chart, grad)), grad));
+    EXPECT_TRUE(
+        eq(ctx, reassemble_del(ctx, chart, expand_nabla(ctx, chart, div)), div));
+}
+
+// reassemble_del folds the double divergence ∇·(∇·ε) — the (1,1,2) fan-in —
+// back from its free-index reduction to the operator form.
+TEST(Chart, ReassembleDelRecoversDoubleDivergence)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto* nab = make_nabla(ctx);
+    auto* divdiv = make_dot(ctx, nab, make_dot(ctx, nab, eps)); // ∇·(∇·ε)
+    EXPECT_TRUE(
+        eq(ctx,
+           reassemble_del(ctx, chart, expand_nabla(ctx, chart, divdiv)),
+           divdiv));
+}
+
 // expand_nabla refuses a curvilinear (non-unit-scale) chart: the free-index
 // ∂_i cannot carry the moving frame's per-direction scale factors.
 TEST(Chart, ExpandNablaRejectsCurvilinear)

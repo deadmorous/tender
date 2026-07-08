@@ -373,3 +373,31 @@ def test_strain_phase1_reduction():
         for i in range(3)
         for j in range(3)
     )
+
+
+def test_strain_phase2_reassembly():
+    # vibe 000078 increment 4 (Phase-2, the heart): reassemble_del reads each
+    # frame-vector ↔ ∂-mark pair's role in the Phase-1 sum and folds it back into
+    # chart-free ∇ operators, yielding the closed compatibility identity
+    #   inc ε = −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + ∇∇·ε + (∇∇·ε)ᵀ   (θ = tr ε).
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+    I = t.identity(ws.ctx)
+    _, id_inc = _cross_removal_identities(ws.ctx)
+
+    interior = cart.expand_nabla(nab % (nab % eps).transpose())
+    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    reass = cart.reassemble_del(phase1)
+
+    th = t.tr(eps)
+    closed = (
+        -(nab @ (nab @ eps)) * I           # −(∇∇··ε) I
+        + (nab @ (nab * th)) * I           # +Δθ I
+        - (nab @ (nab * eps))              # −Δε
+        - (nab * (nab * th)).transpose()   # −∇∇θ  (∇∇θ symmetric ⇒ its transpose)
+        + (nab * (nab @ eps))              # +∇∇·ε
+        + (nab * (nab @ eps)).transpose()  # +(∇∇·ε)ᵀ
+    )
+    assert td.algebraic_eq(reass, closed)
