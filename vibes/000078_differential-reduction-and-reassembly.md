@@ -173,26 +173,46 @@ reserved.  Build these five increments, each buildable/testable, `clang-format`
   `chart.componentize_nabla` unrolls to concrete directions.  **Verified: all 9
   components equal brute-force rot·rotᵀ.**
 
-- **Increment 3 IN PROGRESS.**  `id_axBxc` *derives correctly in the current
-  tender* via the notebook recipe (`expand_in_basis(co) → apply_identity(alt) →
-  expand_in_basis → simplify_basis_cross → simplify_basis_dot → contract_delta →
-  contract_eps_pair → contract_delta → contract_eps_pair → contract_delta →
-  reassemble`), giving `a×B×c = −(a·c)trB·I + (a·Bᵀ·c)I + (a·c)Bᵀ − c⊗(B·a) −
-  (Bᵀ·c)⊗a + trB·c⊗a` — matches the vibe's 5-term form.  The prerequisite
-  `id_axIxb_alt` (`c⊗a = a×I×c + (a·c)I`) also derives.  **Open:** the nested
-  transpose-cross helper `a×(c×B)ᵀ = −a×Bᵀ×c` does *not* reduce with the same
-  chain — it leaves a residual bare `e_k × e_j` that `simplify_basis_cross` will
-  not fire on inside the larger product (a reduction-ordering quirk the sandbox
-  notebook tuned by hand).  Two robust ways forward for the helper: (a) find the
-  interleaved expand / simplify_basis_cross fixpoint chain that clears the
-  residual cross; (b) *prove* the helper at the component level (`component_matrix`
-  of both sides over concrete a,c,B — the same brute-force check increment 2
-  used), then reuse it.  Phase-1's output can then be produced either by
-  `apply_identity` on the free-index interior (matcher-stressing: transpose inside
-  cross) or by direct substitution a→e_i, c→e_j, B→∂_i∂_j ε into the derived
-  `id_axBxc` RHS.  Increment 2's `componentize_nabla` + `component_matrix` is the
-  brute-force oracle to verify whichever path.  NEXT: finish the helper, then the
-  reassembly engine (increment 4).
+- **Increment 3 DONE** (commit `a83f645`).  Phase-1 cross reduction works and is
+  oracle-verified.  `id_axBxc` derives via the notebook recipe to
+  `a×B×c = −(a·c)trB·I + (a·Bᵀ·c)I + (a·c)Bᵀ − c⊗(B·a) − (Bᵀ·c)⊗a + trB·c⊗a`.
+  The transpose-cross helper `a×(c×B)ᵀ = −a×Bᵀ×c` (and `−a×E×c` for symmetric E)
+  is verified by component brute-force; composed with `id_axBxc` it gives
+  `id_inc : a×(c×E)ᵀ = <cross-free δ/dyad RHS>` (correct by construction).
+  Applying `id_inc` to the free-index interior `e_i×(e_j×∂_i∂_j ε)ᵀ` — ε
+  abstract — yields the cross-free Phase-1 sum, **componentwise-equal to the
+  brute-force interior** (increment-2 oracle).  Tests
+  `test_{axbxc_identity_derives,strain_phase1_reduction}`.  **Two red herrings
+  resolved:** (i) the reduction "stalled on ∂-marked expressions" was a *basis
+  mismatch* in the test harness — reducing with `tb.wcs` (id 2) not the chart's
+  `physical_basis()` (id 1); `simplify_basis_cross` silently no-ops on
+  foreign-basis vectors (`as_basis_dir` requires a matching `basis_id`), so there
+  was never a ∂-mark reduction bug; (ii) `simplify_basis_cross` needs *fixpoint
+  iteration* interleaved with `canonicalize` (the transpose between crosses needs
+  canon to distribute) — the "hand-tuned" quirk.  Also fixed en route: `εᵀ` did
+  not fold to `ε` (commit `fb58ed7`, symmetric-transpose fold in `encapsulate`),
+  which had blocked the `a×(c×ε)ᵀ` algebra.
+
+  **The Phase-1 sum (i,j summed, ∂_i∂_j riding) and its Phase-2 targets:**
+  | Phase-1 term | ∂-index roles | → operator |
+  |---|---|---|
+  | `−(e_i·∂∂ε)·e_j I` | both ∂ contract into ε (e_i·, ·e_j) | `−(∇∇··ε) I` |
+  | `+e_i·e_j tr(∂∂ε) I` | e_i·e_j = δ_ij ⇒ Δ; trε = θ | `+Δθ·I` |
+  | `−e_i·e_j ∂∂ε` | δ_ij ⇒ Δ | `−Δε` |
+  | `−tr(∂∂ε) e_i⊗e_j` | e_i,e_j free legs; trε = θ | `−∇∇θ` |
+  | `+e_i⊗(∂∂ε·e_j)` | e_i free (grad), e_j·ε (div) | `+∇∇·ε` |
+  | `+(∂∂ε·e_j)⊗e_i` | transpose of the above | `+(∇∇·ε)ᵀ` |
+  Σ = `−∇∇θ + Δθ·I − (∇∇··ε)I − Δε + 2(∇∇·ε)ˢ` — the closed identity.
+
+- **Increment 4 (Phase-2 reassembly) — NEXT, needs a C++ engine.**  Python
+  exposes no `Expr` node/children introspection, so the ∂-index-role reader must
+  be C++ (sibling of `componentize_nabla` / `reassemble`).  Spec: per term, find
+  the ∂-marks on ε (link set L); for each link ℓ locate its partner frame vector
+  `e_ℓ` and classify — `e_ℓ·e_m` (both links) ⇒ δ ⇒ Laplacian pairing `∂_ℓ∂_ℓ =
+  Δ`; `e_ℓ·ε` ⇒ divergence leg; `e_ℓ` free in a dyad ⇒ gradient leg; `tr(ε)` ⇒
+  θ — then emit the `Nabla` composition.  Verify the reassembled result equals
+  the closed identity (increment-5 form) and componentwise.  The mapping table
+  above is the acceptance spec.
 
 - **Increment 5 DONE** (commit `8504206`), and a prerequisite operator fix
   (`7bdbf2d`).  The **closed identity is proven by tender**:
