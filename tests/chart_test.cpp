@@ -1423,6 +1423,71 @@ TEST(Chart, ReassembleNablaRecoversDoubleDivergence)
            divdiv));
 }
 
+// reassemble_nabla folds the composite operator shapes whose term structure the
+// single-operator round-trips do not reach: a transposed gradient (grad-leg to
+// the right of the operand ⇒ the transpose branch), a gradient of a trace (the
+// `tr` fold in fold_divergences), a grad-div ∇(∇·v) (a gradient leg over a
+// divergence-folded operand), and a transposed grad-div (∇(∇·ε))ᵀ.  Each must
+// round-trip from its free-index expansion back to the operator form.
+TEST(Chart, ReassembleNablaRoundTripsCompositeOperators)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto* v = make_field(ctx, make_tensor_name("v"), 1, {});
+    auto* nab = make_nabla(ctx);
+
+    auto roundtrips = [&](Expr const* op)
+    {
+        auto* free = steps::canonicalize(ctx, expand_nabla(ctx, chart, op));
+        return eq(ctx, reassemble_nabla(ctx, chart, free), op);
+    };
+
+    // (∇⊗ε)ᵀ — a gradient leg to the right of the operand ⇒ transpose branch.
+    EXPECT_TRUE(
+        roundtrips(make_transpose(ctx, make_tensor_product(ctx, nab, eps))));
+    // ∇⊗(tr ε) — the trace fold plus a gradient leg over a scalar operand.
+    EXPECT_TRUE(
+        roundtrips(make_tensor_product(ctx, nab, make_trace(ctx, eps))));
+    // ∇⊗(∇·v) — a gradient leg over a divergence-folded operand.
+    EXPECT_TRUE(
+        roundtrips(make_tensor_product(ctx, nab, make_dot(ctx, nab, v))));
+    // (∇⊗(∇·ε))ᵀ — transpose over a grad-div.
+    EXPECT_TRUE(roundtrips(make_transpose(
+        ctx, make_tensor_product(ctx, nab, make_dot(ctx, nab, eps)))));
+}
+
+// reassemble_nabla folds an identity-scaled invariant term — the `Δθ·I` /
+// `(∇∇··ε)I` shapes the strain identity produces — reading the ⊗-adjacent I as
+// a standalone identity factor and the δ-pair as a Laplacian on the trace
+// scalar. (The strain example exercises this end-to-end; here it is isolated so
+// the C++ suite covers the identity-factor branch of reassemble_term directly.)
+TEST(Chart, ReassembleNablaFoldsIdentityScaledInvariant)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* eps =
+        make_field(ctx, make_tensor_name("\\varepsilon"), 2, {}, /*sym=*/true);
+    auto* nab = make_nabla(ctx);
+    auto* id = make_identity(ctx);
+
+    // Δθ = ∇·∇(tr ε), a scalar; ⊗ I makes the invariant term (Δθ) I.
+    auto* dtheta = expand_nabla(
+        ctx,
+        chart,
+        make_dot(ctx, nab, make_tensor_product(ctx, nab, make_trace(ctx, eps))));
+    auto* term = steps::canonicalize(ctx, make_tensor_product(ctx, dtheta, id));
+    auto* reass = reassemble_nabla(ctx, chart, term);
+    auto* want = make_tensor_product(
+        ctx,
+        make_dot(ctx, nab, make_tensor_product(ctx, nab, make_trace(ctx, eps))),
+        id);
+    EXPECT_TRUE(eq(ctx, reass, want));
+}
+
 // expand_nabla(∇·∇f) for a SCALAR field keeps its true rank 0 (the Laplacian
 // Δf) instead of degrading to a rank-2 dyad (vibe 000079).  The inner grad ∇f
 // is the scalar-scaled frame vector (∂_i f) e_i; the outer ∇· must contract e_ℓ

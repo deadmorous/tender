@@ -500,6 +500,49 @@ TEST(SimplifyScalars, RootOfSquareNeedsNonneg)
         algebraic_eq(ctx, steps::simplify_scalars(ctx, sqrt_s2), sqrt_s2));
 }
 
+// √(base²) → base is licensed by is_nonneg(base); these cover the is_nonneg
+// shapes the geometry pipeline reaches beyond a bare coordinate: a nested √ /
+// exp (always ≥ 0), an even power (≥ 0 for any base), an odd power and a
+// scalar- scaled product (inherit / propagate the factors' signs).
+TEST(SimplifyScalars, RootOfSquareLicensedByNonnegShapes)
+{
+    Context ctx;
+    auto* r =
+        make_coordinate(ctx, make_tensor_name("r"), 0, 0, /*nonneg=*/true);
+    auto* a = coord(ctx, "a", 1); // sign unknown
+    auto* two = make_scalar(ctx, Rational{2});
+
+    auto root_of_square = [&](Expr const* base)
+    {
+        return steps::simplify_scalars(
+            ctx,
+            make_scalar_fn(ctx, ScalarFnKind::Sqrt, make_pow(ctx, base, two)));
+    };
+
+    // √((√r)²) → √r  (a Sqrt is always ≥ 0).
+    auto* sqrt_r = make_scalar_fn(ctx, ScalarFnKind::Sqrt, r);
+    EXPECT_TRUE(algebraic_eq(ctx, root_of_square(sqrt_r), sqrt_r));
+    // √((exp a)²) → exp a  (an Exp is always ≥ 0).
+    auto* exp_a = make_scalar_fn(ctx, ScalarFnKind::Exp, a);
+    EXPECT_TRUE(algebraic_eq(ctx, root_of_square(exp_a), exp_a));
+    // √((a²)²) → a²  (an even power is ≥ 0 for any base).
+    auto* a2 = make_pow(ctx, a, two);
+    EXPECT_TRUE(algebraic_eq(ctx, root_of_square(a2), a2));
+    // √((r³)²) → r³  (an odd power inherits the base's sign; r ≥ 0).
+    auto* r3 = make_pow(ctx, r, make_scalar(ctx, Rational{3}));
+    EXPECT_TRUE(algebraic_eq(ctx, root_of_square(r3), r3));
+    // √((2r)²) → 2r  (a product is ≥ 0 when its factors are; 2 and r ≥ 0).
+    auto* two_r = make_tensor_product(ctx, two, r);
+    EXPECT_TRUE(algebraic_eq(ctx, root_of_square(two_r), two_r));
+    // √((a·r)²) stays put — a's sign is unknown, so the product is not
+    // licensed.
+    auto* a_r = make_tensor_product(ctx, a, r);
+    auto* sqrt_ar2 =
+        make_scalar_fn(ctx, ScalarFnKind::Sqrt, make_pow(ctx, a_r, two));
+    EXPECT_TRUE(
+        algebraic_eq(ctx, steps::simplify_scalars(ctx, sqrt_ar2), sqrt_ar2));
+}
+
 TEST(SimplifyScalars, PowerCleanup)
 {
     Context ctx;

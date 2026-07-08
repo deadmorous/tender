@@ -1,6 +1,8 @@
 #include <tender/basis.hpp>
 #include <tender/coord_system.hpp>
+#include <tender/derivation.hpp>
 #include <tender/index_space.hpp>
+#include <tender/nf_lower.hpp>
 #include <tender/render.hpp>
 
 #include <gtest/gtest.h>
@@ -376,6 +378,62 @@ TEST(RenderBinary, TensorProductAllScalarsUsesCdot)
     auto* inner = make_tensor_product(ctx, s1, s2);
     EXPECT_EQ(
         latex(*make_tensor_product(ctx, inner, s3)), "2 \\cdot 3 \\cdot 4");
+}
+
+// The `\cdot` (scalar·scalar) vs `\,` (juxtaposition) product separator is
+// chosen by is_scalar_expr, which classifies every node kind.  Render a product
+// of each kind against a scalar literal and check the separator: a `\,` appears
+// iff the left operand is non-scalar.  This drives every is_scalar_expr arm.
+TEST(RenderBinary, ProductSeparatorClassifiesEveryNodeKind)
+{
+    Context ctx;
+    auto* lit = make_scalar(ctx, Rational{5});
+    auto* A = make_field(ctx, make_tensor_name("A"), 2, {});
+    auto* a = T(ctx, "a", 1);
+    auto* b = T(ctx, "b", 1);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    CountableIndex idx{ctx.alloc_index_id()};
+
+    // Rendering TP(node, lit): the separator is `\,` exactly when `node` is
+    // non-scalar per is_scalar_expr.
+    auto non_scalar = [&](Expr const* node)
+    {
+        auto s = latex(*make_tensor_product(ctx, node, lit));
+        return s.find(" \\, ") != std::string::npos;
+    };
+
+    // Scalar-valued kinds → `\cdot`, no `\,`.
+    EXPECT_FALSE(non_scalar(make_negate(ctx, lit)));
+    EXPECT_FALSE(non_scalar(make_sum(ctx, lit, lit)));
+    EXPECT_FALSE(non_scalar(make_difference(ctx, lit, lit)));
+    EXPECT_FALSE(non_scalar(make_scalar_div(ctx, lit, lit)));
+    EXPECT_FALSE(non_scalar(make_pow(ctx, lit, lit)));
+    EXPECT_FALSE(non_scalar(make_explicit_sum(ctx, idx, lit)));
+    EXPECT_FALSE(non_scalar(make_no_sum(ctx, idx, lit)));
+    EXPECT_FALSE(non_scalar(make_scalar_fn(ctx, ScalarFnKind::Cos, lit)));
+
+    // Tensor-valued kinds → `\,`.
+    EXPECT_TRUE(non_scalar(make_trace(ctx, A)));
+    EXPECT_TRUE(non_scalar(make_vector_invariant(ctx, A)));
+    EXPECT_TRUE(non_scalar(make_transpose(ctx, A)));
+    EXPECT_TRUE(non_scalar(make_dot(ctx, a, b)));
+    EXPECT_TRUE(non_scalar(make_cross(ctx, a, b)));
+    EXPECT_TRUE(non_scalar(make_deriv(ctx, x)));
+    EXPECT_TRUE(non_scalar(make_nabla(ctx)));
+}
+
+// scalar_fn_str renders each unary scalar function; tan and log complete the
+// set the other tests do not reach.
+TEST(RenderScalarFn, TanAndLog)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    EXPECT_EQ(
+        latex(*make_scalar_fn(ctx, ScalarFnKind::Tan, x)),
+        "\\tan\\left(x\\right)");
+    EXPECT_EQ(
+        latex(*make_scalar_fn(ctx, ScalarFnKind::Log, x)),
+        "\\log\\left(x\\right)");
 }
 
 TEST(RenderBinary, Dot)
@@ -793,4 +851,104 @@ TEST(Render, NablaOperator)
     auto* eps = make_field(ctx, make_tensor_name("e"), 2, {}, /*sym=*/true);
     EXPECT_EQ(latex(*make_dot(ctx, del, eps)), "\\nabla \\cdot \\mathbf{e}");
     EXPECT_EQ(latex(*make_cross(ctx, del, eps)), "\\nabla \\times \\mathbf{e}");
+}
+
+// ---- render_nf_latex (the Nf normal-form renderer) ---------------------
+
+// Lower an Expr to its normal form and render that.  render_nf_latex walks the
+// nf IR (nf.hpp) — a separate renderer from render_latex — so it needs its own
+// coverage across the factor kinds it can meet.
+static auto nf_latex(Context& ctx, Expr const* e) -> std::string
+{
+    IndexNameMap map;
+    return render_nf_latex(*nf::canonicalize_nf(ctx, e), map, &ctx);
+}
+
+TEST(RenderNf, ScalarAndTensorFactors)
+{
+    Context ctx;
+    // A plain scalar, a bare tensor, and a product with a numeric coefficient.
+    EXPECT_EQ(nf_latex(ctx, make_scalar(ctx, Rational{3})), "3");
+    auto* a = T(ctx, "a", 1);
+    auto* b = T(ctx, "b", 1);
+    // a·b — a contraction of two vectors renders through the atom/factor path.
+    auto s = nf_latex(ctx, make_dot(ctx, a, b));
+    EXPECT_NE(s.find("\\cdot"), std::string::npos);
+    // 2 (a⊗b) — a scalar coefficient in front of a dyad.
+    auto d = nf_latex(
+        ctx,
+        make_tensor_product(
+            ctx, make_scalar(ctx, Rational{2}), make_tensor_product(ctx, a, b)));
+    EXPECT_NE(d.find("2"), std::string::npos);
+}
+
+TEST(RenderNf, InvariantsAndTranspose)
+{
+    Context ctx;
+    auto* A = make_field(ctx, make_tensor_name("A"), 2, {});
+    // tr(A) — the Trace unary of the nf renderer.
+    EXPECT_NE(
+        nf_latex(ctx, make_trace(ctx, A)).find("\\operatorname{tr}"),
+        std::string::npos);
+    // Aᵀ — the Transpose unary.
+    EXPECT_NE(
+        nf_latex(ctx, make_transpose(ctx, A)).find("\\mathsf{T}"),
+        std::string::npos);
+    // vec(A) — the VectorInvariant unary renders with the _\times subscript.
+    EXPECT_NE(
+        nf_latex(ctx, make_vector_invariant(ctx, A)).find("_\\times"),
+        std::string::npos);
+}
+
+TEST(RenderNf, ScalarFnPowFractionAndOperators)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    // sin(x) — a ScalarFn factor.
+    EXPECT_NE(
+        nf_latex(ctx, make_scalar_fn(ctx, ScalarFnKind::Sin, x)).find("\\sin"),
+        std::string::npos);
+    // x² — a Pow factor.
+    EXPECT_NE(
+        nf_latex(ctx, make_pow(ctx, x, make_scalar(ctx, Rational{2})))
+            .find("^{2}"),
+        std::string::npos);
+    // ∂_x — a bare (unapplied) ∂ operator renders through the nf Deriv arm.
+    EXPECT_NE(
+        nf_latex(ctx, make_deriv(ctx, x)).find("\\partial_{x}"),
+        std::string::npos);
+    // ∇ — the bare Nabla operator.
+    EXPECT_NE(nf_latex(ctx, make_nabla(ctx)).find("\\nabla"), std::string::npos);
+}
+
+TEST(RenderNf, MultiFactorDoubleDotAndWrappedPow)
+{
+    Context ctx;
+    auto* A = make_field(ctx, make_tensor_name("A"), 2, {});
+    auto* B = make_field(ctx, make_tensor_name("B"), 2, {});
+    auto* a = T(ctx, "a", 1);
+    auto* b = T(ctx, "b", 1);
+    auto* c = T(ctx, "c", 1);
+    auto* d = T(ctx, "d", 1);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+
+    // A:B — the DDot contraction operator (cop_str) in the nf renderer.
+    EXPECT_NE(
+        nf_latex(ctx, make_ddot(ctx, A, B)).find(" : "), std::string::npos);
+    // A··B — the DDotAlt contraction operator.
+    EXPECT_NE(
+        nf_latex(ctx, make_ddot_alt(ctx, A, B)).find("\\cdot\\!\\cdot"),
+        std::string::npos);
+    // (a·b)(c·d) — a term with two contraction factors exercises the per-factor
+    // precedence/sub() path (prec(nf::Contraction)).
+    auto multi = nf_latex(
+        ctx,
+        make_tensor_product(ctx, make_dot(ctx, a, b), make_dot(ctx, c, d)));
+    EXPECT_NE(multi.find(" \\, "), std::string::npos);
+    // (x + 1)² — a Pow whose base is a sum wraps the base in parens.
+    auto* pow = make_pow(
+        ctx,
+        make_sum(ctx, x, make_scalar(ctx, Rational{1})),
+        make_scalar(ctx, Rational{2}));
+    EXPECT_NE(nf_latex(ctx, pow).find("(x + 1)^{2}"), std::string::npos);
 }

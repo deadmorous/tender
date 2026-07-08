@@ -4106,3 +4106,136 @@ TEST(DerivMark, MarkIsClosedFormOfAppliedOperator)
     EXPECT_TRUE(
         algebraic_eq(ctx, dotted, make_dot(ctx, steps::partial(ctx, T, x), a)));
 }
+
+// apply_operators walks the whole additive/invariant/contraction structure.
+// These exercise the arms the single-product tests do not reach: a top-level
+// Difference / VectorInvariant operand, and a contraction whose *left* operand
+// is itself a Sum / Difference / Negate (the shape ∇ produces when it lowers to
+// a sum of frame terms).
+TEST(ApplyOperators, DistributesOverDifferenceAndVectorInvariant)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* g = make_field(ctx, make_tensor_name("g"), 0, {});
+    auto* T = make_field(ctx, make_tensor_name("T"), 2, {});
+    auto* dx = make_deriv(ctx, x);
+
+    // ∂_x f − ∂_x g : the Difference arm applies the operator in each branch.
+    auto* diff = make_difference(
+        ctx, make_tensor_product(ctx, dx, f), make_tensor_product(ctx, dx, g));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::apply_operators(ctx, diff),
+        make_difference(
+            ctx, steps::partial(ctx, f, x), steps::partial(ctx, g, x))));
+
+    // vec(∂_x T) : the VectorInvariant arm recurses so the inner ∂ applies
+    // before the invariant is taken.
+    auto* vinv = make_vector_invariant(ctx, make_tensor_product(ctx, dx, T));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::apply_operators(ctx, vinv),
+        make_vector_invariant(ctx, steps::partial(ctx, T, x))));
+}
+
+TEST(ApplyOperators, DistributesContractionOverAdditiveLeftOperand)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1); // const
+    auto* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1); // const
+    auto* v = make_field(ctx, make_tensor_name("v"), 1, {});
+    auto* dx = make_deriv(ctx, x);
+    auto* adx = make_tensor_product(ctx, a, dx); // a ∂_x
+    auto* bdx = make_tensor_product(ctx, b, dx); // b ∂_x
+    auto* dxv = steps::partial(ctx, v, x);       // ∂_x v
+
+    // (a∂_x + b∂_x)·v → a·∂_x v + b·∂_x v  (Sum left operand).
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::apply_operators(ctx, make_dot(ctx, make_sum(ctx, adx, bdx), v)),
+        make_sum(ctx, make_dot(ctx, a, dxv), make_dot(ctx, b, dxv))));
+
+    // (a∂_x − b∂_x)·v → a·∂_x v − b·∂_x v  (Difference left operand).
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::apply_operators(
+            ctx, make_dot(ctx, make_difference(ctx, adx, bdx), v)),
+        make_difference(ctx, make_dot(ctx, a, dxv), make_dot(ctx, b, dxv))));
+
+    // (−(a∂_x))·v → −(a·∂_x v)  (Negate left operand).
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::apply_operators(ctx, make_dot(ctx, make_negate(ctx, adx), v)),
+        make_negate(ctx, make_dot(ctx, a, dxv))));
+}
+
+// is_component_valued classifies every node kind as a commuting component value
+// (a scalar / fully-indexed coordinate) or an invariant.  The identity matcher
+// relies on it, so it must be right for each kind.
+TEST(IsComponentValued, EveryNodeKind)
+{
+    Context ctx;
+    auto* lit = make_scalar(ctx, Rational{2});
+    auto* A = make_field(ctx, make_tensor_name("A"), 2, {});
+    auto* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    CountableIndex idx{ctx.alloc_index_id()};
+    IndexSlot slot{Level::Upper, Realm::Orthonormal, space_3d()};
+
+    // TensorObject shapes: rank 0 (scalar) vs rank ≥ 1 (invariant) vs
+    // rank-unknown slot-less (invariant) / fully-indexed (coordinate) /
+    // partially-indexed (conservative invariant).
+    EXPECT_TRUE(is_component_valued(
+        make_tensor_object(ctx, make_tensor_name("f"), {}, 0)));
+    EXPECT_FALSE(is_component_valued(a));
+    EXPECT_FALSE(is_component_valued(
+        make_tensor_object(ctx, make_tensor_name("T"), {}, std::nullopt)));
+    EXPECT_TRUE(is_component_valued(make_tensor_object(
+        ctx, make_tensor_name("g"), {SlotBinding{slot, idx}}, std::nullopt)));
+    EXPECT_FALSE(is_component_valued(make_tensor_object(
+        ctx,
+        make_tensor_name("h"),
+        {SlotBinding{slot, std::nullopt}},
+        std::nullopt)));
+
+    // Scalar / component combinators → true.
+    EXPECT_TRUE(is_component_valued(make_negate(ctx, lit)));
+    EXPECT_TRUE(is_component_valued(make_sum(ctx, lit, lit)));
+    EXPECT_TRUE(is_component_valued(make_difference(ctx, lit, lit)));
+    EXPECT_TRUE(is_component_valued(make_tensor_product(ctx, lit, lit)));
+    EXPECT_TRUE(is_component_valued(make_scalar_div(ctx, lit, lit)));
+    EXPECT_TRUE(is_component_valued(make_explicit_sum(ctx, idx, lit)));
+    EXPECT_TRUE(is_component_valued(make_no_sum(ctx, idx, lit)));
+    EXPECT_TRUE(
+        is_component_valued(make_scalar_fn(ctx, ScalarFnKind::Sin, lit)));
+    EXPECT_TRUE(is_component_valued(make_pow(ctx, lit, lit)));
+
+    // Invariant tensor operations and operators → false.
+    EXPECT_FALSE(is_component_valued(make_trace(ctx, A)));
+    EXPECT_FALSE(is_component_valued(make_vector_invariant(ctx, A)));
+    EXPECT_FALSE(is_component_valued(make_transpose(ctx, A)));
+    EXPECT_FALSE(is_component_valued(make_dot(ctx, a, b)));
+    EXPECT_FALSE(is_component_valued(make_ddot(ctx, A, A)));
+    EXPECT_FALSE(is_component_valued(make_ddot_alt(ctx, A, A)));
+    EXPECT_FALSE(is_component_valued(make_cross(ctx, a, b)));
+    EXPECT_FALSE(is_component_valued(make_deriv(ctx, x)));
+    EXPECT_FALSE(is_component_valued(make_nabla(ctx)));
+}
+
+// Differentiating a contraction of constants yields `0·b` / `a·0` terms that
+// canonicalize rejects as ill-formed contractions; apply_operators' tolerant
+// canon folds those zeros instead of throwing (∂_x(a·b) = 0 for constant a, b).
+TEST(ApplyOperators, ZeroContractionOfConstantsFolds)
+{
+    Context ctx;
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1); // const
+    auto* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1); // const
+    auto* dx = make_deriv(ctx, x);
+    auto* got = steps::apply_operators(
+        ctx, make_tensor_product(ctx, dx, make_dot(ctx, a, b)));
+    EXPECT_TRUE(algebraic_eq(ctx, got, make_scalar(ctx, Rational{0})));
+}
