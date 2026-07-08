@@ -1398,10 +1398,12 @@ TEST(Chart, ReassembleNablaRoundTripsSingleOperators)
     auto* nab = make_nabla(ctx);
     auto* grad = make_tensor_product(ctx, nab, eps); // ∇⊗ε
     auto* div = make_dot(ctx, nab, eps);             // ∇·ε
-    EXPECT_TRUE(eq(
-        ctx, reassemble_nabla(ctx, chart, expand_nabla(ctx, chart, grad)), grad));
     EXPECT_TRUE(
-        eq(ctx, reassemble_nabla(ctx, chart, expand_nabla(ctx, chart, div)), div));
+        eq(ctx,
+           reassemble_nabla(ctx, chart, expand_nabla(ctx, chart, grad)),
+           grad));
+    EXPECT_TRUE(eq(
+        ctx, reassemble_nabla(ctx, chart, expand_nabla(ctx, chart, div)), div));
 }
 
 // reassemble_nabla folds the double divergence ∇·(∇·ε) — the (1,1,2) fan-in —
@@ -1419,6 +1421,32 @@ TEST(Chart, ReassembleNablaRecoversDoubleDivergence)
         eq(ctx,
            reassemble_nabla(ctx, chart, expand_nabla(ctx, chart, divdiv)),
            divdiv));
+}
+
+// expand_nabla(∇·∇f) for a SCALAR field keeps its true rank 0 (the Laplacian
+// Δf) instead of degrading to a rank-2 dyad (vibe 000079).  The inner grad ∇f
+// is the scalar-scaled frame vector (∂_i f) e_i; the outer ∇· must contract e_ℓ
+// with that e_i.  Differentiating the constant e_i emits a Leibniz connection
+// term `0 ⊗ ∂_i f` whose rank (0) differs from the real term's (1); left in the
+// Sum it made `infer_rank` misread the operand as a scalar, so `make_dot`
+// silently turned the `·` into `⊗`.  Folding forced zeros in the deferred
+// derivative drops that term before it can mislead the contraction.
+TEST(Chart, ExpandNablaScalarDivGradIsLaplacian)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* nab = make_nabla(ctx);
+    // ∇·(∇f) — grad of a scalar is ∇⊗f, div contracts it back to a scalar.
+    auto* divgrad = make_dot(ctx, nab, make_tensor_product(ctx, nab, f));
+    auto* expanded = expand_nabla(ctx, chart, divgrad);
+    EXPECT_EQ(infer_rank(expanded), std::optional{0});
+    // Componentized, it is the chart Laplacian Δf (a scalar).
+    auto* free = componentize_nabla(ctx, chart, expanded);
+    EXPECT_TRUE(eq(ctx, expand(ctx, chart, free), laplacian(ctx, chart, f)));
+    // And it round-trips back to the operator form ∇·∇f.
+    EXPECT_TRUE(eq(ctx, reassemble_nabla(ctx, chart, expanded), divgrad));
 }
 
 // expand_nabla refuses a curvilinear (non-unit-scale) chart: the free-index

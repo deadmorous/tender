@@ -1405,9 +1405,12 @@ NB_MODULE(_core, m)
             "component-by-component against the brute-force chart operators.")
         .def(
             "reassemble_nabla",
-            [](PyChart const& c, PyExpr const& e) -> PyExpr {
+            [](PyChart const& c, PyExpr const& e) -> PyExpr
+            {
                 return PyExpr{
-                    c.ctx_keep, c.ctx, reassemble_nabla(*c.ctx, c.chart, e.expr)};
+                    c.ctx_keep,
+                    c.ctx,
+                    reassemble_nabla(*c.ctx, c.chart, e.expr)};
             },
             "e"_a,
             "Reassemble a Phase-1-reduced free-index expression back into "

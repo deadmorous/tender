@@ -1,6 +1,37 @@
 # 000079 — expand_nabla div-of-grad-scalar bug (∇·∇f → rank 2)
 
-**Status: OPEN — next task.** Discovered during vibe 000078 increment 4 (the
+**Status: FIXED.** One-line fix in `partial` (src/derivation.cpp): the deferred
+(`canon == false`) derivative now returns `nf::fold_forced_zeros(ctx, raw)`
+instead of `raw`.
+
+**Root cause (confirmed by instrumentation, not the prime suspect above).** The
+`make_dot` scalar-redirect *did* fire, but not because of a transient scalar
+operand — because it was handed an operand whose rank was **misreported**. When
+the outer `∇·` differentiates the inner grad `∇f = (∂_i f) e_i`, the Leibniz
+product rule emits a connection term for the constant frame vector:
+`∂_i[(∂_j f) e_j] = (∂_i∂_j f) e_j + (∂_j f)(∂_i e_j)`, and `∂_i e_j = 0` folds
+to the **rank-0 literal `0`**, leaving the addend `0 ⊗ (∂_j f)` (rank 0) beside
+the real term `e_j ⊗ (∂_i∂_j f)` (rank 1) inside a `Sum`.  `infer_rank(Sum)`
+trusts its **left** operand, so it read the whole differentiated operand as
+rank 0; `make_dot(e_ℓ, that)` saw a "scalar" and redirected `·` → `⊗`, inflating
+`∇·∇f` to a rank-2 dyad.  The **vector** case `∇·∇v` was immune only by
+coincidence: there the sibling factor `∂_j v` is itself rank 1, so the stray
+`0 ⊗ ∂_j v` term is *also* rank 1 and the Sum's rank is read correctly.
+
+Folding forced zeros on the raw derivative drops the `0 ⊗ …` addend (via the
+existing `0 ⊗ x → 0`, then `0 + y → y` laws in `nf::fold_forced_zeros`) before
+it can mislead `infer_rank`/`make_dot`.  The zero law is index-neutral, so it
+does **not** reintroduce the vibe 000078 bug-3a index aliasing that motivated
+deferring canonicalization in `partial`.
+
+**Regression tests:** `Chart.ExpandNablaScalarDivGradIsLaplacian`
+(tests/chart_test.cpp — rank 0, componentizes to `laplacian(f)`, reassembles to
+`∇·∇f`) and `test_expand_nabla_scalar_div_grad_is_laplacian`
+(python/tests/test_operators.py).  Full suite 789 C++ + 244 Python green.
+
+---
+
+**Original report (OPEN — next task).** Discovered during vibe 000078 increment 4 (the
 `reassemble_nabla` round-trip unit tests): `reassemble_nabla(expand_nabla(∇·∇f))`
 did not round-trip because `expand_nabla` itself returns the wrong thing for a
 scalar Laplacian. Not a reassembly bug — the reassembler correctly folded the

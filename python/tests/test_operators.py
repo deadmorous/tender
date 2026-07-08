@@ -293,6 +293,28 @@ def test_expand_nabla_double_divergence_and_transpose():
     assert matches((nab * (nab @ eps)).transpose(), cart.grad(cart.div(eps)).transpose())
 
 
+def test_expand_nabla_scalar_div_grad_is_laplacian():
+    # vibe 000079: ∇·(∇f) for a SCALAR field is the scalar Δf (rank 0), not a
+    # rank-2 dyad.  The inner grad ∇f = (∂_i f) e_i is a scalar-scaled frame
+    # vector; the outer ∇· must contract e_ℓ with that e_i.  Differentiating the
+    # constant e_i leaves a Leibniz connection term `0 ⊗ ∂_i f` of rank 0 beside
+    # the real rank-1 term; left in the Sum it made infer_rank misread the
+    # operand as a scalar, so make_dot degraded the `·` to `⊗`.  Fixed by folding
+    # forced zeros in the deferred derivative.
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    f = ws.field("f", 0)
+    nab = t.nabla(ctx=ws.ctx)
+
+    expanded = cart.expand_nabla(nab @ (nab * f))
+    assert expanded.rank == 0  # Δf is a scalar, not a dyad
+    # Componentized and expanded, it is the chart Laplacian Δf.
+    comp = cart.componentize_nabla(expanded)
+    assert td.algebraic_eq(cart.expand(comp), cart.laplacian(f))
+    # And it reassembles back to the operator form ∇·∇f.
+    assert td.algebraic_eq(cart.reassemble_nabla(expanded), nab @ (nab * f))
+
+
 def _closed_identity_holds(chart, eps):
     # inc ε == −∇∇θ + Δθ·I − (∇∇··ε)·I − Δε + 2(∇∇·ε)ˢ , componentwise.  Both
     # sides are coordinate-free tensors, so this must hold in every frame.

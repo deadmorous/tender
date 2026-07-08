@@ -3226,8 +3226,17 @@ auto partial(Context& ctx, Expr const* e, Expr const* coord, bool canon)
     // that vector later joins and the whole term is re-canonicalized, the index
     // collides onto the same canonical id — aliasing e.g. ∂_i∂_j → ∂_i∂_i in
     // ∇·(∇·ε) (vibe 000078 bug 3a).  Deferring avoids the premature id.
+    //
+    // Fold forced zeros though: the Leibniz product rule emits a connection
+    // term for every constant frame vector it differentiates — `∂_i e_j = 0`
+    // leaves a `0 ⊗ ∂_j f` addend.  Left un-dropped, that rank-0 zero term sits
+    // beside the real (higher-rank) term in a Sum, and `infer_rank(Sum)` —
+    // which trusts its left operand — then reports the wrong rank; a caller's
+    // `make_dot` reads the operand as a scalar and silently degrades its `·` to
+    // `⊗` (∇·∇f → rank-2 dyad, vibe 000079).  The zero law is index-neutral, so
+    // folding it here does not reintroduce the 3a aliasing.
     if (!canon)
-        return raw;
+        return nf::fold_forced_zeros(ctx, raw);
     // Canonicalize to fold the 0/1 noise the rules generate.  canonicalize
     // throws on an ill-formed implicit sum; then the raw form is the best we
     // can return (it is still a correct derivative).
