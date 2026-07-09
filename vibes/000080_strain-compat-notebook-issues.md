@@ -2,13 +2,24 @@
 
 **Status: IN PROGRESS — eight issues + a plan whose sprint endpoint is the
 Navier–Lamé reduction (Increment 8).  DONE:** Increment 0 (Issue 7 crash fix,
-commit e9d9fb8), the `(Aᵀ)ᵀ→A` involution (Issue 8 b1 / Increment 7, commit
-4b2b6e3), **Increment 7A** (`sym`/`skew` constructors, commit 5b4657b),
-**Increment 5** (scalar-Hessian transpose fold in `reassemble_nabla`, commit
-3d507bc), and **Increment 3** (render `∇·(∇⊗X)` as `Δ X`, commit c8bbabe).
-**Remaining:** Increments 1, 2, 4 (the `tr` reductions), the rest of 7 (b1:
-transpose/scalar over `Sum` distribution + recognition), **6 (now a *correctness*
-prerequisite for 8, not last)**, and **8 (Navier–Lamé, the endpoint)**.
+commit e9d9fb8), the `(Aᵀ)ᵀ→A` involution (commit 4b2b6e3), **Increment 7A**
+(`sym`/`skew` constructors, 5b4657b), **Increment 5** (scalar-Hessian transpose
+fold, 3d507bc), **Increment 3** (render `∇·(∇⊗X)` as `Δ X`, c8bbabe),
+**Increment 8 groundwork** (e86d96c: apply_operators resolves an operator hidden
+inside a ⊗-factor — the inner `∇·u` of `(∇·u)I`; reassemble_nabla now carries
+scalar Lamé coefficients through instead of dropping them), and **Increment
+7(b1)** (db67f13: `ScalarDiv`/transpose distribute over `Sum`, so
+`algebraic_eq(sym(A), sym(A)ᵀ)=True` — a symmetric part is recognised symmetric
+with no trait).  **Endpoint reached in part:** `∇·(λ(∇·u)I + μ(∇u+(∇u)ᵀ))`
+reduces (expand ∇ → apply ∂ → `e·I` fold → reassemble) to
+`λ∇(∇·u) + μ∇(∇·u) + μ∇·∇u`, verified `algebraic_eq` == the hand-written
+operator form.  **Remaining for the *clean* endpoint:** (a) **Increment 6**
+(operator positioning) — `collect_terms` already merges the two `∇(∇·u)` but
+canon pushes `∇` to the *right* (`(λ∇·u+μ∇·u)∇`) and does not factor
+`λ∇·u+μ∇·u → (λ+μ)∇·u`; (b) sym-form (`/2`) scalar normalisation (fold a
+`Pow`/`ScalarDiv` denominator `2²` against numerator `2·2` so `2μ·sym(∇u)`
+reassembles — the explicit `μ(∇u+(∇u)ᵀ)` form already works).  **Also
+remaining:** Increments 1, 2, 4 (the `tr` reductions, for strain-compat/Issue 6).
 **Deferred (needs special care):** vibe 000054 (selective application) and its
 riders Issue 6 (equation→identity) + Issue 8(C) (symmetry-guarded identity).
 **Key session lesson:** author operator derivations with the operand *abstract*
