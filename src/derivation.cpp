@@ -1475,6 +1475,11 @@ auto expand_unary(
         return make_difference(ctx, recur(d->left), recur(d->right));
     if (auto const* n = std::get_if<Negate>(&operand->node))
         return make_negate(ctx, recur(n->operand));
+    // A linear unary (tr/vec/transpose) commutes through a scalar divisor:
+    // op(X/c) = op(X)/c.  So a symmetric part ((A+Aᵀ)/2)ᵀ normalises to
+    // (Aᵀ + A)/2 = (A+Aᵀ)/2 and folds symmetric (vibe 000080 Increment 7 b1).
+    if (auto const* d = std::get_if<ScalarDiv>(&operand->node))
+        return make_scalar_div(ctx, recur(d->left), d->right);
     if (auto const sp = split_dyad(operand))
         return dyad_rule(*sp);
     return make_node(operand); // not reducible — leave the op in place
@@ -1818,6 +1823,29 @@ auto expand_products(Context& ctx, Expr const* e) -> Expr const*
                             p.right,
                             [&](Expr const* a, Expr const* b)
                             { return make_cross(ctx, a, b); });
+                    },
+                    // A scalar-divided sum distributes over the numerator (the
+                    // denominator is a shared scalar): (A ± B)/c → A/c ± B/c.
+                    // So sym(∇u) = (∇u + (∇u)ᵀ)/2 splits into per-term halves
+                    // whose frame reductions are no longer trapped behind the
+                    // ScalarDiv fence (vibe 000080 Increment 7 b1).
+                    [&](ScalarDiv const& d) -> Expr const*
+                    {
+                        if (auto const* s = std::get_if<Sum>(&d.left->node))
+                            return make_sum(
+                                ctx,
+                                make_scalar_div(ctx, s->left, d.right),
+                                make_scalar_div(ctx, s->right, d.right));
+                        if (auto const* s =
+                                std::get_if<Difference>(&d.left->node))
+                            return make_difference(
+                                ctx,
+                                make_scalar_div(ctx, s->left, d.right),
+                                make_scalar_div(ctx, s->right, d.right));
+                        if (auto const* n = std::get_if<Negate>(&d.left->node))
+                            return make_negate(
+                                ctx, make_scalar_div(ctx, n->operand, d.right));
+                        return e;
                     },
                     [&](auto const&) -> Expr const* { return e; },
                 },

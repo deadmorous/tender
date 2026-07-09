@@ -1572,6 +1572,50 @@ TEST(ExpandProducts, BothSumsFullyDistributed)
     EXPECT_EQ(std::get_if<TensorProduct>(&after->node), nullptr);
 }
 
+// A scalar-divided sum distributes over the numerator (vibe 000080 Inc 7 b1):
+// (A ± B)/c → A/c ± B/c, and (−A)/c → −(A/c).  The denominator is shared.
+TEST(ExpandProducts, ScalarDivOverSumDistributes)
+{
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"));
+    auto* B = make_tensor_object(ctx, make_tensor_name("B"));
+    auto* two = make_scalar(ctx, Rational{2});
+
+    auto* sum = steps::expand_products(
+        ctx, make_scalar_div(ctx, make_sum(ctx, A, B), two));
+    auto const* s = std::get_if<Sum>(&sum->node);
+    ASSERT_NE(s, nullptr);
+    EXPECT_NE(std::get_if<ScalarDiv>(&s->left->node), nullptr);
+    EXPECT_NE(std::get_if<ScalarDiv>(&s->right->node), nullptr);
+
+    auto* diff = steps::expand_products(
+        ctx, make_scalar_div(ctx, make_difference(ctx, A, B), two));
+    EXPECT_NE(std::get_if<Difference>(&diff->node), nullptr);
+
+    auto* neg = steps::expand_products(
+        ctx, make_scalar_div(ctx, make_negate(ctx, A), two));
+    EXPECT_NE(std::get_if<Negate>(&neg->node), nullptr);
+}
+
+// A linear unary commutes through a scalar divisor: (X/c)ᵀ = Xᵀ/c, so a
+// symmetric part ((A+Aᵀ)/2)ᵀ normalises to (Aᵀ+A)/2 (vibe 000080 Inc 7 b1).
+TEST(ExpandDyadOps, TransposeCommutesThroughScalarDiv)
+{
+    Context ctx;
+    auto* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto* sym = make_scalar_div(
+        ctx,
+        make_sum(ctx, A, make_transpose(ctx, A)),
+        make_scalar(ctx, Rational{2}));
+    // ((A+Aᵀ)/2)ᵀ → (Aᵀ + (Aᵀ)ᵀ)/2, a ScalarDiv of a sum of transposes.
+    auto* out = steps::expand_dyad_ops(ctx, make_transpose(ctx, sym));
+    auto const* d = std::get_if<ScalarDiv>(&out->node);
+    ASSERT_NE(d, nullptr);
+    EXPECT_NE(std::get_if<Sum>(&d->left->node), nullptr);
+    // And it is recognised equal to the original symmetric part.
+    EXPECT_TRUE(algebraic_eq(ctx, make_transpose(ctx, sym), sym));
+}
+
 // ---- fold_arithmetic: missing identity branches ----------------------------
 
 TEST(FoldArithmetic, SumRightZeroSimplifies)

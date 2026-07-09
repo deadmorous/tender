@@ -870,3 +870,31 @@ def test_sym_of_symmetric_field_is_the_field():
     E = ws.field("E", 2, symmetric=True)
     assert td.algebraic_eq(td.sym(E), E)
     assert td.simplify_scalars(td.sym(E)).latex() == E.latex()
+
+
+def test_sym_part_recognised_symmetric_by_construction():
+    # vibe 000080 Increment 7(b1): a symmetric part is recognised symmetric with
+    # no declared trait — transpose distributes through the /2 fence and the
+    # (Aᵀ)ᵀ→A involution, so ((A+Aᵀ)/2)ᵀ normalises back to (A+Aᵀ)/2.
+    ws = tender.Workspace()
+    A = ws.field("A", 2)
+    assert td.algebraic_eq(td.sym(A), td.sym(A).transpose())
+    # sym + skew = A once the shared coefficient is distributed (expand_products;
+    # canonicalize keeps the factored 1/2·(…) form).
+    assert td.algebraic_eq(td.expand_products(td.sym(A) + td.skew(A)), A)
+
+
+def test_scalar_div_distributes_over_sum():
+    # (A ± B)/c → A/c ± B/c under expand_products (vibe 000080 Increment 7 b1).
+    ws = tender.Workspace()
+    A = ws.field("A", 2)
+    B = ws.field("B", 2)
+    assert td.structural_eq(td.expand_products((A + B) / 2), A / 2 + B / 2)
+    assert td.structural_eq(td.expand_products((A - B) / 2), A / 2 - B / 2)
+    # transpose commutes through the divisor and distributes over the sum:
+    # ((A+B)/c)ᵀ = (Aᵀ+Bᵀ)/c under expand_dyad_ops (the /c stays a ScalarDiv —
+    # splitting it is expand_products' job).
+    assert td.structural_eq(
+        td.expand_dyad_ops(((A + B) / 2).transpose()),
+        (A.transpose() + B.transpose()) / 2,
+    )
