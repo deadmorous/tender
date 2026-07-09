@@ -10,15 +10,22 @@ inside a ⊗-factor — the inner `∇·u` of `(∇·u)I`; reassemble_nabla now 
 scalar Lamé coefficients through instead of dropping them), and **Increment
 7(b1)** (db67f13: `ScalarDiv`/transpose distribute over `Sum`, so
 `algebraic_eq(sym(A), sym(A)ᵀ)=True` — a symmetric part is recognised symmetric
-with no trait).  **Endpoint reached in part:** `∇·(λ(∇·u)I + μ(∇u+(∇u)ᵀ))`
-reduces (expand ∇ → apply ∂ → `e·I` fold → reassemble) to
-`λ∇(∇·u) + μ∇(∇·u) + μ∇·∇u`, verified `algebraic_eq` == the hand-written
-operator form.  **Remaining for the *clean* endpoint:** (a) **Increment 6**
-(operator positioning) — `collect_terms` already merges the two `∇(∇·u)` but
-canon pushes `∇` to the *right* (`(λ∇·u+μ∇·u)∇`) and does not factor
-`λ∇·u+μ∇·u → (λ+μ)∇·u`; (b) sym-form (`/2`) scalar normalisation (fold a
-`Pow`/`ScalarDiv` denominator `2²` against numerator `2·2` so `2μ·sym(∇u)`
-reassembles — the explicit `μ(∇u+(∇u)ᵀ)` form already works).  **Also
+with no trait), and **Increment 6** (26b3856: render-time operator-left
+normalisation — `Dot(X,∇)→∇·X`, `X⊗∇→(∇X)ᵀ` or `∇X` for rank-0 X; Issue 1's
+display hazard resolved, `canonicalize(reass)` now shows every ∇ on the left).
+**Increment 6 reframe:** the *correctness* leak Issue 1 feared (a dropped
+Leibniz term in `∇·((∇·u)I)`) was actually the apply_operators nested-operator
+gap, **already fixed in Increment-8 groundwork (e86d96c)** — so what remained
+was purely display, fixed at render time (plan option b); no canon change.
+**Endpoint reached in part:** `∇·(λ(∇·u)I + μ(∇u+(∇u)ᵀ))` reduces (expand ∇ →
+apply ∂ → `e·I` fold → reassemble) to `λ∇(∇·u) + μ∇(∇·u) + μ∇·∇u`, verified
+`algebraic_eq` == the hand form; `collect_terms(reass)` now reads the clean
+`μ∇·∇u + ∇(λ∇·u + μ∇·u)` (all ∇ left).  **Remaining for the *clean* endpoint:**
+(a) coefficient factoring `λ∇·u + μ∇·u → (λ+μ)∇·u` (factor a common tensor out
+of a sum — a new step, the reverse of distribute); (b) sym-form (`/2`) scalar
+normalisation (fold a `Pow`/`ScalarDiv` denominator `2²` against numerator
+`2·2` so `2μ·sym(∇u)` reassembles — the explicit `μ(∇u+(∇u)ᵀ)` form already
+works); (c) the Increment 8 example witness (Cartesian + cylindrical).  **Also
 remaining:** Increments 1, 2, 4 (the `tr` reductions, for strain-compat/Issue 6).
 **Deferred (needs special care):** vibe 000054 (selective application) and its
 riders Issue 6 (equation→identity) + Issue 8(C) (symmetry-guarded identity).
