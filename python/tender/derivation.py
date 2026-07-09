@@ -330,6 +330,25 @@ def simplify(expr):
     return implicitize(canonicalize(expr))
 
 
+def sym(expr):
+    """The symmetric part of a rank-2 tensor: ``sym(A) = (A + Aᵀ)/2``.
+
+    A thin builder (vibe 000080 Increment 7A) — the strain ``ε = sym(∇u)`` is
+    symmetric by construction.  Recognising the *result* as symmetric (so
+    ``sym(A)ᵀ`` folds back) is the separate structural-normalisation work; this
+    is just the constructor.
+    """
+    return (expr + expr.transpose()) / 2
+
+
+def skew(expr):
+    """The antisymmetric part of a rank-2 tensor: ``skew(A) = (A − Aᵀ)/2``.
+
+    Companion to :func:`sym` (vibe 000080 Increment 7A); ``A = sym(A) + skew(A)``.
+    """
+    return (expr - expr.transpose()) / 2
+
+
 class Identity:
     """A directed rewrite rule ``lhs = rhs`` over expressions (vibe 000033).
 

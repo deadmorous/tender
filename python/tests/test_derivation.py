@@ -849,3 +849,24 @@ def test_symmetric_transpose_folds():
     assert td.algebraic_eq(E.transpose(), E)
     assert "mathsf{T}" in td.canonicalize(S.transpose()).latex()  # Sᵀ stays
     assert not td.algebraic_eq(S.transpose(), S)
+
+
+# ---- sym/skew constructors (vibe 000080 Increment 7A) ----------------------
+
+def test_sym_skew_constructors():
+    # sym(A)=(A+Aᵀ)/2, skew(A)=(A−Aᵀ)/2 — thin builders for the (anti)symmetric
+    # part of a rank-2 tensor.
+    ws = tender.Workspace()
+    A = ws.field("A", 2)
+    assert td.structural_eq(td.sym(A), (A + A.transpose()) / 2)
+    assert td.structural_eq(td.skew(A), (A - A.transpose()) / 2)
+
+
+def test_sym_of_symmetric_field_is_the_field():
+    # For a symmetric-by-declaration field, sym(E) = (E+Eᵀ)/2 = (E+E)/2 = E:
+    # recognised via the symmetric-transpose fold (algebraic_eq), and the
+    # ½·2 scalar folds under simplify_scalars.
+    ws = tender.Workspace()
+    E = ws.field("E", 2, symmetric=True)
+    assert td.algebraic_eq(td.sym(E), E)
+    assert td.simplify_scalars(td.sym(E)).latex() == E.latex()
