@@ -1,7 +1,10 @@
 # 000080 — strain_compatibility.ipynb: notebook-play issues
 
-**Status: OPEN — eight issues recorded + implementation plan (Increment 0 +
-Increments 1–5, 7).** From notebook-driven derivations on the reassembled
+**Status: IN PROGRESS — eight issues recorded + implementation plan.  DONE:
+Increment 0 (Issue 7 crash fix, commit e9d9fb8) and the `(Aᵀ)ᵀ→A` involution
+(Issue 8 part b1 / Increment 7, commit 4b2b6e3).  Remaining: Increments 1–5 and
+the rest of Increment 7 (sym/skew constructors + transpose-over-sum symmetry
+recognition).** From notebook-driven derivations on the reassembled
 operator forms: Issues 1–6 come from `examples/strain_compatibility.ipynb` (one
 fixed helper cell + one changing experiment cell); **Issue 7** (a **hard crash**,
 the priority item) and **Issue 8** (symmetric/antisymmetric-part constructors +
@@ -414,7 +417,20 @@ implementation plan below.**
 
 ---
 
-## Issue 7 — `express(∇·T)` crashes: `encapsulate: unsupported factor node` on a ScalarDiv-wrapped transposed *basis-expanded* gradient (**hard bug**)
+## Issue 7 — `express(∇·T)` crashes: `encapsulate: unsupported factor node` on a ScalarDiv-wrapped transposed *basis-expanded* gradient (**hard bug**) — FIXED (Increment 0, commit e9d9fb8)
+
+**Resolution.** The choking node was an **`ExplicitSum`**, not a `⊗`: after
+`materialize` wrapped the implicit `u = u_i e_i` in an `ExplicitSum` binder,
+materializing the transpose `(∇u)ᵀ → Σ_i(u_i e_i)⊗∇` stranded that binder as a
+bare product factor inside `∇·(…)`, which `distribute_contraction` cannot split
+(it distributes over `Sum`, not a binder).  Fixed by self-preparing in
+`steps::canonicalize` *before* `materialize` — iterating
+`expand_dyad_ops ∘ distribute_contraction` to a joint fixpoint while the
+summation is still implicit (so the exposed sum stays a plain `⊗`/scalar the
+distributor reduces).  `cart.express(∇·T)` now yields the Navier–Lamé expansion
+(rank 1); 803 C++ + 245 Python green.  The result still carries Issues 1–5
+(∇-on-the-right, unresolved `tr`), addressed by the later increments.
+
 
 **Different example — balance equations via linear displacement.** Deriving the
 continuum balance equation `∇·T + … = 0` for an isotropic (Hooke) material:
@@ -513,10 +529,12 @@ construction*.  Two asks:
   (`algebraic_eq(E, Eᵀ) = True`, via the vibe-000078 trait), and
   `algebraic_eq(½(E+Eᵀ), E) = True`.
 - **Two supporting gaps that block recognition:**
-  - **Double-transpose involution `(Aᵀ)ᵀ → A` is not folded** for a generic
-    field: `algebraic_eq((Aᵀ)ᵀ, A)` is **False** — canon leaves `(Aᵀ)ᵀ` (and it
-    renders as malformed stacked superscripts `A^{\mathsf{T}}^{\mathsf{T}}`, a
-    minor render bug of its own).
+  - **Double-transpose involution `(Aᵀ)ᵀ → A`** — was not folded for a generic
+    field (`algebraic_eq((Aᵀ)ᵀ, A)` False; rendered as stacked superscripts
+    `A^{\mathsf{T}}^{\mathsf{T}}`).  **FIXED (commit 4b2b6e3):** `encapsulate`'s
+    Transpose arm now folds a transpose-of-transpose directly (the outer swap
+    undoes the inner), collapsing chains too (`((Xᵀ)ᵀ)ᵀ → Xᵀ`).  Test
+    `CanonicalizeNf.DoubleTransposeInvolutes`.
   - **Transpose is not distributed over a `Sum`/`ScalarDiv`**, so
     `((A+Aᵀ)/2)ᵀ` stays opaque instead of normalizing to `(Aᵀ + A)/2 = (A+Aᵀ)/2`
     (same fence-distribution family as **Issue 7**).
@@ -584,7 +602,14 @@ canonicalization change (Issue 1) is sequenced **last**: it is the highest-risk
 edit, and the earlier increments (a `Δ` node, symmetry folds) shrink the number
 of shapes it has to get right.
 
-## Increment 0 — `express`/`expand` self-prepares before nf-lowering (Issue 7, **priority lead**)
+## Increment 0 — `express`/`expand` self-prepares before nf-lowering (Issue 7, **priority lead**) — DONE (commit e9d9fb8)
+
+Landed as a self-prep fixpoint (`expand_dyad_ops ∘ distribute_contraction`) at
+the front of `steps::canonicalize`, *before* `materialize` (chosen over the
+narrower encapsulate-hardening: it fixes a direct `canonicalize(∇·T)` too, and
+both distributors are no-ops on ordinary inputs).  Full suite + examples green.
+Original plan below.
+
 
 **Goal.** `cart.express(∇·T)` (and the whole balance-equation pipeline) no longer
 crashes on a `ScalarDiv`-wrapped transposed basis-expanded gradient; the
@@ -748,7 +773,14 @@ the shapes (`∇·∇`, `(∇∇θ)ᵀ`) that trigger the reorder, shrinking its
 (watch the operator/differentiation and strain tests for reorder regressions);
 `strain_compatibility` example unchanged in result.
 
-## Increment 7 — `sym`/`skew` constructors + recognize a symmetric-by-construction tensor (Issue 8, parts A + b1)
+## Increment 7 — `sym`/`skew` constructors + recognize a symmetric-by-construction tensor (Issue 8, parts A + b1) — PARTIAL
+
+**Done (commit 4b2b6e3):** the `(Aᵀ)ᵀ → A` transpose involution (one of the two
+(b1) canon laws).  **Remaining:** the `sym`/`skew` constructors (A), transpose
+distribution over `Sum`/`ScalarDiv` for symmetry recognition (the other (b1)
+law — note `express`/canonicalize already distributes the transpose fence in the
+contraction path via Increment 0, but plain `algebraic_eq((A+Aᵀ)/2, sym)` recog
+still needs the sum-level rule), and the round-trip recognition assertions.
 
 **Goal.** `sym(A)`/`skew(A)` build the (anti)symmetric part, and the result is
 *recognized* (anti)symmetric — `algebraic_eq(sym(A), sym(A)ᵀ)` True,
