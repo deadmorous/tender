@@ -1128,6 +1128,29 @@ namespace steps
 
 auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
 {
+    // Self-prepare the fences before `materialize` (vibe 000080 Issue 7).  A
+    // transpose of a basis-expanded gradient dyad — `(∇u)ᵀ` with `u = u_i e_i`,
+    // nested in `∇·((∇u + (∇u)ᵀ)/2)` — must be materialized (`(a⊗b)ᵀ → b⊗a`)
+    // and its `∇·` distributed through the `⊗`/sum *while the summation is
+    // still implicit*.  Done after `materialize` instead, the sum is an
+    // `ExplicitSum` binder that materializing the transpose strands as a bare
+    // product factor inside the contraction (`∇·(Σ_i(u_i e_i) ⊗ ∇)`), which
+    // `distribute_contraction` cannot split (it distributes over `Sum`, not a
+    // binder) and which then reaches `encapsulate` and throws.  Iterate the two
+    // distributors to a joint fixpoint here: `distribute_contraction` peels the
+    // `/2`, splits the sum and pushes `∇·` through the `⊗` (floating the scalar
+    // `u_i`), and `expand_dyad_ops` materializes the transpose the split
+    // exposes — each pass consuming what the other reveals.  Both are no-ops on
+    // inputs without a dyad-fence / contraction, so ordinary expressions are
+    // untouched.
+    for (;;)
+    {
+        Expr const* const next =
+            steps::expand_dyad_ops(ctx, steps::distribute_contraction(ctx, e));
+        if (structural_eq(next, e))
+            break;
+        e = next;
+    }
     // The flip (vibe 000058 / C13): canonicalize is now `raise ∘ lower` over
     // the all-`*` normal form `Nf`, replacing the binary-tree `canon`.  The
     // prep `materialize` (realm-implicit → explicit `ExplicitSum`) +

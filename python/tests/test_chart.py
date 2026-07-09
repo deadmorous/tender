@@ -818,3 +818,32 @@ def test_operator_nabla_reproduces_chart_operators_after_expand():
     rc = chart.components(chart.rot(eps))
     assert all(td.algebraic_eq(rm[i][j], rc[i][j])
                for i in range(3) for j in range(3))
+
+
+def test_express_div_of_symmetric_gradient_stress():
+    # vibe 000080 Issue 7 (Increment 0): express(∇·T) for a Hooke stress built
+    # from the symmetric gradient of a *basis-expanded* displacement used to
+    # crash — encapsulate met a nested ⊗ under a transpose fence (the trapped
+    # ExplicitSum of u = u_i e_i, exposed when the transpose materialized after
+    # `materialize` wrapped the sum).  canonicalize now self-prepares the fences
+    # (distribute_contraction + expand_dyad_ops to a fixpoint) before materialize,
+    # so the whole balance-equation pipeline runs.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    u = tb.expand_in_basis(
+        t.field("u", 1, ctx=ctx), chart.physical_basis(), tb.Variance.Contravariant
+    )
+    nab = chart.nabla()
+    ident = t.identity(ctx)
+    lam = t.tensor(r"\lambda", 0, ctx=ctx)  # Lamé constants (not fields)
+    mu = t.tensor(r"\mu", 0, ctx=ctx)
+    eps = (nab * u + (nab * u).transpose()) / 2  # symmetric strain
+    stress = lam * eps.tr() * ident + 2 * mu * eps  # Hooke's law
+
+    result = chart.express(nab @ stress)  # must not raise
+    assert result.rank == 1  # ∇·T is a vector (the balance-equation term)
+
+    # The narrower trigger — ∇·(symmetric gradient) alone — also canonicalizes.
+    assert td.canonicalize(nab @ eps).rank == 1
+    # And the transpose of the basis-expanded gradient materializes.
+    assert "mathsf{T}" not in td.canonicalize((nab * u).transpose()).latex()
