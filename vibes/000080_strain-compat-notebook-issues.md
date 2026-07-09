@@ -1,16 +1,19 @@
 # 000080 — strain_compatibility.ipynb: notebook-play issues
 
-**Status: OPEN — seven issues recorded + implementation plan (Increment 0 +
-Increments 1–5).** From notebook-driven derivations on the reassembled operator
-forms: Issues 1–6 come from `examples/strain_compatibility.ipynb` (one fixed
-helper cell + one changing experiment cell); **Issue 7** comes from a second
+**Status: OPEN — eight issues recorded + implementation plan (Increment 0 +
+Increments 1–5, 7).** From notebook-driven derivations on the reassembled
+operator forms: Issues 1–6 come from `examples/strain_compatibility.ipynb` (one
+fixed helper cell + one changing experiment cell); **Issue 7** (a **hard crash**,
+the priority item) and **Issue 8** (symmetric/antisymmetric-part constructors +
+symmetry recognition + a symmetry-guarded-identity idea) come from a second
 example — continuum **balance equations via linear displacement** (Hooke's law,
-`∇·T`) — and is a **hard crash**, the priority item.  Mix of real bugs and
-API/usability friction.  The **Implementation plan** at the bottom covers the
-Issue 7 crash-fix (Increment 0, lead) and the five reduction/display gaps
-(Increments 1–5).  Issue 6 (turn the trace *equation* into an *identity*, built
-on the vibe-000054 selective-application primitive) is **deferred** — recorded
-with a brainstorm but intentionally left out of the plan.
+`∇·T`).  Mix of real bugs and API/usability friction.  The **Implementation
+plan** at the bottom covers the Issue 7 crash-fix (Increment 0, lead), the five
+reduction/display gaps (Increments 1–5), and Issue 8's constructors + symmetry
+recognition (Increment 7).  **Deferred (conditional-identity capabilities):**
+Issue 6 (turn the trace *equation* into an *identity*) and Issue 8(C) (a
+*symmetry-guarded* identity), both built on the vibe-000054 selective-application
+primitive — recorded with brainstorms but intentionally left out of the plan.
 
 Fixed helper cell (unchanged across variants):
 
@@ -491,7 +494,82 @@ crash (both spellings hit the same `encapsulate` error).
 
 ---
 
-# Implementation plan (Issues 1–5, plus the Issue 7 crash-fix as the priority lead)
+## Issue 8 — no `sym`/`skew` part constructors; a symmetric-*by-construction* tensor isn't recognized as symmetric; and a "symmetry-guarded identity" idea
+
+**Context.** The strain is written `ε = (∇u + (∇u)ᵀ)/2` — symmetric *by
+construction*.  Two asks:
+
+1. **Convenience constructors** for the symmetric / antisymmetric part of a
+   rank-2 tensor: `sym(A) = (A + Aᵀ)/2` and `skew(A) = (A − Aᵀ)/2`.
+2. **Establish the symmetry of the result** — the point is not just sugar: the
+   value should be *known* symmetric, so `sym(A)ᵀ = sym(A)` folds and downstream
+   reductions can rely on it.
+
+**Current state.**
+- **No `sym`/`skew` methods** on the Python surface.
+- **A symmetric-by-construction tensor is not recognized as symmetric.**
+  `td.algebraic_eq((A+Aᵀ)/2, ((A+Aᵀ)/2)ᵀ)` is **False** (and even without the
+  `/2`).  By contrast a **declared** `symmetric=True` field folds
+  (`algebraic_eq(E, Eᵀ) = True`, via the vibe-000078 trait), and
+  `algebraic_eq(½(E+Eᵀ), E) = True`.
+- **Two supporting gaps that block recognition:**
+  - **Double-transpose involution `(Aᵀ)ᵀ → A` is not folded** for a generic
+    field: `algebraic_eq((Aᵀ)ᵀ, A)` is **False** — canon leaves `(Aᵀ)ᵀ` (and it
+    renders as malformed stacked superscripts `A^{\mathsf{T}}^{\mathsf{T}}`, a
+    minor render bug of its own).
+  - **Transpose is not distributed over a `Sum`/`ScalarDiv`**, so
+    `((A+Aᵀ)/2)ᵀ` stays opaque instead of normalizing to `(Aᵀ + A)/2 = (A+Aᵀ)/2`
+    (same fence-distribution family as **Issue 7**).
+
+**The deeper idea — symmetry as a *guard* on identity application.** In a
+derivation that involves `ε` *and assumes its symmetry*, one wants to treat the
+definition `ε = (∇u + (∇u)ᵀ)/2` (i.e. `ε = sym(∇u)`) as an **identity applied to
+the derivation result** — but firing **only where the constraint (the symmetry
+of the matched subterm / the identity's LHS) holds**.  That is a **guarded /
+conditional identity**: `apply_identity` with a *predicate* checked against the
+match, not an unconditional rewrite.  It generalizes Issue 6's *provenance label*
+(a passive note that an identity holds under a hypothesis) into an *active guard*
+that is verified during matching.
+
+**Brainstorm.**
+
+- **(A) `sym`/`skew` as thin constructors.** `sym(A) → (A+Aᵀ)/2`,
+  `skew(A) → (A−Aᵀ)/2` on the expr/chart surface.  Trivial on its own — the value
+  is in (B).
+- **(B) Establish symmetry — two routes (not exclusive):**
+  - **(b1) Structural recognition.** Fix the small canon laws so a
+    symmetric-part *normalizes* to a canonical symmetric form: fold
+    `(Aᵀ)ᵀ → A` (transpose involution), distribute transpose over `Sum`/`ScalarDiv`,
+    then sum-commutativity makes `((A+Aᵀ)/2)ᵀ ≡ (A+Aᵀ)/2` — no trait needed, it
+    just folds (and `algebraic_eq` sees it).  Concrete and mostly small; the
+    involution and transpose-over-sum are reusable wins (the latter overlaps
+    Issue 7).
+  - **(b2) A carried symmetry trait.** Have `sym(A)` produce a value tagged
+    symmetric (extend the `symmetric=True` trait — today only on a *field* — to a
+    compound expression, or a transparent `Symmetrized`/`Skew` wrapper node that
+    canon/`encapsulate` read like the well-known symmetric fold).  Stronger
+    (works even where structural normalization is hard, e.g. through operators —
+    cf. Issue 5's operator-composition symmetry), but heavier (a trait/​node wired
+    through the visitors).
+- **(C) Guarded identities.** Add a *side-condition predicate* to `Identity` /
+  `apply_identity` — the rewrite fires only where the match satisfies the guard
+  (here: "the matched subterm is symmetric").  New capability; shares its home
+  with Issue 6 (conditional/provenance identities).  Needs: a way to *ask* "is
+  this subterm symmetric?" — which is exactly what (B) provides — so (C) depends
+  on (B).
+
+**Notes / triage.** (A)+(b1) are concrete and partly quick (the involution
+`(Aᵀ)ᵀ→A` is a tiny canon rule; transpose-over-sum overlaps Increment 0/Issue 7).
+(b2) and (C) are the deeper capabilities: a symmetry that is *carried* and a guard
+that is *checked*.  (C) (symmetry-guarded application) is deferred **alongside
+Issue 6** (both are conditional-identity capabilities); it should be designed
+together with the equation→identity work and the vibe-000054 positional
+primitive.  Relates to Issue 5 (operator-composition symmetry) and Issue 7
+(transpose fence distribution).
+
+---
+
+# Implementation plan (Issues 1–5 + 8, plus the Issue 7 crash-fix as the priority lead)
 
 Scope: the Issue 7 crash-fix plus the five reduction/display gaps.  **Out of
 scope:** Issue 6 (the equation→identity step and its vibe-000054
@@ -669,6 +747,41 @@ the shapes (`∇·∇`, `(∇∇θ)ᵀ`) that trigger the reorder, shrinking its
 **Verify.** `td.canonicalize(reass)` keeps every `∇` left; full suite green
 (watch the operator/differentiation and strain tests for reorder regressions);
 `strain_compatibility` example unchanged in result.
+
+## Increment 7 — `sym`/`skew` constructors + recognize a symmetric-by-construction tensor (Issue 8, parts A + b1)
+
+**Goal.** `sym(A)`/`skew(A)` build the (anti)symmetric part, and the result is
+*recognized* (anti)symmetric — `algebraic_eq(sym(A), sym(A)ᵀ)` True,
+`algebraic_eq(skew(A), −skew(A)ᵀ)` True — via structural normalization (no new
+trait/node needed).
+
+**Approach.**
+- **(A)** Add `sym`/`skew` on the expr/chart surface as thin
+  `(A ± Aᵀ)/2` builders (Python + binding).
+- **(b1)** Add the small canon laws that make a symmetric-part fold:
+  `(Aᵀ)ᵀ → A` (transpose involution) and transpose distribution over
+  `Sum`/`ScalarDiv` (`(X+Y)ᵀ → Xᵀ+Yᵀ`, `(X/s)ᵀ → Xᵀ/s`) — with sum
+  commutativity these normalize `((A+Aᵀ)/2)ᵀ` to `(A+Aᵀ)/2`.  The transpose-over-
+  sum/ScalarDiv piece overlaps **Increment 0** (Issue 7 fence distribution) —
+  share the implementation.
+
+**Design question.** Is structural recognition (b1) sufficient for the workflow,
+or is a *carried* symmetry trait (b2) needed where the symmetry survives through
+operators (Issue 5) / can't be normalized structurally?  Start with (b1); revisit
+(b2) if a real case needs it.
+
+**Out of scope here.** Issue 8(C) — the *symmetry-guarded* identity application —
+is **deferred with Issue 6** (conditional-identity capability, on the vibe-000054
+primitive).  (b1) is a prerequisite for (C): the guard "is this symmetric?" reuses
+the same recognition.
+
+**Files.** `python/tender/*.py`, `python/_core.cpp` (`sym`/`skew`);
+`src/derivation.cpp` / canon and `src/nf_lower.cpp` (involution + transpose
+distribution — shared with Increment 0).
+
+**Verify.** `sym`/`skew` round-trip; `(Aᵀ)ᵀ→A`; `((A±Aᵀ)/2)` recognized
+(anti)symmetric; the malformed `A^{T}^{T}` render is gone; the strain
+`ε = sym(∇u)` reads and folds as symmetric; full suite green.
 
 ## Cross-cutting
 
