@@ -1,10 +1,16 @@
 # 000080 — strain_compatibility.ipynb: notebook-play issues
 
-**Status: IN PROGRESS — eight issues recorded + implementation plan.  DONE:
-Increment 0 (Issue 7 crash fix, commit e9d9fb8) and the `(Aᵀ)ᵀ→A` involution
-(Issue 8 part b1 / Increment 7, commit 4b2b6e3).  Remaining: Increments 1–5 and
-the rest of Increment 7 (sym/skew constructors + transpose-over-sum symmetry
-recognition).** From notebook-driven derivations on the reassembled
+**Status: IN PROGRESS — eight issues + a plan whose sprint endpoint is the
+Navier–Lamé reduction (Increment 8).  DONE:** Increment 0 (Issue 7 crash fix,
+commit e9d9fb8) and the `(Aᵀ)ᵀ→A` involution (Issue 8 b1 / Increment 7, commit
+4b2b6e3).  **Remaining:** Increments 1–5, rest of 7, **6 (now a *correctness*
+prerequisite for 8, not last)**, and **8 (Navier–Lamé, the endpoint)**.
+**Deferred (needs special care):** vibe 000054 (selective application) and its
+riders Issue 6 (equation→identity) + Issue 8(C) (symmetry-guarded identity).
+**Key session lesson:** author operator derivations with the operand *abstract*
+(strain-compat template) and expand the basis *last*; basis-expanding `u` first
+is a correctness trap (μ-Laplacian vanishes).  **Notation: never `∇²` — use
+`∇·∇` / Laplacian.** From notebook-driven derivations on the reassembled
 operator forms: Issues 1–6 come from `examples/strain_compatibility.ipynb` (one
 fixed helper cell + one changing experiment cell); **Issue 7** (a **hard crash**,
 the priority item) and **Issue 8** (symmetric/antisymmetric-part constructors +
@@ -587,20 +593,58 @@ primitive.  Relates to Issue 5 (operator-composition symmetry) and Issue 7
 
 ---
 
-# Implementation plan (Issues 1–5 + 8, plus the Issue 7 crash-fix as the priority lead)
+# Implementation plan (Issues 1–5 + 8, the Issue 7 crash-fix, and the Navier–Lamé endpoint)
 
-Scope: the Issue 7 crash-fix plus the five reduction/display gaps.  **Out of
-scope:** Issue 6 (the equation→identity step and its vibe-000054
-selective-application dependency) — deferred, to be planned separately once the
-primitive and vibe 000054 are settled.
+Scope: the Issue 7 crash-fix (done), the five reduction/display gaps, Issue 8's
+constructors+recognition, **and — a sprint goal — reducing `∇·T` (Hooke stress)
+to the clean Navier–Lamé displacement form** (Increment 8).  **Out of scope
+(deferred, needs special care — user):** vibe 000054 (selective application) and
+the two capabilities that ride on it — Issue 6 (equation→identity) and Issue
+8(C) (symmetry-guarded identity).
 
-**Ordering rationale.** **Increment 0 (Issue 7) leads** — it is a hard crash
-blocking a whole workflow, is self-contained, and is independent of the display
-cluster.  Then the additive reductions (each a new rule, low blast radius,
-independently testable per the "test everything" principle).  The one
-canonicalization change (Issue 1) is sequenced **last**: it is the highest-risk
-edit, and the earlier increments (a `Δ` node, symmetry folds) shrink the number
-of shapes it has to get right.
+**Notation (user, going forward): never write `∇²`.**  ∇ is not a
+multiplicative-ring element, so a "power" is meaningless; the intended operation
+is a dot.  Write `∇·∇` (or "the Laplacian"/`Δ`, once Increment 3 lands), never
+`∇²`.
+
+**Course correction — the Navier–Lamé endpoint reframes the plan (session
+lessons).**  Driving `cart.express(∇·T)` with a **basis-expanded** displacement
+`u = u_i e_i` produces a **wrong** result, not merely an ugly one: the components
+`u_i` land to the *left* of the operators (`u_i ∇·∇ e_i`), so `∇·∇` differentiates
+only the constant frame vector `e_i` and the μ-Laplacian term **vanishes in
+Cartesian**.  Two findings reshape the plan:
+
+- **`reassemble(u_i e_i) = u` already works** (basis-invariant reassembly folds
+  the displacement) — the earlier "we can't recognize `u_i e_i = u`" worry was a
+  false alarm.  The real problem is *when* the basis is expanded, not whether it
+  can be folded.
+- **Keep `u` abstract** (exactly as strain-compat kept ε abstract).  With an
+  abstract `u`, `canonicalize(∇·T)` is *well-formed* — `μ (∇·∇ u + …) + λ …` with
+  `u` correctly to the **right** of the operators.  The design template is the
+  strain-compat pipeline (**abstract operand → expand ∇ → reduce → reassemble →
+  expand per-CS at the very end**); the basis should be expanded *last*, never
+  before the operator algebra.  This is a *usage/derivation-strategy* lesson, not
+  a from-scratch rebuild — but it does mean the Navier example must be authored
+  the abstract way, and a couple of new reductions are needed (below).
+
+- **Operator positioning (Issue 1) is a *correctness* blocker, not just
+  display.**  Even with abstract `u`, `∇` commutes past scalar factors to the
+  wrong operand: the `λ tr(sym ∇u) · (∇·I)` term has **dropped its Leibniz
+  `∇(∇·u)` piece** because `∇` skipped past the scalar `tr(…)` factor to act on
+  `I` alone (and `∇·I = 0` for the constant identity).  So **Increment 6 is
+  promoted from "display, do last" to a correctness prerequisite for the
+  Navier–Lamé goal** — it must land before Increment 8 can produce the right
+  answer.  (Design risk the user flagged: if a clean positional-operator model
+  proves hard to retrofit onto canon, this is the increment where a small
+  redesign, informed by these lessons, would live.)
+
+**Ordering rationale (revised).** Increment 0 (Issue 7) is **done**.  Next the
+additive reductions (1–5, 7) — each a new rule, low blast radius, independently
+testable.  **Increment 6 (operator positioning) moves earlier** — it is now a
+correctness prerequisite for Increment 8, not a cosmetic finish; still the
+highest-risk edit, so Increments 3 (`Δ`) and 5 (symmetry) should precede it to
+shrink its surface, but it must precede **Increment 8** (Navier–Lamé), which is
+the endpoint that consumes everything.
 
 ## Increment 0 — `express`/`expand` self-prepares before nf-lowering (Issue 7, **priority lead**) — DONE (commit e9d9fb8)
 
@@ -745,26 +789,35 @@ away; `algebraic_eq(∇∇θ, (∇∇θ)ᵀ)` becomes True.
 **Verify.** `reass` shows `−∇∇ tr(ε)` (no `ᵀ`); `algebraic_eq(∇∇θ, (∇∇θ)ᵀ)` True;
 `strain_compatibility` example's `closed` term can drop its `.transpose()`.
 
-## Increment 6 — operator-positional canon for bare `∇` (Issue 1)
+## Increment 6 — operator-positional canon for bare `∇` (Issue 1) — **correctness prerequisite for Increment 8**
 
-**Goal.** `canonicalize` keeps a bare `∇` (Nabla) to the **left** of its operand,
-so a reassembled operator form stays renderable after canon.
+**Goal.** `canonicalize` keeps a bare `∇` (Nabla) **left of its operand and left
+of any scalar factors it must act on**, so operator expressions stay both
+renderable *and semantically correct* after canon.
 
 **Approach.** Extend vibe 000077's operator-positional treatment (which pins an
-*applied* `Deriv` in a product) to a **bare `Nabla`** in the two commuting
-contexts that currently move it right: (i) a `Dot(∇, X)` must **not** be treated
-as the symmetric `a·b = b·a` (an operator contraction is directed), and (ii) the
+*applied* `Deriv` in a product) to a **bare `Nabla`** in the commuting contexts
+that currently move it right: (i) a `Dot(∇, X)` must **not** be treated as the
+symmetric `a·b = b·a` (an operator contraction is directed); (ii) the
 transpose-of-dyad materialization `(∇⊗X)ᵀ → X⊗∇` must not swap an operator leg to
-the right.  Both are in the canonicalization / factor-ordering / dyad-transpose
-logic.
+the right; **(iii) a scalar factor must not commute *leftward past* a `∇` it is
+the operand of** — this is the correctness leak behind the dropped Leibniz term
+(`λ tr(sym∇u) (∇·I)` lost its `∇(∇·u)` because `tr(…)` slid left of `∇`).  All in
+the canonicalization / factor-ordering / dyad-transpose logic.
 
-**Fallback.** If a full canon change is too invasive, a **render-time
-normalization** that pulls bare operators left just before display (leaving canon
-untouched) — weaker (only fixes display, not `algebraic_eq`) but low-risk.
+**Not just display (revised).** Because of (iii), a **render-time normalization
+fallback is *insufficient*** — the mis-positioning changes what `apply_operators`
+differentiates, so the *value* is wrong (μ-Laplacian → 0 in Cartesian, dropped
+`∇(∇·u)`).  The canon/positioning fix is mandatory, not cosmetic.
 
-**Design note.** Sequenced last deliberately: touches core ordering (highest
-regression risk), and Increments 3 (Δ node) and 5 (symmetry fold) remove two of
-the shapes (`∇·∇`, `(∇∇θ)ᵀ`) that trigger the reorder, shrinking its surface.
+**Design note (revised).** Promoted from last-and-cosmetic to a **correctness
+prerequisite for Increment 8** (Navier–Lamé).  Still the highest-risk edit, so
+Increments 3 (`Δ`) and 5 (symmetry) should precede it (they remove `∇·∇` /
+`(∇∇θ)ᵀ` shapes), but it must land **before** Increment 8.  If retrofitting a
+clean positional-operator model onto canon proves too invasive, this is where a
+small, lessons-informed redesign of the operator/positioning model belongs
+(user's "better design fed by lessons learned" — kept *scoped* to operator
+positioning, not a from-scratch rewrite).
 
 **Files.** `src/derivation.cpp` (canon / tensor ordering), possibly
 `src/tensor_order.cpp`; or `src/render.cpp` for the fallback.
@@ -815,6 +868,49 @@ distribution — shared with Increment 0).
 (anti)symmetric; the malformed `A^{T}^{T}` render is gone; the strain
 `ε = sym(∇u)` reads and folds as symmetric; full suite green.
 
+## Increment 8 — reduce `∇·T` to the clean Navier–Lamé displacement form (**sprint endpoint**)
+
+**Goal.** From the isotropic Hooke stress `T = λ(∇·u)I + 2μ sym(∇u)` (`u`
+abstract), derive
+`∇·T = (λ+μ) ∇(∇·u) + μ ∇·∇ u`
+as an invariant operator identity, then expand it per coordinate system — the
+continuum balance-equation term, in *any* CS.  (No `∇²`: write `∇·∇ u` or "the
+Laplacian of `u`".)
+
+**Approach — mirror the strain-compat pipeline, `u` abstract throughout.**
+1. Build `T` with `u = ws.field("u", 1)` **abstract** (do *not* basis-expand);
+   `ε = sym(∇u)` (Increment 7's `sym`).
+2. Apply/expand the operators keeping `u` abstract, so `∇·T` reduces to a sum of
+   `∇(∇·u)`, `∇·∇ u`, `∇·((∇u)ᵀ)`, `∇(∇·u)`-from-`∇·((∇·u)I)` terms — **with the
+   operators correctly positioned** (needs **Increment 6**: today `∇` slides past
+   the scalar `tr`/`λ` factors and drops the Leibniz `∇(∇·u)` piece, and `∇·I`
+   wrongly collapses to 0).
+3. Reduce the pieces with Increments 1–5: `∇·((∇·u)I) = ∇(∇·u)` (product rule +
+   `∇·I` handling), `∇·((∇u)ᵀ) = ∇(∇·u)`, `∇·∇u` stays / folds to `Δu`
+   (Increment 3), collect like terms → `(λ+μ)∇(∇·u) + μ ∇·∇u`.
+4. **Reassemble / present** as the invariant identity, then **expand per-CS at
+   the very end** (`chart.express` / `chart.components`), with `u` basis-expanded
+   *last* — where `reassemble(u_i e_i)=u` etc. already work.
+
+**Likely new sub-gaps to surface while building (record as found):**
+- `∇·((∇·u) I) = ∇(∇·u)` — divergence of a scalar times the identity (the
+  product-rule / `∇·I` reduction); the current output mis-handles it (Increment
+  6's positioning + an `∇·(fI)` rule).
+- Collecting `∇(∇·u)` from two different terms (the `λ` term and half of the `2μ`
+  term) into one `(λ+μ)` coefficient — like-term collection over operator
+  expressions.
+- Whether a `reassemble`-style step is needed to name `∇·∇u`/`∇(∇·u)`, or the
+  reduced form is already clean.
+
+**Files.** Driven by Increments 1–6 landing; a new `examples/` example
+(`elasticity_balance` / `navier_lame.{py,ipynb}`) as the witness; reductions in
+`src/derivation.cpp` / `src/chart.cpp` as the sub-gaps demand.
+
+**Verify.** `∇·T` reduces to `(λ+μ)∇(∇·u) + μ ∇·∇u` (abstract), checked
+component-wise against a brute-force `chart.div(expand T)` in a Cartesian **and**
+a cylindrical frame (the curvilinear payoff — the μ-Laplacian must **not** vanish,
+the regression the basis-expanded route hit); the example runs end-to-end.
+
 ## Cross-cutting
 
 - **Per CLAUDE.md:** every increment stays buildable/testable (incremental
@@ -825,8 +921,8 @@ distribution — shared with Increment 0).
 - **Examples — two end-to-end witnesses.** (i) `strain_compatibility.{py,ipynb}`:
   after Increments 1–5 it should reduce `tr(inc ε)` cleanly and display the closed
   form without stray `ᵀ` / `∇·∇` / ∇-on-the-right (the final equation-closure
-  remains Issue 6, deferred).  (ii) A **balance-equations / Navier–Lamé** example
-  (`∇·T` for Hooke's law through displacement): after Increment 0 it should run
-  without a manual `canonicalize`, and after Increments 1–5 display a clean
-  per-CS balance equation.  Worth adding as a first-class example
-  (`examples/`) once Increment 0 lands.
+  remains Issue 6, deferred).  (ii) A new **Navier–Lamé / elasticity-balance**
+  example (Increment 8): `∇·T` reduced to `(λ+μ)∇(∇·u) + μ ∇·∇u` with `u`
+  abstract, then expanded per-CS — authored the *abstract-operand* way (u
+  basis-expanded last), and checked in Cartesian **and** cylindrical.  This is the
+  sprint endpoint; it consumes Increments 1–6.
