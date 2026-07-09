@@ -898,3 +898,39 @@ def test_scalar_div_distributes_over_sum():
         td.expand_dyad_ops(((A + B) / 2).transpose()),
         (A.transpose() + B.transpose()) / 2,
     )
+
+
+# ---- factor_common: reverse of distribution (vibe 000080) ------------------
+
+def test_factor_common_scalar_factor():
+    # λ (∇·u) + μ (∇·u) → (λ + μ) (∇·u): a common rank-0 factor (∇·u, itself a
+    # scalar) is pulled out — the case collect_terms misses (it folds the whole
+    # scalar product into a coefficient).
+    ws = tender.Workspace()
+    u = ws.field("u", 1)
+    nab = tender.nabla(ctx=ws.ctx)
+    lam = tender.tensor(r"\lambda", 0, ctx=ws.ctx)
+    mu = tender.tensor(r"\mu", 0, ctx=ws.ctx)
+    s = lam * (nab @ u) + mu * (nab @ u)
+    fc = td.factor_common(s)
+    assert fc.latex() == r"(\lambda + \mu) \, \nabla \cdot \mathbf{u}"
+    # correctness: distributing it back recovers the original sum.
+    assert td.algebraic_eq(td.expand_products(fc), s)
+
+
+def test_factor_common_nested_in_gradient_and_noop():
+    ws = tender.Workspace()
+    u = ws.field("u", 1)
+    nab = tender.nabla(ctx=ws.ctx)
+    lam = tender.tensor(r"\lambda", 0, ctx=ws.ctx)
+    mu = tender.tensor(r"\mu", 0, ctx=ws.ctx)
+    # reaches a sum nested inside a gradient: ∇(λ∇·u + μ∇·u) → ∇((λ+μ)∇·u).
+    g = nab * (lam * (nab @ u) + mu * (nab @ u))
+    fc = td.factor_common(g)
+    assert fc.latex() == r"\nabla \, (\lambda + \mu) \, \nabla \cdot \mathbf{u}"
+    # correctness: both distribute to the same fully-expanded form (a robust
+    # check that avoids canonicalising the bare ∇, which is unstable).
+    assert td.structural_eq(td.expand_products(fc), td.expand_products(g))
+    # no common factor → unchanged.
+    s2 = lam * (nab @ u) + mu * u
+    assert td.structural_eq(td.factor_common(s2), s2)

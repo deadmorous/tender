@@ -882,10 +882,11 @@ TEST(Render, NablaOperator)
         "(\\nabla \\mathbf{v})^{\\mathsf{T}}");
     // f⊗∇ for a rank-0 f is the gradient ∇f (its transpose is itself), no ᵀ.
     EXPECT_EQ(latex(*make_tensor_product(ctx, f, del)), "\\nabla f");
-    // A rank-0 divergence-valued operand keeps no spurious ᵀ: (∇·v)⊗∇ → ∇(∇·v).
+    // A rank-0 divergence-valued operand keeps no spurious ᵀ: (∇·v)⊗∇ → ∇(∇·v)
+    // (the divergence operand of the gradient is parenthesised).
     EXPECT_EQ(
         latex(*make_tensor_product(ctx, make_dot(ctx, del, v), del)),
-        "\\nabla \\nabla \\cdot \\mathbf{v}");
+        "\\nabla (\\nabla \\cdot \\mathbf{v})");
 }
 
 // ---- render_nf_latex (the Nf normal-form renderer) ---------------------

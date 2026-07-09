@@ -3838,6 +3838,34 @@ TEST(CollectTerms, GroupsByDyadSummingScalarCoefficients)
     EXPECT_EQ(count(tex, "\\mathbf{g} \\, \\mathbf{e}"), 1);
 }
 
+// factor_common pulls a shared rank-0 factor out of a sum — the reverse of
+// distribution — where collect_terms cannot (the shared factor is itself a
+// scalar, so it lands in the coefficient).  `λ s + μ s → (λ + μ) s`, and it
+// leaves a sum with no common factor untouched (vibe 000080).
+TEST(FactorCommon, PullsSharedScalarFactorFromSum)
+{
+    Context ctx;
+    auto* lam = make_tensor_object(ctx, make_tensor_name("\\lambda"), {}, 0);
+    auto* mu = make_tensor_object(ctx, make_tensor_name("\\mu"), {}, 0);
+    auto* s = make_tensor_object(ctx, make_tensor_name("s"), {}, 0); // scalar
+    // λ s + μ s → (λ + μ) s.
+    auto* sum = make_sum(
+        ctx, make_tensor_product(ctx, lam, s), make_tensor_product(ctx, mu, s));
+    auto* out = steps::factor_common(ctx, sum);
+    auto const* tp = std::get_if<TensorProduct>(&out->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_NE(std::get_if<Sum>(&tp->left->node), nullptr); // (λ + μ)
+    EXPECT_EQ(tp->right, s);                               // · s
+    // Distributing it back recovers the original sum.
+    EXPECT_TRUE(algebraic_eq(ctx, steps::expand_products(ctx, out), sum));
+
+    // No shared factor → unchanged.
+    auto* t = make_tensor_object(ctx, make_tensor_name("t"), {}, 0);
+    auto* sum2 = make_sum(
+        ctx, make_tensor_product(ctx, lam, s), make_tensor_product(ctx, mu, t));
+    EXPECT_TRUE(structural_eq(steps::factor_common(ctx, sum2), sum2));
+}
+
 // vibe 000074: algebraic_eq closes the fraction-shape gap of theory T0 — the
 // canonical forms keep x/r + y/r and (x+y)/r apart, so algebraic_eq falls back
 // to checking that the difference simplifies to the literal 0.

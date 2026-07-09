@@ -215,6 +215,14 @@ auto fold_equal_addends(Context& ctx, Expr const* e) -> Expr const*;
 // terms to one per dyad.  A zero combined coefficient drops the term.
 auto collect_terms(Context& ctx, Expr const* e) -> Expr const*;
 
+// Factor a common scalar factor out of an additive group — the reverse of
+// distribution (vibe 000080): `λ (∇·u) + μ (∇·u) → (λ + μ) (∇·u)`.  Only rank-0
+// non-literal factors are pulled out (they commute, so it is always valid); a
+// common numeric coefficient is left to collect_terms and a common *tensor*
+// factor is already handled there.  Runs bottom-up, so it also factors a sum
+// nested inside a gradient: `∇(λ∇·u + μ∇·u) → ∇((λ+μ)∇·u)`.
+auto factor_common(Context& ctx, Expr const* e) -> Expr const*;
+
 // Rewrite an expression into algebraic normal form (vibe 000037): the local
 // AC/α-canonical form for which structural_eq decides theory T0.
 //

@@ -244,6 +244,18 @@ def collect_terms(expr):
     return _d._collect_terms(expr)
 
 
+def factor_common(expr):
+    """Factor a common scalar factor out of an additive group (vibe 000080).
+
+    The reverse of distribution: ``λ (∇·u) + μ (∇·u) → (λ + μ) (∇·u)``.  Only
+    rank-0 non-literal factors are pulled out (they commute, so it is always
+    valid); a common numeric coefficient is left to :func:`collect_terms` and a
+    common *tensor* factor is already handled there.  Runs bottom-up, so it also
+    factors a sum nested inside a gradient: ``∇(λ∇·u + μ∇·u) → ∇((λ+μ)∇·u)``.
+    """
+    return _d._factor_common(expr)
+
+
 def canonicalize(expr):
     """Rewrite into algebraic normal form (vibe 000037).
 

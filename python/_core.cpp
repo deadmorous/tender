@@ -835,6 +835,15 @@ NB_MODULE(_core, m)
         "curvilinear second gradient's raw terms to one per e_i⊗e_j).");
 
     md.def(
+        "_factor_common",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::factor_common(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Factor a common scalar factor out of an additive group (reverse of "
+        "distribution): λ(∇·u) + μ(∇·u) → (λ+μ)(∇·u).  Reaches a sum nested in "
+        "a gradient too: ∇(λ∇·u + μ∇·u) → ∇((λ+μ)∇·u).");
+
+    md.def(
         "_canonicalize",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::canonicalize(*e.ctx, e.expr)); },

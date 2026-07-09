@@ -519,3 +519,32 @@ def test_canonicalize_keeps_nabla_on_the_left():
     assert gt == r"(\nabla (\nabla \cdot \boldsymbol{\varepsilon}))^{\mathsf{T}}"
     # value is unchanged by the reorder.
     assert td.algebraic_eq(td.canonicalize(nab @ (nab @ eps)), nab @ (nab @ eps))
+
+
+def test_navier_lame_endpoint():
+    # vibe 000080 Increment 8 endpoint: ∇·T for the isotropic Hooke stress
+    # reduces all the way to the Navier–Lamé operator form μ∇·∇u + ∇((λ+μ)∇·u)
+    # (= μΔu + (λ+μ)∇(∇·u)) via expand ∇ → apply ∂ → e·I fold → reassemble →
+    # collect_terms → factor_common.
+    ws = t.Workspace()
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    nab = t.nabla(ctx=ws.ctx)
+    I = t.identity(ws.ctx)
+    lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+    mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+    u = ws.field("u", 1)
+
+    T = lam * (nab @ u) * I + mu * (nab * u + (nab * u).transpose())
+    interior = td.contract_identity(td.canonicalize(cart.expand_nabla(nab @ T)))
+    reass = cart.reassemble_nabla(td.canonicalize(interior))
+    nl = td.factor_common(td.collect_terms(reass))
+
+    assert (
+        nl.latex()
+        == r"\mu \, \nabla \cdot \nabla \, \mathbf{u} + \nabla (\lambda + \mu) \, \nabla \cdot \mathbf{u}"
+    )
+    # correctness: factor_common only regroups coefficients, so nl and
+    # collect_terms(reass) distribute to the same fully-expanded form.
+    ct = td.collect_terms(reass)
+    assert td.structural_eq(td.expand_products(nl), td.expand_products(ct))

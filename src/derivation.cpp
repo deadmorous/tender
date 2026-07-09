@@ -2968,6 +2968,80 @@ auto collect_terms(Context& ctx, Expr const* e) -> Expr const*
     return out ? out : make_scalar(ctx, Rational{0});
 }
 
+auto factor_common(Context& ctx, Expr const* e) -> Expr const*
+{
+    // Factor a common (scalar) factor out of an additive group — the reverse of
+    // distribution: `λ (∇·u) + μ (∇·u) → (λ + μ) (∇·u)` (vibe 000080).  Only
+    // rank-0 non-literal factors are pulled out (they commute freely, so the
+    // factoring is order-independent and always valid; numeric coefficients are
+    // left to collect_terms/canon, and a common *tensor* factor is handled by
+    // collect_terms).  Runs bottom-up, so it also reaches a sum nested inside a
+    // gradient, `∇(λ∇·u + μ∇·u) → ∇((λ+μ)∇·u)`.
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& ctx, Expr const* node) -> Expr const*
+        {
+            if (!std::holds_alternative<Sum>(node->node)
+                && !std::holds_alternative<Difference>(node->node))
+                return node;
+            std::vector<std::pair<int, Expr const*>> addends;
+            collect_signed_addends(node, +1, addends);
+            if (addends.size() < 2)
+                return node;
+
+            std::vector<std::vector<Expr const*>> avail(addends.size());
+            for (std::size_t i = 0; i < addends.size(); ++i)
+                flatten_factors(addends[i].second, avail[i]);
+
+            // A candidate common factor: a rank-0, non-literal factor of the
+            // first addend that occurs (with multiplicity) in every addend.
+            std::vector<Expr const*> common;
+            for (Expr const* f: avail[0])
+            {
+                if (!f || infer_rank(f) != std::optional<int>{0}
+                    || std::holds_alternative<ScalarLiteral>(f->node))
+                    continue;
+                std::vector<int> pos(addends.size(), -1);
+                bool in_all = true;
+                for (std::size_t i = 0; i < addends.size() && in_all; ++i)
+                {
+                    for (std::size_t k = 0; k < avail[i].size(); ++k)
+                        if (avail[i][k] && structural_eq(avail[i][k], f))
+                        {
+                            pos[i] = static_cast<int>(k);
+                            break;
+                        }
+                    in_all = pos[i] >= 0;
+                }
+                if (!in_all)
+                    continue;
+                for (std::size_t i = 0; i < addends.size(); ++i)
+                    avail[i][static_cast<std::size_t>(pos[i])] = nullptr;
+                common.push_back(f);
+            }
+            if (common.empty())
+                return node;
+
+            // Σ sign_i · (remaining factors of addend i), then multiply by the
+            // common part: (λ + μ) (∇·u).
+            Expr const* rem_sum = nullptr;
+            for (std::size_t i = 0; i < addends.size(); ++i)
+            {
+                std::vector<Expr const*> rem;
+                for (Expr const* f: avail[i])
+                    if (f)
+                        rem.push_back(f);
+                Expr const* term = rem.empty() ? make_scalar(ctx, Rational{1}) :
+                                                 product_of(ctx, rem);
+                if (addends[i].first < 0)
+                    term = make_negate(ctx, term);
+                rem_sum = rem_sum ? make_sum(ctx, rem_sum, term) : term;
+            }
+            return make_tensor_product(ctx, rem_sum, product_of(ctx, common));
+        });
+}
+
 // ---- partial differentiation (vibe 000069 M2) --------------------------
 
 namespace
