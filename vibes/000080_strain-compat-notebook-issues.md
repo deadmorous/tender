@@ -1,13 +1,16 @@
 # 000080 — strain_compatibility.ipynb: notebook-play issues
 
-**Status: OPEN — six issues recorded + implementation plan for Issues 1–5.**
-While experimenting with `examples/strain_compatibility.ipynb`, the user drives
-one fixed helper cell and one changing experiment cell, and hits a series of
-issues (mix of real bugs and API/usability friction).  Issues 1–5 are the
-reduction/display gaps and are covered by the **Implementation plan** at the
-bottom.  Issue 6 (turn the trace *equation* into an *identity*, built on the
-vibe-000054 selective-application primitive) is **deferred** — recorded with a
-brainstorm but intentionally left out of the plan.
+**Status: OPEN — seven issues recorded + implementation plan (Increment 0 +
+Increments 1–5).** From notebook-driven derivations on the reassembled operator
+forms: Issues 1–6 come from `examples/strain_compatibility.ipynb` (one fixed
+helper cell + one changing experiment cell); **Issue 7** comes from a second
+example — continuum **balance equations via linear displacement** (Hooke's law,
+`∇·T`) — and is a **hard crash**, the priority item.  Mix of real bugs and
+API/usability friction.  The **Implementation plan** at the bottom covers the
+Issue 7 crash-fix (Increment 0, lead) and the five reduction/display gaps
+(Increments 1–5).  Issue 6 (turn the trace *equation* into an *identity*, built
+on the vibe-000054 selective-application primitive) is **deferred** — recorded
+with a brainstorm but intentionally left out of the plan.
 
 Fixed helper cell (unchanged across variants):
 
@@ -408,18 +411,132 @@ implementation plan below.**
 
 ---
 
-# Implementation plan (Issues 1–5)
+## Issue 7 — `express(∇·T)` crashes: `encapsulate: unsupported factor node` on a ScalarDiv-wrapped transposed *basis-expanded* gradient (**hard bug**)
 
-Scope: the five reduction/display gaps.  **Out of scope:** Issue 6 (the
-equation→identity step and its vibe-000054 selective-application dependency) —
-deferred, to be planned separately once the primitive below and vibe 000054 are
-settled.
+**Different example — balance equations via linear displacement.** Deriving the
+continuum balance equation `∇·T + … = 0` for an isotropic (Hooke) material:
 
-**Ordering rationale.** Additive reductions first (each is a new rule, low blast
-radius, independently testable per the "test everything" principle).  The one
+```python
+u = ws.field(r"u", 1)
+u = tb.expand_in_basis(u, cart.physical_basis(), tb.Variance.Contravariant)  # u_i e_i
+eps = (nabla*u + (nabla*u).transpose())/2        # symmetric strain  (½(∇u+(∇u)ᵀ))
+I   = t.identity()
+lam = t.tensor(r"\lambda", 0); mu = t.tensor(r"\mu", 0)   # Lamé constants (not fields)
+T   = lam*eps.tr()*I + 2*mu*eps                   # Hooke's law
+cart.express(nabla@T)                             # ⟶ ValueError
+```
+
+```
+ValueError: encapsulate: unsupported factor node
+            (a nested ⊗ inside an operand awaits fence distribution)
+```
+
+Goal: `∇·T` expressed through the displacement `u` in *any* CS, so the balance
+equations follow per coordinate system.
+
+**Trigger — needs all three ingredients together** (each removed individually
+works):
+
+1. a **basis-expanded gradient** `∇u = ∇⊗(u_i e_i)` — a *multi-factor* nested `⊗`
+   (∇, the component `u_i`, the frame vector `e_i`), **not** an atomic field;
+2. **transposed inside a sum**: `∇u + (∇u)ᵀ`;
+3. wrapped in a **`ScalarDiv`**: `(…)/2`; under an outer **`∇·`**.
+
+Verified isolations (all `cart.express(…)`):
+
+| expression | result |
+|---|---|
+| `∇·((∇u + (∇u)ᵀ)/2)`, **basis-expanded** u | **crash** |
+| `∇·((∇u + (∇u)ᵀ)/2)`, **plain** (non-expanded) u | OK |
+| `∇·((∇u)ᵀ/2)` (no sum) | OK |
+| `∇·(∇u + (∇u)ᵀ)` (no `/2`) | OK |
+| `∇·(∇u/2 + (∇u)ᵀ/2)` (`/2` distributed by hand) | OK |
+| `∇·((A + Aᵀ)/2)`, A an atomic rank-2 field | OK |
+| `∇·((a⊗b + (a⊗b)ᵀ)/2)`, plain dyad | OK |
+
+**Diagnosis.** `(∇u)ᵀ` of a basis-expanded gradient is the transpose of a
+*multi-factor* product `(∇ ⊗ u_i ⊗ e_i)ᵀ`.  The `ScalarDiv` fence (and the
+enclosing `Sum`) **block the transpose-fence distribution** from reaching that
+nested `⊗` before nf-lowering, so `encapsulate` (src/nf_lower.cpp) meets an
+undistributed nested `⊗` inside a `Transpose` operand and throws.  `express` does
+**not self-prepare** — it lowers without first canonicalizing / distributing the
+`ScalarDiv`+`Transpose` fences.  Same family as vibe 000078 bug 3c (a transpose
+fence hiding a nested/zero `⊗`), and a direct instance of the *"steps must
+self-prepare"* principle (vibes 000060/000061): the step should materialize /
+distribute internally rather than require the caller to prepare the input.
+
+**Workarounds (today).**
+- Distribute the `/2` by hand: `∇·(∇u/2 + (∇u)ᵀ/2)`.
+- **Canonicalize the operand before `∇·`:** `cart.express(nabla @ td.canonicalize(T))`
+  succeeds (rank 1) and yields the Navier–Lamé expansion — but the result still
+  carries Issues 1 (∇-on-the-right: `u_i e_i ∇`, `∇·e_i ∇`) and unresolved `tr`,
+  so a *clean* balance equation still needs Issues 1–5.
+  (Note `cart.express(td.canonicalize(nabla@T))` — canon *after* wrapping — does
+  **not** help; the `∇·` must sit outside the already-prepared operand.)
+
+**Repro (headless).**
+```python
+u  = tb.expand_in_basis(ws.field("u",1), cart.physical_basis(), tb.Variance.Contravariant)
+gu = nabla*u
+cart.express(nabla @ ((gu + gu.transpose())/2))   # ValueError
+```
+
+**Notes / triage.** **Real, hard bug (a crash), not a display gap** — and it
+blocks an entirely new workflow (elasticity balance equations / Navier–Lamé),
+so it is the **highest-priority** item here and is **independent** of the
+operator-display cluster (Issues 1–6).  Also a `.tr()` (trace) vs `.transpose()`
+naming trap sits nearby: writing `(∇u).tr()` for the strain's symmetric part is a
+natural mistake (`.tr()` is *trace*, rank 0), though it is orthogonal to this
+crash (both spellings hit the same `encapsulate` error).
+
+---
+
+# Implementation plan (Issues 1–5, plus the Issue 7 crash-fix as the priority lead)
+
+Scope: the Issue 7 crash-fix plus the five reduction/display gaps.  **Out of
+scope:** Issue 6 (the equation→identity step and its vibe-000054
+selective-application dependency) — deferred, to be planned separately once the
+primitive and vibe 000054 are settled.
+
+**Ordering rationale.** **Increment 0 (Issue 7) leads** — it is a hard crash
+blocking a whole workflow, is self-contained, and is independent of the display
+cluster.  Then the additive reductions (each a new rule, low blast radius,
+independently testable per the "test everything" principle).  The one
 canonicalization change (Issue 1) is sequenced **last**: it is the highest-risk
 edit, and the earlier increments (a `Δ` node, symmetry folds) shrink the number
 of shapes it has to get right.
+
+## Increment 0 — `express`/`expand` self-prepares before nf-lowering (Issue 7, **priority lead**)
+
+**Goal.** `cart.express(∇·T)` (and the whole balance-equation pipeline) no longer
+crashes on a `ScalarDiv`-wrapped transposed basis-expanded gradient; the
+transpose fence over a multi-factor `⊗` is distributed before `encapsulate` runs.
+
+**Approach.**
+- Make the `express`/`expand` operator path **self-prepare** (per vibes
+  000060/000061): before nf-lowering, distribute the `ScalarDiv` into its
+  numerator sum and push the `Transpose` fence through the multi-factor `⊗`
+  (`(a⊗b⊗c)ᵀ` distribution / `expand_dyad_ops`-style fence removal) — i.e. run
+  the same normalization that canonicalizing the operand first already achieves
+  (the verified workaround `express(∇· canonicalize(operand))`).
+- Alternatively/additionally, harden `encapsulate` (src/nf_lower.cpp) so a
+  `Transpose` operand carrying an undistributed nested `⊗` is distributed in
+  place rather than throwing (mirrors the vibe 000078 bug-3c fence handling).
+
+**Design question.** Is the right fix (a) a self-preparation pass at the front of
+`express`/the operator lowering (broadest, fixes the class), or (b) a targeted
+fence-distribution in `encapsulate` for the `ScalarDiv`/`Transpose` shape (narrow,
+local)?  Prefer (a) if it does not perturb already-working paths; keep (b) as the
+safety net.
+
+**Files.** `src/chart.cpp` (`express`/`expand`), `src/nf_lower.cpp`
+(`encapsulate` fence handling), possibly `src/derivation.cpp`.
+
+**Verify.** The Issue-7 repro `cart.express(nabla@((gu+gu.T)/2))` (basis-expanded)
+succeeds; the full Hooke `cart.express(nabla@T)` succeeds without a manual
+`canonicalize`; the isolation table above all pass; regression-check that
+plain-`u`, no-`/2`, and atomic-field variants still work; full suite green.
+(Clean *rendering* of the result still depends on Increments 1–6.)
 
 ## Increment 1 — `tr(W) → dim` for a well-known symmetric tensor (Issue 3; atom of 2(i))
 
@@ -560,7 +677,11 @@ the shapes (`∇·∇`, `(∇∇θ)ᵀ`) that trigger the reorder, shrinking its
   update), runs clang-format, keeps notebooks stripped, and commits naturally on
   the current branch.
 - **Coverage:** keep line coverage ≥ 90% (the CI gate) as new branches land.
-- **Examples:** `strain_compatibility.{py,ipynb}` is the end-to-end witness —
-  after Increments 1–5 it should reduce `tr(inc ε)` cleanly and display the
-  closed form without stray `ᵀ` / `∇·∇` / ∇-on-the-right.  (The final
-  equation-closure remains Issue 6, deferred.)
+- **Examples — two end-to-end witnesses.** (i) `strain_compatibility.{py,ipynb}`:
+  after Increments 1–5 it should reduce `tr(inc ε)` cleanly and display the closed
+  form without stray `ᵀ` / `∇·∇` / ∇-on-the-right (the final equation-closure
+  remains Issue 6, deferred).  (ii) A **balance-equations / Navier–Lamé** example
+  (`∇·T` for Hooke's law through displacement): after Increment 0 it should run
+  without a manual `canonicalize`, and after Increments 1–5 display a clean
+  per-CS balance equation.  Worth adding as a first-class example
+  (`examples/`) once Increment 0 lands.
