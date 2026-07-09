@@ -1002,6 +1002,29 @@ auto fold_divergences(
     return strip_free_marks(ctx, n);
 }
 
+// Does `e` carry the field being reassembled — a frame-direction vector, or a
+// ∂-marked tensor — anywhere in its tree?  A ⊗-factor that carries neither is a
+// plain scalar coefficient (a Lamé constant λ/μ, a numeric factor), which must
+// ride through reassembly rather than be mistaken for the operand blob (vibe
+// 000080, Increment 8: reassemble_nabla dropped leading scalars).
+auto carries_field(Context& ctx, Expr const* e, Basis const& fb) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (frame_dir_index(n, fb))
+                found = true;
+            else if (auto const* t = std::get_if<TensorObject>(&n->node);
+                     t && !t->deriv_marks.empty())
+                found = true;
+            return n;
+        });
+    return found;
+}
+
 // Reassemble one additive term (a ⊗-product) into ∇ operators.
 auto reassemble_term(
     Context& ctx,
@@ -1028,6 +1051,7 @@ auto reassemble_term(
     // one factor carrying the field).
     int laplacians = 0;
     std::vector<Expr const*> identities;
+    std::vector<Expr const*> coefficients;
     std::vector<int> grad_positions;
     Expr const* operand = nullptr;
     int operand_pos = -1;
@@ -1048,6 +1072,14 @@ auto reassemble_term(
         if (is_identity_tensor(f))
         {
             identities.push_back(f);
+            continue;
+        }
+        // A factor with no field/frame content is a scalar coefficient (λ, μ,
+        // a numeric factor); keep it aside to multiply back in, so it is not
+        // overwritten as (or by) the field-carrying operand blob.
+        if (!carries_field(ctx, f, fb))
+        {
+            coefficients.push_back(f);
             continue;
         }
         operand = f;
@@ -1080,6 +1112,9 @@ auto reassemble_term(
         cur = make_dot(ctx, nabla, make_tensor_product(ctx, nabla, cur));
     for (Expr const* id: identities)
         cur = make_tensor_product(ctx, cur, id);
+    // Scalar coefficients ride on the left: λ ∇(∇·u), μ Δu, ….
+    for (Expr const* coef: coefficients)
+        cur = make_tensor_product(ctx, coef, cur);
     return cur;
 }
 

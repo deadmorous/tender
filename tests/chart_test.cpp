@@ -1488,6 +1488,40 @@ TEST(Chart, ReassembleNablaFoldsIdentityScaledInvariant)
     EXPECT_TRUE(eq(ctx, reass, want));
 }
 
+// ∇·((∇·v) I) = ∇(∇·v): the outer ∂ must reach the inner divergence ∇·v (a ∂
+// operator hidden inside a ⊗-factor, resolved by apply_operators' structured-
+// factor recursion), then e_i·I folds to e_i and the term reassembles to a
+// grad-div.  A scalar coefficient (a Lamé constant λ) rides through — the
+// endpoint's ∇·(λ(∇·u)I) piece (vibe 000080 Increment 8).
+TEST(Chart, ReassembleNablaDivOfScalarTimesIdentity)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* v = make_field(ctx, make_tensor_name("v"), 1, {});
+    auto* nab = make_nabla(ctx);
+    auto* id = make_identity(ctx);
+
+    auto reduce = [&](Expr const* e)
+    {
+        auto* x = steps::canonicalize(ctx, expand_nabla(ctx, chart, e));
+        x = steps::contract_identity(ctx, x);
+        return reassemble_nabla(ctx, chart, steps::canonicalize(ctx, x));
+    };
+
+    // ∇·((∇·v) I) → ∇(∇·v).
+    auto* divv_I = make_tensor_product(ctx, make_dot(ctx, nab, v), id);
+    auto* graddiv = make_tensor_product(ctx, nab, make_dot(ctx, nab, v));
+    EXPECT_TRUE(eq(ctx, reduce(make_dot(ctx, nab, divv_I)), graddiv));
+
+    // ∇·(λ (∇·v) I) → λ ∇(∇·v): the scalar coefficient λ is preserved, not
+    // dropped as (or overwritten by) the operand blob.
+    auto* lam = make_tensor_object(ctx, make_tensor_name("\\lambda"), {}, 0);
+    auto* lam_divv_I = make_tensor_product(ctx, lam, divv_I);
+    auto* want = make_tensor_product(ctx, lam, graddiv);
+    EXPECT_TRUE(eq(ctx, reduce(make_dot(ctx, nab, lam_divv_I)), want));
+}
+
 // expand_nabla(∇·∇f) for a SCALAR field keeps its true rank 0 (the Laplacian
 // Δf) instead of degrading to a rank-2 dyad (vibe 000079).  The inner grad ∇f
 // is the scalar-scaled frame vector (∂_i f) e_i; the outer ∇· must contract e_ℓ

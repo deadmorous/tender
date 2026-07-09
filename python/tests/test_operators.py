@@ -454,3 +454,51 @@ def test_laplacian_render_recognition():
     assert (nab @ (nab * eps)).latex() == r"\Delta \boldsymbol{\varepsilon}"
     th = t.tr(eps)
     assert (nab @ (nab * th)).latex() == r"\Delta \operatorname{tr}(\boldsymbol{\varepsilon})"
+
+
+def test_div_hooke_stress_reduces_toward_navier_lame():
+    # vibe 000080 Increment 8: ∇·T for the isotropic Hooke stress
+    #   T = λ(∇·u)I + μ(∇u + (∇u)ᵀ),  u abstract
+    # reduces (expand ∇ → apply ∂ by Leibniz → contract e·I → reassemble) to the
+    # Navier–Lamé operator form λ∇(∇·u) + μ∇(∇·u) + μ∇·∇u.  Exercises the two
+    # infra fixes: apply_operators resolving the inner ∇·u nested in (∇·u)I, and
+    # reassemble_nabla carrying the scalar Lamé coefficients through (they were
+    # dropped before).  Like-term collection into (λ+μ)∇(∇·u) — the ScalarDiv
+    # (sym) route — is the remaining Increment 7(b1)/8 step.
+    ws = t.Workspace()
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    nab = t.nabla(ctx=ws.ctx)
+    I = t.identity(ws.ctx)
+    lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+    mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+    u = ws.field("u", 1)
+
+    T = lam * (nab @ u) * I + mu * (nab * u + (nab * u).transpose())
+    interior = td.contract_identity(td.canonicalize(cart.expand_nabla(nab @ T)))
+    reass = cart.reassemble_nabla(td.canonicalize(interior))
+
+    expected = (
+        lam * (nab * (nab @ u))   # λ∇(∇·u)
+        + mu * (nab * (nab @ u))  # μ∇(∇·u)  (from ∇·((∇u)ᵀ))
+        + mu * (nab @ (nab * u))  # μ∇·∇u    (from ∇·(∇u))
+    )
+    assert td.algebraic_eq(reass, expected)
+    # the Lamé constants survive reassembly (they were being dropped).
+    assert r"\lambda" in reass.latex() and r"\mu" in reass.latex()
+
+
+def test_div_of_scalar_times_identity_grad_div():
+    # The ∇·((∇·u) I) = ∇(∇·u) piece in isolation: the inner divergence ∇·u sits
+    # inside a ⊗-factor, so apply_operators must resolve it before the outer ∂,
+    # then e_i·I → e_i and the term reassembles to a grad-div (vibe 000080 Inc 8).
+    ws = t.Workspace()
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    nab = t.nabla(ctx=ws.ctx)
+    I = t.identity(ws.ctx)
+    u = ws.field("u", 1)
+    e = nab @ ((nab @ u) * I)
+    interior = td.contract_identity(td.canonicalize(cart.expand_nabla(e)))
+    reass = cart.reassemble_nabla(td.canonicalize(interior))
+    assert td.algebraic_eq(reass, nab * (nab @ u))

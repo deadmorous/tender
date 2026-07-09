@@ -3430,6 +3430,12 @@ auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
             return make_difference(ctx, go(s->left), go(s->right));
         if (auto const* s = std::get_if<Negate>(&n->node))
             return make_negate(ctx, go(s->operand));
+        // A scalar-divided operand `(…)/c`: resolve operators in the numerator
+        // (the denominator is a constant scalar).  So ∇·(sym(∇u)) — whose
+        // operand is the ScalarDiv (∇u + (∇u)ᵀ)/2 — has its inner grads applied
+        // before the outer ∂ reaches them (vibe 000080, Increment 8).
+        if (auto const* d = std::get_if<ScalarDiv>(&n->node))
+            return make_scalar_div(ctx, go(d->left), d->right);
         // Recurse into the linear unary invariants (transpose/trace/vec): an
         // operator nested inside, e.g. the ∇ of the inner (∇×ε) in ∇×(∇×ε)ᵀ,
         // must be applied before the outer operator reaches this operand.
@@ -3479,6 +3485,27 @@ auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
         }
         std::vector<Expr const*> facs;
         flatten_factors(n, facs);
+        // A factor may itself be a contraction / unary invariant / sum that
+        // hides an unapplied operator — e.g. the inner ∇·u of `(∇·u) I` in
+        // ∇·((∇·u) I).  apply_product_operators only sees *top-level* ∂
+        // factors, so resolve each structured factor first (rightmost-first,
+        // via go), leaving bare atoms and ∂ operators untouched — else
+        // `partial` would later meet the still-unapplied inner ∂ and refuse
+        // (vibe 000080, Increment 8).
+        for (auto*& f: facs)
+        {
+            bool const structured =
+                as_contraction(f).has_value()
+                || std::holds_alternative<Transpose>(f->node)
+                || std::holds_alternative<Trace>(f->node)
+                || std::holds_alternative<VectorInvariant>(f->node)
+                || std::holds_alternative<Sum>(f->node)
+                || std::holds_alternative<Difference>(f->node)
+                || std::holds_alternative<Negate>(f->node)
+                || std::holds_alternative<ScalarDiv>(f->node);
+            if (structured)
+                f = go(f);
+        }
         return apply_product_operators(ctx, facs);
     };
     return go(e);
