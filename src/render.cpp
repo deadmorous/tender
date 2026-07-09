@@ -514,7 +514,17 @@ struct Renderer
                 // precedence with ⊗, so both operands wrap any nested
                 // contraction (and any sum): a × b × c → (a × b) × c, and
                 // a × (b × c) keeps its parens.
-                [&](Dot const& d) -> std::string {
+                [&](Dot const& d) -> std::string
+                {
+                    // Laplacian recognition (vibe 000080 Increment 3): the
+                    // reassembled ∇·(∇⊗X) is the Laplacian ΔX — render it as
+                    // \Delta X (matching tender.operators.laplacian) rather
+                    // than the misleading "power" ∇² (∇ is not a ring element).
+                    if (std::holds_alternative<Nabla>(d.left->node))
+                        if (auto const* tp =
+                                std::get_if<TensorProduct>(&d.right->node);
+                            tp && std::holds_alternative<Nabla>(tp->left->node))
+                            return "\\Delta " + sub(*tp->right, TENSOR_PREC);
                     return sub(*d.left, TENSOR_PREC) + " \\cdot "
                            + sub(*d.right, TENSOR_PREC);
                 },

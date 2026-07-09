@@ -444,3 +444,13 @@ def test_reassemble_scalar_hessian_drops_transpose():
     assert r"\nabla \, \nabla \, \operatorname{tr}(\boldsymbol{\varepsilon})" in tex
     # … but the true rank-2 gradient (∇(∇·ε))ᵀ still carries a transpose.
     assert r"(\nabla \, (\nabla \cdot \boldsymbol{\varepsilon}))^{\mathsf{T}}" in tex
+
+
+def test_laplacian_render_recognition():
+    # vibe 000080 Increment 3: ∇·(∇⊗X) renders as ΔX, not the misleading ∇².
+    ws = t.Workspace()
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+    assert (nab @ (nab * eps)).latex() == r"\Delta \boldsymbol{\varepsilon}"
+    th = t.tr(eps)
+    assert (nab @ (nab * th)).latex() == r"\Delta \operatorname{tr}(\boldsymbol{\varepsilon})"

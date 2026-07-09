@@ -851,6 +851,25 @@ TEST(Render, NablaOperator)
     auto* eps = make_field(ctx, make_tensor_name("e"), 2, {}, /*sym=*/true);
     EXPECT_EQ(latex(*make_dot(ctx, del, eps)), "\\nabla \\cdot \\mathbf{e}");
     EXPECT_EQ(latex(*make_cross(ctx, del, eps)), "\\nabla \\times \\mathbf{e}");
+    // ∇·(∇⊗X) is the Laplacian ΔX (vibe 000080 Increment 3), not the
+    // misleading "power" ∇²; a plain ∇·(∇×X) is not folded.
+    auto* lap = make_dot(ctx, del, make_tensor_product(ctx, del, eps));
+    EXPECT_EQ(latex(*lap), "\\Delta \\mathbf{e}");
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    EXPECT_EQ(
+        latex(*make_dot(ctx, del, make_tensor_product(ctx, del, f))),
+        "\\Delta f");
+    // A Δ operand that is a sum wraps in parens: Δ(a + b).
+    auto* a = T(ctx, "a", 1);
+    auto* b = T(ctx, "b", 1);
+    EXPECT_EQ(
+        latex(*make_dot(
+            ctx, del, make_tensor_product(ctx, del, make_sum(ctx, a, b)))),
+        "\\Delta (\\mathbf{a} + \\mathbf{b})");
+    // Not a Laplacian: ∇·(∇×X) keeps the divergence form.
+    EXPECT_EQ(
+        latex(*make_dot(ctx, del, make_cross(ctx, del, eps))),
+        "\\nabla \\cdot (\\nabla \\times \\mathbf{e})");
 }
 
 // ---- render_nf_latex (the Nf normal-form renderer) ---------------------
