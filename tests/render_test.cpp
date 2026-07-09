@@ -870,6 +870,22 @@ TEST(Render, NablaOperator)
     EXPECT_EQ(
         latex(*make_dot(ctx, del, make_cross(ctx, del, eps))),
         "\\nabla \\cdot (\\nabla \\times \\mathbf{e})");
+
+    // Operator-left normalisation (vibe 000080 Increment 6): a canonical
+    // reorder can leave ∇ on the *right*; render it left where it acts. X·∇
+    // (divergence commuted) → ∇·X.
+    EXPECT_EQ(latex(*make_dot(ctx, eps, del)), "\\nabla \\cdot \\mathbf{e}");
+    // v⊗∇ (transpose of a gradient) → (∇v)ᵀ, since v⊗∇ = (∇⊗v)ᵀ.
+    auto* v = make_field(ctx, make_tensor_name("v"), 1, {});
+    EXPECT_EQ(
+        latex(*make_tensor_product(ctx, v, del)),
+        "(\\nabla \\mathbf{v})^{\\mathsf{T}}");
+    // f⊗∇ for a rank-0 f is the gradient ∇f (its transpose is itself), no ᵀ.
+    EXPECT_EQ(latex(*make_tensor_product(ctx, f, del)), "\\nabla f");
+    // A rank-0 divergence-valued operand keeps no spurious ᵀ: (∇·v)⊗∇ → ∇(∇·v).
+    EXPECT_EQ(
+        latex(*make_tensor_product(ctx, make_dot(ctx, del, v), del)),
+        "\\nabla \\nabla \\cdot \\mathbf{v}");
 }
 
 // ---- render_nf_latex (the Nf normal-form renderer) ---------------------

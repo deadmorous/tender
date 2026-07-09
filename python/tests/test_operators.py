@@ -502,3 +502,20 @@ def test_div_of_scalar_times_identity_grad_div():
     interior = td.contract_identity(td.canonicalize(cart.expand_nabla(e)))
     reass = cart.reassemble_nabla(td.canonicalize(interior))
     assert td.algebraic_eq(reass, nab * (nab @ u))
+
+
+def test_canonicalize_keeps_nabla_on_the_left():
+    # vibe 000080 Increment 6 (Issue 1): a value-preserving canonical reorder
+    # used to leave ∇ on the *right* (∇·(∇·ε) → (∇·ε)·∇, reads as ∇ acting on
+    # nothing).  Render-time operator-left normalisation puts it back.
+    ws = t.Workspace()
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+    # double divergence: ∇ stays left, no trailing "·∇".
+    dd = td.canonicalize(nab @ (nab @ eps)).latex()
+    assert dd == r"\nabla \cdot (\nabla \cdot \boldsymbol{\varepsilon})"
+    # transpose of a grad-div: ∇ left, as (∇(∇·ε))ᵀ (not (∇·ε)∇).
+    gt = td.canonicalize((nab * (nab @ eps)).transpose()).latex()
+    assert gt == r"(\nabla (\nabla \cdot \boldsymbol{\varepsilon}))^{\mathsf{T}}"
+    # value is unchanged by the reorder.
+    assert td.algebraic_eq(td.canonicalize(nab @ (nab @ eps)), nab @ (nab @ eps))

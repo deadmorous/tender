@@ -500,6 +500,22 @@ struct Renderer
                 },
                 [&](TensorProduct const& p) -> std::string
                 {
+                    // Operator-left normalisation (vibe 000080 Increment 6): a
+                    // canonical reorder can leave a bare ∇ on the *right* of a
+                    // dyad, `X⊗∇`, which reads as ∇ acting on nothing.  It is
+                    // the transpose of a gradient, X⊗∇ = (∇⊗X)ᵀ, so render it
+                    // that way — and for a scalar X (a rank-1 gradient, whose
+                    // transpose is itself) just as the gradient ∇X.
+                    if (std::holds_alternative<Nabla>(p.right->node)
+                        && !std::holds_alternative<Nabla>(p.left->node))
+                    {
+                        // A rank-0 (scalar-valued) operand is a gradient ∇X
+                        // whose transpose is itself, so drop the ᵀ.
+                        if (infer_rank(p.left) == std::optional<int>{0})
+                            return "\\nabla " + sub(*p.left, TENSOR_PREC);
+                        return "(\\nabla " + sub(*p.left, TENSOR_PREC)
+                               + ")^{\\mathsf{T}}";
+                    }
                     bool both_scalar =
                         is_scalar_expr(*p.left) && is_scalar_expr(*p.right);
                     std::string sep = both_scalar ? " \\cdot " : " \\, ";
@@ -525,6 +541,13 @@ struct Renderer
                                 std::get_if<TensorProduct>(&d.right->node);
                             tp && std::holds_alternative<Nabla>(tp->left->node))
                             return "\\Delta " + sub(*tp->right, TENSOR_PREC);
+                    // Operator-left normalisation (vibe 000080 Increment 6): a
+                    // divergence reordered to `X·∇` (∇ on the right, from
+                    // `a·b = b·a`) reads as ∇ acting on nothing.  It equals the
+                    // divergence ∇·X, so render it left.
+                    if (std::holds_alternative<Nabla>(d.right->node)
+                        && !std::holds_alternative<Nabla>(d.left->node))
+                        return "\\nabla \\cdot " + sub(*d.left, TENSOR_PREC);
                     return sub(*d.left, TENSOR_PREC) + " \\cdot "
                            + sub(*d.right, TENSOR_PREC);
                 },
