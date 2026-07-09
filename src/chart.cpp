@@ -1057,14 +1057,23 @@ auto reassemble_term(
                                 make_scalar(ctx, Rational{1});
     // Gradient legs: a leg left of the operand is ∇⊗cur; a leg to its right is
     // (∇⊗cur)ᵀ when cur already carries a leg (a scalar operand commutes, so no
-    // transpose there).  ∂'s commute, so ∇∇θ is symmetric regardless.
+    // transpose there).  Exception — the scalar Hessian: when cur is itself the
+    // gradient of a scalar (∇⊗θ, θ rank 0), ∇⊗cur = ∇∇θ is symmetric (mixed
+    // partials commute), so the right-leg transpose is redundant and we drop it
+    // (vibe 000080 Increment 5).
+    auto is_scalar_gradient = [&](Expr const* x) -> bool
+    {
+        auto const* p = std::get_if<TensorProduct>(&x->node);
+        return p && std::holds_alternative<Nabla>(p->left->node)
+               && infer_rank(p->right) == std::optional<int>{0};
+    };
     for (int pos: grad_positions)
     {
         bool const left = pos < operand_pos;
         Expr const* g = make_tensor_product(ctx, nabla, cur);
-        cur = (!left && infer_rank(cur).value_or(0) >= 1) ?
-                  make_transpose(ctx, g) :
-                  g;
+        bool const transpose = !left && infer_rank(cur).value_or(0) >= 1
+                               && !is_scalar_gradient(cur);
+        cur = transpose ? make_transpose(ctx, g) : g;
     }
     // Laplacians: Δ = ∇·(∇⊗·).
     for (int k = 0; k < laplacians; ++k)

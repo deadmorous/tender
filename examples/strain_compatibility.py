@@ -203,7 +203,7 @@ def main():
         -(nabla @ (nabla @ eps)) * I  # −(∇∇··ε) I
         + (nabla @ (nabla * theta)) * I  # +Δθ I
         - (nabla @ (nabla * eps))  # −Δε
-        - (nabla * (nabla * theta)).transpose()  # −∇∇θ  (∇∇θ symmetric)
+        - (nabla * (nabla * theta))  # −∇∇θ  (scalar Hessian: symmetric, no ᵀ)
         + (nabla * (nabla @ eps))  # +∇∇·ε
         + (nabla * (nabla @ eps)).transpose()  # +(∇∇·ε)ᵀ
     )

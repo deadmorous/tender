@@ -418,8 +418,29 @@ def test_strain_phase2_reassembly():
         -(nab @ (nab @ eps)) * I           # −(∇∇··ε) I
         + (nab @ (nab * th)) * I           # +Δθ I
         - (nab @ (nab * eps))              # −Δε
-        - (nab * (nab * th)).transpose()   # −∇∇θ  (∇∇θ symmetric ⇒ its transpose)
+        - (nab * (nab * th))               # −∇∇θ  (scalar Hessian: symmetric, no ᵀ)
         + (nab * (nab @ eps))              # +∇∇·ε
         + (nab * (nab @ eps)).transpose()  # +(∇∇·ε)ᵀ
     )
     assert td.algebraic_eq(reass, closed)
+
+
+def test_reassemble_scalar_hessian_drops_transpose():
+    # vibe 000080 Increment 5: the scalar Hessian ∇∇θ (θ = tr ε) reassembles
+    # symmetric — no redundant transpose — while the genuine rank-2 gradient
+    # (∇(∇·ε))ᵀ keeps its transpose.
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+    _, id_inc = _cross_removal_identities(ws.ctx)
+
+    interior = cart.expand_nabla(nab % (nab % eps).transpose())
+    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    reass = cart.reassemble_nabla(phase1)
+    tex = reass.latex()
+
+    # −∇∇θ appears un-transposed …
+    assert r"\nabla \, \nabla \, \operatorname{tr}(\boldsymbol{\varepsilon})" in tex
+    # … but the true rank-2 gradient (∇(∇·ε))ᵀ still carries a transpose.
+    assert r"(\nabla \, (\nabla \cdot \boldsymbol{\varepsilon}))^{\mathsf{T}}" in tex
