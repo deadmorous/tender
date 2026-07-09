@@ -377,6 +377,13 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
     }
     if (auto const* u = std::get_if<Transpose>(&factor->node))
     {
+        // Transpose is an involution: `(Xᵀ)ᵀ = X`.  A transpose-of-transpose
+        // undoes itself — fold it away before the symmetric-fold / wrap logic
+        // (otherwise the inner Tᵀ encapsulates to `Transpose(X)` and the outer
+        // wraps it again into `Transpose(Transpose(X))`, which survives into
+        // the nf form and renders as stacked superscripts).
+        if (auto const* inner = std::get_if<Transpose>(&u->operand->node))
+            return encapsulate(ctx, inner->operand);
         // A rank-2 tensor symmetric under its slot swap folds `Tᵀ = T`
         // (antisymmetric `Tᵀ = −T`): transpose is exactly that swap.  So
         // `εᵀ = ε`, and — since the swap leaves the ∂-marks untouched —

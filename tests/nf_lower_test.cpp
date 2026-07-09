@@ -1156,6 +1156,23 @@ TEST(CanonicalizeNf, SymmetricTransposeFolds)
         steps::canonicalize(ctx, gen)));
 }
 
+TEST(CanonicalizeNf, DoubleTransposeInvolutes)
+{
+    // (Xᵀ)ᵀ = X for any tensor (transpose is an involution): a
+    // transpose-of-transpose folds away instead of surviving as stacked
+    // `Transpose(Transpose(X))` in the nf form (vibe 000080 Issue 8).
+    Context ctx;
+    auto const* A = make_field(ctx, make_tensor_name("A"), 2, {});
+    auto const* AtT = make_transpose(ctx, make_transpose(ctx, A));
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, AtT), steps::canonicalize(ctx, A)));
+    // A triple transpose collapses to a single one: ((Xᵀ)ᵀ)ᵀ = Xᵀ.
+    auto const* AtTt = make_transpose(ctx, AtT);
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, AtTt),
+        steps::canonicalize(ctx, make_transpose(ctx, A))));
+}
+
 TEST(CanonicalizeNf, RankTwoFanInInsertsTranspose)
 {
     // T·(a·S), T,S rank 2: a·S is a vector on S's free leg, so T fans onto S's
