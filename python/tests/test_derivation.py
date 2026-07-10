@@ -715,6 +715,19 @@ def test_transpose_identity_is_self():
     assert td.structural_eq(td.expand_dyad_ops(tender.transpose(I)), I)
 
 
+def test_trace_of_dimensioned_identity():
+    # vibe 000080 Increment 1 (literal-only): a dimensioned identity folds its
+    # trace to the space dimension; the bare identity stays symbolic tr(I).
+    ctx = tender.Context()
+    I3 = tender.identity(ctx=ctx, space=tender.space_3d)
+    assert I3.rank == 2
+    assert td.algebraic_eq(
+        td.expand_dyad_ops(tender.tr(I3)), tender.scalar(3, ctx=ctx)
+    )
+    I = tender.identity(ctx=ctx)
+    assert td.expand_dyad_ops(tender.tr(I)).latex() == r"\operatorname{tr}(\mathbf{I})"
+
+
 def test_unary_op_ranks():
     ctx = tender.Context()
     A = tender.tensor("A", rank=2, ctx=ctx)

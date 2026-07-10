@@ -1457,6 +1457,23 @@ auto is_symmetric_well_known(Expr const* e) -> bool
     return false; // GCOV_EXCL_LINE
 }
 
+// The literal trace `tr(W) = n` of a well-known symmetric rank-2 tensor
+// (I / δ / g), where n is the dimension of its index space — *only* when that
+// space is concrete (vibe 000080 Increment 1, literal-only design).  A bare
+// dimension-agnostic identity carries no slots, so it has no space and its
+// trace stays symbolic `tr(I)`; a dimensioned `identity(space)` reads n.
+auto well_known_trace_dim(Expr const* e) -> std::optional<int>
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    if (!t || !is_symmetric_well_known(e)
+        || infer_rank(e) != std::optional<int>{2})
+        return std::nullopt;
+    for (auto const& sb: t->slots)
+        if (sb.slot.space)
+            return static_cast<int>(sb.slot.space->values().size());
+    return std::nullopt; // no concrete space — leave tr(W) unreduced
+}
+
 // Apply a linear rank-2 operation (tr/vec/transpose) by its definition,
 // distributing over sums/negation and acting on each dyad.  `dyad_rule` builds
 // the result from a dyad's scalar factors and its two legs; `make_node`
@@ -1507,7 +1524,14 @@ auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
                         fs.push_back(make_dot(c, sp.leg0, sp.leg1));
                         return product_of(c, fs);
                     },
-                    [&](Expr const* op) { return make_trace(c, op); });
+                    [&](Expr const* op) -> Expr const*
+                    {
+                        // tr(W) = n for a well-known symmetric W with a
+                        // concrete index space (vibe 000080 Increment 1).
+                        if (auto const dim = well_known_trace_dim(op))
+                            return make_scalar(c, Rational{*dim});
+                        return make_trace(c, op);
+                    });
             }
             else if (auto const* u = std::get_if<VectorInvariant>(&node->node))
             {

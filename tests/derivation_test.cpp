@@ -3351,6 +3351,25 @@ TEST(ExpandDyadOps, NonDyadUnchanged)
     EXPECT_EQ(steps::expand_dyad_ops(ctx, e), e);
 }
 
+// tr(I) of a *dimensioned* identity folds to the space dimension; the bare
+// dimension-agnostic identity leaves tr(I) symbolic (vibe 000080 Increment 1,
+// literal-only design).
+TEST(ExpandDyadOps, TraceOfDimensionedIdentityIsDimension)
+{
+    Context ctx;
+    auto const* I3 = make_identity(ctx, space_3d()); // carries dim = 3
+    EXPECT_EQ(infer_rank(I3), std::optional<int>{2});
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::expand_dyad_ops(ctx, make_trace(ctx, I3)),
+        make_scalar(ctx, Rational{3})));
+
+    // A bare identity has no space — its trace stays tr(I), not a guessed n.
+    auto const* I = make_identity(ctx);
+    auto const* tr_bare = make_trace(ctx, I);
+    EXPECT_EQ(steps::expand_dyad_ops(ctx, tr_bare), tr_bare);
+}
+
 TEST(InferRank, UnaryOps)
 {
     Context ctx;

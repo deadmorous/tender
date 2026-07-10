@@ -52,9 +52,14 @@ class Workspace:
         """A scalar literal (int or Rational)."""
         return _core.scalar(value, ctx=self.ctx)
 
-    def identity(self):
-        """The identity tensor I."""
-        return _core.identity(ctx=self.ctx)
+    def identity(self, space=None):
+        """The identity tensor I.
+
+        With a concrete index ``space`` (e.g. ``t.space_3d``) the identity
+        carries a dimension, so ``tr(I)`` folds to ``n``; the bare identity
+        leaves ``tr(I)`` symbolic.
+        """
+        return _core.identity(ctx=self.ctx, space=space)
 
     def coordinate(self, name, chart_id=0, slot=0, nonneg=False):
         """A single chart coordinate variable (use :meth:`coords` for a set)."""

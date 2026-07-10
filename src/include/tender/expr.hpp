@@ -515,6 +515,11 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 // Identity tensor I: invariant, rank 2, no slots.
 [[nodiscard]] auto make_identity(Context&) -> Expr const*;
 
+// Dimensioned identity: rank 2 with two unbound slots carrying `space`, so its
+// dimension is known (tr(I) → n).  Matched by well-known kind like the bare I.
+[[nodiscard]] auto make_identity(Context&, IndexSpace const* space)
+    -> Expr const*;
+
 // Kronecker delta δ: two independently chosen levels, one realm, one space.
 [[nodiscard]] auto make_delta(
     Context&,

@@ -438,13 +438,19 @@ NB_MODULE(_core, m)
 
     m.def(
         "identity",
-        [](nb::object ctx_arg) -> PyExpr
+        [](nb::object ctx_arg, IndexSpace const* space) -> PyExpr
         {
             auto [ctx, keep] = resolve_ctx(ctx_arg);
-            return PyExpr{keep, ctx, make_identity(*ctx)};
+            return PyExpr{
+                keep,
+                ctx,
+                space ? make_identity(*ctx, space) : make_identity(*ctx)};
         },
         "ctx"_a = nb::none(),
-        "Create the identity tensor.");
+        "space"_a = nb::none(),
+        "Create the identity tensor.  With a concrete index space (e.g. "
+        "space=t.space_3d) the identity carries a dimension, so tr(I) folds to "
+        "n; the bare identity leaves tr(I) symbolic.");
 
     m.def(
         "field",

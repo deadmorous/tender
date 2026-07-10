@@ -40,8 +40,18 @@ plus guard tests `test_navier_lame_endpoint_{cartesian,cylindrical}`: the full
 chart-free derivation (expand ∇ → apply ∂ → e·I fold → reassemble → factor_common)
 alongside a component-wise Cartesian + cylindrical verification of
 `∇·T = μ∇·∇u + (λ+μ)∇(∇·u)`, a bare-∇-independent correctness proof.  A
-nicety would pull the constant `(λ+μ)` fully outside the gradient.  **Also
-remaining:** Increments 1, 2, 4 (the `tr` reductions, for strain-compat/Issue 6).
+nicety would pull the constant `(λ+μ)` fully outside the gradient.  **Increment 1
+DONE** (literal-only, user decision): `tr(W)→n` for a well-known symmetric rank-2
+tensor whose index space is concrete.  Key finding — the bare `t.identity()` is
+the *only* rank-2 well-known tensor (δ/g always appear as rank-0 *components*),
+and it carries no space, so under literal-only `tr(I)` could never fold; resolved
+by adding a **dimensioned identity** `make_identity(ctx, space)` /
+`t.identity(space=t.space_3d)` / `ws.identity(space=…)` — rank-2 with two unbound
+slots carrying the space, matched by well-known kind everywhere so contraction/
+basis folds are unaffected.  `well_known_trace_dim` reads it in `expand_dyad_ops`'s
+Trace arm; bare `tr(I)` stays symbolic; component `Σ_i δ_ii→3` already worked.
+**Also remaining:** Increments 2 (`tr(c·I)→c·n`), 4 (`tr` through operators) —
+for strain-compat/Issue 6.
 **Deferred (needs special care):** vibe 000054 (selective application) and its
 riders Issue 6 (equation→identity) + Issue 8(C) (symmetry-guarded identity).
 **Key session lesson:** author operator derivations with the operand *abstract*
@@ -722,7 +732,21 @@ succeeds; the full Hooke `cart.express(nabla@T)` succeeds without a manual
 plain-`u`, no-`/2`, and atomic-field variants still work; full suite green.
 (Clean *rendering* of the result still depends on Increments 1–6.)
 
-## Increment 1 — `tr(W) → dim` for a well-known symmetric tensor (Issue 3; atom of 2(i))
+## Increment 1 — `tr(W) → dim` for a well-known symmetric tensor (Issue 3; atom of 2(i)) — **DONE**
+
+**Resolution (literal-only, user decision).** `tr(W)→n` fires only when the
+well-known symmetric rank-2 tensor carries a *concrete* index space.  Finding:
+the bare `t.identity()` is the only rank-2 well-known tensor (δ/g are always
+rank-0 *components* with bound indices) and it has no space, so `tr(I)` could
+never fold — resolved by adding a **dimensioned identity**
+`make_identity(ctx, space)` (Python `t.identity(space=t.space_3d)` /
+`ws.identity(space=…)`): rank-2 with two unbound slots carrying the space, still
+matched by well-known kind everywhere (contraction/basis folds unaffected).
+`well_known_trace_dim` (derivation.cpp) reads the space in `expand_dyad_ops`'s
+Trace arm and returns the dimension; bare `tr(I)` stays symbolic; the component
+`Σ_i δ_ii→3` already worked (unroll_sums + eval_delta_concrete).  Guards:
+`ExpandDyadOps.TraceOfDimensionedIdentityIsDimension` (C++),
+`test_trace_of_dimensioned_identity` (Py).
 
 **Goal.** `tr(I) → n` (and `tr(δ)`, `tr(g)`), where n is the dimension; a
 self-contracted `δ_ii` likewise collapses to n.
