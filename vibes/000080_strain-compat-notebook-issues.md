@@ -50,8 +50,10 @@ by adding a **dimensioned identity** `make_identity(ctx, space)` /
 slots carrying the space, matched by well-known kind everywhere so contraction/
 basis folds are unaffected.  `well_known_trace_dim` reads it in `expand_dyad_ops`'s
 Trace arm; bare `tr(I)` stays symbolic; component `Σ_i δ_ii→3` already worked.
-**Also remaining:** Increments 2 (`tr(c·I)→c·n`), 4 (`tr` through operators) —
-for strain-compat/Issue 6.
+**Increment 2 DONE**: `tr(c·W)→c·n` — the Trace fallback peels rank-0 scalar
+factors off the single well-known leg (resolves the `Δθ·I` / `(∇∇··ε)I` terms
+once I is dimensioned).  **Also remaining:** Increment 4 (`tr` through operators)
+— for strain-compat/Issue 6.
 **Deferred (needs special care):** vibe 000054 (selective application) and its
 riders Issue 6 (equation→identity) + Issue 8(C) (symmetry-guarded identity).
 **Key session lesson:** author operator derivations with the operand *abstract*
@@ -774,7 +776,16 @@ possibly `src/nf_lower.cpp`/`contract_delta`; Python surface unchanged.
 **Verify.** `tr(I)`, `tr(δ)`, `Σ_i δ_ii` reduce to the dimension (3 in a 3D
 context, or symbolic n); `delta_trace` example still passes; unit tests for each.
 
-## Increment 2 — `tr(scalar · W)` distributes; identity-scaled terms resolve (Issue 2(i))
+## Increment 2 — `tr(scalar · W)` distributes; identity-scaled terms resolve (Issue 2(i)) — **DONE**
+
+**Done.** `expand_dyad_ops`'s Trace fallback flattens the operand's factors,
+peels the rank-0 scalars off the single tensor leg, and if that leg is a
+well-known symmetric tensor with a concrete space (Increment 1) returns
+`product(scalars)·n` — so `tr(c·I3)→3c`.  Bare (spaceless) `tr(c·I)` and a
+non-well-known `tr(c·A)` stay symbolic.  Guards:
+`ExpandDyadOps.TraceOfScaledDimensionedIdentity` (C++),
+`test_trace_of_scaled_dimensioned_identity` (Py).
+
 
 **Goal.** `tr(c · I) → c · n` — the `(∇∇··ε)I` / `Δθ·I` terms of `reass` lose
 their trace.

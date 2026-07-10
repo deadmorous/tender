@@ -3370,6 +3370,26 @@ TEST(ExpandDyadOps, TraceOfDimensionedIdentityIsDimension)
     EXPECT_EQ(steps::expand_dyad_ops(ctx, tr_bare), tr_bare);
 }
 
+// tr(c·I) = c·n: a scalar-scaled dimensioned identity peels its scalar factors
+// off the tensor leg — the Δθ·I / (∇∇··ε)I trace terms (vibe 000080 Inc 2).
+TEST(ExpandDyadOps, TraceOfScaledDimensionedIdentity)
+{
+    Context ctx;
+    auto const* I3 = make_identity(ctx, space_3d());
+    auto const* c = make_tensor_object(ctx, make_tensor_name("c"), {}, 0);
+    // tr(c·I3) = 3·c.
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::expand_dyad_ops(
+            ctx, make_trace(ctx, make_tensor_product(ctx, c, I3))),
+        make_tensor_product(ctx, make_scalar(ctx, Rational{3}), c)));
+
+    // tr(c·I) of a bare (spaceless) identity stays symbolic.
+    auto const* cI = make_tensor_product(ctx, c, make_identity(ctx));
+    auto const* tr_cI = make_trace(ctx, cI);
+    EXPECT_EQ(steps::expand_dyad_ops(ctx, tr_cI), tr_cI);
+}
+
 TEST(InferRank, UnaryOps)
 {
     Context ctx;

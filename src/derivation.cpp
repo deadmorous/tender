@@ -1526,10 +1526,33 @@ auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
                     },
                     [&](Expr const* op) -> Expr const*
                     {
-                        // tr(W) = n for a well-known symmetric W with a
-                        // concrete index space (vibe 000080 Increment 1).
-                        if (auto const dim = well_known_trace_dim(op))
-                            return make_scalar(c, Rational{*dim});
+                        // tr(W) = n, and tr(c·W) = c·n, for a well-known
+                        // symmetric W with a concrete index space — peel the
+                        // scalar factors off the single tensor leg (vibe 000080
+                        // Increments 1 & 2).  This resolves the Δθ·I / (∇∇··ε)I
+                        // terms' trace once I carries a dimension.
+                        std::vector<Expr const*> flat;
+                        flatten_factors(op, flat);
+                        std::vector<Expr const*> scalars;
+                        Expr const* leg = nullptr;
+                        int legs = 0;
+                        for (auto const* f: flat)
+                        {
+                            if (infer_rank(f) == std::optional<int>{0})
+                                scalars.push_back(f);
+                            else
+                            {
+                                leg = f;
+                                ++legs;
+                            }
+                        }
+                        if (legs == 1)
+                            if (auto const dim = well_known_trace_dim(leg))
+                            {
+                                scalars.push_back(
+                                    make_scalar(c, Rational{*dim}));
+                                return product_of(c, scalars);
+                            }
                         return make_trace(c, op);
                     });
             }

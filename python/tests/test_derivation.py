@@ -728,6 +728,19 @@ def test_trace_of_dimensioned_identity():
     assert td.expand_dyad_ops(tender.tr(I)).latex() == r"\operatorname{tr}(\mathbf{I})"
 
 
+def test_trace_of_scaled_dimensioned_identity():
+    # vibe 000080 Increment 2: tr(c·I) = c·n peels the scalar off the identity
+    # leg (the Δθ·I / (∇∇··ε)I trace terms).  A bare identity stays symbolic.
+    ctx = tender.Context()
+    I3 = tender.identity(ctx=ctx, space=tender.space_3d)
+    c = tender.tensor("c", rank=0, ctx=ctx)
+    assert td.algebraic_eq(
+        td.expand_dyad_ops(tender.tr(c * I3)), tender.scalar(3, ctx=ctx) * c
+    )
+    Ibare = tender.identity(ctx=ctx)
+    assert "operatorname{tr}" in td.expand_dyad_ops(tender.tr(c * Ibare)).latex()
+
+
 def test_unary_op_ranks():
     ctx = tender.Context()
     A = tender.tensor("A", rank=2, ctx=ctx)
