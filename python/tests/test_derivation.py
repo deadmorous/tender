@@ -741,6 +741,22 @@ def test_trace_of_scaled_dimensioned_identity():
     assert "operatorname{tr}" in td.expand_dyad_ops(tender.tr(c * Ibare)).latex()
 
 
+def test_trace_commutes_through_laplacian():
+    # vibe 000080 Increment 4: tr(∇·(∇⊗ε)) = ∇·(∇⊗ tr ε) = Δ(tr ε); the dyad
+    # cases tr(∇⊗v)=∇·v and tr((∇⊗w)ᵀ)=∇·w already fold via split_dyad.
+    ctx = tender.Context()
+    nab = tender.nabla(ctx=ctx)
+    eps = tender.field("e", 2, ctx=ctx, symmetric=True)
+    v = tender.field("v", 1, ctx=ctx)
+    assert td.algebraic_eq(
+        td.expand_dyad_ops(tender.tr(nab @ (nab * eps))),
+        nab @ (nab * tender.tr(eps)),
+    )
+    assert td.algebraic_eq(td.expand_dyad_ops(tender.tr(nab * v)), nab @ v)
+    # rank-1 Δv has no trace — stays symbolic.
+    assert "operatorname{tr}" in td.expand_dyad_ops(tender.tr(nab @ (nab * v))).latex()
+
+
 def test_unary_op_ranks():
     ctx = tender.Context()
     A = tender.tensor("A", rank=2, ctx=ctx)

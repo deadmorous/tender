@@ -1526,6 +1526,26 @@ auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
                     },
                     [&](Expr const* op) -> Expr const*
                     {
+                        // tr(∇·(∇⊗X)) = ∇·(∇⊗ tr X) = Δ(tr X): the Laplacian
+                        // commutes with the trace, which acts on X's own slots
+                        // (vibe 000080 Increment 4).  Needs rank X ≥ 2 for the
+                        // inner trace to be well-formed.
+                        if (auto const* dt = std::get_if<Dot>(&op->node))
+                            if (std::holds_alternative<Nabla>(dt->left->node))
+                                if (auto const* tp = std::get_if<TensorProduct>(
+                                        &dt->right->node);
+                                    tp
+                                    && std::holds_alternative<Nabla>(
+                                        tp->left->node)
+                                    && infer_rank(tp->right).value_or(0) >= 2)
+                                    return make_dot(
+                                        c,
+                                        dt->left,
+                                        make_tensor_product(
+                                            c,
+                                            tp->left,
+                                            expand_dyad_ops(
+                                                c, make_trace(c, tp->right))));
                         // tr(W) = n, and tr(c·W) = c·n, for a well-known
                         // symmetric W with a concrete index space — peel the
                         // scalar factors off the single tensor leg (vibe 000080

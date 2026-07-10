@@ -52,8 +52,11 @@ basis folds are unaffected.  `well_known_trace_dim` reads it in `expand_dyad_ops
 Trace arm; bare `tr(I)` stays symbolic; component `Σ_i δ_ii→3` already worked.
 **Increment 2 DONE**: `tr(c·W)→c·n` — the Trace fallback peels rank-0 scalar
 factors off the single well-known leg (resolves the `Δθ·I` / `(∇∇··ε)I` terms
-once I is dimensioned).  **Also remaining:** Increment 4 (`tr` through operators)
-— for strain-compat/Issue 6.
+once I is dimensioned).  **Increment 4 DONE**: `tr` through operators —
+`tr(∇⊗v)=∇·v` / `tr((∇⊗w)ᵀ)=∇·w` already folded via split_dyad; the only gap,
+`tr(∇·(∇⊗X))=∇·(∇⊗ tr X)=Δ(tr X)`, is a new Laplacian-trace commutation (guarded
+rank X ≥ 2), verified frame-independent (Cartesian + cylindrical).
+**tr-reduction set (Increments 1, 2, 4) complete.**
 **Deferred (needs special care):** vibe 000054 (selective application) and its
 riders Issue 6 (equation→identity) + Issue 8(C) (symmetry-guarded identity).
 **Key session lesson:** author operator derivations with the operand *abstract*
@@ -825,7 +828,18 @@ Laplacian; a standalone fold collapses an existing `∇·(∇⊗X)`.
 `∇·(∇⊗X) → Δ X` step folds a hand-built expression; round-trips with
 `chart.laplacian`; render test `\Delta`.
 
-## Increment 4 — trace through differential operators (Issue 2(ii))
+## Increment 4 — trace through differential operators (Issue 2(ii)) — **DONE**
+
+**Done.** `tr(∇⊗v)=∇·v` and `tr((∇⊗w)ᵀ)=∇·w` already fold via `split_dyad` (the
+∇⊗field is a genuine dyad).  The one gap — the Laplacian — is a new commutation
+in `expand_dyad_ops`'s Trace fallback: `tr(∇·(∇⊗X)) → ∇·(∇⊗ tr X) = Δ(tr X)`,
+matching Increment 3's `Dot(∇, TensorProduct(∇, X))` Laplacian shape, guarded to
+rank X ≥ 2 (so a rank-1 `Δv` with no trace is left symbolic).  Verified
+frame-independent (metric-compatible): `tr(Δε)=Δ(tr ε)` holds componentwise in
+both Cartesian and cylindrical frames.  Guards:
+`ExpandDyadOps.TraceCommutesThroughLaplacian` (C++),
+`test_trace_commutes_through_laplacian` (Py).
+
 
 **Goal.** `tr(∇⊗v) = ∇·v`, `tr(Δε) = Δ(tr ε)`, `tr((∇⊗w)ᵀ) = ∇·w` — the
 `tr(∇·∇ ε)` term resolves to `Δ(tr ε)`.

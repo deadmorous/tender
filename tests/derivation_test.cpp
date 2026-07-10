@@ -3390,6 +3390,29 @@ TEST(ExpandDyadOps, TraceOfScaledDimensionedIdentity)
     EXPECT_EQ(steps::expand_dyad_ops(ctx, tr_cI), tr_cI);
 }
 
+// tr(∇·(∇⊗ε)) = ∇·(∇⊗ tr ε): the Laplacian commutes with the trace over ε's own
+// slots (vibe 000080 Increment 4).  A rank-1 operand (Δv) has no trace, so it
+// stays symbolic.
+TEST(ExpandDyadOps, TraceCommutesThroughLaplacian)
+{
+    Context ctx;
+    auto const* nab = make_nabla(ctx);
+    auto const* eps = make_field(ctx, make_tensor_name("\\varepsilon"), 2, {});
+    // tr(∇·(∇⊗ε)) → ∇·(∇⊗ tr ε).
+    auto const* lap_eps =
+        make_dot(ctx, nab, make_tensor_product(ctx, nab, eps));
+    auto const* want =
+        make_dot(ctx, nab, make_tensor_product(ctx, nab, make_trace(ctx, eps)));
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::expand_dyad_ops(ctx, make_trace(ctx, lap_eps)), want));
+
+    // Δv is rank 1 — tr(Δv) is ill-formed, so it is left untouched.
+    auto const* v = make_field(ctx, make_tensor_name("v"), 1, {});
+    auto const* lap_v = make_dot(ctx, nab, make_tensor_product(ctx, nab, v));
+    auto const* tr_lap_v = make_trace(ctx, lap_v);
+    EXPECT_EQ(steps::expand_dyad_ops(ctx, tr_lap_v), tr_lap_v);
+}
+
 TEST(InferRank, UnaryOps)
 {
     Context ctx;
