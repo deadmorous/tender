@@ -3248,11 +3248,21 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
             { return leibniz(make_tensor_product, s.left, s.right); },
             [&](ScalarDiv const& s) -> Expr const*
             {
-                // (l/r)' = (l' r − l r') / r².
+                // A denominator constant in q (the common case — a ∇ operand
+                // like (∇u + (∇u)ᵀ)/2) uses the simple rule (l/c)' = l'/c.  The
+                // full quotient rule would drag an *un-differentiated* copy of
+                // the numerator through the vestigial l·r' term; canonicalize
+                // then alpha-renames the two copies inconsistently, orphaning
+                // the ∂-mark direction indices (vibe 000080, sym-form (b)).
+                auto* dr = nf::fold_forced_zeros(ctx, diff(ctx, s.right, q));
+                if (auto const* z = std::get_if<ScalarLiteral>(&dr->node);
+                    z && z->value.is_zero())
+                    return make_scalar_div(ctx, diff(ctx, s.left, q), s.right);
+                // Otherwise the full quotient rule (l/r)' = (l' r − l r') / r².
                 auto* num = make_difference(
                     ctx,
                     make_tensor_product(ctx, diff(ctx, s.left, q), s.right),
-                    make_tensor_product(ctx, s.left, diff(ctx, s.right, q)));
+                    make_tensor_product(ctx, s.left, dr));
                 return make_scalar_div(
                     ctx,
                     num,

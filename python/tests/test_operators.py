@@ -550,17 +550,27 @@ def test_navier_lame_endpoint():
     assert td.structural_eq(td.expand_products(nl), td.expand_products(ct))
 
 
-def _navier_lame_holds(chart, ctx):
-    # ∇·T == μ∇·∇u + (λ+μ)∇(∇·u) componentwise, for the isotropic Hooke stress
-    # T = λ(∇·u)I + μ(∇u + (∇u)ᵀ).  Both sides are coordinate-free vectors, so
-    # this must hold in every frame — the bare-∇-independent endpoint witness.
+def _explicit_hooke(chart, u, lam, mu, I, ctx):
+    # T = λ(∇·u)I + μ(∇u + (∇u)ᵀ).
+    gradu = chart.grad(u)
+    return lam * chart.div(u) * I + mu * (gradu + gradu.transpose())
+
+
+def _standard_hooke(chart, u, lam, mu, I, ctx):
+    # T = λ tr(ε)I + 2με with ε = sym(∇u) — the textbook elasticity form, whose
+    # scalar-halved sym part exercises the constant-denominator diff rule.
+    return lam * chart.div(u) * I + t.scalar(2, ctx=ctx) * mu * td.sym(chart.grad(u))
+
+
+def _navier_lame_holds(chart, ctx, stress=_explicit_hooke):
+    # ∇·T == μ∇·∇u + (λ+μ)∇(∇·u) componentwise, for an isotropic Hooke stress.
+    # Both sides are coordinate-free vectors, so this must hold in every frame —
+    # the bare-∇-independent endpoint witness.
     lam = t.tensor(r"\lambda", 0, ctx=ctx)
     mu = t.tensor(r"\mu", 0, ctx=ctx)
     I = t.identity(ctx)
     u = t.field("u", 1, ctx=ctx)
-    gradu = chart.grad(u)
-    stress = lam * chart.div(u) * I + mu * (gradu + gradu.transpose())
-    lhs = chart.components(chart.div(stress))
+    lhs = chart.components(chart.div(stress(chart, u, lam, mu, I, ctx)))
     rhs = chart.components(
         mu * chart.div(chart.grad(u)) + (lam + mu) * chart.grad(chart.div(u))
     )
@@ -589,3 +599,33 @@ def test_navier_lame_endpoint_cylindrical():
     r, th, z = ws.coords("r", r"\theta", "z", nonneg=("r",))
     cyl = ws.chart(ws.wcs(), [r, th, z], [r * t.cos(th), r * t.sin(th), z])
     assert _navier_lame_holds(cyl, ws.ctx)
+
+
+def test_navier_lame_endpoint_standard_sym_form():
+    # vibe 000080, sym-form (b): the textbook stress T = λ tr(ε)I + 2με with
+    # ε = sym(∇u) = (∇u+(∇u)ᵀ)/2 reduces to the SAME clean endpoint.  The scalar
+    # /2 rides out via the constant-denominator diff rule (the full quotient rule
+    # used to orphan the ∂-mark indices and drop the second derivatives).
+    ws = t.Workspace()
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    nab = t.nabla(ctx=ws.ctx)
+    I = t.identity(ws.ctx)
+    lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+    mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+    u = ws.field("u", 1)
+
+    T = lam * (nab @ u) * I + t.scalar(2, ctx=ws.ctx) * mu * td.sym(nab * u)
+    interior = td.contract_identity(td.canonicalize(cart.expand_nabla(nab @ T)))
+    reass = cart.reassemble_nabla(td.canonicalize(interior))
+    nl = td.factor_common(td.collect_terms(reass))
+    assert (
+        nl.latex()
+        == r"\mu \, \nabla \cdot \nabla \, \mathbf{u} + \nabla (\lambda + \mu) \, \nabla \cdot \mathbf{u}"
+    )
+    # and it holds componentwise in a Cartesian and a cylindrical frame.
+    assert _navier_lame_holds(cart, ws.ctx, stress=_standard_hooke)
+    ws2 = t.Workspace()
+    r, th, zc = ws2.coords("r", r"\theta", "z", nonneg=("r",))
+    cyl = ws2.chart(ws2.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+    assert _navier_lame_holds(cyl, ws2.ctx, stress=_standard_hooke)

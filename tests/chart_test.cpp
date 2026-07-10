@@ -1522,6 +1522,43 @@ TEST(Chart, ReassembleNablaDivOfScalarTimesIdentity)
     EXPECT_TRUE(eq(ctx, reduce(make_dot(ctx, nab, lam_divv_I)), want));
 }
 
+// A scalar-halved operator operand — the symmetric gradient sym(∇u) =
+// (∇u + (∇u)ᵀ)/2, the standard elasticity strain — reduces cleanly: the
+// constant /2 rides out and the ∂-mark direction indices stay linked to their
+// frame vectors.  Before the constant-denominator diff rule the full quotient
+// rule dragged an un-differentiated numerator copy through canonicalize, whose
+// inconsistent alpha-renaming orphaned the ∂ marks and dropped the second
+// derivatives entirely (vibe 000080, sym-form (b)).
+TEST(Chart, ReassembleNablaDivOfSymmetricGradient)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto* nab = make_nabla(ctx);
+    auto* two = make_scalar(ctx, Rational{2});
+
+    auto reduce = [&](Expr const* e)
+    {
+        auto* x = steps::canonicalize(ctx, expand_nabla(ctx, chart, e));
+        x = steps::contract_identity(ctx, x);
+        return reassemble_nabla(ctx, chart, steps::canonicalize(ctx, x));
+    };
+
+    auto* gradu = make_tensor_product(ctx, nab, u);
+    auto* sym = make_scalar_div(
+        ctx, make_sum(ctx, gradu, make_transpose(ctx, gradu)), two);
+    // ∇·(sym ∇u) = ½(∇(∇·u) + ∇·∇u) — the grad-div from (∇u)ᵀ, the Laplacian
+    // from ∇u, each halved.
+    auto* graddiv = make_tensor_product(ctx, nab, make_dot(ctx, nab, u));
+    auto* lap = make_dot(ctx, nab, make_tensor_product(ctx, nab, u));
+    auto* want = make_sum(
+        ctx,
+        make_scalar_div(ctx, graddiv, two),
+        make_scalar_div(ctx, lap, two));
+    EXPECT_TRUE(eq(ctx, reduce(make_dot(ctx, nab, sym)), want));
+}
+
 // expand_nabla(∇·∇f) for a SCALAR field keeps its true rank 0 (the Laplacian
 // Δf) instead of degrading to a rank-2 dyad (vibe 000079).  The inner grad ∇f
 // is the scalar-scaled frame vector (∂_i f) e_i; the outer ∇· must contract e_ℓ

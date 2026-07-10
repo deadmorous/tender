@@ -25,10 +25,17 @@ reassemble → `collect_terms` → `factor_common`) to the clean Navier–Lamé 
 **`μ∇·∇u + ∇((λ+μ)∇·u)`** = μΔu + (λ+μ)∇(∇·u).  Correctness checked by
 `expand_products` round-trip, not `algebraic_eq` (canonicalising a reassembled
 bare-∇ form is structurally unstable — the "display-ready, don't
-re-canonicalize" caveat).  **Remaining polish:** (b) sym-form (`/2`) scalar
-normalisation (fold a `Pow`/`ScalarDiv` denominator `2²` against numerator
-`2·2` so `2μ·sym(∇u)` reassembles — the explicit `μ(∇u+(∇u)ᵀ)` form already
-works); **(c) DONE** — the Increment 8 example witness `examples/navier_lame.{py,ipynb}`
+re-canonicalize" caveat).  **Remaining polish:** **(b) DONE** — the textbook
+elasticity stress `T = λ tr(ε)I + 2με` with `ε = sym(∇u) = (∇u+(∇u)ᵀ)/2` now
+reduces to the *same* clean endpoint.  Root cause was NOT scalar arithmetic but
+`diff`'s `ScalarDiv` arm always using the full quotient rule `(l/r)'=(l'r−lr')/r²`:
+for a constant denominator the vestigial `l·r'` term dragged an *un-differentiated*
+numerator copy through canonicalize, whose inconsistent alpha-renaming orphaned
+the ∂-mark direction indices and dropped the 2nd derivatives.  Fix: constant
+denominator (folds to 0 under `diff`) → simple rule `(l/c)'=l'/c` (derivation.cpp
+ScalarDiv arm).  Guards: `Chart.ReassembleNablaDivOfSymmetricGradient` (C++),
+`test_navier_lame_endpoint_standard_sym_form` (Py, + example step 4b);
+**(c) DONE** — the Increment 8 example witness `examples/navier_lame.{py,ipynb}`
 plus guard tests `test_navier_lame_endpoint_{cartesian,cylindrical}`: the full
 chart-free derivation (expand ∇ → apply ∂ → e·I fold → reassemble → factor_common)
 alongside a component-wise Cartesian + cylindrical verification of

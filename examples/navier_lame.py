@@ -149,6 +149,23 @@ def main():
         ],
     )
 
+    # ---- 4b. the textbook form T = λ tr(ε)I + 2με reduces identically -------
+    # ε = sym(∇u) = (∇u + (∇u)ᵀ)/2; the scalar /2 rides out through the whole
+    # reduction and the endpoint is the same clean Navier–Lamé vector.
+    T_std = lam * (nabla @ u) * I + t.scalar(2, ctx=ws.ctx) * mu * td.sym(nabla * u)
+    reass_std = cart.reassemble_nabla(
+        td.canonicalize(td.contract_identity(td.canonicalize(cart.expand_nabla(nabla @ T_std))))
+    )
+    nl_std = td.factor_common(td.collect_terms(reass_std))
+    assert nl_std.latex() == nl.latex(), "textbook 2με form ≠ explicit-form endpoint"
+    show(
+        "4b. textbook form  T = λ tr(ε)I + 2με,  ε = sym(∇u)",
+        [
+            ("T  (textbook)", T_std),
+            ("∇·T  (same endpoint)", nl_std),
+        ],
+    )
+
     # ---- 5. verify the endpoint component-by-component ----------------------
     print("\n5. Verification  (component-by-component, via the chart operators)")
     verify(cart, u, lam, mu, I, "Cartesian")
