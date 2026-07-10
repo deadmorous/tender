@@ -24,7 +24,7 @@ PYTHONPATH_VAR := PYTHONPATH=$(ROOT)/python
 
 EXAMPLES := kronecker_delta delta_trace eps_delta basis_dot_product cross_identity \
             basis_aware_coordinates curvilinear_operators cyl_equilibrium \
-            strain_compatibility
+            strain_compatibility navier_lame
 
 .PHONY: all clean
 

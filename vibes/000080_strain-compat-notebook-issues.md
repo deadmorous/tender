@@ -28,8 +28,11 @@ bare-∇ form is structurally unstable — the "display-ready, don't
 re-canonicalize" caveat).  **Remaining polish:** (b) sym-form (`/2`) scalar
 normalisation (fold a `Pow`/`ScalarDiv` denominator `2²` against numerator
 `2·2` so `2μ·sym(∇u)` reassembles — the explicit `μ(∇u+(∇u)ᵀ)` form already
-works); (c) the Increment 8 example witness (a `navier_lame` example with
-component-wise Cartesian + cylindrical verification, like strain-compat); a
+works); **(c) DONE** — the Increment 8 example witness `examples/navier_lame.{py,ipynb}`
+plus guard tests `test_navier_lame_endpoint_{cartesian,cylindrical}`: the full
+chart-free derivation (expand ∇ → apply ∂ → e·I fold → reassemble → factor_common)
+alongside a component-wise Cartesian + cylindrical verification of
+`∇·T = μ∇·∇u + (λ+μ)∇(∇·u)`, a bare-∇-independent correctness proof.  A
 nicety would pull the constant `(λ+μ)` fully outside the gradient.  **Also
 remaining:** Increments 1, 2, 4 (the `tr` reductions, for strain-compat/Issue 6).
 **Deferred (needs special care):** vibe 000054 (selective application) and its

@@ -548,3 +548,44 @@ def test_navier_lame_endpoint():
     # collect_terms(reass) distribute to the same fully-expanded form.
     ct = td.collect_terms(reass)
     assert td.structural_eq(td.expand_products(nl), td.expand_products(ct))
+
+
+def _navier_lame_holds(chart, ctx):
+    # ∇·T == μ∇·∇u + (λ+μ)∇(∇·u) componentwise, for the isotropic Hooke stress
+    # T = λ(∇·u)I + μ(∇u + (∇u)ᵀ).  Both sides are coordinate-free vectors, so
+    # this must hold in every frame — the bare-∇-independent endpoint witness.
+    lam = t.tensor(r"\lambda", 0, ctx=ctx)
+    mu = t.tensor(r"\mu", 0, ctx=ctx)
+    I = t.identity(ctx)
+    u = t.field("u", 1, ctx=ctx)
+    gradu = chart.grad(u)
+    stress = lam * chart.div(u) * I + mu * (gradu + gradu.transpose())
+    lhs = chart.components(chart.div(stress))
+    rhs = chart.components(
+        mu * chart.div(chart.grad(u)) + (lam + mu) * chart.grad(chart.div(u))
+    )
+
+    def is_zero(e):
+        return td.simplify_scalars(td.canonicalize(chart.expand(e))).latex() == "0"
+
+    return all(
+        is_zero(chart.expand(lhs[i]) - chart.expand(rhs[i])) for i in range(3)
+    )
+
+
+def test_navier_lame_endpoint_cartesian():
+    # vibe 000080 Increment 8: the Navier–Lamé endpoint, proven componentwise in
+    # a Cartesian frame (the example witness, guarded in the suite).
+    ws = t.Workspace()
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    assert _navier_lame_holds(cart, ws.ctx)
+
+
+def test_navier_lame_endpoint_cylindrical():
+    # vibe 000080 Increment 8: the same endpoint in a *curvilinear* (cylindrical)
+    # frame — the connection terms fall out of the operators on their own.
+    ws = t.Workspace()
+    r, th, z = ws.coords("r", r"\theta", "z", nonneg=("r",))
+    cyl = ws.chart(ws.wcs(), [r, th, z], [r * t.cos(th), r * t.sin(th), z])
+    assert _navier_lame_holds(cyl, ws.ctx)

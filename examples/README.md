@@ -67,6 +67,7 @@ MathJax.
 | `curvilinear_operators.py` / `.ipynb` | Curvilinear ∇/div/rot/Δ derived from a coordinate mapping: tangent basis → metric → scale factors → physical frame → ∂e connection → operators (cylindrical & spherical) |
 | `cyl_equilibrium.py` / `.ipynb` | Cylindrical equilibrium ∇·T + f = 0 worked through to the thin-pipe hoop-stress formula |
 | `strain_compatibility.py` / `.ipynb` | Strain compatibility inc ε = ∇×(∇×ε)ᵀ derived *as performed* — expand ∇, derive & apply the a×B×c cross-removal identity, reassemble into ∇ operators — then verified componentwise (Cartesian & cylindrical) |
+| `navier_lame.py` / `.ipynb` | Navier–Lamé reduction ∇·T = μ∇·∇u + ∇((λ+μ)∇·u) of the isotropic Hooke stress derived *as performed* — expand ∇, apply the Leibniz ∂'s, fold e_i·I, reassemble into ∇ operators, reverse the distribution — then verified componentwise (Cartesian & cylindrical) |
 
 ## Notebook hygiene — stripping outputs before committing
 
