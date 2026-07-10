@@ -3928,6 +3928,49 @@ TEST(FactorCommon, PullsSharedScalarFactorFromSum)
     EXPECT_TRUE(structural_eq(steps::factor_common(ctx, sum2), sum2));
 }
 
+// factor_common hoists a differentiation-constant scalar fully out of a bare
+// gradient: ∇(λ f + μ f) → (λ+μ)∇f, valid since ∇(λ+μ)=0 (vibe 000080).  A
+// field coefficient (∇f ≠ 0) is NOT hoisted.
+TEST(FactorCommon, HoistsConstantOutOfGradient)
+{
+    Context ctx;
+    auto* nab = make_nabla(ctx);
+    auto* lam = make_tensor_object(ctx, make_tensor_name("\\lambda"), {}, 0);
+    auto* mu = make_tensor_object(ctx, make_tensor_name("\\mu"), {}, 0);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+
+    // ∇(λ f + μ f) → (λ+μ) ∇f: the hoisted constant (λ+μ) now leads the
+    // ⊗-chain, so the top node is a product whose left factor is the sum (λ+μ).
+    auto* grad = make_tensor_product(
+        ctx,
+        nab,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, lam, f),
+            make_tensor_product(ctx, mu, f)));
+    auto* out = steps::factor_common(ctx, grad);
+    auto const* tp = std::get_if<TensorProduct>(&out->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_NE(std::get_if<Sum>(&tp->left->node), nullptr);   // (λ+μ) hoisted
+    EXPECT_EQ(std::get_if<Nabla>(&tp->left->node), nullptr); // ∇ not in front
+    EXPECT_EQ(steps::factor_common(ctx, out), out);          // idempotent
+
+    // A field coefficient is left inside the gradient (∇g ≠ 0): ∇ still leads.
+    auto* g = make_field(ctx, make_tensor_name("g"), 0, {});
+    auto* h = make_field(ctx, make_tensor_name("h"), 0, {});
+    auto* gradf = make_tensor_product(
+        ctx,
+        nab,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, g, f),
+            make_tensor_product(ctx, h, f)));
+    auto* outf = steps::factor_common(ctx, gradf);
+    auto const* tpf = std::get_if<TensorProduct>(&outf->node);
+    ASSERT_NE(tpf, nullptr);
+    EXPECT_NE(std::get_if<Nabla>(&tpf->left->node), nullptr); // ∇ still leads
+}
+
 // vibe 000074: algebraic_eq closes the fraction-shape gap of theory T0 — the
 // canonical forms keep x/r + y/r and (x+y)/r apart, so algebraic_eq falls back
 // to checking that the difference simplifies to the literal 0.

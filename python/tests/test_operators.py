@@ -542,12 +542,15 @@ def test_navier_lame_endpoint():
 
     assert (
         nl.latex()
-        == r"\mu \, \nabla \cdot \nabla \, \mathbf{u} + \nabla (\lambda + \mu) \, \nabla \cdot \mathbf{u}"
+        == r"\mu \, \nabla \cdot \nabla \, \mathbf{u} + (\lambda + \mu) \, \nabla (\nabla \cdot \mathbf{u})"
     )
-    # correctness: factor_common only regroups coefficients, so nl and
-    # collect_terms(reass) distribute to the same fully-expanded form.
-    ct = td.collect_terms(reass)
-    assert td.structural_eq(td.expand_products(nl), td.expand_products(ct))
+    # correctness: factor_common's constant-hoist ∇((λ+μ)∇·u)→(λ+μ)∇(∇·u) is an
+    # operator-linearity rewrite that expand_products can't model, so the
+    # endpoint identity ∇·T = μ∇·∇u + (λ+μ)∇(∇·u) is proven componentwise
+    # (independent of the bare-∇ display) in the dedicated
+    # test_navier_lame_endpoint_{cartesian,cylindrical}; here the pipeline is
+    # confirmed to reach that clean factored display.
+    assert _navier_lame_holds(cart, ws.ctx)
 
 
 def _explicit_hooke(chart, u, lam, mu, I, ctx):
@@ -621,7 +624,7 @@ def test_navier_lame_endpoint_standard_sym_form():
     nl = td.factor_common(td.collect_terms(reass))
     assert (
         nl.latex()
-        == r"\mu \, \nabla \cdot \nabla \, \mathbf{u} + \nabla (\lambda + \mu) \, \nabla \cdot \mathbf{u}"
+        == r"\mu \, \nabla \cdot \nabla \, \mathbf{u} + (\lambda + \mu) \, \nabla (\nabla \cdot \mathbf{u})"
     )
     # and it holds componentwise in a Cartesian and a cylindrical frame.
     assert _navier_lame_holds(cart, ws.ctx, stress=_standard_hooke)

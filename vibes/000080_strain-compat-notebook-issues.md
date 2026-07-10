@@ -39,8 +39,14 @@ ScalarDiv arm).  Guards: `Chart.ReassembleNablaDivOfSymmetricGradient` (C++),
 plus guard tests `test_navier_lame_endpoint_{cartesian,cylindrical}`: the full
 chart-free derivation (expand ∇ → apply ∂ → e·I fold → reassemble → factor_common)
 alongside a component-wise Cartesian + cylindrical verification of
-`∇·T = μ∇·∇u + (λ+μ)∇(∇·u)`, a bare-∇-independent correctness proof.  A
-nicety would pull the constant `(λ+μ)` fully outside the gradient.  **Increment 1
+`∇·T = μ∇·∇u + (λ+μ)∇(∇·u)`, a bare-∇-independent correctness proof.  **Nicety
+DONE**: `factor_common` now also hoists a differentiation-constant scalar fully
+out of a bare gradient — `∇((λ+μ)∇·u) → (λ+μ)∇(∇·u)` (`∇(cX)=c∇X`, licensed by a
+new `is_diff_constant` predicate: field/coordinate/operator-free ⇒ ∇c=0);
+handles ∇ at either end of the ⊗-chain (canonicalised bare ∇ sits on the right).
+NOTE this hoist is an operator-linearity rewrite `expand_products` can't model,
+so the endpoint round-trip check was replaced by the component-wise proof.
+**Increment 1
 DONE** (literal-only, user decision): `tr(W)→n` for a well-known symmetric rank-2
 tensor whose index space is concrete.  Key finding — the bare `t.identity()` is
 the *only* rank-2 well-known tensor (δ/g always appear as rank-0 *components*),

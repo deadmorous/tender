@@ -136,16 +136,17 @@ def main():
     )
 
     # ---- 4. reverse the distribution: the Navier–Lamé endpoint --------------
+    # factor_common pulls the shared ∇·u out of the λ- and μ-gradients and then
+    # hoists the constant (λ+μ) fully outside the gradient (∇(cX)=c∇X, ∇c=0).
+    # That last step is an operator-linearity rewrite expand_products can't
+    # model, so the endpoint's correctness is proven componentwise in §5, not by
+    # a distribution round-trip (see the vibe-000080 "don't re-canonicalize"
+    # caveat).
     nl = td.factor_common(td.collect_terms(reass))
-    # factor_common only regroups coefficients: nl and the collected form
-    # distribute to the same fully-expanded expression (a bare-∇-independent
-    # structural check — see the vibe-000080 "don't re-canonicalize" caveat).
-    ct = td.collect_terms(reass)
-    assert td.structural_eq(td.expand_products(nl), td.expand_products(ct))
     show(
         "4. factor_common → clean Navier–Lamé endpoint",
         [
-            ("∇·T  =  μ∇·∇u + ∇((λ+μ)∇·u)", nl),
+            ("∇·T  =  μ∇·∇u + (λ+μ)∇(∇·u)", nl),
         ],
     )
 

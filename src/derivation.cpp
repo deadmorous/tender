@@ -3035,6 +3035,30 @@ auto collect_terms(Context& ctx, Expr const* e) -> Expr const*
     return out ? out : make_scalar(ctx, Rational{0});
 }
 
+// True if `e` is invariant under differentiation (∇e = 0): a scalar built only
+// from parameters and literals, with no field, coordinate, applied derivative,
+// or ∇/∂ operator anywhere.  Licenses hoisting a constant out of a gradient,
+// `∇(c X) = c ∇X` (vibe 000080).
+auto is_diff_constant(Context& ctx, Expr const* e) -> bool
+{
+    bool constant = true;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (std::holds_alternative<Nabla>(n->node)
+                || std::holds_alternative<Deriv>(n->node))
+                constant = false;
+            else if (auto const* t = std::get_if<TensorObject>(&n->node))
+                if ((t->traits && (t->traits->field || t->traits->coordinate))
+                    || !t->deriv_marks.empty())
+                    constant = false;
+            return n;
+        });
+    return constant;
+}
+
 auto factor_common(Context& ctx, Expr const* e) -> Expr const*
 {
     // Factor a common (scalar) factor out of an additive group — the reverse of
@@ -3043,12 +3067,53 @@ auto factor_common(Context& ctx, Expr const* e) -> Expr const*
     // factoring is order-independent and always valid; numeric coefficients are
     // left to collect_terms/canon, and a common *tensor* factor is handled by
     // collect_terms).  Runs bottom-up, so it also reaches a sum nested inside a
-    // gradient, `∇(λ∇·u + μ∇·u) → ∇((λ+μ)∇·u)`.
+    // gradient, `∇(λ∇·u + μ∇·u) → ∇((λ+μ)∇·u)`, and then hoists the constant
+    // coefficient fully out of that gradient, `∇((λ+μ)∇·u) → (λ+μ)∇(∇·u)`.
     return rewrite_tree(
         ctx,
         e,
         [](Context& ctx, Expr const* node) -> Expr const*
         {
+            // Hoist a differentiation-constant scalar out of a bare gradient:
+            // ∇(c X) → c ∇X, valid since ∇c = 0.  The gradient is a ⊗-chain
+            // with the single bare ∇ at one end — `∇ ⊗ (λ+μ) ⊗ ∇·u` or the
+            // canonicalised `(λ+μ) ⊗ ∇·u ⊗ ∇`; peel the constant scalars off
+            // the other factors and re-front them, keeping ∇ adjacent to the
+            // rest it acts on: `(λ+μ) ⊗ (∇ ⊗ ∇·u)`.  Bottom-up, so the inner
+            // sum is already factored to (λ+μ)∇·u when this fires.
+            if (std::holds_alternative<TensorProduct>(node->node))
+            {
+                std::vector<Expr const*> facs;
+                flatten_factors(node, facs);
+                int nab = -1;
+                if (!facs.empty()
+                    && std::holds_alternative<Nabla>(facs.front()->node))
+                    nab = 0;
+                else if (
+                    facs.size() >= 2
+                    && std::holds_alternative<Nabla>(facs.back()->node))
+                    nab = static_cast<int>(facs.size()) - 1;
+                if (nab >= 0)
+                {
+                    std::vector<Expr const*> consts;
+                    std::vector<Expr const*> rest;
+                    for (std::size_t k = 0; k < facs.size(); ++k)
+                        if (static_cast<int>(k) != nab)
+                            ((infer_rank(facs[k]) == std::optional<int>{0}
+                              && is_diff_constant(ctx, facs[k])) ?
+                                 consts :
+                                 rest)
+                                .push_back(facs[k]);
+                    if (!consts.empty() && !rest.empty())
+                    {
+                        Expr const* r = product_of(ctx, rest);
+                        consts.push_back(
+                            nab == 0 ? make_tensor_product(ctx, facs[nab], r) :
+                                       make_tensor_product(ctx, r, facs[nab]));
+                        return product_of(ctx, consts);
+                    }
+                }
+            }
             if (!std::holds_alternative<Sum>(node->node)
                 && !std::holds_alternative<Difference>(node->node))
                 return node;

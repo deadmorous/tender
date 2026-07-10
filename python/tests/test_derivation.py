@@ -966,13 +966,18 @@ def test_factor_common_nested_in_gradient_and_noop():
     nab = tender.nabla(ctx=ws.ctx)
     lam = tender.tensor(r"\lambda", 0, ctx=ws.ctx)
     mu = tender.tensor(r"\mu", 0, ctx=ws.ctx)
-    # reaches a sum nested inside a gradient: ∇(λ∇·u + μ∇·u) → ∇((λ+μ)∇·u).
+    # reaches a sum nested inside a gradient AND hoists the constant coefficient
+    # fully out: ∇(λ∇·u + μ∇·u) → (λ+μ)∇(∇·u), valid since ∇(λ+μ)=0.
     g = nab * (lam * (nab @ u) + mu * (nab @ u))
     fc = td.factor_common(g)
-    assert fc.latex() == r"\nabla \, (\lambda + \mu) \, \nabla \cdot \mathbf{u}"
-    # correctness: both distribute to the same fully-expanded form (a robust
-    # check that avoids canonicalising the bare ∇, which is unstable).
-    assert td.structural_eq(td.expand_products(fc), td.expand_products(g))
+    assert fc.latex() == r"(\lambda + \mu) \, \nabla \, \nabla \cdot \mathbf{u}"
+    assert td.factor_common(fc).latex() == fc.latex()  # idempotent
+    # a *field*-dependent coefficient is NOT hoisted (∇f ≠ 0): the factored sum
+    # stays inside the gradient.
+    f = ws.field("f", 0)
+    h = ws.field("h", 0)
+    gf = nab * (f * (nab @ u) + h * (nab @ u))
+    assert td.factor_common(gf).latex() == r"\nabla \, (f + h) \, \nabla \cdot \mathbf{u}"
     # no common factor → unchanged.
     s2 = lam * (nab @ u) + mu * u
     assert td.structural_eq(td.factor_common(s2), s2)
