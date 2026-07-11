@@ -1481,10 +1481,12 @@ TEST(Chart, ReassembleNablaFoldsIdentityScaledInvariant)
         make_dot(ctx, nab, make_tensor_product(ctx, nab, make_trace(ctx, eps))));
     auto* term = steps::canonicalize(ctx, make_tensor_product(ctx, dtheta, id));
     auto* reass = reassemble_nabla(ctx, chart, term);
+    // reassemble_nabla dimensions the identity to the chart's space (vibe
+    // 000081 B1), so the invariant term is (Δθ) I with a 3-D I.
     auto* want = make_tensor_product(
         ctx,
         make_dot(ctx, nab, make_tensor_product(ctx, nab, make_trace(ctx, eps))),
-        id);
+        make_identity(ctx, space_3d()));
     EXPECT_TRUE(eq(ctx, reass, want));
 }
 

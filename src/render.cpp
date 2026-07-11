@@ -178,6 +178,19 @@ auto index_str(
     return base;
 }
 
+// A well-known tensor (I / δ / g / ε) whose slots are all *unbound*
+// placeholders — a dimensioned identity carries them only to remember its space
+// for tr(I)=n (vibe 000081 B1).  They are not indices, so render just the
+// symbol (`I`), not `I^{•·}_{·•}`.
+auto all_unbound_well_known(TensorObject const& t) -> bool
+{
+    return t.traits && t.traits->well_known.has_value() && !t.slots.empty()
+           && std::none_of(
+               t.slots.begin(),
+               t.slots.end(),
+               [](SlotBinding const& sb) { return sb.index.has_value(); });
+}
+
 // Bold for rank >= 1 or rank nullopt (treated as tensor); plain for rank == 0.
 auto name_str(TensorName const& name, std::optional<int> rank) -> std::string
 {
@@ -458,7 +471,9 @@ struct Renderer
                         prefix += "\\partial_{" + dir + "} ";
                     }
                     return prefix + name_str(t.name, t.rank)
-                           + slots_str(map, t.slots, hints, ctx);
+                           + (all_unbound_well_known(t) ?
+                                  std::string{} :
+                                  slots_str(map, t.slots, hints, ctx));
                 },
                 [&](ScalarLiteral const& s) -> std::string
                 { return rational_str(s.value); },
@@ -648,7 +663,9 @@ struct NfRenderer
                     if (a.obj.traits)
                         hints = a.obj.traits->render_hints;
                     return name_str(a.obj.name, a.obj.rank)
-                           + slots_str(map, a.obj.slots, hints, ctx);
+                           + (all_unbound_well_known(a.obj) ?
+                                  std::string{} :
+                                  slots_str(map, a.obj.slots, hints, ctx));
                 },
                 // Flat contraction chain: f0 op0 f1 op1 …  Each operand wraps a
                 // nested contraction / cross (prec < TENSOR_PREC).

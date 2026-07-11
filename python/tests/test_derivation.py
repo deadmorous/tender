@@ -726,6 +726,9 @@ def test_trace_of_dimensioned_identity():
     )
     I = tender.identity(ctx=ctx)
     assert td.expand_dyad_ops(tender.tr(I)).latex() == r"\operatorname{tr}(\mathbf{I})"
+    # vibe 000081 B1: the dimensioned identity's space-carrying slots are not
+    # indices — it renders as a clean I, same as the bare one, not I^{•·}_{·•}.
+    assert I3.latex() == r"\mathbf{I}" == I.latex()
 
 
 def test_trace_of_scaled_dimensioned_identity():

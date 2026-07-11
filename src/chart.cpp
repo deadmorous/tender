@@ -1145,6 +1145,30 @@ auto reassemble_term(
     return cur;
 }
 
+// Stamp the chart's dimension onto a *bare* identity (rank-2 well-known I with
+// no index slots).  A derivation keeps the dimension-agnostic `identity(ctx)`
+// because the basis machinery (`expand_in_basis` / `simplify_basis_cross`) only
+// handles the slotless form; but the reassembled invariant is chart-bound, so
+// its I becomes `identity(space)` — letting a downstream `tr(c·I) → c·n` fold
+// (vibe 000081, B1).  The dimensioned I is matched by well-known kind
+// everywhere, so no other reduction is disturbed.
+auto dimension_identities(Context& ctx, Expr const* e, IndexSpace const* space)
+    -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* n) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&n->node);
+            if (t && t->traits
+                && t->traits->well_known == WellKnownKind::Identity
+                && t->slots.empty())
+                return make_identity(c, space);
+            return n;
+        });
+}
+
 } // namespace
 
 auto reassemble_nabla(Context& ctx, CoordinateChart const& chart, Expr const* e)
@@ -1178,7 +1202,7 @@ auto reassemble_nabla(Context& ctx, CoordinateChart const& chart, Expr const* e)
         Expr const* r = reassemble_term(ctx, fb, nabla, n);
         return sign < 0 ? make_negate(ctx, r) : r;
     };
-    return go(body, +1);
+    return dimension_identities(ctx, go(body, +1), fb.space());
 }
 
 auto gradient(

@@ -406,7 +406,9 @@ def test_strain_phase2_reassembly():
     cart, _ = _chart(ws)
     eps = ws.field(r"\varepsilon", 2, symmetric=True)
     nab = t.nabla(ctx=ws.ctx)
-    I = t.identity(ws.ctx)
+    # reassemble_nabla dimensions the identity to the chart's space (vibe 000081
+    # B1); the closed form's I must match to compare equal.
+    I = t.identity(ws.ctx, space=t.space_3d)
     _, id_inc = _cross_removal_identities(ws.ctx)
 
     interior = cart.expand_nabla(nab % (nab % eps).transpose())
@@ -423,6 +425,29 @@ def test_strain_phase2_reassembly():
         + (nab * (nab @ eps)).transpose()  # +(∇∇·ε)ᵀ
     )
     assert td.algebraic_eq(reass, closed)
+
+
+def test_reassemble_nabla_dimensions_identity_and_trace_folds():
+    # vibe 000081 B1: the derivation keeps the dimension-agnostic identity (the
+    # basis machinery needs the slotless form), but reassemble_nabla stamps the
+    # chart's dimension onto the I in its invariant output — so tr(inc ε) folds
+    # tr(c·I)→c·n and the whole thing reduces to Δ tr(ε) − ∇·(∇·ε).  The
+    # dimensioned I still renders as a clean `I` (no slot decoration).
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+    _, id_inc = _cross_removal_identities(ws.ctx)  # bare I inside
+
+    interior = cart.expand_nabla(nab % (nab % eps).transpose())
+    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    reass = cart.reassemble_nabla(phase1)
+    assert reass.latex().count(r"\mathbf{I}") == 2  # clean I, no ^{•·}_{·•}
+
+    tr_inc = td.fold_equal_addends_structural(td.expand_dyad_ops(t.tr(reass)))
+    theta = t.tr(eps)
+    target = nab @ (nab * theta) - nab @ (nab @ eps)  # Δ tr ε − ∇·(∇·ε)
+    assert td.fold_equal_addends_structural(tr_inc - target).latex() == "0"
 
 
 def test_reassemble_scalar_hessian_drops_transpose():
