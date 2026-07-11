@@ -71,6 +71,30 @@ TEST(UnrollSums, LeavesFreeDerivLinkedIndex)
                             // intact
 }
 
+TEST(AbstractNabla, DetectsNablaOverExpandedBasis)
+{
+    // vibe 000081, Part 2: an abstract ∇ coexisting with a basis-frame vector
+    // (a slot carrying basis_id ≠ 0) is the basis-first mistake;
+    // apply_operators must refuse rather than silently drop the gradient.
+    Context ctx;
+    auto const* sp = space_3d();
+    auto const* nab = make_nabla(ctx);
+    auto const* frame = ctx.make<Expr>(TensorObject{
+        .name = make_tensor_name("e"),
+        .rank = 1,
+        .traits = std::nullopt,
+        .slots = {SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, sp, /*basis_id=*/7},
+            IndexAssoc{ConcreteIndex{1}}}},
+        .deriv_marks = {}});
+    auto const* prod = make_tensor_product(ctx, nab, frame);
+
+    EXPECT_TRUE(steps::abstract_nabla_over_expanded_basis(ctx, prod));
+    EXPECT_FALSE(steps::abstract_nabla_over_expanded_basis(ctx, nab));
+    EXPECT_FALSE(steps::abstract_nabla_over_expanded_basis(ctx, frame));
+    EXPECT_THROW(steps::apply_operators(ctx, prod), std::invalid_argument);
+}
+
 // ---- eval_delta_concrete ---------------------------------------------------
 
 TEST(EvalDeltaConcrete, DiagonalIsOne)

@@ -3787,8 +3787,43 @@ auto apply_operators_impl(Context& ctx, Expr const* e) -> Expr const*
 
 } // namespace
 
+auto abstract_nabla_over_expanded_basis(Context& ctx, Expr const* e) -> bool
+{
+    bool nabla = false;
+    bool frame_vector = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (std::holds_alternative<Nabla>(n->node))
+                nabla = true;
+            else if (auto const* t = std::get_if<TensorObject>(&n->node))
+                for (auto const& sb: t->slots)
+                    if (sb.slot.basis_id != 0)
+                        frame_vector = true;
+            return n;
+        });
+    return nabla && frame_vector;
+}
+
+// The clear, actionable error for the basis-first mistake (vibe 000081): an
+// abstract ∇ survived into a step that must canonicalize it over an already-
+// expanded basis.  Point at the ∇-first order.
+[[noreturn]] void throw_abstract_nabla(char const* step)
+{
+    throw std::invalid_argument(
+        std::string(step)
+        + ": ∇ is still abstract over an expanded basis — canon cannot reduce a "
+          "∇ nested in a basis ⊗-fence (it would silently drop the gradient or "
+          "crash). Expand ∇ first (expand_nabla / grad / div / rot), then expand "
+          "the basis.");
+}
+
 auto apply_operators(Context& ctx, Expr const* e) -> Expr const*
 {
+    if (abstract_nabla_over_expanded_basis(ctx, e))
+        throw_abstract_nabla("apply_operators");
     return canon_tolerant(ctx, apply_operators_impl(ctx, e));
 }
 

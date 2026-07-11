@@ -265,12 +265,52 @@ Guards: py `test_divergence_via_explicit_basis_and_componentize`,
 `UnrollSums.LeavesFreeDerivLinkedIndex`. Part-3 example step list to switch
 `td.unroll_sums`→`cs.componentize_nabla` (then unroll) when writing the witness.
 
-**Fix B — Part 2 (CORRECTNESS). DECISION: B2 (make it correct).** Teach the
-invariant product rule `∇⊙(f T) = (∇f)⊙T + f (∇⊙T)` for the abstract ∇ in
-`apply_operators`, and **stop `canonicalize` commuting a scalar across a `Nabla`
-factor** (the value-corrupting reorder). After this, the basis-first order also
-yields the right answer. Re-opens the vibe-000080 operator-position area in
-canon — proceed carefully; component-wise verification is the correctness oracle.
+**Fix B — Part 2 (CORRECTNESS). DECISION was B2; SCOPE FINDING blocks the cheap
+version.** Investigation nailed the corruption locus and, more importantly, an
+architectural wall:
+- Exact corruption: `distribute_contraction` (canon internal, derivation.cpp
+  ~1261) floats a *legless scalar* out of a contraction fence
+  (`∇·(f⊗v) → f (∇·v)`), treating the abstract ∇ as a plain vector and dropping
+  the gradient `(∇f)·v`.  This is the normally-correct bilinearity `X·(f v) =
+  f(X·v)` firing when `X` is the operator ∇.
+- KEY: the user's Part-2 pipeline is **already correct** if the abstract ∇ is
+  resolved by `expand_nabla` *before* any canonicalization — verified:
+  `expand_nabla(tr(∇⊗(u_i e_i)))` → `∂_x u_x+∂_y u_y+∂_z u_z`.  The premature
+  `apply_operators` (which calls `canon_tolerant`) is the sole cause; canon never
+  should have seen an unexpanded ∇ over expanded components.
+- WALL: making canon itself correct here needs an **operator normal form**.
+  Canon has NO representation for a grad/div nested as a contraction operand
+  (`∇⊗f`, `∇·v` inside a `Dot`): `encapsulate` throws "nested ⊗ inside an operand
+  awaits fence distribution".  A probe that merely *stopped* the scalar-float
+  (guarding `ends_in_operator`/`begins_with_operator`) left the node
+  un-distributed → `encapsulate` crash.  And the mathematically-correct Leibniz
+  output `(∇f)·v` is itself a `∇⊗f` inside a Dot → same crash.  The working
+  chart/operator paths avoid this by expanding ∇ into concrete frame ∂'s FIRST,
+  so a grad becomes `Σ_i e_i (∂_i f)` (∂ is a rank-0 field-deriv atom, no operator
+  nested in a fence).  Teaching canon an operator normal form is a large, risky,
+  multi-increment redesign — the exact vibe-000080 minefield.
+
+So the practical choice narrows to: **B1-style guard** (make `apply_operators` /
+canon refuse or no-op an abstract ∇ it can't apply, turning the silent-zero into
+a loud pointer to expand_nabla — the correct answer is already reachable by the
+∇-first order, Fix A) vs **B2-full** (operator normal form in canon; large).
+Re-checked with the user before proceeding (scope was not known at decision time).
+
+**DECISION (re-confirmed with user): guard + clear error. DONE.** New predicate
+`steps::abstract_nabla_over_expanded_basis(ctx, e)` = an abstract `Nabla` node
+coexists with a basis-frame vector (a slot `basis_id ≠ 0`).  `apply_operators`
+and `chart::express` check it up-front and raise `std::invalid_argument`
+("∇ is still abstract over an expanded basis — … Expand ∇ first (expand_nabla /
+grad / div / rot), then expand the basis.") BEFORE any canonicalization, so both
+failure modes (the silent scalar-float zero AND the cryptic encapsulate crash)
+become one actionable message.  Scoped to `Nabla` only (NOT `Deriv`), so the
+∇-first order — where `expand_nabla` has already replaced ∇ by frame ∂'s (Deriv)
++ e_i — passes untouched; abstract field/identity forms (no basis vector) also
+pass (vibe-080 unaffected).  Guards: py
+`test_apply_operators_refuses_abstract_nabla_over_expanded_basis`,
+`test_abstract_nabla_over_basis_ok_when_nabla_expanded_first`; C++
+`AbstractNabla.DetectsNablaOverExpandedBasis`.  Issue 3 (express weirdness) is
+subsumed: express now refuses that input outright.  Full suite 814 C++ / 267 py.
 
 **Fix C — Issue 1 (rendering, small).** Re-implicitize the Einstein sum inside
 `apply_operators` output (or have it not materialise `Σ_i`). Verify no explicit

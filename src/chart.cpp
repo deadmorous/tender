@@ -1284,6 +1284,17 @@ auto express(Context& ctx, CoordinateChart const& target, Expr const* v)
     //     i_a = Σ_k (i_a · e_k) e_k,
     // which projects *all* legs of a tensor of any rank (not just the one an
     // outer dot would contract) onto target's symbolic e_k atoms.
+    //
+    // An abstract ∇ over an already-expanded basis cannot be re-expressed:
+    // canon has no normal form for ∇ in a ⊗-fence (vibe 000081, Part 2). Refuse
+    // with a clear pointer to the ∇-first order rather than silently
+    // corrupting.
+    if (steps::abstract_nabla_over_expanded_basis(ctx, v))
+        throw std::invalid_argument(
+            "express: ∇ is still abstract over an expanded basis — canon cannot "
+            "reduce a ∇ nested in a basis ⊗-fence (it would silently drop the "
+            "gradient or crash). Expand ∇ first (expand_nabla / grad / div / "
+            "rot), then expand the basis.");
     Basis const tf = physical_frame(ctx, target);
     Basis const& ref = target.reference;
     Expr const* w = to_reference(ctx, v);

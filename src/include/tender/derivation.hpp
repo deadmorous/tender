@@ -270,6 +270,16 @@ auto partial(Context& ctx, Expr const* e, Expr const* coord, bool canon = true)
 // result canonicalized.
 auto apply_operators(Context& ctx, Expr const* e) -> Expr const*;
 
+// vibe 000081: an abstract surface ∇ (a `Nabla` node) cannot be canonicalized
+// once the basis has been expanded into concrete frame vectors.  Canon has no
+// normal form for ∇ nested in a ⊗-fence: it either silently drops the gradient
+// (`∇·(f v) → f (∇·v)`, the Part-2 zero) or crashes on the fence.  True iff `e`
+// holds BOTH an abstract `Nabla` and a basis-frame vector (a slot with
+// `basis_id ≠ 0`) — the basis-first mistake.  The fix is to expand ∇ *first*
+// (expand_nabla / grad / div / rot), then expand the basis.  `apply_operators`
+// and `chart::express` raise on this so the corruption never happens silently.
+auto abstract_nabla_over_expanded_basis(Context& ctx, Expr const* e) -> bool;
+
 // Targeted scalar-field simplifier (vibe 000069 M3): the specific identities
 // the orthogonal-curvilinear geometry pipeline needs, applied to a fixed point
 // on top of canonicalize.  Deliberately small (decision 1 — e-graph promotion

@@ -764,6 +764,42 @@ def test_unroll_sums_leaves_free_deriv_linked_index():
     assert r"\sum" in out.latex()
 
 
+def test_apply_operators_refuses_abstract_nabla_over_expanded_basis():
+    # vibe 000081, Part 2: expanding the basis while ∇ is still an abstract
+    # surface operator is the basis-first mistake.  Canon has no normal form for
+    # ∇ nested in a basis ⊗-fence — it would silently drop the gradient
+    # (∇·(f v) → f(∇·v), giving 0).  apply_operators refuses with a clear pointer
+    # to the ∇-first order instead of corrupting.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    basis = chart.physical_basis()
+    nabla = t.nabla(ctx=ctx)
+    u = t.field("u", 1, ctx=ctx)
+    expr = tb.expand_in_basis(t.tr(nabla * u), basis, tb.Variance.Contravariant)
+    with pytest.raises(ValueError, match="∇ is still abstract over an expanded"):
+        td.apply_operators(expr)
+    # express refuses the same way.
+    with pytest.raises(ValueError, match="∇ is still abstract over an expanded"):
+        chart.express(td.unroll_sums(expr))
+
+
+def test_abstract_nabla_over_basis_ok_when_nabla_expanded_first():
+    # The ∇-first order (Part 3) is fine: once expand_nabla replaces the surface
+    # ∇ by frame ∂'s, apply_operators no longer sees an abstract Nabla, so the
+    # guard stays silent and the reduction proceeds.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    basis = chart.physical_basis()
+    nabla = t.nabla(ctx=ctx)
+    u = t.field("u", 1, ctx=ctx)
+    ok = tb.expand_in_basis(
+        chart.expand_nabla(t.tr(nabla * u)), basis, tb.Variance.Contravariant
+    )
+    td.apply_operators(ok)  # must not raise
+    # and an abstract div of a plain field (no basis expansion) is untouched.
+    assert r"\nabla" in td.apply_operators(nabla @ u).latex()
+
+
 def test_grad_of_trace_of_field():
     # vibe 000075 gap A: grad(tr ε) self-prepares — the Trace wrapper around
     # the expanded field opens on the dyads instead of tripping encapsulate.
