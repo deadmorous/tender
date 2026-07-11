@@ -1145,13 +1145,11 @@ auto reassemble_term(
     return cur;
 }
 
-// Stamp the chart's dimension onto a *bare* identity (rank-2 well-known I with
-// no index slots).  A derivation keeps the dimension-agnostic `identity(ctx)`
-// because the basis machinery (`expand_in_basis` / `simplify_basis_cross`) only
-// handles the slotless form; but the reassembled invariant is chart-bound, so
-// its I becomes `identity(space)` — letting a downstream `tr(c·I) → c·n` fold
-// (vibe 000081, B1).  The dimensioned I is matched by well-known kind
-// everywhere, so no other reduction is disturbed.
+// Stamp the chart's dimension onto a dimension-agnostic identity.  The
+// reassembled result is chart-bound, so its abstract I gains the chart's
+// dimension — letting a downstream `tr(c·I) → c·n` fold (vibe 000081, B1).
+// Dimension-awareness is orthogonal to the slots (`TensorObject::dim`), so the
+// I stays slotless and behaves identically everywhere else.
 auto dimension_identities(Context& ctx, Expr const* e, IndexSpace const* space)
     -> Expr const*
 {
@@ -1162,8 +1160,7 @@ auto dimension_identities(Context& ctx, Expr const* e, IndexSpace const* space)
         {
             auto const* t = std::get_if<TensorObject>(&n->node);
             if (t && t->traits
-                && t->traits->well_known == WellKnownKind::Identity
-                && t->slots.empty())
+                && t->traits->well_known == WellKnownKind::Identity && !t->dim)
                 return make_identity(c, space);
             return n;
         });

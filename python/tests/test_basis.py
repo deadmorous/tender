@@ -317,6 +317,28 @@ class TestBasisSteps:
         assert td.algebraic_eq(reduce(a @ c), reduce(c @ a))
 
 
+def test_dimension_aware_identity_is_orthogonal_to_slots():
+    # vibe 000081: dimension-awareness is a TensorObject attribute orthogonal to
+    # the index slots (not fake unbound slots).  A sized identity is slotless,
+    # so it renders as a clean I, expands in a basis like the bare I, yet its
+    # trace reads the dimension; and it is a distinct object from the bare I.
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    bare = tender.identity(ctx=ctx)
+    sized = tender.identity(ctx=ctx, space=tender.space_3d)
+    assert sized.latex() == bare.latex() == r"\mathbf{I}"
+    assert not td.structural_eq(bare, sized)
+    assert td.expand_dyad_ops(tender.tr(sized)).latex() == "3"
+    # expands in a matching basis exactly like the bare identity …
+    exp_bare = td.canonicalize(tb.expand_in_basis(bare, frame, tb.Variance.Covariant))
+    exp_sized = td.canonicalize(tb.expand_in_basis(sized, frame, tb.Variance.Covariant))
+    assert td.structural_eq(exp_bare, exp_sized)
+    # … but a dimension mismatch is refused.
+    two_d = tender.identity(ctx=ctx, space=tender.space_2d)
+    with pytest.raises(ValueError, match="dimension does not match"):
+        tb.expand_in_basis(two_d, frame, tb.Variance.Covariant)
+
+
 def test_vec_of_identity_is_zero():
     # vec(I) = 0 through the basis: I = Σ e_i⊗e_i, vec → Σ e_i×e_i, each = 0.
     ctx = tender.Context()

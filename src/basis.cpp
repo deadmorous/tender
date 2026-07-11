@@ -293,6 +293,12 @@ auto expand_in_basis(
             if (t->slots.empty() && t->traits
                 && t->traits->well_known == WellKnownKind::Identity)
             {
+                // A dimension-aware identity (vibe 000081) must match the basis
+                // it is expanded in: I of ℝ³ makes no sense on a 2-D frame.
+                if (t->dim && t->dim != basis.space())
+                    throw std::invalid_argument(
+                        "expand_in_basis: identity dimension does not match the "
+                        "basis dimension");
                 CountableIndex const idx{c.alloc_index_id()};
                 return make_tensor_product(
                     c,

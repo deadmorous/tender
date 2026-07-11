@@ -463,6 +463,8 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                     return false;
                 if (ta.rank != tb->rank)
                     return false;
+                if (ta.dim != tb->dim) // dimension-awareness (vibe 000081)
+                    return false;
                 if (ta.slots.size() != tb->slots.size())
                     return false;
                 for (std::size_t i = 0; i < ta.slots.size(); ++i)
@@ -1524,10 +1526,12 @@ auto well_known_trace_dim(Expr const* e) -> std::optional<int>
     if (!t || !is_symmetric_well_known(e)
         || infer_rank(e) != std::optional<int>{2})
         return std::nullopt;
-    for (auto const& sb: t->slots)
-        if (sb.slot.space)
-            return static_cast<int>(sb.slot.space->values().size());
-    return std::nullopt; // no concrete space — leave tr(W) unreduced
+    // The dimension is the object's own dimension-awareness attribute (vibe
+    // 000081) — orthogonal to any index slots; a bare (dimension-agnostic)
+    // identity has none, so tr(I) stays symbolic.
+    if (t->dim)
+        return static_cast<int>(t->dim->values().size());
+    return std::nullopt;
 }
 
 // Apply a linear rank-2 operation (tr/vec/transpose) by its definition,

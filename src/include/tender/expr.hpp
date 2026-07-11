@@ -181,6 +181,16 @@ struct TensorObject final
     // (compared by structural_eq / tensor_object_cmp), so ∂_x T and T are
     // distinct and ∂_x∂_y T = ∂_y∂_x T.
     std::vector<DerivMark> deriv_marks = {};
+    // Dimension-awareness (vibe 000081), orthogonal to the index slots: the
+    // index space this object's implicit indices range over, when known.  Null
+    // means dimension-agnostic (the default).  Set on an abstract well-known
+    // tensor with no index slots — e.g. a sized identity, so tr(I) → n —
+    // without fabricating fake unbound slots.  Part of structural identity (a
+    // 3-D I is a distinct object from a dimension-agnostic I), but rendering
+    // ignores it (a sized I still prints as a plain `I`).  Kept last so
+    // existing aggregate initialisers `{name, rank, traits, slots,
+    // deriv_marks}` keep compiling.
+    IndexSpace const* dim = nullptr;
 };
 
 // A numeric scalar literal.

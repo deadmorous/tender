@@ -374,19 +374,19 @@ auto make_identity(Context& ctx) -> Expr const*
 
 auto make_identity(Context& ctx, IndexSpace const* space) -> Expr const*
 {
-    // A dimensioned identity: the bare I plus two unbound slots carrying the
-    // index space, so its dimension is known (tr(I) → n, vibe 000080 Inc 1).
-    // The slots stay *unbound* (index = nullopt) so the rank remains 2; the
-    // levels are the identity's natural mixed pair (I = δ^i_j).  Still matched
-    // by well-known kind everywhere, so contraction/basis folds are unaffected.
+    // A dimension-aware identity: the bare I with its `dim` attribute set (vibe
+    // 000081).  Dimension-awareness is orthogonal to the index slots — the
+    // object stays slotless (abstract), so it behaves exactly like the bare I
+    // in basis expansion / contraction / rendering, and only `tr(I) → n` reads
+    // the dimension.  (Earlier this fabricated two fake unbound slots to carry
+    // the space, which broke `expand_in_basis`/`simplify_basis_cross` and
+    // printed `I^{•·}_{·•}` — a design defect.)
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("I"),
         .rank = 2,
         .traits = TensorTraits{.well_known = WellKnownKind::Identity},
-        .slots = {
-            SlotBinding{IndexSlot{Level::Upper, Realm::Orthonormal, space}, {}},
-            SlotBinding{
-                IndexSlot{Level::Lower, Realm::Orthonormal, space}, {}}}});
+        .slots = {},
+        .dim = space});
 }
 
 auto make_delta(
