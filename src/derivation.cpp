@@ -721,15 +721,29 @@ auto distribute_any(
 // The coefficient is an exact Rational, so e.g. ½X + ½X collects to X.
 auto extract_coeff(Expr const* e) -> std::pair<Rational, Expr const*>
 {
+    // Recurse so a sign or numeric factor buried inside the coefficient is
+    // fully lifted: `(−X)·3` = TensorProduct(Negate(X), 3) → (−3, X), matching
+    // a sibling addend whose core is the bare `X` (vibe 000081, B3 — a
+    // tr(c·I)→c·n term keeps its `−` inside the coefficient, else the
+    // structural fold misses it).
+    if (auto const* neg = std::get_if<Negate>(&e->node))
+    {
+        auto [c, core] = extract_coeff(neg->operand);
+        return {-c, core};
+    }
     if (auto const* tp = std::get_if<TensorProduct>(&e->node))
     {
-        if (auto const* sl = std::get_if<ScalarLiteral>(&tp->left->node))
-            return {sl->value, tp->right};
-        if (auto const* sr = std::get_if<ScalarLiteral>(&tp->right->node))
-            return {sr->value, tp->left};
+        if (std::holds_alternative<ScalarLiteral>(tp->left->node))
+        {
+            auto [c, core] = extract_coeff(tp->right);
+            return {std::get<ScalarLiteral>(tp->left->node).value * c, core};
+        }
+        if (std::holds_alternative<ScalarLiteral>(tp->right->node))
+        {
+            auto [c, core] = extract_coeff(tp->left);
+            return {std::get<ScalarLiteral>(tp->right->node).value * c, core};
+        }
     }
-    if (auto const* neg = std::get_if<Negate>(&e->node))
-        return {Rational{-1}, neg->operand};
     return {Rational{1}, e};
 }
 
@@ -1560,28 +1574,37 @@ auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
                 out = expand_unary(
                     c,
                     u->operand,
-                    [&](DyadSplit const& sp)
+                    [&](DyadSplit const& sp) -> Expr const*
                     {
-                        // Both legs differential operators ⇒ a scalar Hessian
-                        // `tr(∇⊗∇⊗s)`: the scalars are the OPERAND the
-                        // operators act on, not a coefficient to float.  Keep
-                        // them attached — `∇·(∇⊗s) = Δs` — else `s` detaches
-                        // and the Laplacian is left bare and un-appliable (vibe
-                        // 000081, B2).
+                        // A differential-operator leg (∇/∂) always goes on the
+                        // LEFT of the resulting dot, acting on the other leg
+                        // and the scalars as its OPERAND.  This makes tr of a
+                        // reassembled term independent of (a) which side the
+                        // operator sits — `tr(∇⊗v)` and the transposed
+                        // `tr(v⊗∇)` both give `∇·v`, not `v·∇` — and (b) scalar
+                        // position — `tr(∇⊗∇⊗s) = ∇·(∇⊗s) = Δs`, keeping `s`
+                        // attached rather than floating it off a bare
+                        // Laplacian. Both let a structural like-term fold
+                        // combine the terms of `tr(inc ε)` without canon, which
+                        // would float the scalar (vibe 000081, B2/B3).
                         auto is_op = [](Expr const* x)
                         {
                             return std::holds_alternative<Nabla>(x->node)
                                    || std::holds_alternative<Deriv>(x->node);
                         };
-                        if (is_op(sp.leg0) && is_op(sp.leg1))
+                        auto apply_op = [&](Expr const* op, Expr const* other)
                         {
-                            std::vector<Expr const*> rhs{sp.leg1};
+                            std::vector<Expr const*> rhs{other};
                             rhs.insert(
                                 rhs.end(),
                                 sp.scalars.begin(),
                                 sp.scalars.end());
-                            return make_dot(c, sp.leg0, product_of(c, rhs));
-                        }
+                            return make_dot(c, op, product_of(c, rhs));
+                        };
+                        if (is_op(sp.leg0))
+                            return apply_op(sp.leg0, sp.leg1);
+                        if (is_op(sp.leg1))
+                            return apply_op(sp.leg1, sp.leg0);
                         auto fs = sp.scalars;
                         fs.push_back(make_dot(c, sp.leg0, sp.leg1));
                         return product_of(c, fs);

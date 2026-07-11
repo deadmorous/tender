@@ -760,8 +760,8 @@ def test_trace_commutes_through_laplacian():
 def test_trace_of_scalar_hessian_keeps_operand():
     # vibe 000081, B2: tr(∇⊗∇⊗θ) (scalar Hessian, θ = tr ε) must reduce to the
     # applied Laplacian ∇·(∇θ) = Δθ, not float θ off into θ·(∇·∇) with a bare,
-    # un-appliable operator.  Guard: both dyad legs are ∇ ⇒ the scalar is the
-    # operand, kept attached.
+    # un-appliable operator.  Guard: an operator dyad leg goes on the left with
+    # the scalar as its operand, kept attached.
     ctx = tender.Context()
     nab = tender.nabla(ctx=ctx)
     eps = tender.field("e", 2, ctx=ctx, symmetric=True)
@@ -770,6 +770,43 @@ def test_trace_of_scalar_hessian_keeps_operand():
     # equals Δθ = ∇·(∇θ), and carries no detached θ·(∇·∇)
     assert td.algebraic_eq(reduced, nab @ (nab * theta))
     assert r"\Delta" in reduced.latex()
+
+
+def test_trace_of_operator_dyad_is_transpose_independent():
+    # vibe 000081, B3: tr(∇⊗v) and its transpose tr((∇⊗v)ᵀ) = tr(v⊗∇) must both
+    # reduce to the operator-left form ∇·v (not v·∇), so the two are structurally
+    # identical and a structural like-term fold can combine them.
+    ctx = tender.Context()
+    nab = tender.nabla(ctx=ctx)
+    eps = tender.field("e", 2, ctx=ctx, symmetric=True)
+    grad_div = nab * (nab @ eps)  # ∇⊗(∇·ε), rank 2
+    direct = td.expand_dyad_ops(tender.tr(grad_div))
+    transposed = td.expand_dyad_ops(tender.tr(grad_div.transpose()))
+    assert td.structural_eq(direct, transposed)
+
+
+def test_trace_of_strain_incompatibility_reduces():
+    # vibe 000081, B2+B3 endpoint: tr(inc ε) of the closed cross-free form
+    # reduces to Δ tr(ε) − ∇·(∇·ε) via expand_dyad_ops (tr through operators,
+    # dimensioned tr(c·I)=c·n) + a structural like-term fold that keeps every
+    # operator attached (no canon float).  Needs a *dimensioned* identity.
+    ctx = tender.Context()
+    nab = tender.nabla(ctx=ctx)
+    eps = tender.field(r"\varepsilon", 2, ctx=ctx, symmetric=True)
+    theta = tender.tr(eps)
+    ident = tender.identity(ctx, space=tender.space_3d)
+    closed = (
+        -(nab @ (nab @ eps)) * ident
+        + (nab @ (nab * theta)) * ident
+        - (nab @ (nab * eps))
+        - (nab * (nab * theta))
+        + (nab * (nab @ eps))
+        + (nab * (nab @ eps)).transpose()
+    )
+    reduced = td.fold_equal_addends_structural(td.expand_dyad_ops(tender.tr(closed)))
+    target = nab @ (nab * theta) - nab @ (nab @ eps)  # Δ tr ε − ∇·(∇·ε)
+    # order-independent structural equality: the difference cancels to 0
+    assert td.fold_equal_addends_structural(reduced - target).latex() == "0"
 
 
 def test_unary_op_ranks():
