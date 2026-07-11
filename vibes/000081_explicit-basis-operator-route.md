@@ -76,10 +76,20 @@ operators** (`tr(inc ε) == chart.laplacian(tr ε) − chart.div(chart.div ε)`,
   **orthogonal `TensorObject::dim` attribute** (`IndexSpace*`, kept last for
   aggregate-init compat). `make_identity(ctx, space)` sets `dim` and stays
   SLOTLESS → behaves exactly like the bare I in basis/contraction/render (clean
-  `I`, hack removed); only `tr(I)=n` reads it. `dim` is part of identity (3-D I ≠
-  agnostic I): in `tensor_object_cmp`, `structural_eq`, `hash_tensor_object`.
-  Per the review, `expand_in_basis` now REFUSES a dimension mismatch (2-D I on a
-  3-D frame). A sized I in the derivation works too now (slotless).
+  `I`, hack removed); only `tr(I)=n` reads it. `expand_in_basis` REFUSES a
+  dimension mismatch (2-D I on a 3-D frame). A sized I in the derivation works
+  too now (slotless).
+- **FOLLOW-UP (identity-NEUTRAL) — 7ac315d.** First cut made `dim` part of
+  identity, which regressed: (a) a KERNEL CRASH — `space_cmp` dereferenced a null
+  `IndexSpace` comparing a bare I (`dim=null`) vs a sized I (now null-safe); (b)
+  NON-REDUCTION — a library-emitted bare I (from `tb.reassemble`'s
+  resolution-of-identity fold) and a user's sized I stopped *cancelling*, so the
+  cross-removal `id_alt` broke. So `dim` is now identity-**NEUTRAL** (like
+  `well_known`/`field`): removed from `tensor_object_cmp`/`structural_eq`/hash;
+  only `tr` reads it. Bare I and sized I are interchangeable and cancel/combine,
+  so a sized I in a derivation gives exactly the bare-I result (verified `axBxc`
+  bare == dim). Reverted the example/test sized-I edits back to plain I; the
+  `expand_in_basis` mismatch check stays.
 - **B1 (dimensioned identity) — FIXED** (7b40bcb; superseded by 0c0888b design).
   Threading a *dimensioned* I
   through the derivation BREAKS the cross-removal (`expand_in_basis` /
