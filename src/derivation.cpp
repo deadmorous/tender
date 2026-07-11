@@ -1615,6 +1615,30 @@ auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
         });
 }
 
+// True if any tensor in `e` carries a *free* ∂-mark (an abstract-direction
+// derivative) whose direction `link` id is `id`.  Such an index cannot be
+// unrolled chart-free: concretizing the frame vector e_i → e_value would orphan
+// the linked ∂_i mark (a free mark stores no chart/coordinate, so `substitute`
+// cannot turn it into the concrete ∂_{q^value}), silently corrupting the value
+// (vibe 000081, Part 3).  The chart-aware `componentize_nabla` is the step that
+// concretizes both in lockstep; `unroll_sums` must leave these indices for it.
+auto body_has_free_deriv_link(Context& ctx, Expr const* e, int id) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node))
+                for (auto const& m: t->deriv_marks)
+                    if (m.free && m.link == id)
+                        found = true;
+            return n;
+        });
+    return found;
+}
+
 auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
 {
     // Expose implicit Einstein sums first, so an implicit δ_ii (a trace)
@@ -1637,6 +1661,12 @@ auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
             auto const* s = std::get_if<ExplicitSum>(&e->node);
             if (!s || s->bound)
                 return e; // symbolic bound — cannot unroll
+
+            // A frame direction bound to a free ∂-mark must be concretized by
+            // the chart (componentize_nabla), not here — unrolling it alone
+            // would orphan the ∂ (vibe 000081, Part 3).  Leave it intact.
+            if (body_has_free_deriv_link(ctx, s->body, s->index.id))
+                return e;
 
             IndexSpace const* space = find_index_space(e, s->index.id);
             if (!space)

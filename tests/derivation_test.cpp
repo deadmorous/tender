@@ -51,6 +51,26 @@ TEST(UnrollSums, SymbolicBoundUnchanged)
     EXPECT_EQ(after, expr); // pointer unchanged
 }
 
+TEST(UnrollSums, LeavesFreeDerivLinkedIndex)
+{
+    // vibe 000081, Part 3: a Σ_i whose body carries a *free* ∂-mark linked to i
+    // (∂_i acting on a field, tied to a frame vector e_i) must NOT be unrolled
+    // chart-free — concretizing e_i alone would orphan the ∂_i (a free mark has
+    // no chart/coordinate to become ∂_{q^v}).  unroll_sums leaves it for the
+    // chart-aware componentize_nabla; the ExplicitSum survives untouched.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex i{ctx.alloc_index_id()};
+    IndexSlot const slot{Level::Lower, Realm::Orthonormal, sp};
+    auto const* f = make_field(ctx, make_tensor_name("u"), 0);
+    auto const* df = make_field_derivative_free(ctx, f, i, slot);
+    auto const* expr = make_explicit_sum(ctx, i, df);
+
+    auto const* after = steps::unroll_sums(ctx, expr);
+    EXPECT_EQ(after, expr); // pointer unchanged — the ∂-linked sum is left
+                            // intact
+}
+
 // ---- eval_delta_concrete ---------------------------------------------------
 
 TEST(EvalDeltaConcrete, DiagonalIsOne)

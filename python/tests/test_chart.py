@@ -713,6 +713,57 @@ def make_cartesian(ctx):
     return x, y, z, tc.CoordinateChart(ref, [x, y, z], [x, y, z])
 
 
+def test_divergence_via_explicit_basis_and_componentize():
+    # vibe 000081, Part 3: the explicit route ∇·u = tr(∇u), expand_nabla,
+    # expand_in_basis, apply_operators — must componentize the free ∂-direction
+    # index through the *chart* (not the chart-free unroll_sums, which cannot
+    # concretize the linked ∂-mark).  The endpoint is the true divergence
+    # ∂_x u_x + ∂_y u_y + ∂_z u_z, not the earlier bogus vector i+j+k.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    basis = chart.physical_basis()
+    nabla = t.nabla(ctx=ctx)
+    u = t.field("u", 1, ctx=ctx)
+    a = td.apply_operators(
+        tb.expand_in_basis(
+            chart.expand_nabla(t.tr(nabla * u)), basis, tb.Variance.Contravariant
+        )
+    )
+    div = td.fold_arithmetic(
+        td.eval_delta_concrete(
+            tb.simplify_basis_dot(
+                td.unroll_sums(chart.componentize_nabla(a)), basis
+            )
+        )
+    )
+    tex = div.latex()
+    for c in ("x", "y", "z"):
+        assert rf"\partial_{{{c}}} u_{{{c}}}" in tex
+    # a scalar: no dangling basis vector / free index survived
+    assert r"\mathbf" not in tex and r"\sum" not in tex
+
+
+def test_unroll_sums_leaves_free_deriv_linked_index():
+    # vibe 000081, Part 3 root cause: unrolling a frame direction that is bound
+    # to a free ∂-mark alone would orphan the ∂ (chart-free substitute cannot
+    # turn it into ∂_{q^v}), silently corrupting the value.  unroll_sums must
+    # leave such an index for componentize_nabla — so the ∂-linked Σ survives.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    basis = chart.physical_basis()
+    nabla = t.nabla(ctx=ctx)
+    u = t.field("u", 1, ctx=ctx)
+    a = td.apply_operators(
+        tb.expand_in_basis(
+            chart.expand_nabla(t.tr(nabla * u)), basis, tb.Variance.Contravariant
+        )
+    )
+    out = td.unroll_sums(a)
+    # the free ∂-direction sum is not unrolled: a Σ remains and the ∂ index
+    # stays symbolic (never a spurious concrete-orphaned ∂ against a summed e).
+    assert r"\sum" in out.latex()
+
+
 def test_grad_of_trace_of_field():
     # vibe 000075 gap A: grad(tr ε) self-prepares — the Trace wrapper around
     # the expanded field opens on the dyads instead of tripping encapsulate.
