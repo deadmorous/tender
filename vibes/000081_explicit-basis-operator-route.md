@@ -1,11 +1,37 @@
-# 000081 — (subject TBD, driven by a new example script)
+# 000081 — explicit basis + operator route for ∇·u (cases-driven)
 
-Status: **IN PROGRESS** — collecting the driving example.
+Status: **IN PROGRESS** — correctness fixes landed for cases 1–3; case 4 (issue
+I8) awaits the user's exact reproductions; more cases may be added to the
+preamble.
 
-The user is building a Python example to drive the next round of fixes
-(correctness / usability / rendering challenges hinted at the end of vibe
-000080). The example arrives in several parts; this file records the preamble
-and will accumulate the continuations and the issues they expose.
+The user drives the next round of fixes with a Python example that derives `∇·u`
+several ways (per coordinate system), each a numbered **case**. Every distinct
+problem gets a short **issue label**. Discipline: **after each fix, re-run every
+case and assess** whether it worked (a runnable harness lives in scratch;
+`examples/` are success-stories only, so corrected cases stay in this vibe, not
+in a committed example).
+
+## Case & issue labels
+
+**Cases** (from the driving example; `disp` shows each derive step):
+| # | label | what it does | status |
+|---|-------|--------------|--------|
+| 1 | `baseline-div` | `∇·u` via `cs.grad → tr → apply_operators×2 → simplify_basis_dot → eval_delta → fold_arithmetic` | ✓ correct (cart & cyl) |
+| 2 | `basis-first` | expand basis (`expand_in_basis`) while ∇ is still abstract, then `apply_operators … express … expand_nabla` | ✓ refused loudly (Fix B) |
+| 3 | `nabla-first` | `expand_nabla` THEN `expand_in_basis`, then `apply_operators → unroll_sums → …` | ✓ refused loudly at unroll_sums → use `componentize_nabla` (Fix A) |
+| 4 | `express-anomalies` | manual `express` / `expand_in_basis` interaction probes | I7 doc, I8 blocked |
+
+**Issues:**
+| label | case | one-liner | status |
+|-------|------|-----------|--------|
+| I1 `sum-surfaced` | 2,3 | `apply_operators` surfaced an explicit `Σ` on an implicit index | FIXED (implicitize) d9f0815 |
+| I2 `basis-first-zero` | 2 | ∇ applied to constant basis vectors, gradient dropped | FIXED (refuse) e4ec23b |
+| I3 `express-opaque` | 2 | `express` output mysterious after the broken state | SUBSUMED (case 2 refused) |
+| I4 `final-zero` | 2 | final result 0 | FIXED (refuse) e4ec23b |
+| I5 `cyl-expand-nabla` | 2 | cyl `expand_nabla` raises (free-index ∇ needs unit-scale frame) | WONTFIX (documented limit) |
+| I6 `nabla-first-weird` | 3 | wrong vector `i+j+k`, then (worse) stuck `Σ_i δ_{i1} i` | FIXED (refuse→componentize) 9a67a18/5af9ae5 |
+| I7 `express-no-reassemble` | 4 | `express` won't fold `u_i e_i → u` | USE `tb.reassemble` (doc) |
+| I8 `express-hidden-state` | 4 | order-dependent, display-invisible side effect of `express` | BLOCKED (awaiting user's 2 cases) |
 
 ## Driving example — preamble
 
@@ -44,9 +70,9 @@ u = ws.field(r"u", 1)
 all_cs = {"cart": cart, "cyl": cyl}
 ```
 
-## Continuations
+## Cases (verbatim from the driving example)
 
-### Part 1 — baseline (correct): `∇·u` per CS
+### Case 1 `baseline-div` — `∇·u` per CS (correct)
 
 Status: **ok** (reference derivation, both `cart` and `cyl`).
 
@@ -73,7 +99,7 @@ for cs_name, cs in all_cs.items():
 Establishes the step vocabulary the broken cases will reuse:
 `grad → tr → apply_operators×2 → simplify_basis_dot → eval_delta_concrete → fold_arithmetic`.
 
-### Part 2 — `∇·u` via early basis expansion (BROKEN: result is zero)
+### Case 2 `basis-first` — expand basis while ∇ abstract (was: zero)
 
 Status: **incorrect result (zero)** — plus rendering/usability problems.
 
@@ -97,7 +123,7 @@ for cs_name, cs in all_cs.items():
         cb=disp)
 ```
 
-Issues exposed by Part 2:
+Issues exposed by Case 2:
 
 1. **[rendering]** after step 4 (`apply_operators`), an *explicit sum* is rendered
    (should stay in implicit/Einstein form, or at least not surface a raw
@@ -119,7 +145,7 @@ Issues exposed by Part 2:
    a constant unit-scale (Cartesian) frame; use the chart operators
    (grad/div/rot) for curvilinear charts`.
 
-### Part 3 — `∇·u`, expand_nabla *before* basis expansion (BROKEN: gives `i+j+k`)
+### Case 3 `nabla-first` — expand_nabla before basis (was: `i+j+k`)
 
 Status: **incorrect result (vector `i+j+k`)** — Cartesian only (`cyl` commented out).
 
@@ -146,17 +172,17 @@ for cs_name, cs in (("cart", cart),):#all_cs.items():
         cb=disp)
 ```
 
-Issues exposed by Part 3:
+Issues exposed by Case 3:
 
 6. **[CORRECTNESS]** ordering `expand_nabla` *before* `expand_in_basis` yields the
    **wrong vector `i+j+k`** instead of the scalar `∇·u`. `∇·u` is a scalar
    (rank-0); a vector result signals the sum over components was mis-contracted
    (the trace/divergence contraction lost, leaving a dangling free basis index
-   that sums the unit vectors). Distinct failure mode from Part 2's zero, but the
+   that sums the unit vectors). Distinct failure mode from Case 2's zero, but the
    same root theme: basis expansion interleaved with operator expansion corrupts
    the contraction.
 
-### Part 4 — `express` / `expand_in_basis` interaction anomalies
+### Case 4 `express-anomalies` — express / expand_in_basis interaction
 
 Manual exploration (not a full script); observed on both CS.
 
@@ -186,7 +212,7 @@ differentiating frame vectors.
 
 ## Root causes (grounded by runtime tracing)
 
-### Part 2 zero (issues 2, 4) — abstract ∇ never applied; canon commutes the coefficient across it
+### Case 2 `basis-first` zero (I2, I4) — abstract ∇ never applied; canon commutes the coefficient across it
 Trace of `nabla@(f·e_x)` (a *scalar field* f, not just a component):
 `apply_operators(∇·(f e_x)) = f (∇·e_x)`. The `(∇f)·e_x` term is **dropped**.
 Mechanism: `apply_operators_impl` only *applies* concrete `Deriv` operators
@@ -197,10 +223,10 @@ factor and **commutes the scalar `f` to the front** of the `∇·` contraction,
 producing `f (∇·e_x)`. That is exactly the "canon treats bare ∇ as a plain
 factor" hazard from vibe 000080 — here it silently corrupts the *value* (drops a
 Leibniz term), not just display. In Cartesian `∇·e_x = 0`, so the whole thing → 0.
-So: **Part 2's order (basis-expand while ∇ is still abstract) feeds
+So: **Case 2's order (basis-expand while ∇ is still abstract) feeds
 `apply_operators` an operator it cannot apply, and canon then drops terms.**
 
-### Part 3 `i+j+k` (issue 6) — ∂-direction index orphaned from its frame vector
+### Case 3 `nabla-first` weird (I6) — ∂-direction index orphaned from its frame vector
 Trace: `expand_nabla(tr(∇u)) = Σ_i e_i·(∂_i u)` (∂ direction index *is* the frame
 index i). `expand_in_basis` then expands `u→u_k e_k`, renaming to display
 `Σ_j e_j·(∂_j u_i) e_i` — BUT the ∂-mark's free direction index is **not renamed
@@ -222,7 +248,7 @@ direction indices) — here triggered by `expand_in_basis`, not canonicalize.
 `express(u_x ∇·i + …)` returns `∇·i i + ∇·j j + ∇·k k` — it mis-reads the loose
 component symbols `u_x,u_y,u_z` as a vector's reference components and reshuffles
 roles. This is *downstream of* the Part-2 corruption; it largely evaporates once
-Part 2 is refused/corrected. Kept as a dependent item.
+Case 2 is refused/corrected. Kept as a dependent item.
 
 ### Issue 5 (cylindrical error) — deliberate limitation, not a bug
 `expand_nabla` asserts a constant unit-scale (Cartesian/WCS) frame: a moving
@@ -244,12 +270,12 @@ the exact expression to repro before diagnosing.
 ## Plan
 
 The two orders of "expand everything then compute" are the crux:
-- **∇-first (Part 3 order):** the sound route in principle — make it correct
+- **∇-first (Case 3 order):** the sound route in principle — make it correct
   (Fix A). This becomes the recommended explicit workflow.
-- **basis-first (Part 2 order):** feeds `apply_operators` an operator it can't
+- **basis-first (Case 2 order):** feeds `apply_operators` an operator it can't
   apply; canon then silently drops terms. Stop the silent corruption (Fix B).
 
-**Fix A — Part 3 (CORRECTNESS, primary). DONE.** ROOT CAUSE refined: a *free*
+**Fix A — Case 3 (CORRECTNESS, primary). DONE.** ROOT CAUSE refined: a *free*
 ∂-mark stores an empty `CoordinateRef{}` (no chart id, no coord name), so the
 chart-free `substitute`/`unroll_sums` genuinely *cannot* turn `∂_{link=i}` into
 `∂_{q^v}` — only the chart-aware `componentize_nabla` can (it concretizes the
@@ -265,7 +291,7 @@ Guards: py `test_divergence_via_explicit_basis_and_componentize`,
 `UnrollSums.LeavesFreeDerivLinkedIndex`. Part-3 example step list to switch
 `td.unroll_sums`→`cs.componentize_nabla` (then unroll) when writing the witness.
 
-**Fix B — Part 2 (CORRECTNESS). DECISION was B2; SCOPE FINDING blocks the cheap
+**Fix B — Case 2 (CORRECTNESS). DECISION was B2; SCOPE FINDING blocks the cheap
 version.** Investigation nailed the corruption locus and, more importantly, an
 architectural wall:
 - Exact corruption: `distribute_contraction` (canon internal, derivation.cpp
