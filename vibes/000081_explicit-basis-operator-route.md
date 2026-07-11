@@ -19,7 +19,12 @@ in a committed example).
 | 1 | `baseline-div` | `∇·u` via `cs.grad → tr → apply_operators×2 → simplify_basis_dot → eval_delta → fold_arithmetic` | ✓ correct (cart & cyl) |
 | 2 | `basis-first` | expand basis (`expand_in_basis`) while ∇ is still abstract, then `apply_operators … express … expand_nabla` | ✓ refused loudly (Fix B) |
 | 3 | `nabla-first` | `expand_nabla` THEN `expand_in_basis`, then `apply_operators → unroll_sums → …` | ✓ refused loudly at unroll_sums → use `componentize_nabla` (Fix A) |
-| 4 | `express-anomalies` | manual `express` / `expand_in_basis` interaction probes | I7 doc, I8 blocked |
+| 4 | `express-anomalies` | manual `express` / `expand_in_basis` interaction probes | I7 doc, I8 reproduced (case 9) |
+| 5 | `scalar-complexify` | `grad(e_r)` then `express` — express should be a no-op (cyl) | I9 OPEN |
+| 6 | `nabla-appears` | `expand_in_basis(i) → reassemble_nabla → expand_nabla` (cart) | ✓ FIXED+test (I10) |
+| 7 | `appends-one` | `reassemble_nabla(i)` — should be a no-op (cart) | ✓ FIXED+test (I11) |
+| 8 | `mystery-1` | `expand_in_basis(i)` → `i_i e_i` (reference for I8) | ✓ ok+test |
+| 9 | `mystery-2` | `express(i)` then `expand_in_basis(i)` → `i` (not `i_i e_i`) | I8 (render collision) |
 
 **Issues:**
 | label | case | one-liner | status |
@@ -31,7 +36,17 @@ in a committed example).
 | I5 `cyl-expand-nabla` | 2 | cyl `expand_nabla` raises (free-index ∇ needs unit-scale frame) | WONTFIX (documented limit) |
 | I6 `nabla-first-weird` | 3 | wrong vector `i+j+k`, then (worse) stuck `Σ_i δ_{i1} i` | FIXED (refuse→componentize) 9a67a18/5af9ae5 |
 | I7 `express-no-reassemble` | 4 | `express` won't fold `u_i e_i → u` | USE `tb.reassemble` (doc) |
-| I8 `express-hidden-state` | 4 | order-dependent, display-invisible side effect of `express` | BLOCKED (awaiting user's 2 cases) |
+| I8 `express-render-collision` | 4,9 | `express(i)`→frame `e_x` (distinct `basis_id`) renders identically to reference `i`; not hidden state, each step correct | OPEN (render/design) |
+| I9 `express-complexify` | 5 | `express` (no-op) explodes coeff `1/r` into a 4-term trig sum that equals `1/r`; terms won't collect (tensor-in-div vs -out) | OPEN (simplification; fix = canon `(s·T)/d→(s/d)·T`) |
+| I10 `reassemble-fabricates-nabla` | 6 | `reassemble_nabla(i_i e_i)` invented `i_i ∇ 1` → `expand_nabla → 0` | FIXED (has_deriv_mark no-op) |
+| I11 `reassemble-appends-one` | 7 | `reassemble_nabla(i)` appended `·1` | FIXED (has_deriv_mark no-op) |
+
+**Note (basis(0) vs direction(0)):** for cart both render `𝐢`; for cyl
+`direction(0)=e_r` (symbolic) but `basis(0)=cosθ 𝐢+sinθ 𝐣` (WCS). The new cases
+use `basis.basis(0)`.
+
+**Regression discipline (user):** once a case's result is accepted, make it a
+Python test and mark it ✓test in the tables.
 
 ## Driving example — preamble
 
@@ -199,6 +214,49 @@ Manual exploration (not a full script); observed on both CS.
    *does* visibly change the input. → `express` has an order-dependent,
    display-invisible side effect; its interaction with `expand_in_basis` is not
    idempotent/commuting.
+
+### Cases 5–9 (second batch; `basis = cs.physical_frame()`, `initial = basis.basis(0)` unless noted)
+
+```python
+# Case 5 scalar-complexify (cyl): grad(e_r) then express; express must be a no-op
+derive(basis.direction(0), [cs.grad, cs.express], cb=disp)
+# Case 6 nabla-appears (cart): reassemble_nabla must not invent a ∇
+derive(basis.basis(0), [lambda a: tb.expand_in_basis(a, basis, contra),
+                        cs.reassemble_nabla, cs.expand_nabla], cb=disp)
+# Case 7 appends-one (cart): reassemble_nabla(i) must be a no-op
+derive(basis.basis(0), [cs.reassemble_nabla], cb=disp)
+# Case 8 mystery-1 (cart): expand_in_basis(i) → i_i e_i  (reference, ok)
+derive(basis.basis(0), [lambda a: tb.expand_in_basis(a, basis, contra)], cb=disp)
+# Case 9 mystery-2 (cart): express(i) then expand_in_basis(i) → i  (I8)
+derive(basis.basis(0), [cs.express, lambda a: tb.expand_in_basis(a, basis, contra)], cb=disp)
+```
+
+**Diagnoses (grounded by runtime traces):**
+- **I10/I11 (cases 6, 7) — FIXED (chart.cpp `has_deriv_mark` guard in
+  `reassemble_term`).** `reassemble_term` treated any frame vector as a gradient
+  leg; with no operand it fabricated a base `1` and wrapped ∇ around it — so `i`
+  → `i·1` (I11) and `i_i e_i` → `i_i ∇1` → `expand_nabla → 0` (I10).  A term with
+  NO ∂-mark is a plain expanded tensor, not a ∇-expression; reassembly is now a
+  no-op on it.  Cases 6/7 give clean no-ops (`i_i e_i` / `i`).  Guards:
+  py `test_reassemble_nabla_is_noop_without_derivative`,
+  `test_expand_in_basis_of_reference_vector` (case 8).
+- **I8 (case 9) — NOT a hidden-state bug; a RENDER COLLISION.** `express(i)`
+  legitimately returns the *frame* vector `e_x` (`structural_eq` to
+  `direction(0)`, distinct `basis_id` from the reference `basis(0)`); in
+  Cartesian both render `𝐢`, masking the change.  `expand_in_basis` then
+  correctly leaves the already-frame `e_x` (`→ i`), whereas on the reference
+  vector it expands (`→ i_i e_i`).  Each step is individually correct.  Open
+  question: should `express` be a *true* no-op for a reference axis that already
+  equals a frame vector (preserve `basis_id`), or is documenting the collision
+  enough?  (Cartesian-only ambiguity: cyl `e_r` vs reference render differently.)
+- **I9 (case 5) — OPEN, simplification.** `express(grad(e_r))` gives four
+  `e_θe_θ` terms whose coeffs sum to 1 (`= 1/r`), but they DON'T collect because
+  the terms are structurally inconsistent: term 1 is `(sin⁴θ·e_θe_θ)/r` (tensor
+  INSIDE the `/r`) while the rest are `(scalar/r)·e_θe_θ` (tensor OUTSIDE).
+  `collect_terms` can't unify tensor-in-div with tensor-out-of-div.  FIX
+  DIRECTION: a canon normalization `(s·T)/d → (s/d)·T` (factor non-scalar legs
+  out of a ScalarDiv numerator) so all terms share one shape and the trig folds
+  to 1.  Scope: a canon/simplify change of moderate risk — hold for user OK.
 
 ### API note — obtaining `e_r`
 

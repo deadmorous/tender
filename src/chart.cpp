@@ -1025,6 +1025,27 @@ auto carries_field(Context& ctx, Expr const* e, Basis const& fb) -> bool
     return found;
 }
 
+// True if any tensor in `e` carries a ∂-mark (an applied derivative).  A term
+// with frame vectors but no ∂ is a plain expanded tensor (e.g. `i_i e_i`), not
+// a ∇-expression: reassembly must leave it untouched rather than mistake its
+// frame vectors for gradient legs and fabricate a spurious ∇⊗1 (vibe 000081,
+// I10/I11).
+auto has_deriv_mark(Context& ctx, Expr const* e) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node);
+                t && !t->deriv_marks.empty())
+                found = true;
+            return n;
+        });
+    return found;
+}
+
 // Reassemble one additive term (a ⊗-product) into ∇ operators.
 auto reassemble_term(
     Context& ctx,
@@ -1032,6 +1053,12 @@ auto reassemble_term(
     Expr const* nabla,
     Expr const* term) -> Expr const*
 {
+    // No applied derivative in this term ⇒ nothing to reassemble: a bare frame
+    // vector / expanded basis (`i`, `i_i e_i`) is not a ∇-expression.  Leave it
+    // as-is instead of inventing a gradient ∇⊗1 (vibe 000081, I10/I11).
+    if (!has_deriv_mark(ctx, term))
+        return term;
+
     // Flatten the top-level ⊗ chain into factors.
     std::vector<Expr const*> factors;
     std::function<void(Expr const*)> flat = [&](Expr const* n)

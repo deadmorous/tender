@@ -801,6 +801,33 @@ def test_abstract_nabla_over_basis_ok_when_nabla_expanded_first():
     assert r"\nabla" in td.apply_operators(nabla @ u).latex()
 
 
+def test_reassemble_nabla_is_noop_without_derivative():
+    # vibe 000081, I10/I11 (cases 6, 7): reassemble_nabla must not invent a ∇ out
+    # of a term that carries no derivative.  A bare frame vector `i` and an
+    # expanded basis `i_i e_i` have no ∂-mark, so reassembly is a no-op — not
+    # `i · 1` (I11) nor `i_i ∇ 1` (I10, which expand_nabla then sent to 0).
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    basis = chart.physical_frame()
+    i = basis.basis(0)
+    assert td.structural_eq(chart.reassemble_nabla(i), i)  # case 7: no `·1`
+    expanded = tb.expand_in_basis(i, basis, tb.Variance.Contravariant)
+    reass = chart.reassemble_nabla(expanded)
+    assert r"\nabla" not in reass.latex()  # case 6: no fabricated ∇
+    assert td.structural_eq(reass, expanded)  # a clean no-op
+    assert chart.expand_nabla(reass).latex() == expanded.latex()  # not 0
+
+
+def test_expand_in_basis_of_reference_vector():
+    # vibe 000081, case 8 (reference for I8): expanding the reference axis i in
+    # the frame gives its symbolic components i_i e_i.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    basis = chart.physical_frame()
+    out = tb.expand_in_basis(basis.basis(0), basis, tb.Variance.Contravariant)
+    assert r"\mathbf{e}_{i}" in out.latex() and "i_{i}" in out.latex()
+
+
 def test_apply_operators_keeps_summation_implicit():
     # vibe 000081, case 2 issue 1: apply_operators must not surface an explicit Σ
     # on an index that was implicit on the way in.  Its internal canonicalize
