@@ -1620,8 +1620,8 @@ auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
 // unrolled chart-free: concretizing the frame vector e_i → e_value would orphan
 // the linked ∂_i mark (a free mark stores no chart/coordinate, so `substitute`
 // cannot turn it into the concrete ∂_{q^value}), silently corrupting the value
-// (vibe 000081, Part 3).  The chart-aware `componentize_nabla` is the step that
-// concretizes both in lockstep; `unroll_sums` must leave these indices for it.
+// (vibe 000081, case 3).  The chart-aware `componentize_nabla` is the step that
+// concretizes both in lockstep; `unroll_sums` refuses these and points at it.
 auto body_has_free_deriv_link(Context& ctx, Expr const* e, int id) -> bool
 {
     bool found = false;
@@ -1664,9 +1664,15 @@ auto unroll_sums(Context& ctx, Expr const* e) -> Expr const*
 
             // A frame direction bound to a free ∂-mark must be concretized by
             // the chart (componentize_nabla), not here — unrolling it alone
-            // would orphan the ∂ (vibe 000081, Part 3).  Leave it intact.
+            // would orphan the ∂ (a free mark carries no chart/coordinate, so
+            // it cannot become the concrete ∂_{q^v}), leaving a stuck δ_{i·}
+            // that later steps mangle (vibe 000081, case 3).  Refuse loudly.
             if (body_has_free_deriv_link(ctx, s->body, s->index.id))
-                return e;
+                throw std::invalid_argument(
+                    "unroll_sums: this summation index is a free ∂-direction "
+                    "bound to a frame vector; chart-free unrolling would orphan "
+                    "the ∂. Concretize the frame direction first with the "
+                    "chart's componentize_nabla, then unroll_sums.");
 
             IndexSpace const* space = find_index_space(e, s->index.id);
             if (!space)

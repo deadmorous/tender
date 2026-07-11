@@ -743,11 +743,11 @@ def test_divergence_via_explicit_basis_and_componentize():
     assert r"\mathbf" not in tex and r"\sum" not in tex
 
 
-def test_unroll_sums_leaves_free_deriv_linked_index():
-    # vibe 000081, Part 3 root cause: unrolling a frame direction that is bound
-    # to a free ∂-mark alone would orphan the ∂ (chart-free substitute cannot
-    # turn it into ∂_{q^v}), silently corrupting the value.  unroll_sums must
-    # leave such an index for componentize_nabla — so the ∂-linked Σ survives.
+def test_unroll_sums_refuses_free_deriv_linked_index():
+    # vibe 000081, case 3 root cause: unrolling a frame direction bound to a free
+    # ∂-mark alone would orphan the ∂ (chart-free substitute cannot turn it into
+    # ∂_{q^v}), leaving a stuck δ_{i·} that later steps mangle.  unroll_sums
+    # refuses and points at the chart-aware componentize_nabla.
     ctx = t.Context()
     x, y, z, chart = make_cartesian(ctx)
     basis = chart.physical_basis()
@@ -758,10 +758,11 @@ def test_unroll_sums_leaves_free_deriv_linked_index():
             chart.expand_nabla(t.tr(nabla * u)), basis, tb.Variance.Contravariant
         )
     )
-    out = td.unroll_sums(a)
-    # the free ∂-direction sum is not unrolled: a Σ remains and the ∂ index
-    # stays symbolic (never a spurious concrete-orphaned ∂ against a summed e).
-    assert r"\sum" in out.latex()
+    with pytest.raises(ValueError, match="free ∂-direction"):
+        td.unroll_sums(a)
+    # concretizing the frame direction first (componentize_nabla) unblocks it.
+    ok = td.unroll_sums(chart.componentize_nabla(a))
+    assert r"\partial" in ok.latex()
 
 
 def test_apply_operators_refuses_abstract_nabla_over_expanded_basis():
