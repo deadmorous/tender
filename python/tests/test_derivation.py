@@ -757,6 +757,21 @@ def test_trace_commutes_through_laplacian():
     assert "operatorname{tr}" in td.expand_dyad_ops(tender.tr(nab @ (nab * v))).latex()
 
 
+def test_trace_of_scalar_hessian_keeps_operand():
+    # vibe 000081, B2: tr(∇⊗∇⊗θ) (scalar Hessian, θ = tr ε) must reduce to the
+    # applied Laplacian ∇·(∇θ) = Δθ, not float θ off into θ·(∇·∇) with a bare,
+    # un-appliable operator.  Guard: both dyad legs are ∇ ⇒ the scalar is the
+    # operand, kept attached.
+    ctx = tender.Context()
+    nab = tender.nabla(ctx=ctx)
+    eps = tender.field("e", 2, ctx=ctx, symmetric=True)
+    theta = tender.tr(eps)
+    reduced = td.expand_dyad_ops(tender.tr(nab * (nab * theta)))
+    # equals Δθ = ∇·(∇θ), and carries no detached θ·(∇·∇)
+    assert td.algebraic_eq(reduced, nab @ (nab * theta))
+    assert r"\Delta" in reduced.latex()
+
+
 def test_unary_op_ranks():
     ctx = tender.Context()
     A = tender.tensor("A", rank=2, ctx=ctx)

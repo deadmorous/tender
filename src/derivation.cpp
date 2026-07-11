@@ -1562,6 +1562,26 @@ auto expand_dyad_ops(Context& ctx, Expr const* e) -> Expr const*
                     u->operand,
                     [&](DyadSplit const& sp)
                     {
+                        // Both legs differential operators ⇒ a scalar Hessian
+                        // `tr(∇⊗∇⊗s)`: the scalars are the OPERAND the
+                        // operators act on, not a coefficient to float.  Keep
+                        // them attached — `∇·(∇⊗s) = Δs` — else `s` detaches
+                        // and the Laplacian is left bare and un-appliable (vibe
+                        // 000081, B2).
+                        auto is_op = [](Expr const* x)
+                        {
+                            return std::holds_alternative<Nabla>(x->node)
+                                   || std::holds_alternative<Deriv>(x->node);
+                        };
+                        if (is_op(sp.leg0) && is_op(sp.leg1))
+                        {
+                            std::vector<Expr const*> rhs{sp.leg1};
+                            rhs.insert(
+                                rhs.end(),
+                                sp.scalars.begin(),
+                                sp.scalars.end());
+                            return make_dot(c, sp.leg0, product_of(c, rhs));
+                        }
                         auto fs = sp.scalars;
                         fs.push_back(make_dot(c, sp.leg0, sp.leg1));
                         return product_of(c, fs);
