@@ -1,8 +1,8 @@
 # 000081 — explicit basis + operator route for ∇·u (cases-driven)
 
-Status: **IN PROGRESS** — correctness fixes landed for cases 1–3; case 4 (issue
-I8) awaits the user's exact reproductions; more cases may be added to the
-preamble.
+Status: **IN PROGRESS** — cases 1–3, 5–8 resolved (fixed or refused-with-guidance);
+I9 fixed. Remaining: **I8** (merge-vs-distinguish coincident bases) deferred to the
+**operations-revisit vibe** (next step); I7 is doc; I5 wontfix.
 
 The user drives the next round of fixes with a Python example that derives `∇·u`
 several ways (per coordinate system), each a numbered **case**. Every distinct
@@ -20,7 +20,7 @@ in a committed example).
 | 2 | `basis-first` | expand basis (`expand_in_basis`) while ∇ is still abstract, then `apply_operators … express … expand_nabla` | ✓ refused loudly (Fix B) |
 | 3 | `nabla-first` | `expand_nabla` THEN `expand_in_basis`, then `apply_operators → unroll_sums → …` | ✓ refused loudly at unroll_sums → use `componentize_nabla` (Fix A) |
 | 4 | `express-anomalies` | manual `express` / `expand_in_basis` interaction probes | I7 doc, I8 reproduced (case 9) |
-| 5 | `scalar-complexify` | `grad(e_r)` then `express` — express should be a no-op (cyl) | I9 OPEN |
+| 5 | `scalar-complexify` | `grad(e_r)` then `express` — express should be a no-op (cyl) | ✓ FIXED+test (I9) |
 | 6 | `nabla-appears` | `expand_in_basis(i) → reassemble_nabla → expand_nabla` (cart) | ✓ FIXED+test (I10) |
 | 7 | `appends-one` | `reassemble_nabla(i)` — should be a no-op (cart) | ✓ FIXED+test (I11) |
 | 8 | `mystery-1` | `expand_in_basis(i)` → `i_i e_i` (reference for I8) | ✓ ok+test |
@@ -36,8 +36,8 @@ in a committed example).
 | I5 `cyl-expand-nabla` | 2 | cyl `expand_nabla` raises (free-index ∇ needs unit-scale frame) | WONTFIX (documented limit) |
 | I6 `nabla-first-weird` | 3 | wrong vector `i+j+k`, then (worse) stuck `Σ_i δ_{i1} i` | FIXED (refuse→componentize) 9a67a18/5af9ae5 |
 | I7 `express-no-reassemble` | 4 | `express` won't fold `u_i e_i → u` | USE `tb.reassemble` (doc) |
-| I8 `express-render-collision` | 4,9 | `express(i)`→frame `e_x` (distinct `basis_id`) renders identically to reference `i`; not hidden state, each step correct | OPEN (render/design) |
-| I9 `express-complexify` | 5 | `express` (no-op) explodes coeff `1/r` into a 4-term trig sum that equals `1/r`; terms won't collect (tensor-in-div vs -out) | OPEN (simplification; fix = canon `(s·T)/d→(s/d)·T`) |
+| I8 `express-render-collision` | 4,9 | reference `R` and physical frame `F` coincide for a Cartesian chart but are two `Basis`es with distinct `basis_id`, both rendering `𝐢`; `express` maps R→F invisibly | OPEN → operations-revisit vibe (merge vs distinguish elaborated) |
+| I9 `express-complexify` | 5 | `express` (no-op) explodes coeff `1/r` into a 4-term trig sum that equals `1/r`; terms won't collect (tensor-in-div vs -out) | FIXED (canon `(s·T)/d→(s/d)·T`; express collects) 97bd283 |
 | I10 `reassemble-fabricates-nabla` | 6 | `reassemble_nabla(i_i e_i)` invented `i_i ∇ 1` → `expand_nabla → 0` | FIXED (has_deriv_mark no-op) |
 | I11 `reassemble-appends-one` | 7 | `reassemble_nabla(i)` appended `·1` | FIXED (has_deriv_mark no-op) |
 
@@ -47,6 +47,14 @@ use `basis.basis(0)`.
 
 **Regression discipline (user):** once a case's result is accepted, make it a
 Python test and mark it ✓test in the tables.
+
+**NEXT STEP (new vibe, after I9):** the user wants to **revisit the set of
+derivation operations** — rearrange which operations exist and what each does
+(`express`, `expand_in_basis`, `reassemble`, `reassemble_nabla`, `componentize_
+nabla`, `basis(i)` vs `direction(i)`, reference vs frame bases). This is where I8
+(merge coincident bases) and the reference/frame model get resolved. To be
+started as its own vibe, NOT inside 000081. I9 is now done → this is the next
+thing to open.
 
 ## Driving example — preamble
 
@@ -240,15 +248,57 @@ derive(basis.basis(0), [cs.express, lambda a: tb.expand_in_basis(a, basis, contr
   no-op on it.  Cases 6/7 give clean no-ops (`i_i e_i` / `i`).  Guards:
   py `test_reassemble_nabla_is_noop_without_derivative`,
   `test_expand_in_basis_of_reference_vector` (case 8).
-- **I8 (case 9) — NOT a hidden-state bug; a RENDER COLLISION.** `express(i)`
-  legitimately returns the *frame* vector `e_x` (`structural_eq` to
-  `direction(0)`, distinct `basis_id` from the reference `basis(0)`); in
-  Cartesian both render `𝐢`, masking the change.  `expand_in_basis` then
-  correctly leaves the already-frame `e_x` (`→ i`), whereas on the reference
-  vector it expands (`→ i_i e_i`).  Each step is individually correct.  Open
-  question: should `express` be a *true* no-op for a reference axis that already
-  equals a frame vector (preserve `basis_id`), or is documenting the collision
-  enough?  (Cartesian-only ambiguity: cyl `e_r` vs reference render differently.)
+- **I8 (case 9) — NOT a hidden-state bug; a RENDER COLLISION of two coincident
+  bases.** Each step is individually correct; the confusion is that two
+  *structurally distinct* vectors render identically in Cartesian.
+
+  **The two bases (verified):**
+  1. **Reference (WCS) basis** `R = chart.reference` (`ws.wcs()`) — the ambient
+     constant Cartesian axes `i, j, k`, its own `basis_id` (call it `idR`).
+  2. **Physical frame basis** `F = physical_frame(chart)` — the chart's
+     orthonormal (moving) frame, a *separate* tender `Basis` with its own
+     `basis_id` (`idF ≠ idR`). Its symbolic atoms are `F.direction(i) = e_i^F`
+     (carry `idF`).
+
+  Key API distinction (verified): on any frame `F`,
+  - `F.basis(i)` returns the STORED CONSTRUCTION of `e_i^F` **in R** (its WCS
+    components): cart → `𝐢`; cyl → `cosθ 𝐢 + sinθ 𝐣`. In fact for cart
+    `F.basis(i)` is *structurally equal to* `R.basis(i)` (`structural_eq` True).
+  - `F.direction(i)` mints the SYMBOLIC atom `e_i^F` carrying `idF`: cart → `𝐢`;
+    cyl → `e_r`.
+
+  **Why the collision is Cartesian-only:** for a Cartesian chart aligned with
+  WCS the map is the identity, so `e_i^F` equals `R.basis(i)` *mathematically*,
+  and F's value-names spell it `𝐢` too. So `F.direction(0)` (idF, `𝐢`) and the
+  reference `𝐢` (idR) are structurally distinct (`structural_eq` False) yet
+  render the same. In cyl they render differently (`e_r` vs `cosθ𝐢+sinθ𝐣`), so
+  no collision. In case 9 `express(𝐢_R)` maps R→F giving `e_x^F` (renders `𝐢`),
+  and `expand_in_basis(·, F)` then leaves the already-F vector (`→ 𝐢`), whereas
+  on the reference `𝐢_R` it expands (`→ i_i e_i`) — both correct, invisibly
+  different inputs.
+
+  **Merge vs distinguish (for the operations-revisit vibe, not here):**
+  - **(A) Merge coincident bases.** When `physical_frame` would reproduce the
+    reference exactly (unit scale factors AND `F.basis(i) ≡ R.basis(i)` ∀i),
+    register F with `idR` (one basis, not two). Then `F.direction(i) ≡
+    R.basis(i)`; `express` is a true no-op on reference vectors and case 9 →
+    `i_i e_i` (matches case 8). PRO: kills the collision at the source, `𝐢` and
+    `e_x` become one object. CON: (1) `expand_in_basis(𝐢, F)` on a merged basis
+    is a no-op (a basis vector expanded in its own basis is itself) so **case 8's
+    `i_i e_i` would become `𝐢`** (arguably also correct); (2) only applies to a
+    Cartesian chart *aligned* with WCS — a rotated Cartesian frame does not
+    coincide; (3) couples F's connection/∂ machinery to R (trivial for cart:
+    ∂e=0).
+  - **(B) Keep distinct, make visible.** Always render a physical-frame vector
+    distinctly (`e_x, e_y, e_z`), never `i,j,k`. PRO: no ambiguity. CON: cart
+    loses the familiar `i,j,k`; a rendering regression for the common case; the
+    two-basis modeling stays, just surfaced.
+  - **(C) Document only.** Accept F≡R for cart renders alike; `express` maps
+    R→F; no code change.
+  RECOMMENDATION LEAN: (A) merge, since the two bases are genuinely the same
+  object for a WCS-aligned Cartesian chart — but the right call depends on
+  redefining `express` / `expand_in_basis` / `basis(i)` vs `direction(i)`
+  semantics, which belongs to the operations-revisit vibe (see NEXT STEP below).
 - **I9 (case 5) — OPEN, simplification.** `express(grad(e_r))` gives four
   `e_θe_θ` terms whose coeffs sum to 1 (`= 1/r`), but they DON'T collect because
   the terms are structurally inconsistent: term 1 is `(sin⁴θ·e_θe_θ)/r` (tensor
