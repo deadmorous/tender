@@ -1,6 +1,6 @@
 # 000083 — apply_operators no-op guard + invariant Laplacian constructor
 
-Status: **PLANNED** (to implement).
+Status: **DONE** (both increments implemented).
 
 Two small, independent fixes surfaced by a user example on the strain `reass`:
 
@@ -79,10 +79,24 @@ Guard test: `t.laplacian(eps.tr()).latex() == "Δ tr(ε)"` and it is structurall
 
 ## Increments
 
-1. **Part A** — `contains_deriv` + no-op short-circuit in `apply_operators`
-   (after the abstract-∇ guard). Tests + full suite.
-2. **Part B** — `t.laplacian(operand, ctx=None)` constructor (Python binding,
-   optional C++ helper). Tests; update the example/docs to prefer `t.laplacian`.
+1. **Part A — DONE.** `contains_deriv` helper (`rewrite_tree` scan for any
+   `Deriv` node) + a no-op short-circuit in `apply_operators`, ordered
+   guard → no-Deriv no-op → `canon_tolerant(apply_operators_impl(e))`. With no
+   `Deriv` the step returns `e` unchanged, so the abstract scalar-Hessian trace
+   `tr(∇⊗∇⊗θ)` survives for `expand_dyad_ops` to reduce to `Δθ` (the #1/#2
+   divergence is gone — both paths now give `Δ tr(ε)`). Full suite green (no
+   caller relied on the incidental canonicalize). Tests:
+   `ApplyOperators.NoDerivIsStructuralNoOp` (C++),
+   `test_apply_operators_no_op_without_deriv` (Python).
+2. **Part B — DONE.** `t.laplacian(operand)` = `∇·(∇⊗operand)` built in the
+   operand's own context (`_core.cpp` binding; re-exported from `tender`). No new
+   node — `Δ` stays a *rendering* of `∇·(∇⊗·)`. Renders `Δθ` / `Δε`; structurally
+   equal to `nabla @ (nabla * X)`. Chose the C++/`_core` binding (one definition,
+   shared with any C++ caller) over a Python-only wrapper. Distinct from the
+   chart-bound DSL `tender.operators.laplacian` (a `DifferentialExpr` atom needing
+   `.evaluate(chart)`); `t.laplacian` is the invariant Expr usable directly in
+   derivations. Test `test_invariant_laplacian_constructor`;
+   `examples/strain_compatibility.py` now writes `t.laplacian(theta)` / `t.laplacian(eps)`.
 
 Constraints: buildable/tested per increment; ≥90% coverage; clang-format;
 strip notebooks. Both are small and independent — either can land first.

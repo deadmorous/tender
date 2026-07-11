@@ -3902,6 +3902,25 @@ auto abstract_nabla_over_expanded_basis(Context& ctx, Expr const* e) -> bool
     return nabla && frame_vector;
 }
 
+// True iff the tree contains a concrete `Deriv` node — the frame ∂'s that
+// `expand_nabla` emits and that `apply_operators` actually applies.  An
+// expression with no `Deriv` gives `apply_operators` nothing to do (vibe
+// 000083).
+auto contains_deriv(Context& ctx, Expr const* e) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (std::holds_alternative<Deriv>(n->node))
+                found = true;
+            return n;
+        });
+    return found;
+}
+
 // The clear, actionable error for the basis-first mistake (vibe 000081): an
 // abstract ∇ survived into a step that must canonicalize it over an already-
 // expanded basis.  Point at the ∇-first order.
@@ -3919,6 +3938,12 @@ auto apply_operators(Context& ctx, Expr const* e) -> Expr const*
 {
     if (abstract_nabla_over_expanded_basis(ctx, e))
         throw_abstract_nabla("apply_operators");
+    // Nothing to apply: with no concrete Deriv node this step would only run
+    // canonicalize, which floats a scalar off a bare ∇ operator (∇·(∇⊗θ) →
+    // θ·(∇·∇), the I2/B3 wall — vibe 000081/000083).  Make it a genuine no-op
+    // so an abstract ∇∇ form survives for expand_dyad_ops to reduce to Δθ.
+    if (!contains_deriv(ctx, e))
+        return e;
     // Leave the implicit/explicit summation as the caller had it (vibe 000081,
     // case 2): the internal canonicalize materializes every realm-contracted
     // index to an explicit Σ, surfacing sums that were implicit on the way in.

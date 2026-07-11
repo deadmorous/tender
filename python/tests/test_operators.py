@@ -481,6 +481,41 @@ def test_laplacian_render_recognition():
     assert (nab @ (nab * th)).latex() == r"\Delta \operatorname{tr}(\boldsymbol{\varepsilon})"
 
 
+def test_invariant_laplacian_constructor():
+    # vibe 000083 Part B: t.laplacian(X) is the official invariant Laplacian
+    # ΔX = ∇·(∇⊗X) — no new node, just a thin constructor over nabla@(nabla*X).
+    ws = t.Workspace()
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+
+    # scalar operand → Δ tr(ε), rank-2 operand → Δε
+    assert t.laplacian(t.tr(eps)).latex() == r"\Delta \operatorname{tr}(\boldsymbol{\varepsilon})"
+    assert t.laplacian(eps).latex() == r"\Delta \boldsymbol{\varepsilon}"
+
+    # structurally identical to the explicit ∇·(∇⊗X) it abbreviates
+    assert td.structural_eq(t.laplacian(t.tr(eps)), nab @ (nab * t.tr(eps)))
+    assert td.structural_eq(t.laplacian(eps), nab @ (nab * eps))
+
+
+def test_apply_operators_no_op_without_deriv():
+    # vibe 000083 Part A: with no concrete Deriv to apply, apply_operators is a
+    # genuine no-op — it must NOT canonicalize (which would float the scalar off
+    # the bare ∇, detaching it from the would-be Laplacian, the I2/B3 wall).
+    ws = t.Workspace()
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    nab = t.nabla(ctx=ws.ctx)
+
+    hessian_trace = t.tr(nab * (nab * t.tr(eps)))  # tr(∇⊗∇⊗θ), θ = tr ε
+    # apply_operators leaves it untouched ...
+    assert td.structural_eq(td.apply_operators(hessian_trace), hessian_trace)
+    # ... so expand_dyad_ops still recovers the Laplacian Δθ, matching the
+    # pipeline that never went through apply_operators.
+    via_apply = td.expand_dyad_ops(td.apply_operators(hessian_trace))
+    direct = td.expand_dyad_ops(hessian_trace)
+    assert td.structural_eq(via_apply, direct)
+    assert td.structural_eq(via_apply, t.laplacian(t.tr(eps)))
+
+
 def test_div_hooke_stress_reduces_toward_navier_lame():
     # vibe 000080 Increment 8: ∇·T for the isotropic Hooke stress
     #   T = λ(∇·u)I + μ(∇u + (∇u)ᵀ),  u abstract

@@ -507,6 +507,24 @@ NB_MODULE(_core, m)
         "nabla@T (div), nabla%T (rot) — to write differential expressions "
         "coordinate-free; a chart later expands each ∇ to Σ_i (1/h_i) e_i ∂_i.");
 
+    m.def(
+        "laplacian",
+        [](PyExpr const& operand) -> PyExpr
+        {
+            auto* ctx = operand.ctx;
+            auto const* nab = make_nabla(*ctx);
+            return derive(
+                operand,
+                make_dot(
+                    *ctx, nab, make_tensor_product(*ctx, nab, operand.expr)));
+        },
+        "operand"_a,
+        "The invariant Laplacian Δ(operand) = ∇·(∇⊗operand) (vibe 000083).  No "
+        "new node — Δ is a rendering of ∇·(∇⊗·) — so it works for any rank "
+        "(Δθ, Δε) and renders as `Δ operand`.  This is the abstract operator "
+        "form; a chart's cs.laplacian(f) evaluates it on that chart.  Bare "
+        "nabla@nabla (no operand) is NOT a Laplacian.");
+
     // ---- scalar fields (vibe 000069 M1) -------------------------------- //
 
     m.def(

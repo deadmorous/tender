@@ -93,6 +93,24 @@ TEST(AbstractNabla, DetectsNablaOverExpandedBasis)
     EXPECT_THROW(steps::apply_operators(ctx, prod), std::invalid_argument);
 }
 
+TEST(ApplyOperators, NoDerivIsStructuralNoOp)
+{
+    // vibe 000083 Part A: with no concrete Deriv to apply, apply_operators must
+    // leave the expression untouched.  Previously it still canonicalized, which
+    // floats the scalar off a bare ∇ operator (∇·(∇⊗θ) → θ·(∇·∇), the I2/B3
+    // wall) and detaches the operand from the would-be Laplacian.
+    Context ctx;
+    auto const* theta = make_tensor_object(ctx, make_tensor_name("\\theta"));
+    auto const* nab = make_nabla(ctx);
+    // tr(∇⊗∇⊗θ) — the abstract scalar Hessian trace.
+    auto const* hessian =
+        make_tensor_product(ctx, nab, make_tensor_product(ctx, nab, theta));
+    auto const* tr_hessian = make_trace(ctx, hessian);
+
+    auto const* out = steps::apply_operators(ctx, tr_hessian);
+    EXPECT_TRUE(structural_eq(out, tr_hessian));
+}
+
 // ---- eval_delta_concrete ---------------------------------------------------
 
 TEST(EvalDeltaConcrete, DiagonalIsOne)
