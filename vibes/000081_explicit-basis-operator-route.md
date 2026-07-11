@@ -56,6 +56,36 @@ nabla`, `basis(i)` vs `direction(i)`, reference vs frame bases). This is where I
 started as its own vibe, NOT inside 000081. I9 is now done → this is the next
 thing to open.
 
+## Side thread — `tr(inc ε)` of the strain-compat interim (`reass`)
+
+User computing `tr(inc ε)` where `reass = −(∇∇··ε)I + Δθ I − Δε − ∇∇θ + ∇∇·ε +
+(∇∇·ε)ᵀ` (θ=tr ε). Goal `Δ tr(ε) − ∇·(∇·ε)` — **identity verified via chart
+operators** (`tr(inc ε) == chart.laplacian(tr ε) − chart.div(chart.div ε)`, True).
+
+**Recipe:** `td.expand_dyad_ops(t.tr(reass))` distributes tr over the sum and
+fires the vibe-080 tr-through-operator reductions. Result (with a *dimensioned*
+identity) `−3(∇∇··ε)+3Δθ−2Δθ+2(∇∇··ε)` — value-correct (`= Δθ − ∇∇··ε`) and
+evaluable; the terms are just not maximally combined.
+
+**Blockers found:**
+- **B1 (dimensioned identity).** `tr(c·I)→c·n` needs a *dimensioned* identity
+  (`t.identity(ctx, space=t.space_3d)`); `reass` carries the BARE `t.identity(ctx)`
+  (from `cross_removal_identity`), so the `Δθ I` / `(∇∇··ε)I` traces stay `tr(…)`
+  and the coefficients never cancel. Workaround: thread a dimensioned I through
+  the derivation. Cleaner fix TBD: `reassemble_nabla` (chart-aware) could stamp
+  the chart dimension onto the identity it carries. (Reminder: `cs.nabla()` is the
+  CS-specific ∇ = Σ_i(1/h_i)e_i∂_i; chart-free is `t.nabla(ctx)`.)
+- **B2 (scalar-Hessian trace) — FIXED** (8adad47): `tr(∇⊗∇⊗θ)` split_dyad'd to
+  `θ·(∇·∇)` (θ floated off, Laplacian left bare & un-appliable). Now: both dyad
+  legs operators ⇒ scalar is the operand ⇒ `∇·(∇⊗θ)=Δθ`, kept attached.
+- **B3 (the I2 wall).** `td.collect_terms` (canonicalize) RE-FLOATS θ off `Δθ`
+  (`Δθ → tr(ε)(∇·∇)`, detached/un-evaluable) when combining the redundant
+  `3Δθ−2Δθ` into one term — the same operator-position/scalar-float wall as I2.
+  So the maximally-clean single-term `Δθ − ∇∇··ε` is not reachable via
+  collect_terms; stop at `expand_dyad_ops` (evaluable, value-correct) or verify
+  component-wise. `fold_equal_addends_structural` keeps `Δθ` attached but doesn't
+  fully combine. B3 is the deep canon fix (operator normal form), still deferred.
+
 ## Driving example — preamble
 
 ```python
