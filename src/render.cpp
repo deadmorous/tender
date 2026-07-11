@@ -500,6 +500,18 @@ struct Renderer
                 },
                 [&](TensorProduct const& p) -> std::string
                 {
+                    // Laplacian recognition, floated form (vibe 000083):
+                    // canonicalize rewrites ∇·(∇⊗X) into the equivalent
+                    // (∇·∇)⊗X = tprod(dot(∇,∇), X) (the scalar Laplacian
+                    // operator applied to X).  Both are the Laplacian ΔX, so
+                    // render the floated form the same way — otherwise
+                    // canonicalize (e.g. inside apply_identity) silently
+                    // degrades a clean Δ back to ∇·∇.  A bare ∇·∇ with no
+                    // operand is NOT matched here and stays ∇·∇ (vibe 000083).
+                    if (auto const* dl = std::get_if<Dot>(&p.left->node);
+                        dl && std::holds_alternative<Nabla>(dl->left->node)
+                        && std::holds_alternative<Nabla>(dl->right->node))
+                        return "\\Delta " + sub(*p.right, TENSOR_PREC);
                     // Operator-left normalisation (vibe 000080 Increment 6): a
                     // canonical reorder can leave a bare ∇ on the *right* of a
                     // dyad, `X⊗∇`, which reads as ∇ acting on nothing.  It is

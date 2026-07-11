@@ -870,6 +870,17 @@ TEST(Render, NablaOperator)
     EXPECT_EQ(
         latex(*make_dot(ctx, del, make_cross(ctx, del, eps))),
         "\\nabla \\cdot (\\nabla \\times \\mathbf{e})");
+    // Laplacian, floated canonical form (vibe 000083): canonicalize rewrites
+    // ∇·(∇⊗X) into the equivalent (∇·∇)⊗X = tprod(dot(∇,∇), X); it is still ΔX,
+    // so it renders the same — a Δ must survive a canonicalize (e.g. inside
+    // apply_identity), not degrade back to ∇·∇.
+    auto* floated = make_tensor_product(ctx, make_dot(ctx, del, del), eps);
+    EXPECT_EQ(latex(*floated), "\\Delta \\mathbf{e}");
+    EXPECT_EQ(
+        latex(*make_tensor_product(ctx, make_dot(ctx, del, del), f)),
+        "\\Delta f");
+    // But a bare ∇·∇ with no operand is NOT a Laplacian — it stays ∇·∇.
+    EXPECT_EQ(latex(*make_dot(ctx, del, del)), "\\nabla \\cdot \\nabla");
 
     // Operator-left normalisation (vibe 000080 Increment 6): a canonical
     // reorder can leave ∇ on the *right*; render it left where it acts. X·∇

@@ -108,6 +108,19 @@ Guard test: `t.laplacian(eps.tr()).latex() == "Δ tr(ε)"` and it is structurall
    `.evaluate(chart)`); `t.laplacian` is the invariant Expr usable directly in
    derivations. Test `test_invariant_laplacian_constructor`;
    `examples/strain_compatibility.py` now writes `t.laplacian(theta)` / `t.laplacian(eps)`.
+3. **Part B follow-up — DONE (Δ render survives canonicalize).** User applied an
+   identity `∇·(∇·ε) → Δ tr(ε)` to `reass`; the *untouched* `−Δε` term came back
+   rendered `−∇·∇ ε`. Cause: `apply_identity` canonicalizes, and canonicalize
+   applies the tensor rule `a·(b⊗c) = (a·b)c` to `∇·(∇⊗ε)`, floating ε across the
+   operator into the equivalent `(∇·∇)⊗ε = tprod(dot(∇,∇), ε)` (the I2/B3
+   scalar-float wall — semantically still Δε, "kinda correct"). The clean `∇·(∇⊗X)`
+   render-recognition (vibe 000080 Inc 3, in the `Dot` arm) did not cover this
+   canonical *floated* form, so the Δ degraded. **Fix (render.cpp `TensorProduct`
+   arm):** recognise `(∇·∇)⊗X` → `ΔX` too; a bare `∇·∇` (no operand) stays `∇·∇`.
+   Now a Δ survives a canonicalize (inside `apply_identity` or standalone). Tests
+   extended in `render_test.cpp` (floated scalar + rank-2 Δ; bare `∇·∇` unchanged).
+   NB this is a *render* robustness fix; the deeper I2/B3 canonicalize corruption
+   (float across an operator) is still the operations-revisit vibe's to resolve.
 
 Constraints: buildable/tested per increment; ≥90% coverage; clang-format;
 strip notebooks. Both are small and independent — either can land first.
