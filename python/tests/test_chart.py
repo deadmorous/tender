@@ -801,6 +801,33 @@ def test_abstract_nabla_over_basis_ok_when_nabla_expanded_first():
     assert r"\nabla" in td.apply_operators(nabla @ u).latex()
 
 
+def test_express_of_grad_frame_vector_is_noop():
+    # vibe 000081, case 5 (I9): grad(e_r) = (1/r) e_θ⊗e_θ is already in the frame,
+    # so re-expressing it must be a no-op.  Re-expressing the moving e_θ legs
+    # spreads 1/r into four trig e_θe_θ pieces; the canon normalization
+    # (s·T)/d → (s/d)·T lets collect_terms gather them onto one coefficient that
+    # folds back to 1/r (previously express "complexified" into an unsimplified
+    # 4-term trig sum).
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    e_r = chart.physical_frame().direction(0)
+    g = chart.grad(e_r)
+    assert chart.express(g).latex() == g.latex()
+
+
+def test_canonicalize_lifts_tensor_out_of_symbolic_division():
+    # vibe 000081, I9 core: (sin²θ e_θ)/r and (cos²θ e_θ)/r must collect (both are
+    # (·/r) e_θ) and fold to e_θ/r — impossible while one keeps the tensor inside
+    # the division and the other outside.
+    ctx = t.Context()
+    r, th, z, chart = make_cylindrical(ctx)
+    e_th = chart.physical_frame().direction(1)
+    t1 = t.cos(th) ** 2 * e_th / r  # tensor rides a (·/r) coefficient
+    t2 = (t.sin(th) ** 2 * e_th) / r  # tensor buried inside the /r division
+    folded = td.simplify_scalars(td.collect_terms(td.canonicalize(t1 + t2)))
+    assert folded.latex() == td.canonicalize(e_th / r).latex()  # (1/r) e_θ
+
+
 def test_reassemble_nabla_is_noop_without_derivative():
     # vibe 000081, I10/I11 (cases 6, 7): reassemble_nabla must not invent a ∇ out
     # of a term that carries no derivative.  A bare frame vector `i` and an

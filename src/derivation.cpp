@@ -1121,6 +1121,45 @@ auto float_sums(Context& ctx, Expr const* e) -> Expr const*
         ctx, e, [](Context& c, Expr const* n) { return pull_sums_up(c, n); });
 }
 
+// Factor non-scalar legs out of a division by a *symbolic* scalar:
+// `(s ⊗ T) / d → (s / d) ⊗ T`  (vibe 000081, I9).  Division is scalar-only, so
+// a tensor leg buried in a numerator is just a coefficient's worth of scalar
+// over `d` times the leg.  Leaving it inside makes `(s·T)/d` and `(s/d)·T` two
+// different shapes that `collect_terms` cannot unify, so like terms (e.g. the
+// four `e_θe_θ` pieces of `express(grad e_r)`, coeffs summing to 1) never fold.
+// A *literal* denominator is skipped — multiplicative_flatten already folds it
+// into the numeric coefficient, so `X/2` stays the canonical symmetric-gradient
+// shape the reassembly reads.
+auto factor_div_tensors(Context& ctx, Expr const* e) -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [](Context& c, Expr const* n) -> Expr const*
+        {
+            auto const* d = std::get_if<ScalarDiv>(&n->node);
+            if (!d || std::holds_alternative<ScalarLiteral>(d->right->node))
+                return n;
+            std::vector<Expr const*> facs;
+            flatten_factors(d->left, facs);
+            std::vector<Expr const*> scalars, tensors;
+            for (auto const* f: facs)
+                (infer_rank(f) == std::optional<int>{0} ? scalars : tensors)
+                    .push_back(f);
+            if (tensors.empty())
+                return n; // pure scalar division — nothing to lift
+            Expr const* snum = nullptr;
+            for (auto const* s: scalars)
+                snum = snum ? make_tensor_product(c, snum, s) : s;
+            if (!snum)
+                snum = make_scalar(c, Rational{1});
+            Expr const* out = make_scalar_div(c, snum, d->right);
+            for (auto const* tt: tensors)
+                out = make_tensor_product(c, out, tt);
+            return out;
+        });
+}
+
 } // namespace
 
 namespace steps
@@ -1159,6 +1198,9 @@ auto canonicalize(Context& ctx, Expr const* e) -> Expr const*
     // all-`*` regions, and `raise` rebuilds an `Expr` carrying the same
     // explicit binders the rest of the `Expr` pipeline reads.  (`canon` /
     // `canon_sum_stack` are now dead; pruned at C15.)
+    // Lift tensor legs out of symbolic divisions so `(s·T)/d` and `(s/d)·T`
+    // share one shape and collect (vibe 000081, I9).
+    e = factor_div_tensors(ctx, e);
     return nf::raise(
         ctx,
         *nf::canonicalize_nf(ctx, float_sums(ctx, materialize(ctx, e, {}))));

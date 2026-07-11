@@ -1359,7 +1359,12 @@ auto express(Context& ctx, CoordinateChart const& target, Expr const* v)
             return node;
         });
     out = steps::expand_products(ctx, out);
-    out = steps::simplify_scalars(ctx, steps::canonicalize(ctx, out));
+    // Collect like frame-dyad terms before simplifying: re-expressing a moving
+    // frame leg spreads one coefficient over several trig pieces (e.g. `1/r` of
+    // ∇e_r fans into four `e_θe_θ` terms), which only fold once gathered onto a
+    // common coefficient and reduced (vibe 000081, I9).
+    out = steps::simplify_scalars(
+        ctx, steps::collect_terms(ctx, steps::canonicalize(ctx, out)));
     // vibe 000072 Obs 8: collapse a completed resolution of identity
     // Σ_k e_k⊗e_k in the target frame back to I (guarded — a no-op otherwise).
     return fold_resolution_of_identity(ctx, out, tf);
