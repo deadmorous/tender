@@ -71,13 +71,28 @@ embedding-dim), so they coincide; the design must let them diverge later.
    `dim` was bearing. Fixed: copy the whole obj, replace only slots. Kept the
    null-safe `space_cmp` and the `expand_in_basis` dimension check. Python
    `t.identity`/`ws.identity` default 3-D; docstrings updated.
-2. **Generalise `dim` to abstract positive-rank invariants.** User vectors
-   (`t.tensor(name, rank≥1)`), `∇`, radius/tangent vectors get a `dim`
-   (default 3-D / inherited from chart). Bearing. Constructors stamp it.
-3. **Space-readers validate; sums stay permissive.** `expand_in_basis` (and
-   friends) check the invariant's space matches the basis; `+`/`·` untouched.
-   `well_known_trace_dim` already generalises to any dimensioned symmetric
-   well-known rank-2.
+2. **Dimension-aware user tensors (OPT-IN). DONE.** `make_tensor_object` gained
+   an optional `dim`; `t.tensor(name, rank, space=…)` sets it, and
+   `expand_in_basis` validates ANY dimensioned invariant against its basis.
+   **SCOPE CORRECTION** — user tensors default to **dimension-AGNOSTIC (null)**,
+   NOT 3-D. Reason: user tensors double as **identity-rule pattern variables**
+   (the whole `cross_removal_identities` machinery: `a`, `c`, `B`, `E`), which
+   must match ANY dimension; a default 3-D corrupted the derivation of
+   `id_axBxc`/`id_inc` (phase-1 leaked literal `B_{xx} a_y c_y` + unresolved
+   `Σ_?`, breaking the strain example). So dim on a user tensor is opt-in via
+   `space=`. Internal reconstructions that copy a source tensor now preserve its
+   `dim` (`fold_reassembly_groups` `coord_invariant`, completeness fold) — the
+   same class as the inc-1 matcher `inst_factor` bug. Test
+   `test_dimension_aware_user_tensor_is_opt_in`. `∇`/radius/tangent held (∇ is a
+   `Nabla` node, not a `TensorObject`; its dimension is contextual).
+3. **DEFERRED (unchanged): tangent-vs-embedding, subspace/embedding, `∇` dim,
+   sum-compat enforcement.** `well_known_trace_dim` already generalises to any
+   dimensioned symmetric well-known rank-2.
+
+**LESSON:** a global "positive-rank ⇒ default 3-D" is wrong — the identity NEEDS
+a default (tr), but plain tensors are also pattern *variables* and must stay
+dimension-agnostic. Dimension is set where KNOWN (identity default; chart
+inheritance; explicit `space=`), null (agnostic, permissive) otherwise.
 
 Constraints: buildable/tested per increment; ≥90% coverage; run clang-format;
 strip notebooks. See [[vibe81-explicit-basis-operator-route]] (identity-dimension

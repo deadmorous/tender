@@ -14,13 +14,15 @@ auto make_tensor_object(
     Context& ctx,
     TensorName name,
     std::vector<SlotBinding> slots,
-    std::optional<int> rank) -> Expr const*
+    std::optional<int> rank,
+    IndexSpace const* dim) -> Expr const*
 {
     return ctx.make<Expr>(TensorObject{
         .name = std::move(name),
         .rank = rank,
         .traits = std::nullopt,
-        .slots = std::move(slots)});
+        .slots = std::move(slots),
+        .dim = dim});
 }
 
 auto make_scalar(Context& ctx, Rational value) -> Expr const*

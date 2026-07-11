@@ -309,6 +309,14 @@ auto expand_in_basis(
             if (!is_expandable_invariant(*t))
                 return node;
 
+            // A dimension-aware invariant must match the basis it is expanded
+            // in (vibe 000082): a 3-D vector makes no sense on a 2-D frame.  A
+            // dimension-agnostic invariant (dim == null) expands in any basis.
+            if (t->dim && t->dim != basis.space())
+                throw std::invalid_argument(
+                    "expand_in_basis: tensor dimension does not match the basis "
+                    "dimension");
+
             // A field derivative ∂T cannot be expanded correctly in a moving
             // frame: the connection ∂e_i (the spin Ω, ∂e_i = Ω×e_i) lives on
             // the chart, not the basis, so expanding here would silently drop
@@ -1192,7 +1200,11 @@ auto fold_reassembly_groups(
     Basis const& basis) -> Expr const*
 {
     auto coord_invariant = [&](TensorObject const* c, int rank)
-    { return make_tensor_object(ctx, c->name, {}, rank); };
+    {
+        // Preserve the source invariant's dimension (vibe 000082) so the
+        // reassembled blob still equals the original user tensor.
+        return make_tensor_object(ctx, c->name, {}, rank, c->dim);
+    };
 
     // Classify the factors: basis vectors (by summed id), coordinate carriers,
     // and the summed ids blocked by some other (foreign) factor.
@@ -1550,7 +1562,7 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
                 return node;
 
             return signed_(make_tensor_object(
-                c, coord->name, {}, static_cast<int>(s.size())));
+                c, coord->name, {}, static_cast<int>(s.size()), coord->dim));
         });
     // Surface the prepared result, not the raw input (vibe 000064 #3/#4/#6).
     // The self-prep canonicalize may simplify the input on its own — cancelling

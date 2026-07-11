@@ -412,18 +412,24 @@ NB_MODULE(_core, m)
         "tensor",
         [](std::string const& name,
            std::optional<int> rank,
-           nb::object ctx_arg) -> PyExpr
+           nb::object ctx_arg,
+           IndexSpace const* space) -> PyExpr
         {
             auto [ctx, keep] = resolve_ctx(ctx_arg);
             return PyExpr{
                 keep,
                 ctx,
-                make_tensor_object(*ctx, make_tensor_name(name), {}, rank)};
+                make_tensor_object(
+                    *ctx, make_tensor_name(name), {}, rank, space)};
         },
         "name"_a,
         "rank"_a = nb::none(),
         "ctx"_a = nb::none(),
-        "Create a named tensor object.");
+        "space"_a = nb::none(),
+        "Create a named tensor object.  Pass `space` (e.g. t.space_3d) to make a "
+        "positive-rank tensor dimension-aware (vibe 000082) — validated against "
+        "its basis on expansion.  Dimension-agnostic by default, so it doubles "
+        "as an identity-rule pattern variable (which must match any dimension).");
 
     m.def(
         "scalar",

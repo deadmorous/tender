@@ -342,6 +342,26 @@ def test_dimension_aware_identity_is_orthogonal_to_slots():
         tb.expand_in_basis(two_d, frame, tb.Variance.Covariant)
 
 
+def test_dimension_aware_user_tensor_is_opt_in():
+    # vibe 000082 inc 2: a user tensor is dimension-agnostic by default (so it
+    # still works as an identity-rule pattern variable, which must match any
+    # dimension), but `space=` makes it dimension-aware — validated against its
+    # basis on expansion.
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    agn = tender.tensor("a", 1, ctx=ctx)  # agnostic
+    v3 = tender.tensor("a", 1, ctx=ctx, space=tender.space_3d)
+    v2 = tender.tensor("a", 1, ctx=ctx, space=tender.space_2d)
+    assert not td.structural_eq(agn, v3)  # bearing: agnostic ≠ 3-D
+    assert not td.structural_eq(v3, v2)  # bearing: 3-D ≠ 2-D
+    # agnostic and matching-dimension tensors both expand in the 3-D frame
+    for x in (agn, v3):
+        tb.expand_in_basis(x, frame, tb.Variance.Covariant)  # no raise
+    # a 2-D tensor in a 3-D frame is refused
+    with pytest.raises(ValueError, match="dimension does not match"):
+        tb.expand_in_basis(v2, frame, tb.Variance.Covariant)
+
+
 def test_vec_of_identity_is_zero():
     # vec(I) = 0 through the basis: I = Σ e_i⊗e_i, vec → Σ e_i×e_i, each = 0.
     ctx = tender.Context()

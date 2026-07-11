@@ -410,11 +410,15 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 
 // Generic tensor object.  slots defaults to empty (abstract form).
 // rank is independent of slot count.
+// `dim` (vibe 000082): the index space a positive-rank *invariant* ranges over,
+// for a slotless abstract object (a user vector/tensor); null on a rank-0
+// scalar or an internal transient (dimension-agnostic ⇒ expands in any basis).
 [[nodiscard]] auto make_tensor_object(
     Context&,
     TensorName,
     std::vector<SlotBinding> slots = {},
-    std::optional<int> rank = std::nullopt) -> Expr const*;
+    std::optional<int> rank = std::nullopt,
+    IndexSpace const* dim = nullptr) -> Expr const*;
 
 // Numeric scalar literal.
 [[nodiscard]] auto make_scalar(Context&, Rational) -> Expr const*;
