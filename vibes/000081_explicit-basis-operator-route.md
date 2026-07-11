@@ -312,9 +312,11 @@ pass (vibe-080 unaffected).  Guards: py
 `AbstractNabla.DetectsNablaOverExpandedBasis`.  Issue 3 (express weirdness) is
 subsumed: express now refuses that input outright.  Full suite 814 C++ / 267 py.
 
-**Fix C — Issue 1 (rendering, small).** Re-implicitize the Einstein sum inside
-`apply_operators` output (or have it not materialise `Σ_i`). Verify no explicit
-`Σ` after the step in the baseline/Part-3 traces.
+**Fix C — Issue 1 (rendering).** The surfaced explicit `Σ_j Σ_i` after
+`apply_operators` re-folds to Einstein form with **`td.implicitize`** (verified).
+Tool already exists — steer users to it rather than change `apply_operators`'
+output contract (many callers/tests read its explicit sums). Awaiting user
+preference on whether `apply_operators` should auto-implicitize.
 
 **Fix E — Issue 7 (usability). DECISION: keep `express` pure; document.**
 `express` stays a pure frame-change; document `tb.reassemble(expr, basis)` as the
