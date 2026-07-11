@@ -3902,23 +3902,31 @@ auto abstract_nabla_over_expanded_basis(Context& ctx, Expr const* e) -> bool
     return nabla && frame_vector;
 }
 
-// True iff the tree contains a concrete `Deriv` node — the frame ∂'s that
-// `expand_nabla` emits and that `apply_operators` actually applies.  An
-// expression with no `Deriv` gives `apply_operators` nothing to do (vibe
-// 000083).
-auto contains_deriv(Context& ctx, Expr const* e) -> bool
+// Scan the tree for the two operator node kinds that matter to
+// `apply_operators`: the concrete `Deriv` (a frame ∂ that `expand_nabla` emits
+// and that this step actually applies) and the abstract `Nabla` (a bare ∇ that
+// only `expand_nabla` can expand — this step can never apply it).  vibe 000083.
+struct OperatorPresence
 {
-    bool found = false;
+    bool deriv = false;
+    bool nabla = false;
+};
+
+auto scan_operators(Context& ctx, Expr const* e) -> OperatorPresence
+{
+    OperatorPresence p;
     rewrite_tree(
         ctx,
         e,
         [&](Context&, Expr const* n) -> Expr const*
         {
             if (std::holds_alternative<Deriv>(n->node))
-                found = true;
+                p.deriv = true;
+            else if (std::holds_alternative<Nabla>(n->node))
+                p.nabla = true;
             return n;
         });
-    return found;
+    return p;
 }
 
 // The clear, actionable error for the basis-first mistake (vibe 000081): an
@@ -3938,11 +3946,17 @@ auto apply_operators(Context& ctx, Expr const* e) -> Expr const*
 {
     if (abstract_nabla_over_expanded_basis(ctx, e))
         throw_abstract_nabla("apply_operators");
-    // Nothing to apply: with no concrete Deriv node this step would only run
-    // canonicalize, which floats a scalar off a bare ∇ operator (∇·(∇⊗θ) →
-    // θ·(∇·∇), the I2/B3 wall — vibe 000081/000083).  Make it a genuine no-op
-    // so an abstract ∇∇ form survives for expand_dyad_ops to reduce to Δθ.
-    if (!contains_deriv(ctx, e))
+    // Nothing this step CAN apply: an abstract ∇ (that only expand_nabla
+    // expands) with no concrete Deriv.  Running canonicalize here would only
+    // float a scalar off the bare ∇ operator (∇·(∇⊗θ) → θ·(∇·∇), the I2/B3 wall
+    // — vibe 000081/000083), detaching the operand from the would-be Laplacian.
+    // Make it a genuine no-op so the abstract ∇∇ form survives for
+    // expand_dyad_ops to reduce to Δθ.  (A Deriv-free expression with NO ∇ —
+    // e.g. a chart-expanded tr(∇u) whose partials are already applied — still
+    // canonicalizes below: no operator means no scalar-float risk, and callers
+    // rely on that cleanup.)
+    auto const ops = scan_operators(ctx, e);
+    if (ops.nabla && !ops.deriv)
         return e;
     // Leave the implicit/explicit summation as the caller had it (vibe 000081,
     // case 2): the internal canonicalize materializes every realm-contracted

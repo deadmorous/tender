@@ -79,15 +79,26 @@ Guard test: `t.laplacian(eps.tr()).latex() == "Δ tr(ε)"` and it is structurall
 
 ## Increments
 
-1. **Part A — DONE.** `contains_deriv` helper (`rewrite_tree` scan for any
-   `Deriv` node) + a no-op short-circuit in `apply_operators`, ordered
-   guard → no-Deriv no-op → `canon_tolerant(apply_operators_impl(e))`. With no
-   `Deriv` the step returns `e` unchanged, so the abstract scalar-Hessian trace
+1. **Part A — DONE (guard NARROWED after a vibe-081 Case-1 regression).**
+   `scan_operators` helper (`rewrite_tree` scan flagging `Deriv` and `Nabla`) +
+   a no-op short-circuit in `apply_operators`, ordered guard → no-op →
+   `canon_tolerant(apply_operators_impl(e))`. The abstract scalar-Hessian trace
    `tr(∇⊗∇⊗θ)` survives for `expand_dyad_ops` to reduce to `Δθ` (the #1/#2
-   divergence is gone — both paths now give `Δ tr(ε)`). Full suite green (no
-   caller relied on the incidental canonicalize). Tests:
-   `ApplyOperators.NoDerivIsStructuralNoOp` (C++),
-   `test_apply_operators_no_op_without_deriv` (Python).
+   divergence is gone — both paths now give `Δ tr(ε)`).
+   **REGRESSION FOUND on re-running the vibe-081 cases:** the first cut no-op'd on
+   *any* `Deriv`-free expression, which broke **Case 1 baseline-div** — `cs.grad`
+   emits **already-applied** partials (no `Deriv` node), so its `tr(∇u)` relied on
+   `apply_operators`'s incidental canonicalize to fold `tr(dyad)` → dot products;
+   the blanket no-op left it stuck at `tr(…)`. **Fix:** the guard is NARROW — no-op
+   only when a bare **`Nabla`** is present AND there is no `Deriv` (i.e. an
+   operator this step genuinely cannot apply, where canonicalize would only float
+   the scalar and corrupt). A `Deriv`-free, `Nabla`-free expression (Case 1) still
+   canonicalizes as before. Both directions locked by tests
+   `ApplyOperators.AbstractNablaWithoutDerivIsStructuralNoOp` +
+   `ApplyOperators.DerivFreeExpressionWithoutNablaStillCanonicalizes` (C++),
+   `test_apply_operators_no_op_without_deriv` (Python). All vibe-081 cases re-run
+   and match their recorded statuses (Case 1 correct div in both CS; Cases 2/3
+   refused by the earlier guards; Cases 5–9 clean).
 2. **Part B — DONE.** `t.laplacian(operand)` = `∇·(∇⊗operand)` built in the
    operand's own context (`_core.cpp` binding; re-exported from `tender`). No new
    node — `Δ` stays a *rendering* of `∇·(∇⊗·)`. Renders `Δθ` / `Δε`; structurally

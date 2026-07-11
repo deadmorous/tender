@@ -93,12 +93,12 @@ TEST(AbstractNabla, DetectsNablaOverExpandedBasis)
     EXPECT_THROW(steps::apply_operators(ctx, prod), std::invalid_argument);
 }
 
-TEST(ApplyOperators, NoDerivIsStructuralNoOp)
+TEST(ApplyOperators, AbstractNablaWithoutDerivIsStructuralNoOp)
 {
-    // vibe 000083 Part A: with no concrete Deriv to apply, apply_operators must
-    // leave the expression untouched.  Previously it still canonicalized, which
-    // floats the scalar off a bare ∇ operator (∇·(∇⊗θ) → θ·(∇·∇), the I2/B3
-    // wall) and detaches the operand from the would-be Laplacian.
+    // vibe 000083 Part A: an abstract ∇ that this step cannot apply (no
+    // concrete Deriv) must be left untouched.  Previously apply_operators still
+    // canonicalized, which floats the scalar off the bare ∇ (∇·(∇⊗θ) → θ·(∇·∇),
+    // the I2/B3 wall) and detaches the operand from the would-be Laplacian.
     Context ctx;
     auto const* theta = make_tensor_object(ctx, make_tensor_name("\\theta"));
     auto const* nab = make_nabla(ctx);
@@ -109,6 +109,34 @@ TEST(ApplyOperators, NoDerivIsStructuralNoOp)
 
     auto const* out = steps::apply_operators(ctx, tr_hessian);
     EXPECT_TRUE(structural_eq(out, tr_hessian));
+}
+
+TEST(ApplyOperators, DerivFreeExpressionWithoutNablaStillCanonicalizes)
+{
+    // vibe 000083 Part A guard is NARROW: it only no-ops when a bare ∇ is
+    // present.  A Deriv-free expression with NO ∇ (e.g. a chart-expanded tr(∇u)
+    // whose partials are already applied) must STILL canonicalize — the
+    // baseline-div derivation (vibe 000081 Case 1) relies on that trace→dot
+    // cleanup.  Here tr(a⊗b) must canonicalize to the dot a·b, not stay a
+    // no-op.
+    Context ctx;
+    auto const* sp = space_3d();
+    auto make_vec = [&](char const* name)
+    {
+        return make_tensor_object(
+            ctx,
+            make_tensor_name(name),
+            {SlotBinding{
+                IndexSlot{Level::Lower, Realm::Orthonormal, sp, /*basis_id=*/0},
+                IndexAssoc{}}},
+            1);
+    };
+    auto const* dyad = make_tensor_product(ctx, make_vec("a"), make_vec("b"));
+    auto const* tr_dyad = make_trace(ctx, dyad);
+
+    auto const* out = steps::apply_operators(ctx, tr_dyad);
+    // canonicalize turns tr(a⊗b) into the contracted dot a·b — NOT a no-op.
+    EXPECT_FALSE(structural_eq(out, tr_dyad));
 }
 
 // ---- eval_delta_concrete ---------------------------------------------------
