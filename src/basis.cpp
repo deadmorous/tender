@@ -786,7 +786,7 @@ auto fold_completeness_term(
                 if (static_cast<int>(p) != legs[0]
                     && static_cast<int>(p) != legs[1])
                     out.push_back(factors[p]);
-            out.push_back(make_identity(ctx));
+            out.push_back(make_identity(ctx, basis.space())); // vibe 000082
             std::vector<int> rest;
             for (int s: summed)
                 if (s != id)
@@ -1008,8 +1008,8 @@ auto fold_identity_dyads(
         for (int x: member)
             consumed[static_cast<std::size_t>(x)] = true;
         Expr const* c = items[i].dyad->coeff;
-        Expr const* term = c ? make_tensor_product(ctx, c, make_identity(ctx)) :
-                               make_identity(ctx);
+        Expr const* const id = make_identity(ctx, b.space()); // vibe 000082
+        Expr const* term = c ? make_tensor_product(ctx, c, id) : id;
         folded.push_back({term, items[i].neg});
         any = true;
     }
@@ -1407,7 +1407,7 @@ auto fold_reassembly_groups(
         if (kind[id] == Kind::Identity)
         {
             auto const& bp = in_basis[id];
-            replace[bp[0]] = make_identity(ctx);
+            replace[bp[0]] = make_identity(ctx, basis.space()); // vibe 000082
             drop.insert(bp[1]);
             folded.insert(id);
         }
@@ -1534,7 +1534,7 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
                 auto const s = sorted(summed);
                 if (vec_ids.size() == 2 && s.size() == 1 && vec_ids[0] == s[0]
                     && vec_ids[1] == s[0])
-                    return signed_(make_identity(c));
+                    return signed_(make_identity(c, basis.space())); // vibe 82
                 return node;
             }
             auto const coord_ids = countable_slot_ids(*coord);

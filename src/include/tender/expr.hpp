@@ -181,18 +181,20 @@ struct TensorObject final
     // (compared by structural_eq / tensor_object_cmp), so ∂_x T and T are
     // distinct and ∂_x∂_y T = ∂_y∂_x T.
     std::vector<DerivMark> deriv_marks = {};
-    // Dimension-awareness (vibe 000081), orthogonal to the index slots: the
-    // index space this object's implicit indices range over, when known.  Null
-    // means dimension-agnostic (the default).  Set on an abstract well-known
-    // tensor with no index slots — e.g. a sized identity, so tr(I) → n —
-    // without fabricating fake unbound slots.  Identity-NEUTRAL, like
-    // `well_known` / `field` (structural_eq / tensor_object_cmp / hash ignore
-    // it): a sized I and a dimension-agnostic I are interchangeable and cancel,
-    // so a library-emitted bare I and a user's sized I still combine.  Only the
-    // reductions read it (`tr`), exactly like well_known; rendering ignores it
-    // too (a sized I still prints as a plain `I`).  Kept last so existing
-    // aggregate initialisers `{name, rank, traits, slots, deriv_marks}` keep
-    // compiling.
+    // Dimension-awareness (vibe 000081/000082), orthogonal to the index slots:
+    // the index space this object's implicit indices range over.  Null on a
+    // rank-0 scalar / coordinate (dimension is irrelevant); a positive-rank
+    // *invariant* carries the space of the CS/basis it belongs to (a bare
+    // construction defaults to `space_3d` — there is no dimension-agnostic
+    // invariant).  Set without fabricating fake index slots, so the object
+    // stays abstract and behaves like a plain tensor in
+    // expansion/contraction/render; only the reductions read it (`tr(I) → n`)
+    // and `expand_in_basis` validates it against its basis.  `dim` IS part of
+    // structural identity (a 2-D I ≠ a 3-D I) so equality stays a congruence —
+    // `tensor_object_cmp` / `structural_eq` / `hash_tensor_object` all honour
+    // it; rendering ignores it (a sized I still prints as a plain `I`).  Kept
+    // last so existing aggregate initialisers `{name, rank, traits, slots,
+    // deriv_marks}` keep compiling.
     IndexSpace const* dim = nullptr;
 };
 

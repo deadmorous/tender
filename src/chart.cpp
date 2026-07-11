@@ -1145,11 +1145,11 @@ auto reassemble_term(
     return cur;
 }
 
-// Stamp the chart's dimension onto a dimension-agnostic identity.  The
-// reassembled result is chart-bound, so its abstract I gains the chart's
-// dimension — letting a downstream `tr(c·I) → c·n` fold (vibe 000081, B1).
-// Dimension-awareness is orthogonal to the slots (`TensorObject::dim`), so the
-// I stays slotless and behaves identically everywhere else.
+// Stamp the chart's dimension onto every identity in the reassembled result.
+// The result is chart-bound, so its abstract I takes the chart's space (letting
+// `tr(c·I) → c·n` fold, vibe 000081 B1) — overwriting any mismatched default a
+// user's I may have carried in (vibe 000082).  Dimension-awareness is
+// orthogonal to the slots (`TensorObject::dim`), so the I stays slotless.
 auto dimension_identities(Context& ctx, Expr const* e, IndexSpace const* space)
     -> Expr const*
 {
@@ -1160,7 +1160,8 @@ auto dimension_identities(Context& ctx, Expr const* e, IndexSpace const* space)
         {
             auto const* t = std::get_if<TensorObject>(&n->node);
             if (t && t->traits
-                && t->traits->well_known == WellKnownKind::Identity && !t->dim)
+                && t->traits->well_known == WellKnownKind::Identity
+                && t->dim != space)
                 return make_identity(c, space);
             return n;
         });

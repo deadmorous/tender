@@ -716,32 +716,35 @@ def test_transpose_identity_is_self():
 
 
 def test_trace_of_dimensioned_identity():
-    # vibe 000080 Increment 1 (literal-only): a dimensioned identity folds its
-    # trace to the space dimension; the bare identity stays symbolic tr(I).
+    # vibe 000080/000082: an identity carries its dimension, so tr(I) folds to n.
+    # There is no dimension-agnostic identity — the default is 3-D (000082).
     ctx = tender.Context()
     I3 = tender.identity(ctx=ctx, space=tender.space_3d)
     assert I3.rank == 2
     assert td.algebraic_eq(
         td.expand_dyad_ops(tender.tr(I3)), tender.scalar(3, ctx=ctx)
     )
-    I = tender.identity(ctx=ctx)
-    assert td.expand_dyad_ops(tender.tr(I)).latex() == r"\operatorname{tr}(\mathbf{I})"
-    # vibe 000081 B1: the dimensioned identity's space-carrying slots are not
-    # indices — it renders as a clean I, same as the bare one, not I^{•·}_{·•}.
+    I = tender.identity(ctx=ctx)  # default 3-D
+    assert td.structural_eq(I, I3)  # bearing, but the default IS 3-D
+    assert td.algebraic_eq(
+        td.expand_dyad_ops(tender.tr(I)), tender.scalar(3, ctx=ctx)
+    )
+    # the dimension is not an index slot — it still renders as a clean I.
     assert I3.latex() == r"\mathbf{I}" == I.latex()
 
 
 def test_trace_of_scaled_dimensioned_identity():
-    # vibe 000080 Increment 2: tr(c·I) = c·n peels the scalar off the identity
-    # leg (the Δθ·I / (∇∇··ε)I trace terms).  A bare identity stays symbolic.
+    # vibe 000080 Increment 2 / 000082: tr(c·I) = c·n; the default I is 3-D.
     ctx = tender.Context()
     I3 = tender.identity(ctx=ctx, space=tender.space_3d)
     c = tender.tensor("c", rank=0, ctx=ctx)
     assert td.algebraic_eq(
         td.expand_dyad_ops(tender.tr(c * I3)), tender.scalar(3, ctx=ctx) * c
     )
-    Ibare = tender.identity(ctx=ctx)
-    assert "operatorname{tr}" in td.expand_dyad_ops(tender.tr(c * Ibare)).latex()
+    assert td.algebraic_eq(
+        td.expand_dyad_ops(tender.tr(c * tender.identity(ctx=ctx))),
+        tender.scalar(3, ctx=ctx) * c,
+    )
 
 
 def test_trace_commutes_through_laplacian():

@@ -75,6 +75,11 @@ auto tensor_object_cmp(TensorObject const& a, TensorObject const& b) -> int
         return c;
     if (a.rank != b.rank)
         return a.rank < b.rank ? -1 : 1;
+    // Dimension-awareness is part of identity (vibe 000082): a 2-D I is a
+    // distinct object from a 3-D I, so `tr` stays a congruence.  space_cmp is
+    // null-safe (a rank-0 tensor has dim == null).
+    if (int c = space_cmp(a.dim, b.dim))
+        return c;
     if (a.slots.size() != b.slots.size())
         return a.slots.size() < b.slots.size() ? -1 : 1;
     for (std::size_t i = 0; i < a.slots.size(); ++i)

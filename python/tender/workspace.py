@@ -55,9 +55,9 @@ class Workspace:
     def identity(self, space=None):
         """The identity tensor I.
 
-        With a concrete index ``space`` (e.g. ``t.space_3d``) the identity
-        carries a dimension, so ``tr(I)`` folds to ``n``; the bare identity
-        leaves ``tr(I)`` symbolic.
+        It carries its dimension (vibe 000082), so ``tr(I)`` folds to ``n``;
+        ``space`` defaults to 3-D — there is no dimension-agnostic identity.
+        Pass ``space=t.space_2d`` etc. for other dimensions.
         """
         return _core.identity(ctx=self.ctx, space=space)
 

@@ -630,10 +630,12 @@ auto inst_factor(
                 for (auto& s: slots)
                     if (s.index)
                         s.index = remap_assoc(*s.index, bnd, fresh);
-                return make_atom(
-                    ctx,
-                    TensorObject{
-                        a.obj.name, a.obj.rank, a.obj.traits, std::move(slots)});
+                // Copy the whole object and only replace the slots, so its
+                // dimension-awareness (`dim`, vibe 000082) and applied ∂-marks
+                // survive instantiation — a positional rebuild dropped them.
+                TensorObject obj = a.obj;
+                obj.slots = std::move(slots);
+                return make_atom(ctx, std::move(obj));
             },
             [&](Contraction const& c) -> Factor const*
             {

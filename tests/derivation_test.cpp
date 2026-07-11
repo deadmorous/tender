@@ -3406,10 +3406,13 @@ TEST(ExpandDyadOps, TraceOfDimensionedIdentityIsDimension)
         steps::expand_dyad_ops(ctx, make_trace(ctx, I3)),
         make_scalar(ctx, Rational{3})));
 
-    // A bare identity has no space — its trace stays tr(I), not a guessed n.
+    // There is no dimension-agnostic identity (vibe 000082): the default is
+    // 3-D, so a plain identity's trace also folds to 3.
     auto const* I = make_identity(ctx);
-    auto const* tr_bare = make_trace(ctx, I);
-    EXPECT_EQ(steps::expand_dyad_ops(ctx, tr_bare), tr_bare);
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::expand_dyad_ops(ctx, make_trace(ctx, I)),
+        make_scalar(ctx, Rational{3})));
 }
 
 // tr(c·I) = c·n: a scalar-scaled dimensioned identity peels its scalar factors
@@ -3426,10 +3429,12 @@ TEST(ExpandDyadOps, TraceOfScaledDimensionedIdentity)
             ctx, make_trace(ctx, make_tensor_product(ctx, c, I3))),
         make_tensor_product(ctx, make_scalar(ctx, Rational{3}), c)));
 
-    // tr(c·I) of a bare (spaceless) identity stays symbolic.
+    // The default identity is 3-D (vibe 000082), so tr(c·I) folds to 3·c too.
     auto const* cI = make_tensor_product(ctx, c, make_identity(ctx));
-    auto const* tr_cI = make_trace(ctx, cI);
-    EXPECT_EQ(steps::expand_dyad_ops(ctx, tr_cI), tr_cI);
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::expand_dyad_ops(ctx, make_trace(ctx, cI)),
+        make_tensor_product(ctx, make_scalar(ctx, Rational{3}), c)));
 }
 
 // tr(∇·(∇⊗ε)) = ∇·(∇⊗ tr ε): the Laplacian commutes with the trace over ε's own

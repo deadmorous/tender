@@ -318,28 +318,26 @@ class TestBasisSteps:
 
 
 def test_dimension_aware_identity_is_orthogonal_to_slots():
-    # vibe 000081: dimension-awareness is a TensorObject attribute orthogonal to
-    # the index slots (not fake unbound slots).  A sized identity is slotless, so
-    # it renders as a clean I and expands in a basis like the bare I.  The
-    # attribute is identity-NEUTRAL (like well_known): a sized I and the bare I
-    # are interchangeable and cancel — only `tr` reads the dimension.
+    # vibe 000082: dimension-awareness is a TensorObject attribute orthogonal to
+    # the index slots (not fake unbound slots).  The identity is slotless, so it
+    # renders as a clean I and expands in a basis normally.  It is BEARING (part
+    # of identity, so `tr` stays a congruence: a 2-D I ≠ a 3-D I), and there is
+    # no dimension-agnostic identity — the default is 3-D.
     ctx = tender.Context()
     frame = tb.wcs(ctx)
-    bare = tender.identity(ctx=ctx)
-    sized = tender.identity(ctx=ctx, space=tender.space_3d)
-    assert sized.latex() == bare.latex() == r"\mathbf{I}"
-    assert td.structural_eq(bare, sized)  # neutral: interchangeable
-    # so a bare I and a sized I cancel (a library-emitted I mixes with a user's)
-    assert td.fold_equal_addends(bare - sized).latex() == "0"
-    # only tr reads the dimension: sized folds to n, bare stays symbolic
-    assert td.expand_dyad_ops(tender.tr(sized)).latex() == "3"
-    assert "tr" in td.expand_dyad_ops(tender.tr(bare)).latex()
-    # expands in a matching basis exactly like the bare identity …
-    exp_bare = td.canonicalize(tb.expand_in_basis(bare, frame, tb.Variance.Covariant))
-    exp_sized = td.canonicalize(tb.expand_in_basis(sized, frame, tb.Variance.Covariant))
-    assert td.structural_eq(exp_bare, exp_sized)
-    # … but a dimension mismatch is refused.
+    default = tender.identity(ctx=ctx)  # 3-D by default
+    three_d = tender.identity(ctx=ctx, space=tender.space_3d)
     two_d = tender.identity(ctx=ctx, space=tender.space_2d)
+    assert default.latex() == three_d.latex() == two_d.latex() == r"\mathbf{I}"
+    assert td.structural_eq(default, three_d)  # default IS 3-D
+    assert not td.structural_eq(three_d, two_d)  # bearing: distinct objects
+    # tr reads the dimension (congruent — distinct I's, distinct traces)
+    assert td.expand_dyad_ops(tender.tr(three_d)).latex() == "3"
+    assert td.expand_dyad_ops(tender.tr(two_d)).latex() == "2"
+    # slotless: expands in a matching basis normally, no fake index bullets
+    exp = td.canonicalize(tb.expand_in_basis(three_d, frame, tb.Variance.Covariant))
+    assert r"\bullet" not in exp.latex()
+    # but a dimension mismatch (2-D I on a 3-D frame) is refused
     with pytest.raises(ValueError, match="dimension does not match"):
         tb.expand_in_basis(two_d, frame, tb.Variance.Covariant)
 

@@ -1,5 +1,7 @@
 #include <tender/expr.hpp>
 
+#include <tender/index_space.hpp> // space_3d (default identity dimension)
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -365,22 +367,22 @@ auto make_no_sum(Context& ctx, CountableIndex index, Expr const* body)
 
 auto make_identity(Context& ctx) -> Expr const*
 {
-    return ctx.make<Expr>(TensorObject{
-        .name = make_tensor_name("I"),
-        .rank = 2,
-        .traits = TensorTraits{.well_known = WellKnownKind::Identity},
-        .slots = {}});
+    // Default to 3-D: there is no dimension-agnostic invariant (vibe 000082).
+    return make_identity(ctx, space_3d());
 }
 
 auto make_identity(Context& ctx, IndexSpace const* space) -> Expr const*
 {
-    // A dimension-aware identity: the bare I with its `dim` attribute set (vibe
-    // 000081).  Dimension-awareness is orthogonal to the index slots — the
-    // object stays slotless (abstract), so it behaves exactly like the bare I
+    // A dimension-aware identity: the abstract I with its `dim` attribute set
+    // (vibe 000081/000082).  Dimension-awareness is orthogonal to the index
+    // slots — the object stays slotless, so it behaves exactly like a plain I
     // in basis expansion / contraction / rendering, and only `tr(I) → n` reads
-    // the dimension.  (Earlier this fabricated two fake unbound slots to carry
-    // the space, which broke `expand_in_basis`/`simplify_basis_cross` and
-    // printed `I^{•·}_{·•}` — a design defect.)
+    // the dimension.  `dim` IS part of structural identity (a 2-D I ≠ a 3-D I),
+    // so congruence holds; a shared default means a library I and a user I are
+    // both 3-D and still cancel.  (Earlier this fabricated two fake unbound
+    // slots to carry the space, which broke
+    // `expand_in_basis`/`simplify_basis_cross` and printed `I^{•·}_{·•}` — a
+    // design defect.)
     return ctx.make<Expr>(TensorObject{
         .name = make_tensor_name("I"),
         .rank = 2,
