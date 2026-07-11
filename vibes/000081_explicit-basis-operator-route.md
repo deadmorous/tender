@@ -62,29 +62,30 @@ User computing `tr(inc ε)` where `reass = −(∇∇··ε)I + Δθ I − Δε 
 (∇∇·ε)ᵀ` (θ=tr ε). Goal `Δ tr(ε) − ∇·(∇·ε)` — **identity verified via chart
 operators** (`tr(inc ε) == chart.laplacian(tr ε) − chart.div(chart.div ε)`, True).
 
-**Recipe:** `td.expand_dyad_ops(t.tr(reass))` distributes tr over the sum and
-fires the vibe-080 tr-through-operator reductions. Result (with a *dimensioned*
-identity) `−3(∇∇··ε)+3Δθ−2Δθ+2(∇∇··ε)` — value-correct (`= Δθ − ∇∇··ε`) and
-evaluable; the terms are just not maximally combined.
+**RECIPE (works):** with a *dimensioned* identity,
+`td.fold_equal_addends_structural(td.expand_dyad_ops(t.tr(reass)))` →
+`Δ tr(ε) − ∇·(∇·ε)`, evaluable. (`cs.nabla()` is the CS-specific
+∇=Σ_i(1/h_i)e_i∂_i; chart-free is `t.nabla(ctx)`.)
 
-**Blockers found:**
-- **B1 (dimensioned identity).** `tr(c·I)→c·n` needs a *dimensioned* identity
-  (`t.identity(ctx, space=t.space_3d)`); `reass` carries the BARE `t.identity(ctx)`
-  (from `cross_removal_identity`), so the `Δθ I` / `(∇∇··ε)I` traces stay `tr(…)`
-  and the coefficients never cancel. Workaround: thread a dimensioned I through
-  the derivation. Cleaner fix TBD: `reassemble_nabla` (chart-aware) could stamp
-  the chart dimension onto the identity it carries. (Reminder: `cs.nabla()` is the
-  CS-specific ∇ = Σ_i(1/h_i)e_i∂_i; chart-free is `t.nabla(ctx)`.)
-- **B2 (scalar-Hessian trace) — FIXED** (8adad47): `tr(∇⊗∇⊗θ)` split_dyad'd to
-  `θ·(∇·∇)` (θ floated off, Laplacian left bare & un-appliable). Now: both dyad
-  legs operators ⇒ scalar is the operand ⇒ `∇·(∇⊗θ)=Δθ`, kept attached.
-- **B3 (the I2 wall).** `td.collect_terms` (canonicalize) RE-FLOATS θ off `Δθ`
-  (`Δθ → tr(ε)(∇·∇)`, detached/un-evaluable) when combining the redundant
-  `3Δθ−2Δθ` into one term — the same operator-position/scalar-float wall as I2.
-  So the maximally-clean single-term `Δθ − ∇∇··ε` is not reachable via
-  collect_terms; stop at `expand_dyad_ops` (evaluable, value-correct) or verify
-  component-wise. `fold_equal_addends_structural` keeps `Δθ` attached but doesn't
-  fully combine. B3 is the deep canon fix (operator normal form), still deferred.
+**Blockers:**
+- **B1 (dimensioned identity) — OPEN (usage).** `tr(c·I)→c·n` needs a
+  *dimensioned* identity `t.identity(ctx, space=t.space_3d)`; the strain example's
+  `reass` carries the BARE `t.identity(ctx)` (from `cross_removal_identity`), so
+  the `Δθ I` / `(∇∇··ε)I` traces stay `tr(…)`. Thread a dimensioned I through the
+  derivation (one-line change). Cleaner TBD: `reassemble_nabla` (chart-aware)
+  could stamp the chart dimension onto the identity it carries.
+- **B2 (scalar-Hessian trace) — FIXED** (8adad47, generalized in 0920b2e).
+- **B3 (combine without float) — FIXED** (0920b2e). NOT the full canon operator
+  normal form — sidestepped for this workflow: (1) the `expand_dyad_ops` Trace
+  dyad rule now puts an operator leg on the LEFT with the other leg + scalars as
+  its operand, so `tr(∇⊗v)` and the transposed `tr(v⊗∇)` both give `∇·v` (not
+  `v·∇`) and `tr(∇⊗∇⊗s)=Δs` (B2 subsumed) — transposed and direct terms become
+  structurally identical; (2) `extract_coeff` recurses so a `−`/factor buried in a
+  coefficient (`(−X)·3`) lifts out, matching a bare-`X` sibling. Then
+  `fold_equal_addends_structural` combines every term WITHOUT `collect_terms`/canon
+  (which floats the scalar off `Δθ`). The deep canon operator-normal-form (the
+  real I2 wall) is still deferred — `collect_terms` still floats; use the
+  structural fold for bare-∇ operator sums.
 
 ## Driving example — preamble
 
