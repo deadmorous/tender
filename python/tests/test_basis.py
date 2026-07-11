@@ -319,16 +319,21 @@ class TestBasisSteps:
 
 def test_dimension_aware_identity_is_orthogonal_to_slots():
     # vibe 000081: dimension-awareness is a TensorObject attribute orthogonal to
-    # the index slots (not fake unbound slots).  A sized identity is slotless,
-    # so it renders as a clean I, expands in a basis like the bare I, yet its
-    # trace reads the dimension; and it is a distinct object from the bare I.
+    # the index slots (not fake unbound slots).  A sized identity is slotless, so
+    # it renders as a clean I and expands in a basis like the bare I.  The
+    # attribute is identity-NEUTRAL (like well_known): a sized I and the bare I
+    # are interchangeable and cancel — only `tr` reads the dimension.
     ctx = tender.Context()
     frame = tb.wcs(ctx)
     bare = tender.identity(ctx=ctx)
     sized = tender.identity(ctx=ctx, space=tender.space_3d)
     assert sized.latex() == bare.latex() == r"\mathbf{I}"
-    assert not td.structural_eq(bare, sized)
+    assert td.structural_eq(bare, sized)  # neutral: interchangeable
+    # so a bare I and a sized I cancel (a library-emitted I mixes with a user's)
+    assert td.fold_equal_addends(bare - sized).latex() == "0"
+    # only tr reads the dimension: sized folds to n, bare stays symbolic
     assert td.expand_dyad_ops(tender.tr(sized)).latex() == "3"
+    assert "tr" in td.expand_dyad_ops(tender.tr(bare)).latex()
     # expands in a matching basis exactly like the bare identity …
     exp_bare = td.canonicalize(tb.expand_in_basis(bare, frame, tb.Variance.Covariant))
     exp_sized = td.canonicalize(tb.expand_in_basis(sized, frame, tb.Variance.Covariant))

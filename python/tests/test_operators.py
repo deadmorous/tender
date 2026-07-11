@@ -406,9 +406,9 @@ def test_strain_phase2_reassembly():
     cart, _ = _chart(ws)
     eps = ws.field(r"\varepsilon", 2, symmetric=True)
     nab = t.nabla(ctx=ws.ctx)
-    # reassemble_nabla dimensions the identity to the chart's space (vibe 000081
-    # B1); the closed form's I must match to compare equal.
-    I = t.identity(ws.ctx, space=t.space_3d)
+    # dimension-awareness is identity-neutral (vibe 000081), so a plain I here
+    # compares equal to reassemble_nabla's dimensioned one.
+    I = t.identity(ws.ctx)
     _, id_inc = _cross_removal_identities(ws.ctx)
 
     interior = cart.expand_nabla(nab % (nab % eps).transpose())

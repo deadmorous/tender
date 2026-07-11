@@ -185,11 +185,14 @@ struct TensorObject final
     // index space this object's implicit indices range over, when known.  Null
     // means dimension-agnostic (the default).  Set on an abstract well-known
     // tensor with no index slots — e.g. a sized identity, so tr(I) → n —
-    // without fabricating fake unbound slots.  Part of structural identity (a
-    // 3-D I is a distinct object from a dimension-agnostic I), but rendering
-    // ignores it (a sized I still prints as a plain `I`).  Kept last so
-    // existing aggregate initialisers `{name, rank, traits, slots,
-    // deriv_marks}` keep compiling.
+    // without fabricating fake unbound slots.  Identity-NEUTRAL, like
+    // `well_known` / `field` (structural_eq / tensor_object_cmp / hash ignore
+    // it): a sized I and a dimension-agnostic I are interchangeable and cancel,
+    // so a library-emitted bare I and a user's sized I still combine.  Only the
+    // reductions read it (`tr`), exactly like well_known; rendering ignores it
+    // too (a sized I still prints as a plain `I`).  Kept last so existing
+    // aggregate initialisers `{name, rank, traits, slots, deriv_marks}` keep
+    // compiling.
     IndexSpace const* dim = nullptr;
 };
 

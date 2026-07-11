@@ -197,10 +197,11 @@ def main():
     )
 
     # Confirm the reassembled operators are the closed compatibility identity.
-    # reassemble_nabla dimensions the identity to the chart's space (vibe 000081
-    # B1), so the closed form's I carries the same dimension to compare equal.
+    # (reassemble_nabla dimensions its identity to the chart's space for tr(I)=n,
+    # but dimension-awareness is identity-neutral — vibe 000081 — so a plain I
+    # here compares equal.)
     theta = t.tr(eps)
-    I = t.identity(ws.ctx, space=t.space_3d)
+    I = t.identity(ws.ctx)
     closed = (
         -(nabla @ (nabla @ eps)) * I  # −(∇∇··ε) I
         + (nabla @ (nabla * theta)) * I  # +Δθ I

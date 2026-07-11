@@ -463,8 +463,6 @@ auto structural_eq(Expr const* a, Expr const* b) -> bool
                     return false;
                 if (ta.rank != tb->rank)
                     return false;
-                if (ta.dim != tb->dim) // dimension-awareness (vibe 000081)
-                    return false;
                 if (ta.slots.size() != tb->slots.size())
                     return false;
                 for (std::size_t i = 0; i < ta.slots.size(); ++i)

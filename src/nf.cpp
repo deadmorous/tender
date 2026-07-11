@@ -360,7 +360,6 @@ auto hash_tensor_object(TensorObject const& t) -> std::size_t
 {
     std::size_t h = std::hash<std::string_view>{}(t.name.v.view());
     h = hash_mix(h, t.rank ? static_cast<std::size_t>(*t.rank) + 1 : 0);
-    h = hash_mix(h, std::hash<IndexSpace const*>{}(t.dim)); // vibe 000081
     for (auto const& s: t.slots)
     {
         h = hash_mix(h, static_cast<std::size_t>(s.slot.level));
