@@ -801,6 +801,23 @@ def test_abstract_nabla_over_basis_ok_when_nabla_expanded_first():
     assert r"\nabla" in td.apply_operators(nabla @ u).latex()
 
 
+def test_apply_operators_keeps_summation_implicit():
+    # vibe 000081, case 2 issue 1: apply_operators must not surface an explicit Σ
+    # on an index that was implicit on the way in.  Its internal canonicalize
+    # materializes every realm-contracted index; implicitize folds those back.
+    ctx = t.Context()
+    x, y, z, chart = make_cartesian(ctx)
+    basis = chart.physical_basis()
+    nabla = t.nabla(ctx=ctx)
+    u = t.field("u", 1, ctx=ctx)
+    a = tb.expand_in_basis(
+        chart.expand_nabla(t.tr(nabla * u)), basis, tb.Variance.Contravariant
+    )
+    out = td.apply_operators(a)
+    assert r"\sum" not in out.latex()  # both dummy sums stay implicit (Einstein)
+    assert r"\partial" in out.latex()
+
+
 def test_grad_of_trace_of_field():
     # vibe 000075 gap A: grad(tr ε) self-prepares — the Trace wrapper around
     # the expanded field opens on the dyads instead of tripping encapsulate.

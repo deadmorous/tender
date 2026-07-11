@@ -3830,7 +3830,12 @@ auto apply_operators(Context& ctx, Expr const* e) -> Expr const*
 {
     if (abstract_nabla_over_expanded_basis(ctx, e))
         throw_abstract_nabla("apply_operators");
-    return canon_tolerant(ctx, apply_operators_impl(ctx, e));
+    // Leave the implicit/explicit summation as the caller had it (vibe 000081,
+    // case 2): the internal canonicalize materializes every realm-contracted
+    // index to an explicit Σ, surfacing sums that were implicit on the way in.
+    // implicitize folds those redundant Σ back to implicit; a genuinely-needed
+    // explicit Σ (ranged, or not realm-contracted) is left untouched.
+    return implicitize(ctx, canon_tolerant(ctx, apply_operators_impl(ctx, e)));
 }
 
 // ---- targeted scalar simplifier (vibe 000069 M3) -----------------------
