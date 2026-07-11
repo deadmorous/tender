@@ -68,7 +68,20 @@ operators** (`tr(inc ε) == chart.laplacian(tr ε) − chart.div(chart.div ε)`,
 ∇=Σ_i(1/h_i)e_i∂_i; chart-free is `t.nabla(ctx)`.)
 
 **Blockers:**
-- **B1 (dimensioned identity) — FIXED** (7b40bcb). Threading a *dimensioned* I
+- **DESIGN FIX (dimension attribute) — 0c0888b.** Review caught a defect: the
+  dimensioned identity carried its space in TWO FAKE unbound index slots. Index
+  slots are for objects with real indices — the fake slots defeated
+  `expand_in_basis`'s slotless-identity special case (broke `a%I%c`) and printed
+  `I^{•·}_{•·}` (needing a render hack). Dimension-awareness is now a dedicated
+  **orthogonal `TensorObject::dim` attribute** (`IndexSpace*`, kept last for
+  aggregate-init compat). `make_identity(ctx, space)` sets `dim` and stays
+  SLOTLESS → behaves exactly like the bare I in basis/contraction/render (clean
+  `I`, hack removed); only `tr(I)=n` reads it. `dim` is part of identity (3-D I ≠
+  agnostic I): in `tensor_object_cmp`, `structural_eq`, `hash_tensor_object`.
+  Per the review, `expand_in_basis` now REFUSES a dimension mismatch (2-D I on a
+  3-D frame). A sized I in the derivation works too now (slotless).
+- **B1 (dimensioned identity) — FIXED** (7b40bcb; superseded by 0c0888b design).
+  Threading a *dimensioned* I
   through the derivation BREAKS the cross-removal (`expand_in_basis` /
   `simplify_basis_cross` only handle the slotless bare I — `a%I%c` stops
   reassembling). So keep bare I in the derivation and have **`reassemble_nabla`
