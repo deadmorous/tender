@@ -213,6 +213,13 @@ void validate_chart(CoordinateChart const& chart);
 [[nodiscard]] auto evaluate(
     Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*;
 
+// Record `chart`'s embedding metadata (its coords' shared chart_id → the
+// reference it embeds into, and whether the embedding is the identity so the
+// coords ARE the reference's Cartesian/WCS coordinates) so a *sibling* chart's
+// `evaluate` can reproject a WCS coordinate written in this chart (vibe
+// 000090). Called at chart construction; idempotent.
+void register_chart(Context& ctx, CoordinateChart const& chart);
+
 // The invariant dot u·v and cross u×v reduced in the chart's orthonormal
 // reference frame (vibe 000070 P8): distribute, turn frame-vector contractions
 // into δ/ε, and simplify.  These expose the reductions the operators use

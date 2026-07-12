@@ -1285,6 +1285,10 @@ NB_MODULE(_core, m)
                 CoordinateChart chart{
                     reference.basis, std::move(cs), std::move(emb)};
                 validate_chart(chart); // vibe 000072 Obs 3
+                // Register the chart's embedding metadata so a *sibling*
+                // chart's evaluate can reproject this chart's WCS coordinates
+                // (vibe 000090).
+                register_chart(*reference.ctx, chart);
                 new (self)
                     PyChart{reference.ctx_keep, reference.ctx, std::move(chart)};
             },

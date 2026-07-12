@@ -32,6 +32,7 @@ class Workspace:
     def __init__(self):
         self.ctx = _core.Context()
         self._next_chart_id = 1
+        self._wcs = None
 
     # ---- expression factories (ctx implicit) ----------------------------
 
@@ -70,8 +71,16 @@ class Workspace:
     # ---- bases ----------------------------------------------------------
 
     def wcs(self):
-        """The world (orthonormal Cartesian) coordinate system i, j, k."""
-        return _basis.wcs(self.ctx)
+        """The world (orthonormal Cartesian) coordinate system i, j, k.
+
+        Memoised: the world frame is unique per workspace, so every call returns
+        the *same* basis.  Charts built over it therefore share one reference —
+        the precondition for relating their coordinates across charts (vibe
+        000090), e.g. evaluating a Cartesian quantity in a cylindrical chart.
+        """
+        if self._wcs is None:
+            self._wcs = _basis.wcs(self.ctx)
+        return self._wcs
 
     def cylindrical(self):
         return _basis.cylindrical(self.ctx)

@@ -126,6 +126,30 @@ public:
         return it == chart_frame_registry_->end() ? nullptr : &it->second;
     }
 
+    // Cross-chart coordinate reprojection (vibe 000090): a chart's coordinates
+    // all share one chart_id; record, per that id, the reference the chart
+    // embeds into and whether the embedding is the identity (the coords ARE the
+    // reference's Cartesian/WCS coordinates).  `chart.evaluate` consults this
+    // to recognise a WCS coordinate written in another chart and reproject it
+    // via the evaluating chart's embedding (`x = r cosθ`), instead of treating
+    // it as an independent variable (`∂_r x = 0`).
+    struct ChartEmbedding final
+    {
+        int reference_basis_id = 0;
+        bool is_identity = false;
+    };
+
+    void register_chart_embedding(int chart_id, ChartEmbedding info)
+    {
+        (*chart_embedding_registry_)[chart_id] = info;
+    }
+
+    auto chart_embedding(int chart_id) const -> ChartEmbedding const*
+    {
+        auto it = chart_embedding_registry_->find(chart_id);
+        return it == chart_embedding_registry_->end() ? nullptr : &it->second;
+    }
+
     // Create a child context: shares the id factory (ids remain contiguous)
     // but starts with an empty resource list (independent allocation scope).
     auto new_context() -> Context
@@ -151,6 +175,9 @@ private:
     // Chart → physical-frame cache (vibe 000071), shared likewise.
     std::shared_ptr<std::map<int, ChartFrame>> chart_frame_registry_{
         std::make_shared<std::map<int, ChartFrame>>()};
+    // Chart-id → embedding metadata for cross-chart reprojection (vibe 000090).
+    std::shared_ptr<std::map<int, ChartEmbedding>> chart_embedding_registry_{
+        std::make_shared<std::map<int, ChartEmbedding>>()};
 
     // Private copy constructor: shares the id factory and basis registry (basis
     // ids stay globally unique across the group), but starts with FRESH

@@ -1529,7 +1529,108 @@ auto is_diff_constant_here(Context& ctx, Expr const* e) -> bool
     return constant;
 }
 
+// The coordinate marker of `e` (chart_id + slot), if it is a chart coordinate.
+auto coord_ref(Expr const* e) -> std::optional<CoordinateRef>
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    if (t && t->traits && t->traits->coordinate)
+        return *t->traits->coordinate;
+    return std::nullopt;
+}
+
+// The shared chart_id of a chart's coordinates (they all share one), if any.
+auto chart_coord_id(CoordinateChart const& chart) -> std::optional<int>
+{
+    if (chart.coords.empty())
+        return std::nullopt;
+    if (auto cr = coord_ref(chart.coords.front()))
+        return cr->chart_id;
+    return std::nullopt;
+}
+
+// Reproject foreign WCS coordinates into the evaluating chart (vibe 000090).
+// A coordinate belonging to another *identity* chart over the same reference is
+// a reference Cartesian (WCS) coordinate `x_a`; rewrite it by this chart's
+// embedding `C.embedding[a]` (a function of C's coords: `x = r cosθ`), so the
+// operators differentiate it correctly instead of as an independent variable.
+auto reproject_coords(Context& ctx, CoordinateChart const& chart, Expr const* e)
+    -> Expr const*
+{
+    auto const my_id = chart_coord_id(chart);
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* n) -> Expr const*
+        {
+            auto cr = coord_ref(n);
+            if (!cr || (my_id && cr->chart_id == *my_id))
+                return n; // not a coord, or one of this chart's own
+            auto const* emb = c.chart_embedding(cr->chart_id);
+            if (!emb)
+                throw std::invalid_argument(
+                    "chart.evaluate: an expression coordinate belongs to a chart "
+                    "that was never registered — cannot relate it to this chart's "
+                    "coordinates.");
+            if (emb->reference_basis_id != chart.reference.basis_id())
+                throw std::invalid_argument(
+                    "chart.evaluate: a coordinate from a chart over a *different* "
+                    "reference frame — the two charts are genuinely independent.");
+            if (!emb->is_identity)
+                throw std::invalid_argument(
+                    "chart.evaluate: cannot reproject a *curvilinear* chart's "
+                    "coordinate forward — that needs its inverse embedding "
+                    "(q = C⁻¹(x), e.g. r = √(x²+y²)), not yet supported (vibe "
+                    "000090 approach B).  Re-express the quantity in this chart, "
+                    "or evaluate it in its own chart.");
+            if (cr->slot < 0
+                || cr->slot >= static_cast<int>(chart.embedding.size()))
+                throw std::invalid_argument(
+                    "chart.evaluate: coordinate slot out of range for "
+                    "reprojection.");
+            return chart.embedding[static_cast<std::size_t>(cr->slot)];
+        });
+}
+
+auto evaluate_lowered(Context& ctx, CoordinateChart const& chart, Expr const* e)
+    -> Expr const*;
+
+auto register_chart(Context& ctx, CoordinateChart const& chart) -> void
+{
+    auto const id = chart_coord_id(chart);
+    if (!id)
+        return;
+    // Identity ⇔ the embedding is the coords themselves (x=x, y=y, z=z): this
+    // chart's coordinates ARE the reference's Cartesian (WCS) coordinates.
+    bool identity = chart.coords.size() == chart.embedding.size();
+    for (std::size_t a = 0; identity && a < chart.coords.size(); ++a)
+        identity = structural_eq(chart.embedding[a], chart.coords[a]);
+    ctx.register_chart_embedding(
+        *id, Context::ChartEmbedding{chart.reference.basis_id(), identity});
+}
+
 auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
+    -> Expr const*
+{
+    // A chart's own coords are registered lazily here too, so evaluating in it
+    // after both charts exist can recognise the sibling identity chart's
+    // coords.
+    register_chart(ctx, chart);
+    // Reproject any WCS coordinate written in another chart into this chart's
+    // coordinates (vibe 000090), so `∂` sees only this chart's coords, then
+    // lower.
+    Expr const* const rp = reproject_coords(ctx, chart, e);
+    Expr const* out = evaluate_lowered(ctx, chart, rp);
+    // A reprojected (foreign, Cartesian) quantity brings its WCS frame vectors
+    // i,j,k in as operand legs; re-express the result in this chart's physical
+    // frame so the mixed-frame dyads fold into a single frame (∇R = I, not
+    // `cosθ e_r⊗i + …`).  Only when reprojection actually fired — native
+    // quantities are already in this frame and must not be perturbed.
+    if (rp != e)
+        out = express(ctx, chart, out);
+    return out;
+}
+
+auto evaluate_lowered(Context& ctx, CoordinateChart const& chart, Expr const* e)
     -> Expr const*
 {
     // A ∇-free sub-expression is a plain operand — a field, scalar, `I`, or an
@@ -1538,7 +1639,7 @@ auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
     // lower.
     if (!contains_nabla(ctx, e))
         return e;
-    auto ev = [&](Expr const* x) { return evaluate(ctx, chart, x); };
+    auto ev = [&](Expr const* x) { return evaluate_lowered(ctx, chart, x); };
 
     // ∇-operator combinations: lower inner-first to the chart operators.
     if (auto const* d = std::get_if<Dot>(&e->node))

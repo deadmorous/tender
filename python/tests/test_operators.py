@@ -727,6 +727,49 @@ def test_chart_evaluate_floated_and_back_forms():
     assert same(cyl.evaluate((nab @ u) * nab), cyl.grad(cyl.div(u)))  # back (∇·u)⊗∇
 
 
+def test_chart_evaluate_cross_chart_position_gradient():
+    # vibe 000090: charts over the same (memoised) WCS reference share a manifold,
+    # so ∇R = I is chart-independent.  A Cartesian position, evaluated in a
+    # cylindrical chart, reprojects its WCS coords (x = r cosθ, …) via the target
+    # embedding and folds to I — forward direction (WCS quantity → curvilinear).
+    ws = t.Workspace()
+    nab = t.nabla(ctx=ws.ctx)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    r, th, zc = ws.coords("r", r"\theta", "z", nonneg=("r",))
+    cyl = ws.chart(ws.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+
+    a = nab * cart.position()  # ∇⊗R, R Cartesian
+    assert cart.evaluate(a).latex() == r"\mathbf{I}"
+    assert cyl.evaluate(a).latex() == r"\mathbf{I}"  # reprojected + folded
+
+    b = nab * cyl.position()  # ∇⊗R, R cylindrical
+    assert cyl.evaluate(b).latex() == r"\mathbf{I}"  # native
+
+
+def test_chart_evaluate_cross_chart_reverse_direction_errors():
+    # The reverse direction (a curvilinear-expressed quantity evaluated in a
+    # different chart) needs the source chart's inverse embedding — not yet
+    # supported (approach B).  It must error clearly, not silently return 0.
+    ws = t.Workspace()
+    nab = t.nabla(ctx=ws.ctx)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    r, th, zc = ws.coords("r", r"\theta", "z", nonneg=("r",))
+    cyl = ws.chart(ws.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+    import pytest
+
+    with pytest.raises(ValueError, match="curvilinear"):
+        cart.evaluate(nab * cyl.position())
+
+
+def test_workspace_wcs_is_memoised():
+    # The world frame is unique per workspace (vibe 000090): every ws.wcs() call
+    # returns the same basis, so charts built over it share one reference.
+    ws = t.Workspace()
+    assert ws.wcs().basis_id == ws.wcs().basis_id
+
+
 def test_chart_evaluate_bare_nabla_raises():
     # A bare ∇, or a ∇·∇ Laplacian operator with no operand, is not evaluable —
     # with a clear message (not the obscure earlier "bare ∇" wording).

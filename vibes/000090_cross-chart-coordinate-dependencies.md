@@ -1,6 +1,50 @@
 # 000090 — coordinates of charts sharing a reference frame are related
 
-Status: **PLANNED / PROBLEM STATEMENT**.
+Status: **DONE** (approach A — forward direction — shipped).
+
+## Implemented
+
+- **`ws.wcs()` is memoised** (workspace.py): the world frame is unique per
+  workspace, so both charts share *one* reference basis — the precondition for
+  relating their coordinates. (Previously each call minted a fresh basis, so the
+  two charts were genuinely independent frames.)
+- **Chart-embedding registry** (`Context::ChartEmbedding` +
+  `register_chart(ctx, chart)`): at construction, record `coord_chart_id →
+  {reference basis_id, is_identity}` (`is_identity` ⇔ `embedding[a] ≡ coords[a]`).
+  Registered in the `PyChart` constructor and (idempotently) in `evaluate`.
+- **`reproject_coords` pre-pass in `evaluate`**: rewrite each coordinate not
+  belonging to chart `C`. An identity-chart coord over the same reference is a
+  WCS coord `x_a` → substitute `C.embedding[a]` (`x = r cosθ`). A curvilinear
+  source coord, a foreign-reference coord, or an unregistered coord → **clear
+  error** (the reverse direction needs the inverse embedding, approach B).
+- **Re-express the result** in `C`'s frame when reprojection fired, so the
+  reprojected quantity's WCS operand vectors `i,j,k` fold into `C`'s frame
+  (`cosθ e_r⊗i + … → e_r⊗e_r + … → I`). Skipped for native quantities.
+
+Result — every chart agrees `∇R = I`:
+```
+cart.evaluate(∇⊗cart.position()) = I
+cyl.evaluate(∇⊗cart.position())  = I   (was 0; forward reproject)
+cyl.evaluate(∇⊗cyl.position())   = I
+cart.evaluate(∇⊗cyl.position())  = clear error (reverse — approach B)
+```
+824 C++ + 293 Python pass; navier_lame + strain_compatibility verify. Tests:
+`Chart.EvaluateReprojectsForeignWcsCoordinates` (C++),
+`test_chart_evaluate_cross_chart_position_gradient`,
+`test_chart_evaluate_cross_chart_reverse_direction_errors`,
+`test_workspace_wcs_is_memoised` (Python).
+
+## Deferred (approach B — the reverse direction)
+
+Curvilinear-quantity → other chart needs the **inverse embedding** `q_C =
+C⁻¹(WCS)`; **derive for the built-in charts** (cyl/spherical/polar; inverses are
+standard), custom charts user-supplied or forward-only. Until then `evaluate`
+errors clearly instead of returning `0`. `expand`/`components` could route through
+the same reproject later.
+
+---
+
+Status (original): **PLANNED / PROBLEM STATEMENT**.
 
 ## The problem (user)
 
@@ -79,14 +123,43 @@ The two directions differ sharply:
   chart-to-chart Jacobian) so `diff` chain-rules through foreign coords. Same
   inverse-embedding requirement as B, expressed differentially.
 
-## Recommendation (to decide with the user)
+## Decisions (locked with the user)
 
-Ship **A** first — it makes `cyl.evaluate(a)` (a Cartesian/WCS-expressed quantity
-evaluated in a curvilinear chart) correct, reusing `radius_vector`, with no
-inversion. Then decide **B**: store an inverse embedding per chart (user-supplied,
-or derived for the built-in cyl/spherical) to cover the reverse and
-curvilinear↔curvilinear directions. `evaluate`/`expand`/`components` all route
-through the same reprojection.
+- **Direction: forward-only (A) now.** WCS/Cartesian-quantity → curvilinear chart
+  via `radius_vector` substitution (`cyl.evaluate(a) → I`). The reverse
+  (curvilinear-quantity → other chart, e.g. `cart.evaluate(b)`) **errors clearly**
+  — no silent `0`.
+- **Inverse embeddings (for the future reverse direction, B): derive for the
+  built-in charts** (cylindrical, spherical, polar); a *custom* chart would be
+  user-supplied or stay forward-only. Not implemented now.
+
+## Implementation design (approach A)
+
+A chart must recognise a *WCS-identity* coordinate to reproject it. Nothing today
+lets `cyl` discover that `x,y,z` are the reference's Cartesian coords (the
+`ChartFrame` registry stores only `basis_id`; `structural_eq` ignores the
+coordinate trait; `ws.coords` mints a fresh `chart_id` per set, so even the
+"shared" `z` is a *distinct* coordinate object of a different chart). So:
+
+1. **A minimal chart registry** on `Context`: at chart construction, register
+   `coord_chart_id → { reference basis_id, embedding, coords, is_identity }`
+   (a chart's coords share one `chart_id`; `is_identity` ⇔ `embedding[a] ≡
+   coords[a]` for all `a`). Populate in the `PyChart` constructor (Python path)
+   and a C++ `register_chart(ctx, chart)` for tests.
+2. **Reproject pre-pass in `evaluate`.** Before lowering `expr` in chart `C`,
+   walk it; for each coordinate `q` not belonging to `C`:
+   - look up `q`'s chart in the registry;
+   - *identity + same reference* ⇒ `q` is WCS coord slot `q.slot` ⇒ substitute
+     `C.embedding[q.slot]` (a function of `C`'s coords);
+   - *non-identity* (curvilinear source) ⇒ **error**: "needs the inverse
+     embedding of chart D (vibe 000090 approach B)";
+   - *unregistered* ⇒ error (can't reproject an unknown coordinate).
+3. Then lower as today. The frame folds (`to_reference` / `simplify_basis_dot`,
+   now with vibe-000089 distribution) collapse `e_r⊗e_r + e_θ⊗e_θ + e_z⊗e_z → I`.
+
+Verified by hand: `cyl.evaluate(∇⊗(x i + y j + z k))` with `x→r cosθ, y→r sinθ,
+z→z` grads to `I`. `expand`/`components` can route through the same reproject
+later; start with `evaluate`.
 
 ## Obstacles / open decisions
 

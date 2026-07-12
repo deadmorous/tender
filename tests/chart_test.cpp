@@ -1449,6 +1449,42 @@ TEST(Chart, EvaluateLowersNablaToChartOperators)
         std::invalid_argument);
 }
 
+// evaluate reprojects a WCS coordinate written in another chart (vibe 000090):
+// ∇R = I is chart-independent, so a Cartesian position evaluated in a
+// cylindrical chart reprojects x=r cosθ,… and folds to I.  The reverse
+// (curvilinear source in another chart) needs the inverse embedding and must
+// error, not return 0.
+TEST(Chart, EvaluateReprojectsForeignWcsCoordinates)
+{
+    Context ctx;
+    auto ref = wcs(ctx); // ONE shared reference for both charts
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 1, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 1, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 1, 2);
+    CoordinateChart cart{ref, {x, y, z}, {x, y, z}}; // identity → WCS coords
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* zc = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart cyl{
+        ref,
+        {r, th, zc},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), zc}};
+    register_chart(ctx, cart);
+    register_chart(ctx, cyl);
+
+    auto* nab = make_nabla(ctx);
+    auto* gradR =
+        make_tensor_product(ctx, nab, position(ctx, cart)); // ∇⊗R_cart
+    auto* I = make_identity(ctx);
+    EXPECT_TRUE(eq(ctx, evaluate(ctx, cart, gradR), I)); // native
+    EXPECT_TRUE(eq(ctx, evaluate(ctx, cyl, gradR), I));  // reprojected + folded
+
+    // reverse: a cylindrical position in the Cartesian chart needs cyl's
+    // inverse.
+    auto* gradRc = make_tensor_product(ctx, nab, position(ctx, cyl));
+    EXPECT_THROW((void)evaluate(ctx, cart, gradRc), std::invalid_argument);
+}
+
 TEST(Chart, ReassembleNablaRoundTripsSingleOperators)
 {
     Context ctx;
