@@ -1501,6 +1501,13 @@ auto expand_double_dot(Context& ctx, Expr const* e) -> Expr const*
         e,
         [](Context& c, Expr const* node) -> Expr const*
         {
+            // Operator barrier (vibe 000088, mirrors distribute_contraction): a
+            // double-dot holding an abstract ∇ stays intact — expanding
+            // `(∇⊗u):(∇⊗v)` as a dyad double-dot would float it to
+            // `(∇·∇)(u·v)`, detaching the operators from the fields they
+            // differentiate.
+            if (contains_nabla(c, node))
+                return node;
             Expr const* out = node;
             if (auto const* d = std::get_if<DDot>(&node->node))
                 out = dd_expand(c, d->left, d->right, /*alt=*/false);

@@ -1067,15 +1067,39 @@ auto free_mark_ids(Context& ctx, Expr const* e) -> std::vector<int>
     return ids;
 }
 
-// Try to reassemble a *bilinear* term — two ∂-marked operands whose gradient
-// legs are contracted by a frame-dot, e.g. `(∂_j u)(e_i·e_j)(∂_i e)` = the
-// cross term `(∇u)·(∇⊗e)` of the second-order Leibniz rule Δ(u e) (vibe
-// 000087).  The single-operand `reassemble_term` classifier would misread the
-// inter-gradient `e_i·e_j` as a Laplacian δ-pair *and* drop one field, so
-// intercept this shape here.  Returns nullptr (caller falls back) unless the
-// term is exactly: two operands with one free gradient leg each, one frame-dot
-// joining those two legs, and only plain scalar coefficients besides.
-auto try_reassemble_bilinear(
+// Whether `id` is one of the free ∂-mark ids of `e`.
+auto owns_mark(Context& ctx, Expr const* e, int id) -> bool
+{
+    auto ids = free_mark_ids(ctx, e);
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+}
+
+// ∇⊗(marks stripped from `e`) and its Laplacian ∇·(∇⊗·).
+auto grad_of(Context& ctx, Expr const* nabla, Expr const* e) -> Expr const*
+{
+    return make_tensor_product(ctx, nabla, strip_free_marks(ctx, e));
+}
+auto laplacian_of(Context& ctx, Expr const* nabla, Expr const* e) -> Expr const*
+{
+    return make_dot(ctx, nabla, grad_of(ctx, nabla, e));
+}
+
+// Try to reassemble a *structural* (multi-field) term — the ∇-expanded
+// second-order Leibniz shapes of Δ(u⊗v) / Δ(u·v) — that the single-operand
+// `reassemble_term` classifier mis-folds (it assumes one monolithic field blob,
+// so it drops a field and mis-scopes the δ-pair Laplacian; vibes
+// 000087/000088). Returns nullptr (caller falls back to the single-operand
+// path) unless the term matches one focused shape: exactly one frame-dot
+// `e_a·e_b` joining marks of
+//   (i) two separate ⊗ operand factors A, B (one mark each), cross ⇒ the
+//   gradient
+//       dot `(∇⊗A)ᵀ·(∇⊗B)` (the ᵀ dropped when ∇⊗A is rank 1); or
+//  (ii) two fields inside one contracted operand `Dot(X, Y)`: both marks on one
+//       side ⇒ a *scoped* Laplacian (`X·ΔY` / `ΔX·Y`), split across the two ⇒
+//       the double contraction `∇X:∇Y` (both leg-pairs — the frame-dot and the
+//       original X·Y — meet).
+// Plain scalar coefficients ride along.
+auto try_reassemble_structural(
     Context& ctx,
     Basis const& fb,
     Expr const* nabla,
@@ -1092,10 +1116,12 @@ auto try_reassemble_bilinear(
             auto b = frame_dir_index(d->right, fb);
             if (a && b)
             {
-                dots.push_back({*a, *b});
+                dots.push_back({*a, *b}); // a frame δ-pair
                 continue;
             }
-            return nullptr; // a non-frame dot: not this shape
+            if (a || b)
+                return nullptr; // a divergence (frame·field): the single path
+            // else a field·field contraction — an operand; fall through.
         }
         if (frame_dir_index(f, fb))
             return nullptr; // a free gradient leg: leave to the single path
@@ -1106,40 +1132,97 @@ auto try_reassemble_bilinear(
         else
             coefficients.push_back(f);
     }
-    if (operands.size() != 2 || dots.size() != 1)
+    if (dots.size() != 1)
         return nullptr;
-    auto ids0 = free_mark_ids(ctx, operands[0]);
-    auto ids1 = free_mark_ids(ctx, operands[1]);
-    if (ids0.size() != 1 || ids1.size() != 1)
-        return nullptr; // focused case: exactly one gradient leg per operand
-    auto owner = [&](int id) -> int
-    {
-        if (id == ids0.front())
-            return 0;
-        if (id == ids1.front())
-            return 1;
-        return -1;
-    };
-    int const oa = owner(dots.front().first);
-    int const ob = owner(dots.front().second);
-    if (!((oa == 0 && ob == 1) || (oa == 1 && ob == 0)))
-        return nullptr; // the dot must join the two *different* operands' legs
+    auto const [a, b] = dots.front();
+    Expr const* res = nullptr;
 
-    // Contract the two gradients at their gradient legs: `(∇⊗A)ᵀ·(∇⊗B)`.  ∇⊗X
-    // carries its gradient leg first; transposing the left operand brings it
-    // adjacent to the right's, so the two gradient legs meet.  A rank-1
-    // gradient (a scalar operand's ∇u) equals its transpose, so drop the ᵀ
-    // there.
-    auto grad = [&](Expr const* op)
-    { return make_tensor_product(ctx, nabla, strip_free_marks(ctx, op)); };
-    Expr const* gA = grad(operands[0]);
-    Expr const* gB = grad(operands[1]);
-    Expr const* left =
-        infer_rank(gA).value_or(0) >= 2 ? make_transpose(ctx, gA) : gA;
-    Expr const* res = make_dot(ctx, left, gB);
+    // Shape (i): two separate ⊗ operand factors, one mark each, joined cross.
+    if (operands.size() == 2)
+    {
+        // Each operand must be a *simple* marked field; a structured operand
+        // (e.g. `Dot(u, ∂v)` from a triple product) would be mis-gradient'd, so
+        // bail to the safety valve instead.
+        if (!std::holds_alternative<TensorObject>(operands[0]->node)
+            || !std::holds_alternative<TensorObject>(operands[1]->node))
+            return nullptr;
+        auto ids0 = free_mark_ids(ctx, operands[0]);
+        auto ids1 = free_mark_ids(ctx, operands[1]);
+        if (ids0.size() != 1 || ids1.size() != 1)
+            return nullptr;
+        bool const cross = (a == ids0.front() && b == ids1.front())
+                           || (a == ids1.front() && b == ids0.front());
+        if (!cross)
+            return nullptr;
+        Expr const* gA = grad_of(ctx, nabla, operands[0]);
+        Expr const* gB = grad_of(ctx, nabla, operands[1]);
+        Expr const* left =
+            infer_rank(gA).value_or(0) >= 2 ? make_transpose(ctx, gA) : gA;
+        res = make_dot(ctx, left, gB);
+    }
+    // Shape (ii): one contracted operand Dot(X, Y) with the two marks.
+    else if (operands.size() == 1)
+    {
+        auto const* d = std::get_if<Dot>(&operands.front()->node);
+        if (!d)
+            return nullptr; // a single monolithic field: the single path
+        Expr const* X = d->left;
+        Expr const* Y = d->right;
+        // Both sides must be simple fields; a nested structure (a triple
+        // product) would be mis-scoped, so bail to the safety valve.
+        if (!std::holds_alternative<TensorObject>(X->node)
+            || !std::holds_alternative<TensorObject>(Y->node))
+            return nullptr;
+        bool const aX = owns_mark(ctx, X, a), aY = owns_mark(ctx, Y, a);
+        bool const bX = owns_mark(ctx, X, b), bY = owns_mark(ctx, Y, b);
+        if (aX && bX) // both marks on X ⇒ Laplacian scoped to X: (ΔX)·Y
+            res = make_dot(
+                ctx, laplacian_of(ctx, nabla, X), strip_free_marks(ctx, Y));
+        else if (aY && bY) // both on Y ⇒ X·(ΔY)
+            res = make_dot(
+                ctx, strip_free_marks(ctx, X), laplacian_of(ctx, nabla, Y));
+        else if ((aX && bY) || (aY && bX)) // split ⇒ ∇X : ∇Y
+            res =
+                make_ddot(ctx, grad_of(ctx, nabla, X), grad_of(ctx, nabla, Y));
+        else
+            return nullptr;
+    }
+    else
+        return nullptr;
+
     for (Expr const* c: coefficients)
         res = make_tensor_product(ctx, c, res);
     return res;
+}
+
+// A factor that is a *field·field* contraction (a `Dot`/`:` whose both operands
+// are ordinary — non-frame — and which carries a ∂-mark), e.g. `u·∂ᵢ∂ⱼv`.  Such
+// a structured operand needs the structural path; the single-operand classifier
+// would mis-scope its operators (vibe 000088).
+auto is_field_field_contraction(Context& ctx, Expr const* f, Basis const& fb)
+    -> bool
+{
+    Expr const* l = nullptr;
+    Expr const* r = nullptr;
+    if (auto const* d = std::get_if<Dot>(&f->node))
+    {
+        l = d->left;
+        r = d->right;
+    }
+    else if (auto const* d = std::get_if<DDot>(&f->node))
+    {
+        l = d->left;
+        r = d->right;
+    }
+    else if (auto const* d = std::get_if<DDotAlt>(&f->node))
+    {
+        l = d->left;
+        r = d->right;
+    }
+    else
+        return false;
+    return has_deriv_mark(ctx, f) && !frame_dir_index(l, fb)
+           && !frame_dir_index(r, fb);
 }
 
 // Reassemble one additive term (a ⊗-product) into ∇ operators.
@@ -1169,11 +1252,29 @@ auto reassemble_term(
     };
     flat(term);
 
-    // A bilinear cross term (two ∂-marked operands joined by an inter-gradient
-    // dot) needs the multi-operand path; the single-operand classifier below
-    // would mis-fold it (vibe 000087).
-    if (Expr const* bilinear = try_reassemble_bilinear(ctx, fb, nabla, factors))
-        return bilinear;
+    // A multi-field term (the ∇-expanded second-order Leibniz shapes of
+    // Δ(u⊗v) / Δ(u·v)) needs the structural path; the single-operand classifier
+    // below would mis-fold it (vibes 000087/000088).
+    if (Expr const* s = try_reassemble_structural(ctx, fb, nabla, factors))
+        return s;
+
+    // Safety valve (vibe 000088): a genuinely multi-field term the structural
+    // path did NOT fold — ≥2 ∂-marked factors, or a field·field contraction
+    // operand — must not reach the single-operand classifier, which would emit
+    // silently-wrong output (e.g. the 4·Δ(u·v) / triple-product bugs).  Leave
+    // it un-reassembled (correct, if unfolded) instead.  Single-field terms
+    // (one ∂-marked factor, its frame vectors in divergences) are unaffected.
+    int marked = 0;
+    bool structured = false;
+    for (Expr const* f: factors)
+    {
+        if (has_deriv_mark(ctx, f))
+            ++marked;
+        if (is_field_field_contraction(ctx, f, fb))
+            structured = true;
+    }
+    if (marked >= 2 || structured)
+        return term;
 
     // Classify factors: δ-pairs `e_ℓ·e_m` (two directions ⇒ a Laplacian), free
     // frame vectors (gradient legs), the identity, and the operand blob (the

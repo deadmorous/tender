@@ -1,7 +1,38 @@
 # 000088 — structural reassembly of ∇-expanded products of fields
 
-Status: **PLANNED** (found stress-testing Δ of products; blocks vibe 000084's
-product expressions).
+Status: **DONE** (two-field shapes folded correctly; ≥3-field bails safe).
+
+## Implemented
+
+- **`try_reassemble_structural`** (src/chart.cpp) replaces the vibe-87
+  `try_reassemble_bilinear` pre-check. It reads a term's frame δ-pairs / free
+  legs / operands and folds two focused shapes:
+  - **(i) two separate ⊗ operand factors** (each a *simple* marked field), one
+    mark each, joined cross ⇒ `(∇⊗A)ᵀ·(∇⊗B)` (ᵀ dropped when `∇⊗A` is rank 1).
+  - **(ii) one contracted operand `Dot(X,Y)`** (X,Y simple fields): both marks on
+    one side ⇒ a **scoped** Laplacian (`X·ΔY` / `ΔX·Y`); split across the two ⇒
+    the **double contraction** `∇X:∇Y` (both leg-pairs — the frame-dot and the
+    original `X·Y` — meet).
+- **`expand_double_dot` operator barrier** (src/derivation.cpp): `contains_nabla`
+  guard so `(∇⊗u):(∇⊗v)` is not dyad-expanded to `(∇·∇)(u·v)` (the `:` analogue
+  of the vibe-85 distribute_contraction float).
+- **Safety valve** (`reassemble_term`): a genuinely multi-field term the
+  structural path did NOT fold — ≥2 ∂-marked factors, or a field·field
+  contraction operand — is left **un-reassembled** (returns the term) rather than
+  reaching the single-operand classifier that would emit silently-wrong output.
+  Shapes (i)/(ii) require *simple*-field operands, so a triple product (an
+  operand that is itself a contraction) bails here instead of mis-folding.
+
+Result: `Δ(u·v) = (Δu)·v + 2∇u:∇v + u·Δv` and `Δ(u⊗v)`, `Δ(f v)` all
+`algebraic_eq` to their textbook RHS. A triple `Δ(f(u·v))` folds its two-field
+subterms and leaves the genuine 3-field terms (`2∇f·∇(u·v)`) as verbatim
+interior — correct but unfolded (an N-field generalisation is future work). 821
+C++ + 284 Python pass; navier_lame + strain_compatibility unchanged. Tests:
+`Chart.ReassembleNablaFoldsContractedDotProduct`,
+`ExpandDoubleDot.AbstractNablaDoubleDotIsNotFloated`,
+`test_reassemble_second_order_leibniz_dot_product`.
+
+## Original plan (as written)
 
 ## Problem
 

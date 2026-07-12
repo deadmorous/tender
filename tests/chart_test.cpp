@@ -1498,6 +1498,42 @@ TEST(Chart, ReassembleNablaFoldsBilinearCrossTerm)
     EXPECT_TRUE(eq(ctx, reass, rhs));
 }
 
+// reassemble_nabla folds a *contracted* (dot-product) operand — Δ(u·v) — via
+// the structural path (vibe 000088): the δ-pair Laplacian must scope to the
+// mark-carrying sub-field (u·Δv, (Δu)·v) and the cross term must become the
+// double contraction ∇u:∇v, not the old 4·Δ(u·v) monolithic mis-fold.
+TEST(Chart, ReassembleNablaFoldsContractedDotProduct)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto* w = make_field(ctx, make_tensor_name("w"), 1, {});
+    auto* nab = make_nabla(ctx);
+
+    // Δ(u·w) = ∇·(∇⊗(u·w))
+    auto* lap =
+        make_dot(ctx, nab, make_tensor_product(ctx, nab, make_dot(ctx, u, w)));
+    auto* free = steps::canonicalize(ctx, expand_nabla(ctx, chart, lap));
+    auto* reass = reassemble_nabla(ctx, chart, free);
+
+    // (Δu)·w + 2 ∇u:∇w + u·(Δw)
+    auto* lap_u = make_dot(ctx, nab, make_tensor_product(ctx, nab, u));
+    auto* lap_w = make_dot(ctx, nab, make_tensor_product(ctx, nab, w));
+    auto* cross = make_ddot(
+        ctx,
+        make_tensor_product(ctx, nab, u),
+        make_tensor_product(ctx, nab, w));
+    auto* rhs = make_sum(
+        ctx,
+        make_sum(
+            ctx,
+            make_dot(ctx, lap_u, w),
+            make_tensor_product(ctx, make_scalar(ctx, Rational{2}), cross)),
+        make_dot(ctx, u, lap_w));
+    EXPECT_TRUE(eq(ctx, reass, rhs));
+}
+
 // reassemble_nabla folds an identity-scaled invariant term — the `Δθ·I` /
 // `(∇∇··ε)I` shapes the strain identity produces — reading the ⊗-adjacent I as
 // a standalone identity factor and the δ-pair as a Laplacian on the trace

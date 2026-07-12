@@ -587,6 +587,34 @@ def test_reassemble_second_order_leibniz_vector_dyad():
     assert r"\mathbf{b} \, \Delta \mathbf{a}" not in reass.latex()
 
 
+def test_reassemble_second_order_leibniz_dot_product():
+    # vibe 000088: Δ(u·v) for two vector fields — a *contracted* (dot) operand.
+    # reassemble_nabla used to return 4·Δ(u·v) (it mis-scoped the δ-pair Laplacian
+    # to the whole u·v and could not emit the double contraction).  The structural
+    # path now folds it to (Δu)·v + 2∇u:∇v + u·Δv, scoping the Laplacian to the
+    # mark-carrying sub-field and emitting the DDot cross term.
+    ws = t.Workspace()
+    u = ws.field("u", 1)
+    v = ws.field("v", 1)
+    nab = t.nabla(ctx=ws.ctx)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+
+    lap = t.laplacian(u @ v)  # Δ(u·v)
+    interior = td.contract_identity(td.canonicalize(cart.expand_nabla(lap)))
+    reass = td.collect_terms(cart.reassemble_nabla(td.canonicalize(interior)))
+
+    rhs = (
+        t.laplacian(u) @ v
+        + t.scalar(2, ctx=ws.ctx) * ((nab * u).ddot(nab * v))
+        + u @ t.laplacian(v)
+    )
+    assert td.algebraic_eq(reass, rhs), reass.latex()
+    # not the old 4·Δ(u·v) bug, and it does contain the double contraction
+    assert "4" not in reass.latex()
+    assert ":" in reass.latex()
+
+
 def test_apply_operators_no_op_without_deriv():
     # vibe 000083 Part A: with no concrete Deriv to apply, apply_operators is a
     # genuine no-op — it must NOT canonicalize (which would float the scalar off

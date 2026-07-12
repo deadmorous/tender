@@ -3250,6 +3250,26 @@ TEST(DistributeContraction, AbstractNablaFenceIsNotFloated)
     EXPECT_TRUE(structural_eq(c, steps::canonicalize(ctx, c)));
 }
 
+TEST(ExpandDoubleDot, AbstractNablaDoubleDotIsNotFloated)
+{
+    // ∇u:∇v = (∇⊗u):(∇⊗v) must NOT expand to (∇·∇)(u·v) (vibe 000088): the
+    // abstract ∇ makes the double-dot dyad-expansion a float that strands the
+    // operators.  canonicalize preserves the DDot (barrier in
+    // expand_double_dot).
+    Context ctx;
+    auto* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto* nab = make_nabla(ctx);
+    auto* gu = make_tensor_product(ctx, nab, u); // ∇⊗u
+    auto* gv = make_tensor_product(ctx, nab, v); // ∇⊗v
+    auto* dd = make_ddot(ctx, gu, gv);           // ∇u : ∇v
+    // expand_double_dot leaves it intact ...
+    EXPECT_EQ(steps::expand_double_dot(ctx, dd), dd);
+    // ... and canonicalize keeps a DDot with a ∇⊗ operand (not a floated ∇·∇).
+    auto const* c = steps::canonicalize(ctx, dd);
+    EXPECT_TRUE(std::holds_alternative<DDot>(c->node));
+}
+
 TEST(DistributeContraction, PlainDyadDivergenceStillDistributes)
 {
     // A plain (operator-free) dyad divergence is unaffected by the ∇ barrier:
