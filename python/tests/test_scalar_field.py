@@ -145,6 +145,37 @@ def test_simplify_combines_fractions_numeric_denominator():
     assert td.simplify_scalars(lhs).latex() == td.simplify_scalars(rhs).latex()
 
 
+def test_simplify_distributes_scalar_product_over_sum():
+    # vibe 000089: a scalar product over a sum is distributed, r(a+b) → ra+rb, so
+    # a polynomial's factored and expanded forms reconcile — r(a+b) − ra − rb = 0.
+    # normalize_scalar's monomial bag alone treats (a+b) as one atomic base and
+    # leaves it un-expanded, so factored/expanded forms never became equal (which
+    # surfaced as spurious "non-equal" component comparisons in a chart).
+    ctx = t.Context()
+    r = t.field("r", 0, ctx=ctx)
+    a = t.field("a", 0, ctx=ctx)
+    b = t.field("b", 0, ctx=ctx)
+    assert td.simplify_scalars(r * (a + b) - r * a - r * b).latex() == "0"
+    # factored and distributed forms normalise to the same thing
+    assert (
+        td.simplify_scalars(r * (a + b)).latex()
+        == td.simplify_scalars(r * a + r * b).latex()
+    )
+    # a Difference distributes too
+    assert td.simplify_scalars(r * (a - b) - r * a + r * b).latex() == "0"
+
+
+def test_simplify_leaves_tensor_sum_factored():
+    # Rank-0 only: a dyad/vector sum (a+b)⊗c is NOT distributed by simplify_scalars
+    # (that is expand_products' job) — tensor structure is left alone.
+    ctx = t.Context()
+    a = t.field("a", 0, ctx=ctx)
+    b = t.field("b", 0, ctx=ctx)
+    c = t.field("c", 1, ctx=ctx)  # a vector
+    out = td.simplify_scalars((a + b) * c).latex()
+    assert "(a + b)" in out  # stays factored
+
+
 def test_simplify_metric_component():
     ctx = t.Context()
     r = t.coordinate("r", slot=0, nonneg=True, ctx=ctx)

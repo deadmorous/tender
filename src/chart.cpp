@@ -1582,10 +1582,12 @@ auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
             return r;
         };
         // Lower the operator over `operand`, first hoisting any diff-constant
-        // scalar coefficients OUT: ∇(cX) = c∇X.  Keeping a constant inside the
-        // operator is value-correct but triggers an index collision when the
-        // result is summed with another operator term (a chart-operator index-
-        // hygiene issue), so factor the constants out here.
+        // scalar coefficients OUT: ∇(cX) = c∇X.  This is a cleanliness
+        // normalisation — `(λ+μ)∇(∇·u)` reads better than `∇((λ+μ)∇·u)`, and
+        // keeps the two forms structurally close.  (It was first added to dodge
+        // a *seeming* z-component mismatch; that turned out to be the
+        // vibe-000089 simplify_scalars distribution gap — since fixed — not an
+        // operator bug. Harmless and nicer, so kept.)
         auto lower = [&](Expr const* operand, bool transposed) -> Expr const*
         {
             std::vector<Expr const*> fs;

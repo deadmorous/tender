@@ -49,21 +49,21 @@ raw `∇·T`. Evaluating `factor_common(collect_terms(reass))` — the Navier–
    flatten-and-find-operator handles the operator at the FRONT (`∇⊗X`, floated
    `(c ∇·∇)⊗X`) or the BACK (`X⊗∇`).
 3. **Constant hoisting.** A diff-constant scalar coefficient *inside* an operator
-   (`grad((λ+μ) div u)`, as `factor_common` leaves it) is value-correct but hits
-   a **chart-operator index-collision** when summed with another operator term
-   (`grad(c·div u) + div(grad u)` mis-reduces — a *pre-existing* operator bug,
-   independent of `evaluate`). `evaluate` sidesteps it by hoisting diff-constant
-   scalars OUT of the operator (`∇(cX)=c∇X`, via a local `is_diff_constant`).
+   (`grad((λ+μ) div u)`, as `factor_common` leaves it) is hoisted OUT
+   (`∇(cX)=c∇X`, via a local `is_diff_constant`).  Originally added to dodge a
+   *seeming* z-component mismatch when summed with another operator term — that
+   turned out to be the **vibe-000089 `simplify_scalars` distribution gap**
+   (a weak `is_zero`, not a real operator/projection bug; now fixed).  The
+   hoisting is kept purely as a cleanliness normalisation (`(λ+μ)∇(∇·u)` reads
+   better than `∇((λ+μ)∇·u)`).
 
 Error messages clarified: a bare `∇` or a bare `∇·∇` (Laplacian operator with no
 operand) now name the problem and how to fix it.
 
-**KNOWN follow-up (separate bug):** the chart operators mis-reduce
-`chart.grad(c · chart.div(u)) + chart.div(chart.grad(u))` (a scalar coefficient
-inside one gradient, summed with another operator result) — an index-hygiene
-issue in the operators/`components`, not `evaluate`. `evaluate` avoids it by
-hoisting constants; a direct user hitting it would see the same. Worth its own
-vibe.
+**Follow-up RESOLVED (vibe 000089):** the "chart operators mis-reduce
+`grad(c·div u) + div(grad u)`" concern was a **mis-diagnosis** — the operators,
+`components`, and `evaluate` were all correct; the phantom was `simplify_scalars`
+not distributing `r·(a+b)` (a weak equality check). Fixed in vibe 000089.
 
 (Other follow-ups: N-field structural reassembly beyond two-field is still vibe
 000088's; a `Dot`/`DDot` of two frame-reduced sub-results uses

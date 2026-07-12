@@ -1,85 +1,68 @@
-# 000089 — chart.components mis-projects a sum (non-additive projection)
+# 000089 — simplify_scalars must distribute a product over a sum
 
-Status: **PLANNED** (found in vibe 000084; `evaluate` already sidesteps it, but a
-direct operator user hits it).
+Status: **DONE** (root cause was mis-diagnosed at first — see below).
 
-## Symptom
+## The correction (what this really was)
 
-`chart.components(X + Y)` can return the **wrong** physical components even though
-the invariant `X + Y` is mathematically correct. Concretely, summing a gradient
-of a *Sum*-coefficient with another operator result:
+The symptom, from vibe 000084, looked like a projection bug:
+`chart.components(A + Bin)` (with `Bin = grad((λ+μ)·div u)`, coefficient *inside*
+the gradient) seemed to give a wrong z-component, and `components` looked
+*non-additive*. **That diagnosis was wrong.** Bisecting with a *stronger* zero
+check exposed the truth:
 
-```python
-A   = mu * cyl.div(cyl.grad(u))          # μ Δu
-Bin = cyl.grad((lam + mu) * cyl.div(u))  # ∇((λ+μ)∇·u), coeff INSIDE the gradient
-# A + Bin is the correct Navier–Lamé vector, but:
-cyl.components(A + Bin)                   # WRONG in the r and z components
-```
+- The invariant is correct: `A+Bin == A+Bout` via `expand`, and
+  `components(A+Bin)[i] == components(A+Bout)[i]` under a strong check.
+- The projection **is** additive and correct.
+- The failing comparisons used `simplify_scalars(...) == "0"`, and the residual
+  was `r·(∂_z u_r + …) − r·∂_z u_r − …` — **algebraically zero**, but
+  `simplify_scalars` left it as `−a r − b r + r(a+b)` (not reduced).
 
-`evaluate` (vibe 000084) avoids this by hoisting diff-constant scalars OUT of the
-operator, but a user calling the chart operators directly — or writing
-`grad(c·div u) + div(grad u)` — gets a wrong answer with no warning.
+So the operators, `components`, and `evaluate` were **all correct all along**.
+The real bug is small and general: **`simplify_scalars` did not distribute a
+scalar product over a sum** (`r·(a+b)`), so a polynomial's factored and expanded
+forms never reconciled — every downstream `is_zero` / equality check (tests,
+examples, the user's component comparisons) gave false negatives.
 
-## Root cause — the projection is non-additive (not the operators / canonicalize)
+## Root cause
 
-Pinned by bisection on the cylindrical case:
+`normalize_scalar` decomposes a scalar into a monomial `FactorBag` (coeff +
+bases^powers) and treats a `Sum` factor like `(a+b)` as **one atomic base**. So
+`r(a+b)` stays a single monomial `{r:1, (a+b):1}` and never combines with the
+distributed monomials `ra`, `rb`. `combine_fractions` (common-denominator) has
+the same blind spot in its numerators.
 
-- **The invariant is correct.** `expand(canonicalize(A+Bin)) == expand(A+Bin)`
-  and `A+Bin == A+Bout` (coeff outside) both hold — canonicalize does *not*
-  corrupt the sum, and the operators produce the right invariant.
-- **`components` is non-additive.** `components(A+Bin)[i] ≠ components(A)[i] +
-  components(Bin)[i]` for i = r and z (θ is additive). Since `A+Bin == A+Bout`
-  as invariants but `components(A+Bin) ≠ components(A+Bout)`, the projection of
-  `A+Bin` is simply **wrong**.
+## Fix
 
-So the fault is in `components` → `reduce_dot` (src/chart.cpp ~L203), which
-projects `v` onto each `e_i` via `distribute_bilinear` → `simplify_basis_dot` →
-`canonicalize` → `eval_delta_concrete` → `fold_arithmetic` → `canonicalize` →
-`simplify_scalars`. One of these scalar/basis-reduction steps is **not additive**
-across the summed terms.
+`distribute_scalar_sum` (src/derivation.cpp) — a rank-0-only rewrite added to the
+`simplify_scalars` fixed-point step: `r(a+b) → ra + rb` (mirrored for a left sum
+and for `Difference`). canonicalize then collects the like monomials, so
+`r(a+b) − ra − rb → 0` and factored/expanded forms normalise equal. **Rank-0
+only** — a dyad/vector sum `(a+b)⊗c` is left factored (that is `expand_products`'
+job, not scalar simplification).
 
-**Why r and z, not θ:** `grad((λ+μ)·div u)` yields per-direction coefficients
-split across a **fraction and a non-fraction** term on the *same* `e_i`
-(e.g. the `e_r` coefficient is `\frac{…}{r²} + μ(∂_r∂_z u_z)`), because in
-cylindrical `div u` carries `1/r`, `1/r²` weights. The θ-component happens to be
-single-form, so it stays additive. The mis-combination therefore lives in the
-mixed-denominator handling of `fold_arithmetic` / `simplify_scalars` /
-`canonicalize` *inside* `reduce_dot` when the two operands' `e_i` coefficients
-meet — most likely a **dummy-index collision** (two terms reuse an implicit-sum
-id) or a **fraction-combination** slip surfaced only when both operands' terms
-are present.
+Effect: robust scalar equality / `is_zero`; the curvilinear component displays
+come out as flat, fully-expanded polynomials over the common denominator (longer
+but standard). 823 C++ + 290 Python pass; navier_lame + strain_compatibility
+verify. Tests: `SimplifyScalars.DistributesProductOverSum` (C++),
+`test_simplify_distributes_scalar_product_over_sum` +
+`test_simplify_leaves_tensor_sum_factored` (Python).
 
-## Plan (to refine at implementation)
+## Fallout / cleanup
 
-1. **Sharpen the mechanism.** Reduce further: build two hand-made concrete
-   vectors whose `e_r` coefficients are `a/r² + b` and `c/r²` (fraction +
-   non-fraction), sum, and check `components` additivity — does it reproduce
-   *without* the operators? If yes ⇒ a pure `reduce_dot`/scalar-arithmetic bug;
-   if no ⇒ a dummy-index collision from the operator results. Instrument
-   `reduce_dot` to print `e` after each step and see which step first differs
-   between `project(A+Bin)` and `project(A)+project(Bin)`.
-2. **Fix the offending step.** Either
-   - make the scalar reduction additive (a `fold_arithmetic` / `simplify_scalars`
-     fraction-combination fix), or
-   - restore dummy-index hygiene (rename implicit-sum ids per term before the
-     reducing `canonicalize`, mirroring the `implicitize` / unbounded-dummy work
-     in vibe 000064), or
-   - project **term-by-term**: distribute the outer `+` before `reduce_dot` so
-     each additive term is reduced independently, then sum (guarantees
-     additivity by construction — likely the smallest safe fix).
-3. **Lock it with an additivity invariant test.** `components(X+Y)[i] ==
-   components(X)[i] + components(Y)[i]` for the Navier–Lamé `A`, `Bin`, and a
-   couple of hand-built curvilinear vectors — in both cyl and spherical.
+- The vibe-000084 `evaluate` **constant-hoisting** (`∇(cX)=c∇X`) was originally
+  justified as dodging an "index collision" — that reasoning was this same
+  simplify_scalars gap, now fixed. The hoisting is kept purely as a cleanliness
+  normalisation (`(λ+μ)∇(∇·u)` reads better than `∇((λ+μ)∇·u)`); its comment is
+  corrected.
+- No projection / operator change was needed — the earlier plan (project
+  term-by-term / dummy-index hygiene) was based on the wrong diagnosis and is
+  dropped.
 
-## Notes
+## Lesson
 
-- Whichever fix lands, keep `evaluate`'s constant-hoisting (vibe 000084): it is
-  independently nice output (`(λ+μ)∇(∇·u)` reads better than `∇((λ+μ)∇·u)`), and
-  it keeps `evaluate` robust even if a residual projection edge remains.
-- Check `component_matrix` (rank-2) for the same non-additivity — it uses the
-  same `reduce_dot`, so the fix should cover it; add a rank-2 additivity test.
+A weak canonicaliser turns a *representation* gap into a phantom *correctness*
+bug. When "X and Y differ" but both look right, check equality with a stronger
+normaliser (here `expand_products` first) before blaming the producer.
 
-See [[express-invariant-nabla-in-chart-plan]] (vibe 000084 — where this surfaced;
-`evaluate` sidesteps it by hoisting constants), [[route-b-curvilinear-derivations]]
-(reduce_dot / simplify_basis_dot), [[anf-design-in-progress]] (dummy-index /
-implicitize hygiene, vibe 000064).
+See [[express-invariant-nabla-in-chart-plan]] (vibe 000084 — where the phantom
+surfaced), [[route-b-curvilinear-derivations]] (reduce_dot / simplify_scalars).

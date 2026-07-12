@@ -396,6 +396,29 @@ TEST(SimplifyScalars, LoneCosSquareNotInflated)
     EXPECT_TRUE(structural_eq(steps::simplify_scalars(ctx, c2), c2));
 }
 
+TEST(SimplifyScalars, DistributesProductOverSum)
+{
+    // vibe 000089: a scalar product over a sum distributes, r(a+b) → ra+rb, so
+    // a polynomial's factored and expanded forms reconcile and r(a+b)−ra−rb =
+    // 0.
+    Context ctx;
+    auto* r = make_field(ctx, make_tensor_name("r"), 0, {});
+    auto* a = make_field(ctx, make_tensor_name("a"), 0, {});
+    auto* b = make_field(ctx, make_tensor_name("b"), 0, {});
+    auto* prod = make_tensor_product(ctx, r, make_sum(ctx, a, b)); // r(a+b)
+    auto* expanded = make_sum(
+        ctx,
+        make_tensor_product(ctx, r, a),
+        make_tensor_product(ctx, r, b)); // ra+rb
+    auto* diff = make_difference(ctx, prod, expanded);
+    EXPECT_TRUE(structural_eq(
+        steps::simplify_scalars(ctx, diff), make_scalar(ctx, Rational{0})));
+    // factored and expanded forms normalise to the same expression.
+    EXPECT_TRUE(structural_eq(
+        steps::simplify_scalars(ctx, prod),
+        steps::simplify_scalars(ctx, expanded)));
+}
+
 TEST(SimplifyScalars, CombineFractionsCommonDenominator)
 {
     // A/r² + B/r → (A + B r)/r²: split fraction coefficients acquire one

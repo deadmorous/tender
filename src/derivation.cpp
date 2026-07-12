@@ -4536,6 +4536,42 @@ auto combine_fractions(Context& ctx, Expr const* e) -> Expr const*
     return structural_eq(result, e) ? e : result;
 }
 
+// Distribute a rank-0 product over a sum: `r(a+b) → ra + rb` (mirrored for a
+// left sum and for `Difference`).  normalize_scalar's monomial `FactorBag`
+// treats `(a+b)` as one atomic base, so it never expands this — leaving a
+// polynomial's factored and distributed forms unreconciled (`r(a+b) − ra − rb`
+// stays non-zero; vibe 000089).  Distributing here lets canonicalize collect
+// the like monomials and cancel.  Rank-0 only: tensor structure is untouched,
+// so a dyad sum `(a+b)⊗c` is left factored (that is expand_products' job, not
+// scalar simplification).
+auto distribute_scalar_sum(Context& ctx, Expr const* e) -> Expr const*
+{
+    auto const* p = std::get_if<TensorProduct>(&e->node);
+    if (!p || infer_rank(e) != std::optional<int>{0})
+        return e;
+    if (auto const* s = std::get_if<Sum>(&p->right->node))
+        return make_sum(
+            ctx,
+            make_tensor_product(ctx, p->left, s->left),
+            make_tensor_product(ctx, p->left, s->right));
+    if (auto const* d = std::get_if<Difference>(&p->right->node))
+        return make_difference(
+            ctx,
+            make_tensor_product(ctx, p->left, d->left),
+            make_tensor_product(ctx, p->left, d->right));
+    if (auto const* s = std::get_if<Sum>(&p->left->node))
+        return make_sum(
+            ctx,
+            make_tensor_product(ctx, s->left, p->right),
+            make_tensor_product(ctx, s->right, p->right));
+    if (auto const* d = std::get_if<Difference>(&p->left->node))
+        return make_difference(
+            ctx,
+            make_tensor_product(ctx, d->left, p->right),
+            make_tensor_product(ctx, d->right, p->right));
+    return e;
+}
+
 } // namespace
 
 auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*
@@ -4557,6 +4593,7 @@ auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*
     auto step_cb = [](Context& c, Expr const* node) -> Expr const*
     {
         Expr const* a = fold_local_scalar(c, node);
+        a = distribute_scalar_sum(c, a); // r(a+b) → ra+rb (vibe 000089)
         if (std::holds_alternative<ScalarDiv>(a->node)
             || std::holds_alternative<TensorProduct>(a->node))
             a = normalize_scalar(c, a);
