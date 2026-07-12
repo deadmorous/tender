@@ -1459,6 +1459,45 @@ TEST(Chart, ReassembleNablaRoundTripsCompositeOperators)
         ctx, make_tensor_product(ctx, nab, make_dot(ctx, nab, eps)))));
 }
 
+// reassemble_nabla folds a *bilinear* cross term — two ∂-marked operands joined
+// by an inter-gradient dot — into a dot of two gradients (vibe 000087).  The
+// second-order Leibniz rule Δ(u e) = (Δu)e + 2(∇u)·(∇⊗e) + u Δe exercises it:
+// the two middle copies are the cross term the single-operand classifier used
+// to mis-fold to Δe (dropping ∇u).
+TEST(Chart, ReassembleNablaFoldsBilinearCrossTerm)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* u = make_field(ctx, make_tensor_name("u"), 0, {}); // scalar field
+    auto* w = make_field(ctx, make_tensor_name("w"), 1, {}); // vector field
+    auto* nab = make_nabla(ctx);
+
+    // Δ(u w) = ∇·(∇⊗(u w))
+    auto* lap = make_dot(
+        ctx,
+        nab,
+        make_tensor_product(ctx, nab, make_tensor_product(ctx, u, w)));
+    auto* free = steps::canonicalize(ctx, expand_nabla(ctx, chart, lap));
+    auto* reass = reassemble_nabla(ctx, chart, free);
+
+    // (Δu) w + 2 (∇u)·(∇⊗w) + u (Δw)
+    auto* lap_u = make_dot(ctx, nab, make_tensor_product(ctx, nab, u));
+    auto* lap_w = make_dot(ctx, nab, make_tensor_product(ctx, nab, w));
+    auto* cross = make_dot(
+        ctx,
+        make_tensor_product(ctx, nab, u),
+        make_tensor_product(ctx, nab, w));
+    auto* rhs = make_sum(
+        ctx,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, lap_u, w),
+            make_tensor_product(ctx, make_scalar(ctx, Rational{2}), cross)),
+        make_tensor_product(ctx, u, lap_w));
+    EXPECT_TRUE(eq(ctx, reass, rhs));
+}
+
 // reassemble_nabla folds an identity-scaled invariant term — the `Δθ·I` /
 // `(∇∇··ε)I` shapes the strain identity produces — reading the ⊗-adjacent I as
 // a standalone identity factor and the δ-pair as a Laplacian on the trace

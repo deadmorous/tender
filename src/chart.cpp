@@ -1046,6 +1046,102 @@ auto has_deriv_mark(Context& ctx, Expr const* e) -> bool
     return found;
 }
 
+// The free ∂-mark link ids (the gradient/operator indices) carried anywhere in
+// `e`.  An operand `∂_i X` owns one such id per applied frame derivative; used
+// to tell which operand a frame-direction vector `e_ℓ` belongs to (vibe
+// 000087).
+auto free_mark_ids(Context& ctx, Expr const* e) -> std::vector<int>
+{
+    std::vector<int> ids;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node))
+                for (auto const& m: t->deriv_marks)
+                    if (m.free)
+                        ids.push_back(m.link);
+            return n;
+        });
+    return ids;
+}
+
+// Try to reassemble a *bilinear* term — two ∂-marked operands whose gradient
+// legs are contracted by a frame-dot, e.g. `(∂_j u)(e_i·e_j)(∂_i e)` = the
+// cross term `(∇u)·(∇⊗e)` of the second-order Leibniz rule Δ(u e) (vibe
+// 000087).  The single-operand `reassemble_term` classifier would misread the
+// inter-gradient `e_i·e_j` as a Laplacian δ-pair *and* drop one field, so
+// intercept this shape here.  Returns nullptr (caller falls back) unless the
+// term is exactly: two operands with one free gradient leg each, one frame-dot
+// joining those two legs, and only plain scalar coefficients besides.
+auto try_reassemble_bilinear(
+    Context& ctx,
+    Basis const& fb,
+    Expr const* nabla,
+    std::vector<Expr const*> const& factors) -> Expr const*
+{
+    std::vector<Expr const*> operands;
+    std::vector<Expr const*> coefficients;
+    std::vector<std::pair<int, int>> dots;
+    for (Expr const* f: factors)
+    {
+        if (auto const* d = std::get_if<Dot>(&f->node))
+        {
+            auto a = frame_dir_index(d->left, fb);
+            auto b = frame_dir_index(d->right, fb);
+            if (a && b)
+            {
+                dots.push_back({*a, *b});
+                continue;
+            }
+            return nullptr; // a non-frame dot: not this shape
+        }
+        if (frame_dir_index(f, fb))
+            return nullptr; // a free gradient leg: leave to the single path
+        if (is_identity_tensor(f))
+            return nullptr;
+        if (carries_field(ctx, f, fb))
+            operands.push_back(f);
+        else
+            coefficients.push_back(f);
+    }
+    if (operands.size() != 2 || dots.size() != 1)
+        return nullptr;
+    auto ids0 = free_mark_ids(ctx, operands[0]);
+    auto ids1 = free_mark_ids(ctx, operands[1]);
+    if (ids0.size() != 1 || ids1.size() != 1)
+        return nullptr; // focused case: exactly one gradient leg per operand
+    auto owner = [&](int id) -> int
+    {
+        if (id == ids0.front())
+            return 0;
+        if (id == ids1.front())
+            return 1;
+        return -1;
+    };
+    int const oa = owner(dots.front().first);
+    int const ob = owner(dots.front().second);
+    if (!((oa == 0 && ob == 1) || (oa == 1 && ob == 0)))
+        return nullptr; // the dot must join the two *different* operands' legs
+
+    // Contract the two gradients at their gradient legs: `(∇⊗A)ᵀ·(∇⊗B)`.  ∇⊗X
+    // carries its gradient leg first; transposing the left operand brings it
+    // adjacent to the right's, so the two gradient legs meet.  A rank-1
+    // gradient (a scalar operand's ∇u) equals its transpose, so drop the ᵀ
+    // there.
+    auto grad = [&](Expr const* op)
+    { return make_tensor_product(ctx, nabla, strip_free_marks(ctx, op)); };
+    Expr const* gA = grad(operands[0]);
+    Expr const* gB = grad(operands[1]);
+    Expr const* left =
+        infer_rank(gA).value_or(0) >= 2 ? make_transpose(ctx, gA) : gA;
+    Expr const* res = make_dot(ctx, left, gB);
+    for (Expr const* c: coefficients)
+        res = make_tensor_product(ctx, c, res);
+    return res;
+}
+
 // Reassemble one additive term (a ⊗-product) into ∇ operators.
 auto reassemble_term(
     Context& ctx,
@@ -1072,6 +1168,12 @@ auto reassemble_term(
             factors.push_back(n);
     };
     flat(term);
+
+    // A bilinear cross term (two ∂-marked operands joined by an inter-gradient
+    // dot) needs the multi-operand path; the single-operand classifier below
+    // would mis-fold it (vibe 000087).
+    if (Expr const* bilinear = try_reassemble_bilinear(ctx, fb, nabla, factors))
+        return bilinear;
 
     // Classify factors: δ-pairs `e_ℓ·e_m` (two directions ⇒ a Laplacian), free
     // frame vectors (gradient legs), the identity, and the operand blob (the

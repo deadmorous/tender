@@ -536,6 +536,30 @@ def test_canonicalize_preserves_nabla_laplacian_nesting():
     assert td.canonicalize(mu * lap_ue).latex() == r"\mu \, \Delta (u \, \mathbf{e})"
 
 
+def test_reassemble_second_order_leibniz_bilinear():
+    # vibe 000087: Δ(u e) expands (Leibniz) and reassembles to the second-order
+    # Leibniz rule (Δu)e + 2(∇u)·(∇⊗e) + u(Δe).  The two middle copies are a
+    # *bilinear* cross term — two ∂-marked fields joined by an inter-gradient dot
+    # — that reassemble_nabla used to mis-fold to Δe (dropping ∇u).
+    ws = t.Workspace()
+    u = ws.field("u", 0)
+    e = ws.field("e", 1)
+    nab = t.nabla(ctx=ws.ctx)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+
+    lap = nab @ (nab * (u * e))
+    interior = td.contract_identity(td.canonicalize(cart.expand_nabla(lap)))
+    reass = td.collect_terms(cart.reassemble_nabla(td.canonicalize(interior)))
+
+    rhs = (
+        t.laplacian(u) * e
+        + t.scalar(2, ctx=ws.ctx) * ((nab * u) @ (nab * e))
+        + u * t.laplacian(e)
+    )
+    assert td.algebraic_eq(reass, rhs), reass.latex()
+
+
 def test_apply_operators_no_op_without_deriv():
     # vibe 000083 Part A: with no concrete Deriv to apply, apply_operators is a
     # genuine no-op — it must NOT canonicalize (which would float the scalar off

@@ -1,6 +1,37 @@
 # 000087 — reassemble_nabla must fold a two-field bilinear cross term
 
-Status: **PLANNED** (prerequisite (b) for vibe 000084).
+Status: **DONE** (prerequisite (b) for vibe 000084).
+
+## Implemented
+
+`try_reassemble_bilinear` (src/chart.cpp), a pre-check run by `reassemble_term`
+before the single-operand classifier (which is left untouched — no regression).
+It matches the focused bilinear shape — two ∂-marked operands, one free gradient
+leg each, one frame-dot joining those two legs, plus plain scalar coefficients —
+and folds it to `(∇⊗A)ᵀ·(∇⊗B)` (the ᵀ dropped when `∇⊗A` is rank 1, i.e. a scalar
+operand's `∇u`), contracting the two **gradient** legs. Leg ownership is resolved
+by matching each frame-direction's index id (`frame_dir_index`) against each
+operand's free `DerivMark.link` ids (`free_mark_ids`): both on one operand ⇒ a
+same-field Laplacian δ-pair (single path); on different operands ⇒ the bilinear.
+
+`Δ(u e)` now reassembles to `(Δu)e + 2(∇u)·(∇⊗e) + u Δe` — the exact second-order
+Leibniz rule (`algebraic_eq` to the textbook RHS). Tests: C++
+`Chart.ReassembleNablaFoldsBilinearCrossTerm`, Python
+`test_reassemble_second_order_leibniz_bilinear`. 819 C++ + 282 Python pass;
+navier_lame + strain_compatibility unchanged.
+
+## Follow-up discovered (orthogonal, out of this vibe's scope)
+
+`Δ(a⊗b)` for two *vector* fields: the bilinear cross term is correct
+(`2(∇a)ᵀ·(∇⊗b)`, transpose branch verified), but the *single-operand* term
+`(Δa)⊗b` comes out `b⊗Δa` — `reassemble_term` places an undifferentiated factor
+as a left "coefficient", which is fine for a scalar (commutes) but wrong-ordered
+for a rank-≥1 bare field. Pre-existing; unrelated to the cross-term fold; does not
+affect the scalar×vector endpoint or navier/strain (their non-operand factors are
+scalars λ/μ and the identity). Fix later (position-aware placement of rank-≥1
+undifferentiated factors) if vibe 84 needs vector⊗vector products.
+
+## Original plan (as written)
 
 ## Problem
 
