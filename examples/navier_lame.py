@@ -32,6 +32,13 @@ Navier–Lamé endpoint is verified:
      Both sides are coordinate-free vectors, so the identity holds in every
      frame; tender confirms it in both.
 
+  6. The clean path (vibe 000084): the coordinate-free balance ∇·T = 0 — with u
+     abstract and the invariant ∇ — is handed straight to `chart.evaluate`, which
+     lowers each ∇-combination to the curvilinear-correct operators, with no
+     hand-rewrite via chart.grad/div/rot.  `chart.components` then projects it
+     onto each frame's physical axes, displaying the equilibrium equations
+     (∇·T)·e_axis = 0 in both the Cartesian and cylindrical coordinate systems.
+
 Writes a standalone LaTeX summary to ``out/``.
 
 Run:  python examples/navier_lame.py
@@ -86,23 +93,27 @@ def verify(chart, u, lam, mu, I, label):
     return ok
 
 
-def verify_evaluate(chart, nabla, u, lam, mu, I, label):
-    """The coordinate-free ∇·T evaluated *directly* in the chart (vibe 000084).
+def project_balance(chart, nabla, u, lam, mu, I, axes):
+    """The equilibrium balance ∇·T = 0 evaluated *coordinate-free* in the chart
+    (vibe 000084) and projected onto the chart's physical axes.
 
-    No hand-rewrite via chart.grad/div/rot — write T with the invariant ∇ and
-    call chart.evaluate, which lowers each ∇-combination to the curvilinear
-    operators.  It must match the same Navier–Lamé endpoint.
+    No hand-rewrite via chart.grad/div/rot — the invariant T (u abstract, the
+    coordinate-free ∇) goes straight to chart.evaluate, which lowers each
+    ∇-combination to the curvilinear-correct operators; chart.components then
+    reads off the projection (∇·T)·e_axis.  Returns the labelled component
+    equations, and asserts they match the operator-built Navier–Lamé endpoint.
     """
     T = lam * (nabla @ u) * I + mu * (nabla * u + (nabla * u).transpose())
-    lhs = chart.components(chart.evaluate(nabla @ T))  # ∇·T, evaluated in-chart
+    comps = chart.components(chart.evaluate(nabla @ T))  # ∇·T, evaluated in-chart
     rhs = chart.components(navier_lame_vector(chart, u, lam, mu))
-    ok = all(
-        is_zero(chart, chart.expand(lhs[i]) - chart.expand(rhs[i])) for i in range(3)
-    )
-    status = "✓ all 3 components equal" if ok else "✗ MISMATCH"
-    print(f"  {label:34s} {status}")
-    assert ok, f"chart.evaluate(∇·T) failed in {label}"
-    return ok
+    assert all(
+        is_zero(chart, chart.expand(comps[i]) - chart.expand(rhs[i]))
+        for i in range(3)
+    ), "chart.evaluate(∇·T) ≠ Navier–Lamé endpoint"
+    return [
+        (rf"$(\nabla\cdot T)_{{{ax}}} = 0$", td.simplify_scalars(chart.expand(comps[i])))
+        for i, ax in enumerate(axes)
+    ]
 
 
 def main():
@@ -207,22 +218,19 @@ def main():
         )
     )
 
-    # ---- 6. the clean path: evaluate the coordinate-free ∇·T in the chart ----
+    # ---- 6/7. the clean path: evaluate the coordinate-free balance ∇·T = 0 and
+    #           project it onto each frame's physical axes (vibe 000084) --------
     # No re-typing with chart.grad/div/rot — the invariant T (u abstract, ∇
-    # coordinate-free) is handed straight to chart.evaluate, which lowers each
-    # ∇-combination to the curvilinear-correct operators (vibe 000084).
-    print("\n6. chart.evaluate(∇·T)  (coordinate-free expression, no hand-rewrite)")
+    # coordinate-free) is handed straight to chart.evaluate, then chart.components
+    # reads off (∇·T)·e_axis: the equilibrium equations in each coordinate system.
     nabla2 = t.nabla(ctx=ws2.ctx)
-    verify_evaluate(cart, nabla, u, lam, mu, I, "Cartesian")
-    verify_evaluate(cyl, nabla2, u2, lam2, mu2, I2, "Cylindrical")
-    report.append(
-        (
-            "6. chart.evaluate($\\nabla\\cdot T$) --- coordinate-free, no rewrite",
-            [
-                ("Cartesian frame", r"\checkmark\ \text{all 3 components equal}"),
-                ("Cylindrical frame", r"\checkmark\ \text{all 3 components equal}"),
-            ],
-        )
+    show(
+        "6. Balance $\\nabla\\cdot T = 0$ projected onto the Cartesian axes",
+        project_balance(cart, nabla, u, lam, mu, I, ["x", "y", "z"]),
+    )
+    show(
+        "7. Balance $\\nabla\\cdot T = 0$ projected onto the cylindrical axes",
+        project_balance(cyl, nabla2, u2, lam2, mu2, I2, ["r", r"\theta", "z"]),
     )
 
     print("\nThe equilibrium operator ∇·T is thus the Navier–Lamé vector")
