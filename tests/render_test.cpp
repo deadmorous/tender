@@ -890,6 +890,24 @@ TEST(Render, NablaOperator)
         ctx, make_tensor_product(ctx, mu, make_dot(ctx, del, del)), eps);
     EXPECT_EQ(latex(*coeff_lap), "\\mu \\, \\Delta \\mathbf{e}");
 
+    // A *product* operand groups under Δ (vibe 000086): Δ(u v) must not misread
+    // as (Δu) v.  And canonicalize re-associates ∇⊗(u v) to (∇⊗u)⊗v, so the
+    // ∇-led ⊗-chain is recognised by flattening, not just the immediate leg.
+    auto* uu = make_field(ctx, make_tensor_name("u"), 0, {});
+    auto* vv = T(ctx, "v", 1);
+    auto* prod = make_tensor_product(ctx, uu, vv);
+    EXPECT_EQ(
+        latex(*make_dot(ctx, del, make_tensor_product(ctx, del, prod))),
+        "\\Delta (u \\, \\mathbf{v})");
+    auto* reassoc =
+        make_tensor_product(ctx, make_tensor_product(ctx, del, uu), vv);
+    EXPECT_EQ(
+        latex(*make_dot(ctx, del, reassoc)), "\\Delta (u \\, \\mathbf{v})");
+    // …and with a scalar coefficient: μ ⊗ ∇·((∇⊗u)⊗v) → μ Δ(u v).
+    EXPECT_EQ(
+        latex(*make_tensor_product(ctx, mu, make_dot(ctx, del, reassoc))),
+        "\\mu \\, \\Delta (u \\, \\mathbf{v})");
+
     // Operator-left normalisation (vibe 000080 Increment 6): a canonical
     // reorder can leave ∇ on the *right*; render it left where it acts. X·∇
     // (divergence commuted) → ∇·X.

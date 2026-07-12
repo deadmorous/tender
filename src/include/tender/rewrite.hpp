@@ -147,4 +147,26 @@ auto rewrite_tree(Context& ctx, Expr const* e, F const& f) -> Expr const*
     return f(ctx, rebuilt);
 }
 
+// True if `e` contains an abstract ∇ (an unlowered `Nabla` operator) anywhere
+// in its tree.  A differential operator makes a term positional — no
+// contraction / ⊗ reassociation may move a factor across it (mirrors nf
+// place_factors) — so this is the barrier both `distribute_contraction` and
+// `encapsulate` consult to keep `∇·(∇⊗X)` (any operand, incl. a product `u e`)
+// nested through canonicalize (vibes 000085/000086).  A concrete
+// post-application `Deriv` is NOT a ∇ and does not trip it.
+inline auto contains_nabla(Context& ctx, Expr const* e) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (std::holds_alternative<Nabla>(n->node))
+                found = true;
+            return n;
+        });
+    return found;
+}
+
 } // namespace tender

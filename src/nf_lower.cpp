@@ -498,20 +498,18 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
                 canonicalize_nf(ctx, pw->base),
                 canonicalize_nf(ctx, pw->exponent))};
 
-    // An *operator* ⊗-fence — a `∇⊗X` (grad) kept intact because ∇ is an
-    // operator, not a vector, so `distribute_contraction` refused to float it
-    // (`∇·(∇⊗X)` must stay nested, not collapse to `(∇·∇)⊗X`; vibe 000085).
-    // The nf model's ⊗ lives only at the term level, so carry the fence
-    // opaquely as a `Paren` over its canonical sub-`Nf`, exactly like a genuine
-    // sum (line ~472).  It round-trips: `∇·(∇⊗X)` raises back to
-    // `Dot(∇, ∇⊗X)`, which renders `ΔX`.  The barrier keys on a fence *leg*
-    // being ∇, so any fence reaching here has one at an immediate leg; a fence
-    // WITHOUT an operator should already be distributed — the throw below still
-    // catches that genuine bug.
-    if (auto const* p = std::get_if<TensorProduct>(&factor->node);
-        p
-        && (std::holds_alternative<tender::Nabla>(p->left->node)
-            || std::holds_alternative<tender::Nabla>(p->right->node)))
+    // An *operator* ⊗-fence — a `∇⊗X` (grad), or a product-operand form like
+    // `(∇⊗u)⊗e` — kept intact because ∇ is an operator, not a vector, so
+    // `distribute_contraction` refused to float it (`∇·(∇⊗X)` must stay nested,
+    // not collapse to `(∇·∇)⊗X`; vibes 000085/000086).  The nf model's ⊗ lives
+    // only at the term level, so carry the fence opaquely as a `Paren` over its
+    // canonical sub-`Nf`, exactly like a genuine sum (line ~472).  It
+    // round-trips: `∇·(∇⊗X)` raises back to `Dot(∇, ∇⊗X)`, which renders `ΔX`.
+    // The barrier keeps *any* fence containing an abstract ∇, so match the same
+    // way; a fence WITHOUT an operator should already be distributed — the
+    // throw below still catches that genuine bug.
+    if (std::holds_alternative<TensorProduct>(factor->node)
+        && contains_nabla(ctx, factor))
         return {+1, make_paren(ctx, canonicalize_nf(ctx, factor))};
 
     throw std::invalid_argument(

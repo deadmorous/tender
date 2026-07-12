@@ -522,6 +522,19 @@ def test_canonicalize_preserves_nabla_laplacian_nesting():
     two = t.scalar(2, ctx=ws.ctx)
     assert td.canonicalize(two * mu * lap).latex() == r"2 \, \mu \, \Delta \mathbf{X}"
 
+    # A *product* operand (vibe 000086): Δ(u e) must stay nested through
+    # canonicalize even though the scalar u puts the ∇ off the immediate fence
+    # leg — the barrier keys on "contains an abstract ∇ anywhere", so the float
+    # is refused and it still renders Δ(u e), μΔ(u e) (not "∇·∇ u e").
+    u = ws.field("u", 0)
+    e = ws.field("e", 1)
+    lap_ue = nab @ (nab * (u * e))
+    c_ue = td.canonicalize(lap_ue)
+    assert not td.structural_eq(c_ue, (nab @ nab) * (u * e))  # not floated
+    assert td.structural_eq(c_ue, td.canonicalize(c_ue))  # idempotent
+    assert c_ue.latex() == r"\Delta (u \, \mathbf{e})"
+    assert td.canonicalize(mu * lap_ue).latex() == r"\mu \, \Delta (u \, \mathbf{e})"
+
 
 def test_apply_operators_no_op_without_deriv():
     # vibe 000083 Part A: with no concrete Deriv to apply, apply_operators is a

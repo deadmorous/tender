@@ -135,22 +135,6 @@ static bool is_laplacian_operator(Expr const& e)
            && std::holds_alternative<Nabla>(d->right->node);
 }
 
-// If `e` is the nested (un-floated) Laplacian ∇·(∇⊗X) = dot(∇, ∇⊗X), return its
-// operand X; else nullptr.  This is the form canonicalize now *preserves* (vibe
-// 000085 — the ∇ operator-fence barrier); the Dot render arm turns it into ΔX,
-// but a scalar coefficient c⊗(∇·(∇⊗X)) needs it recognised at the ⊗ level too
-// so `c Δ X` renders without wrapping the Dot in parens.
-static Expr const* nested_laplacian_operand(Expr const& e)
-{
-    auto const* d = std::get_if<Dot>(&e.node);
-    if (!d || !std::holds_alternative<Nabla>(d->left->node))
-        return nullptr;
-    auto const* tp = std::get_if<TensorProduct>(&d->right->node);
-    if (tp && std::holds_alternative<Nabla>(tp->left->node))
-        return tp->right;
-    return nullptr;
-}
-
 // Flatten a ⊗-product tree into its factors, left to right.
 static void flatten_product(Expr const& e, std::vector<Expr const*>& out)
 {
@@ -161,6 +145,33 @@ static void flatten_product(Expr const& e, std::vector<Expr const*>& out)
     }
     else
         out.push_back(&e);
+}
+
+// If `y` is a gradient `∇⊗rest` — a ⊗-chain whose leftmost factor is an
+// abstract ∇ — return `rest` (the factors after the ∇); else empty.
+// canonicalize may re-associate a *product* operand, so `∇⊗(u e)` can arrive as
+// `(∇⊗u)⊗e`; the left-to-right flatten sees the ∇ first regardless (vibe
+// 000086).
+static std::vector<Expr const*> grad_chain_rest(Expr const& y)
+{
+    std::vector<Expr const*> f;
+    flatten_product(y, f);
+    if (f.size() >= 2 && std::holds_alternative<Nabla>(f.front()->node))
+        return {f.begin() + 1, f.end()};
+    return {};
+}
+
+// If `e` is the nested Laplacian ∇·(∇⊗X) = dot(∇, ∇⊗X) — the form canonicalize
+// *preserves* (vibes 000085/000086) — return its operand factors X (a single
+// factor, or several for a product operand `u e`); else empty.  A scalar
+// coefficient `c⊗(∇·(∇⊗X))` needs it recognised at the ⊗ level too, so `c Δ X`
+// renders without wrapping the Dot in parens.
+static std::vector<Expr const*> nested_laplacian_rest(Expr const& e)
+{
+    auto const* d = std::get_if<Dot>(&e.node);
+    if (!d || !std::holds_alternative<Nabla>(d->left->node))
+        return {};
+    return grad_chain_rest(*d->right);
 }
 
 // LaTeX for a scalar function applied to an already-rendered operand string.
@@ -423,6 +434,34 @@ struct Renderer
         return prec(e) < TENSOR_PREC ? "(" + s + ")" : s;
     }
 
+    // Operand of a Laplacian Δ (vibe 000086): the Δ prefix must *group* any
+    // non-atomic operand — a product `u⊗e`, a sum, a contraction — so `Δ(u e)`
+    // is not misread as `(Δu) e`.  Requiring ATOM_PREC wraps anything below it
+    // (TensorProduct, Sum, Dot, Negate) while atom-like operands (a bare
+    // tensor, `tr`, a transpose, `ε`, `𝐗`) report ATOM_PREC and stay bare.
+    auto laplacian_operand_str(Expr const& e) -> std::string
+    {
+        return sub(e, ATOM_PREC);
+    }
+
+    // Render the operand of a Δ given as a factor list (the `rest` of a ∇-led
+    // ⊗-chain, vibe 000086): a single factor groups as usual; several factors
+    // (a product operand `u e`) render as a parenthesised ⊗-product so `Δ(u e)`
+    // is not misread as `(Δu) e`.
+    auto laplacian_chain_str(std::vector<Expr const*> const& rest) -> std::string
+    {
+        if (rest.size() == 1)
+            return laplacian_operand_str(*rest.front());
+        std::string body;
+        for (std::size_t i = 0; i < rest.size(); ++i)
+        {
+            if (i)
+                body += " \\, ";
+            body += sub_product_child(*rest[i]);
+        }
+        return "(" + body + ")";
+    }
+
     // Child of a Sum: no wrapping needed — Sum rendering converts a Negate
     // right child to subtraction; a Negate left child renders cleanly as "-…".
     auto sub_sum_child(Expr const& e) -> std::string
@@ -545,8 +584,8 @@ struct Renderer
                     // coefficient would wrap it in parens (c ⊗ Dot ⇒ "c (ΔX)");
                     // recognise a scalar-only left chain times a nested
                     // Laplacian here and render the clean "c Δ X".
-                    if (auto const* operand =
-                            nested_laplacian_operand(*p.right))
+                    if (auto rest = nested_laplacian_rest(*p.right);
+                        !rest.empty())
                     {
                         std::vector<Expr const*> lf;
                         flatten_product(*p.left, lf);
@@ -559,8 +598,7 @@ struct Renderer
                             std::string out;
                             for (auto const* f: lf)
                                 out += sub_product_child(*f) + " \\, ";
-                            return out + "\\Delta "
-                                   + sub(*operand, TENSOR_PREC);
+                            return out + "\\Delta " + laplacian_chain_str(rest);
                         }
                     }
                     // Laplacian recognition, floated form (vibe 000083):
@@ -593,7 +631,7 @@ struct Renderer
                                 if (!is_laplacian_operator(*f))
                                     out += sub_product_child(*f) + " \\, ";
                             return out + "\\Delta "
-                                   + sub(*p.right, TENSOR_PREC);
+                                   + laplacian_operand_str(*p.right);
                         }
                     }
                     // Operator-left normalisation (vibe 000080 Increment 6): a
@@ -633,10 +671,9 @@ struct Renderer
                     // \Delta X (matching tender.operators.laplacian) rather
                     // than the misleading "power" ∇² (∇ is not a ring element).
                     if (std::holds_alternative<Nabla>(d.left->node))
-                        if (auto const* tp =
-                                std::get_if<TensorProduct>(&d.right->node);
-                            tp && std::holds_alternative<Nabla>(tp->left->node))
-                            return "\\Delta " + sub(*tp->right, TENSOR_PREC);
+                        if (auto rest = grad_chain_rest(*d.right);
+                            !rest.empty())
+                            return "\\Delta " + laplacian_chain_str(rest);
                     // Operator-left normalisation (vibe 000080 Increment 6): a
                     // divergence reordered to `X·∇` (∇ on the right, from
                     // `a·b = b·a`) reads as ∇ acting on nothing.  It equals the

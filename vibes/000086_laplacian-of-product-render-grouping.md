@@ -1,6 +1,29 @@
 # 000086 — Δ of a compound operand must group (render)
 
-Status: **PLANNED** (prerequisite (a) for vibe 000084).
+Status: **DONE** (prerequisite (a) for vibe 000084).
+
+## Implementation note (what a product operand revealed)
+
+Implementing the render grouping surfaced a deeper gap: `∇·(∇⊗(u e))` (a
+*product* operand) was **floated** by canonicalize to `∇·∇ u e`, because the
+vibe-000085 barrier keyed on the *immediate* fence leg being a bare `∇` — but a
+scalar `u` makes canonicalize re-associate the operand to `(∇⊗u)⊗e`, so the `∇`
+is no longer the immediate leg. Two coupled fixes were needed on top of the pure
+render change:
+
+1. **Deepen the vibe-85 barrier** (`distribute_contraction` + `encapsulate`):
+   key on **"contains an abstract ∇ anywhere"** (new shared `contains_nabla` in
+   `rewrite.hpp`), not just an immediate leg. Now a contraction node holding a
+   `∇` stays fully positional (mirrors nf `place_factors`), so
+   `∇·(∇⊗(u e))` is *preserved* as `Dot(∇, (∇⊗u)⊗e)` — the Laplacian nesting is
+   intact (verified: canon == built Laplacian, idempotent, `L−C=0` on expansion).
+2. **Recognise a ∇-led ⊗-chain in the render** (`grad_chain_rest`): the Δ arms
+   flatten the divergence operand and match when the *leftmost* factor is `∇`,
+   taking the remaining factors as the operand `X` — so a re-associated
+   `(∇⊗u)⊗e` still renders `Δ(u e)`. `laplacian_chain_str` groups a multi-factor
+   operand.
+
+## The pure render change (as planned)
 
 ## Problem
 
