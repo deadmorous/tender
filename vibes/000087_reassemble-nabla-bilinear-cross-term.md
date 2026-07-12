@@ -20,16 +20,29 @@ Leibniz rule (`algebraic_eq` to the textbook RHS). Tests: C++
 `test_reassemble_second_order_leibniz_bilinear`. 819 C++ + 282 Python pass;
 navier_lame + strain_compatibility unchanged.
 
-## Follow-up discovered (orthogonal, out of this vibe's scope)
+## Coefficient-order fix (also DONE — a correctness bug the vector case exposed)
 
-`Δ(a⊗b)` for two *vector* fields: the bilinear cross term is correct
-(`2(∇a)ᵀ·(∇⊗b)`, transpose branch verified), but the *single-operand* term
-`(Δa)⊗b` comes out `b⊗Δa` — `reassemble_term` places an undifferentiated factor
-as a left "coefficient", which is fine for a scalar (commutes) but wrong-ordered
-for a rank-≥1 bare field. Pre-existing; unrelated to the cross-term fold; does not
-affect the scalar×vector endpoint or navier/strain (their non-operand factors are
-scalars λ/μ and the identity). Fix later (position-aware placement of rank-≥1
-undifferentiated factors) if vibe 84 needs vector⊗vector products.
+`Δ(a⊗b)` for two *vector* fields exposed a second, orthogonal bug:
+`reassemble_term` reattached every non-operand factor as a **left** coefficient
+(`make_tensor_product(coef, cur)`), fine for a scalar (commutes) but wrong for a
+rank-≥1 undifferentiated factor — the single-operand term `(Δa)⊗b` came out
+`b⊗Δa`, a *different tensor* (not a render glitch: the tree itself was mis-built).
+Fix: track each coefficient's **position** and reattach on the correct side of the
+operand — left of the operand ⇒ left (`λ Δu`, `a⊗Δb`), right ⇒ right (`(Δa)⊗b`);
+scalars are order-immaterial (canonicalize pools them); no operand ⇒ all left
+(historical). Now `Δ(a⊗b)` reassembles to `(Δa)⊗b + 2(∇a)ᵀ·(∇⊗b) + a⊗(Δb)`
+(`algebraic_eq` to the textbook RHS). navier/strain unchanged (their non-operand
+factors are scalars λ/μ + the identity). Test
+`test_reassemble_second_order_leibniz_vector_dyad`.
+
+## Observing the Leibniz rule (the "how")
+
+There is no *chart-free* abstract-∇ Leibniz — `∇` needs a frame to lower
+(`∇ = eᵢ∂ᵢ`), so `expand_dyad_ops` (tr/vec/transpose of dyads only) is a no-op on
+`t.laplacian(u v)`. Observe it via a Cartesian chart round-trip — `expand_nabla`
+(lowers ∇, applies Leibniz on the concrete ∂'s) then `reassemble_nabla` (folds
+back to invariant ∇/Δ); the endpoint is frame-independent. (A convenience wrapper
+for this invariant Leibniz could live in vibe 84's `chart.evaluate` surface.)
 
 ## Original plan (as written)
 

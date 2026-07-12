@@ -1180,7 +1180,7 @@ auto reassemble_term(
     // one factor carrying the field).
     int laplacians = 0;
     std::vector<Expr const*> identities;
-    std::vector<Expr const*> coefficients;
+    std::vector<std::pair<int, Expr const*>> coefficients; // (position, factor)
     std::vector<int> grad_positions;
     Expr const* operand = nullptr;
     int operand_pos = -1;
@@ -1203,12 +1203,14 @@ auto reassemble_term(
             identities.push_back(f);
             continue;
         }
-        // A factor with no field/frame content is a scalar coefficient (λ, μ,
-        // a numeric factor); keep it aside to multiply back in, so it is not
-        // overwritten as (or by) the field-carrying operand blob.
+        // A factor with no field/frame content is a coefficient — a scalar
+        // (λ, μ, a number) or an *undifferentiated* tensor factor (`b` in
+        // (Δa)⊗b).  Keep it aside *with its position* to reattach on the
+        // correct side of the operand, so its ⊗ order is preserved (vibe
+        // 000087).
         if (!carries_field(ctx, f, fb))
         {
-            coefficients.push_back(f);
+            coefficients.push_back({i, f});
             continue;
         }
         operand = f;
@@ -1241,9 +1243,16 @@ auto reassemble_term(
         cur = make_dot(ctx, nabla, make_tensor_product(ctx, nabla, cur));
     for (Expr const* id: identities)
         cur = make_tensor_product(ctx, cur, id);
-    // Scalar coefficients ride on the left: λ ∇(∇·u), μ Δu, ….
-    for (Expr const* coef: coefficients)
-        cur = make_tensor_product(ctx, coef, cur);
+    // Coefficients keep their ⊗ order relative to the operand: a factor left of
+    // the operand attaches on the left (λ ∇(∇·u), μ Δu, …), one to its right on
+    // the right ((Δa)⊗b) — so an undifferentiated tensor factor keeps its leg
+    // order.  A scalar commutes, so its side is immaterial (canonicalize pools
+    // it).  With no operand blob (operand_pos < 0) every factor rides left, the
+    // historical behaviour.
+    for (auto const& [pos, coef]: coefficients)
+        cur = (operand_pos >= 0 && pos > operand_pos) ?
+                  make_tensor_product(ctx, cur, coef) :
+                  make_tensor_product(ctx, coef, cur);
     return cur;
 }
 

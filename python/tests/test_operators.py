@@ -560,6 +560,33 @@ def test_reassemble_second_order_leibniz_bilinear():
     assert td.algebraic_eq(reass, rhs), reass.latex()
 
 
+def test_reassemble_second_order_leibniz_vector_dyad():
+    # vibe 000087: Δ(a⊗b) for two VECTOR fields exercises the transpose branch of
+    # the bilinear fold — (∇a)ᵀ·(∇⊗b) — and the coefficient-order fix: the
+    # single-operand term must be (Δa)⊗b, NOT b⊗Δa (an undifferentiated rank-1
+    # factor keeps its ⊗ position relative to the operand).
+    ws = t.Workspace()
+    a = ws.field("a", 1)
+    b = ws.field("b", 1)
+    nab = t.nabla(ctx=ws.ctx)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+
+    lap = nab @ (nab * (a * b))
+    interior = td.contract_identity(td.canonicalize(cart.expand_nabla(lap)))
+    reass = td.collect_terms(cart.reassemble_nabla(td.canonicalize(interior)))
+
+    rhs = (
+        t.laplacian(a) * b
+        + t.scalar(2, ctx=ws.ctx) * ((nab * a).transpose() @ (nab * b))
+        + a * t.laplacian(b)
+    )
+    assert td.algebraic_eq(reass, rhs), reass.latex()
+    # the (Δa)⊗b term keeps its leg order (not b⊗Δa) — a structural check
+    assert r"(\Delta \mathbf{a}) \, \mathbf{b}" in reass.latex()
+    assert r"\mathbf{b} \, \Delta \mathbf{a}" not in reass.latex()
+
+
 def test_apply_operators_no_op_without_deriv():
     # vibe 000083 Part A: with no concrete Deriv to apply, apply_operators is a
     # genuine no-op — it must NOT canonicalize (which would float the scalar off
