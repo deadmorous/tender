@@ -615,6 +615,67 @@ def test_reassemble_second_order_leibniz_dot_product():
     assert ":" in reass.latex()
 
 
+def _flat(c):
+    """Flatten a components() result (vector list or rank-2 matrix) to a list."""
+    out = []
+    if isinstance(c, list):
+        for x in c:
+            out.extend(_flat(x))
+    else:
+        out.append(c)
+    return out
+
+
+def test_chart_evaluate_lowers_invariant_nabla_cylindrical():
+    # vibe 000084: chart.evaluate lowers an invariant core-∇ expression to the
+    # curvilinear-correct chart operators — no hand-rewrite via cyl.grad/div/rot.
+    # Verified component-by-component on a CYLINDRICAL chart against the direct
+    # operators, and the full Navier–Lamé ∇·T against its operator-built endpoint.
+    ws = t.Workspace()
+    u = ws.field("u", 1)
+    lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+    mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+    I = t.identity(ws.ctx)
+    nab = t.nabla(ctx=ws.ctx)
+    r, th, zc = ws.coords("r", r"\theta", "z", nonneg=("r",))
+    cyl = ws.chart(ws.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+
+    def is_zero(e):
+        return td.simplify_scalars(td.canonicalize(cyl.expand(e))).latex() == "0"
+
+    def same(a, b):
+        ca, cb = _flat(cyl.components(a)), _flat(cyl.components(b))
+        return len(ca) == len(cb) and all(
+            is_zero(cyl.expand(ca[i]) - cyl.expand(cb[i])) for i in range(len(ca))
+        )
+
+    assert same(cyl.evaluate(nab @ u), cyl.div(u))
+    assert same(cyl.evaluate(nab * u), cyl.grad(u))
+    assert same(cyl.evaluate(nab % u), cyl.rot(u))
+    assert same(cyl.evaluate(nab @ (nab * u)), cyl.laplacian(u))  # ∇·(∇⊗u) = Δu
+
+    # The whole Navier–Lamé ∇·T, written coordinate-free, evaluated in cyl.
+    T = lam * (nab @ u) * I + mu * (nab * u + (nab * u).transpose())
+    nl = mu * cyl.div(cyl.grad(u)) + (lam + mu) * cyl.grad(cyl.div(u))
+    assert same(cyl.evaluate(nab @ T), nl)
+
+    # a canonicalized invariant evaluates the same as the raw one (vibe 000085).
+    raw = mu * (nab @ (nab * u))
+    assert same(cyl.evaluate(td.canonicalize(raw)), cyl.evaluate(raw))
+
+
+def test_chart_evaluate_bare_nabla_raises():
+    # A bare ∇ (no operand) is not evaluable in a chart.
+    ws = t.Workspace()
+    nab = t.nabla(ctx=ws.ctx)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    import pytest
+
+    with pytest.raises(ValueError):
+        cart.evaluate(nab)
+
+
 def test_apply_operators_no_op_without_deriv():
     # vibe 000083 Part A: with no concrete Deriv to apply, apply_operators is a
     # genuine no-op — it must NOT canonicalize (which would float the scalar off

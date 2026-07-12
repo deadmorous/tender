@@ -86,6 +86,25 @@ def verify(chart, u, lam, mu, I, label):
     return ok
 
 
+def verify_evaluate(chart, nabla, u, lam, mu, I, label):
+    """The coordinate-free ∇·T evaluated *directly* in the chart (vibe 000084).
+
+    No hand-rewrite via chart.grad/div/rot — write T with the invariant ∇ and
+    call chart.evaluate, which lowers each ∇-combination to the curvilinear
+    operators.  It must match the same Navier–Lamé endpoint.
+    """
+    T = lam * (nabla @ u) * I + mu * (nabla * u + (nabla * u).transpose())
+    lhs = chart.components(chart.evaluate(nabla @ T))  # ∇·T, evaluated in-chart
+    rhs = chart.components(navier_lame_vector(chart, u, lam, mu))
+    ok = all(
+        is_zero(chart, chart.expand(lhs[i]) - chart.expand(rhs[i])) for i in range(3)
+    )
+    status = "✓ all 3 components equal" if ok else "✗ MISMATCH"
+    print(f"  {label:34s} {status}")
+    assert ok, f"chart.evaluate(∇·T) failed in {label}"
+    return ok
+
+
 def main():
     ws = t.Workspace()
     u = ws.field("u", 1)
@@ -181,6 +200,24 @@ def main():
     report.append(
         (
             "5. Verification (component-by-component)",
+            [
+                ("Cartesian frame", r"\checkmark\ \text{all 3 components equal}"),
+                ("Cylindrical frame", r"\checkmark\ \text{all 3 components equal}"),
+            ],
+        )
+    )
+
+    # ---- 6. the clean path: evaluate the coordinate-free ∇·T in the chart ----
+    # No re-typing with chart.grad/div/rot — the invariant T (u abstract, ∇
+    # coordinate-free) is handed straight to chart.evaluate, which lowers each
+    # ∇-combination to the curvilinear-correct operators (vibe 000084).
+    print("\n6. chart.evaluate(∇·T)  (coordinate-free expression, no hand-rewrite)")
+    nabla2 = t.nabla(ctx=ws2.ctx)
+    verify_evaluate(cart, nabla, u, lam, mu, I, "Cartesian")
+    verify_evaluate(cyl, nabla2, u2, lam2, mu2, I2, "Cylindrical")
+    report.append(
+        (
+            "6. chart.evaluate($\\nabla\\cdot T$) --- coordinate-free, no rewrite",
             [
                 ("Cartesian frame", r"\checkmark\ \text{all 3 components equal}"),
                 ("Cylindrical frame", r"\checkmark\ \text{all 3 components equal}"),

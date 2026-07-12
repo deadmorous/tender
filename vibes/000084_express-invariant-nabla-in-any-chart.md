@@ -1,6 +1,46 @@
 # 000084 — express an invariant ∇-expression in any coordinate system
 
-Status: **PLANNED / PROBLEM STATEMENT** (to work on next session). No code yet.
+Status: **DONE** — approach A shipped (`chart.evaluate`).
+
+## Implemented (approach A)
+
+`chart.evaluate(expr)` (src/chart.cpp `evaluate`, bound in `_core.cpp`, C++
+`tender::evaluate`) — a core-Expr interpreter that lowers an invariant `t.nabla`
+expression to the chart operators, inner-first:
+`Dot(∇, X) → divergence(eval X)`, `TensorProduct(∇, X) → gradient(eval X)`,
+`Cross(∇, X) → rot(eval X)`; so `∇·(∇⊗X)` composes to `div(grad) = Δ` with no
+special case (`laplacian` *is* `div(grad)`). `Sum / Difference / Negate /
+ScalarDiv / scalar⊗ / Transpose / Trace / vec / DDot` pass through and recurse;
+a ∇-free sub-expression (via `contains_nabla`) is an operand returned untouched;
+a non-`∇`-leading `Dot`/`Cross` of ∇-containing sub-results uses
+`frame_dot`/`frame_cross`. A bare `∇` (no operand) throws.
+
+**Decisions settled:** surface = `chart.evaluate(expr)` (mirrors the DSL
+`.evaluate(chart)`); output = an invariant in the chart's physical frame (like
+`divergence`/`gradient`), `chart.components` reads the physical components;
+unsupported-pattern policy = hard error with a clear message. Approach A now, D
+(unify the two ∇s) later — A can be subsumed.
+
+**Verified:** on a *cylindrical* chart, `evaluate(∇·u)=div`, `∇⊗u=grad`,
+`∇×u=rot`, `∇·(∇⊗u)=Δ`, `μΔu`, and the **full Navier–Lamé `∇·T`** — written
+coordinate-free with `u` abstract — match the operator-built endpoint component
+by component (Cartesian + cylindrical). A *canonicalized* invariant evaluates the
+same as the raw one (vibe 000085 preservation pays off — the interpreter may
+canonicalize freely). Tests: `Chart.EvaluateLowersNablaToChartOperators` (C++,
+curvilinear + bare-∇ throw), `test_chart_evaluate_lowers_invariant_nabla_cylindrical`
++ `test_chart_evaluate_bare_nabla_raises` (Python); showcase in
+`examples/navier_lame.py` §6.
+
+This **supersedes the vibe-000081 "∇-first is the only supported order" rule**:
+write it invariant, `chart.evaluate` it. (Follow-ups: N-field structural
+reassembly beyond two-field is still vibe 000088's; a `Dot`/`DDot` of two
+frame-reduced sub-results uses `frame_dot`/`make_ddot` best-effort — fine for the
+operator patterns, revisit if a genuine bilinear-of-evaluated-operands case
+needs full frame reduction.)
+
+---
+
+Status (original): **PLANNED / PROBLEM STATEMENT**. No code yet.
 
 ## The problem (user pain)
 

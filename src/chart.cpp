@@ -1482,6 +1482,63 @@ auto rot(
         fold_identity);
 }
 
+auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
+    -> Expr const*
+{
+    // A ∇-free sub-expression is a plain operand — a field, scalar, `I`, or an
+    // already-lowered frame expression: return it untouched.  An enclosing
+    // chart operator expands it, and a ∇-free whole expression has nothing to
+    // lower.
+    if (!contains_nabla(ctx, e))
+        return e;
+    auto ev = [&](Expr const* x) { return evaluate(ctx, chart, x); };
+
+    // ∇-operator combinations: lower inner-first to the chart operators.
+    if (auto const* d = std::get_if<Dot>(&e->node))
+    {
+        if (std::holds_alternative<Nabla>(d->left->node))
+            return divergence(ctx, chart, ev(d->right)); // ∇·X
+        return frame_dot(ctx, chart, ev(d->left), ev(d->right));
+    }
+    if (auto const* p = std::get_if<TensorProduct>(&e->node))
+    {
+        if (std::holds_alternative<Nabla>(p->left->node))
+            return gradient(ctx, chart, ev(p->right)); // ∇⊗X
+        return make_tensor_product(ctx, ev(p->left), ev(p->right));
+    }
+    if (auto const* c = std::get_if<Cross>(&e->node))
+    {
+        if (std::holds_alternative<Nabla>(c->left->node))
+            return rot(ctx, chart, ev(c->right)); // ∇×X
+        return frame_cross(ctx, chart, ev(c->left), ev(c->right));
+    }
+    // Structural pass-through: recurse into children and rebuild.
+    if (auto const* s = std::get_if<Sum>(&e->node))
+        return make_sum(ctx, ev(s->left), ev(s->right));
+    if (auto const* s = std::get_if<Difference>(&e->node))
+        return make_difference(ctx, ev(s->left), ev(s->right));
+    if (auto const* n = std::get_if<Negate>(&e->node))
+        return make_negate(ctx, ev(n->operand));
+    if (auto const* q = std::get_if<ScalarDiv>(&e->node))
+        return make_scalar_div(ctx, ev(q->left), ev(q->right));
+    if (auto const* u = std::get_if<Transpose>(&e->node))
+        return make_transpose(ctx, ev(u->operand));
+    if (auto const* u = std::get_if<Trace>(&e->node))
+        return make_trace(ctx, ev(u->operand));
+    if (auto const* u = std::get_if<VectorInvariant>(&e->node))
+        return make_vector_invariant(ctx, ev(u->operand));
+    if (auto const* d = std::get_if<DDot>(&e->node))
+        return make_ddot(ctx, ev(d->left), ev(d->right));
+    if (auto const* d = std::get_if<DDotAlt>(&e->node))
+        return make_ddot_alt(ctx, ev(d->left), ev(d->right));
+    if (std::holds_alternative<Nabla>(e->node))
+        throw std::invalid_argument(
+            "chart.evaluate: a bare ∇ has no operand to evaluate; apply it "
+            "(∇·X, ∇⊗X, ∇×X) first");
+    throw std::invalid_argument(
+        "chart.evaluate: unsupported ∇-expression shape");
+}
+
 auto frame_dot(
     Context& ctx,
     CoordinateChart const& chart,

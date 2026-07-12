@@ -1388,6 +1388,50 @@ TEST(Chart, ExpandNablaTransposedGradDivKeepsRank)
 // reassemble_nabla (vibe 000078 increment 4) is the inverse of expand_nabla for
 // single operators: expanding ∇⊗ε / ∇·ε to the free-index form and reassembling
 // recovers the original operator expression.
+// evaluate lowers an invariant core-∇ expression to the chart operators (vibe
+// 000084): each ∇-combination matches its direct operator, on a *curvilinear*
+// (cylindrical) chart — so a coordinate-free expression need not be hand-
+// rewritten via grad/div/rot.  ∇·(∇⊗u) composes to div(grad) = laplacian.
+TEST(Chart, EvaluateLowersNablaToChartOperators)
+{
+    Context ctx;
+    auto cyl = make_cyl(ctx);
+    auto& chart = cyl.chart;
+    auto* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto* nab = make_nabla(ctx);
+
+    EXPECT_TRUE(
+        eq(ctx,
+           evaluate(ctx, chart, make_dot(ctx, nab, u)),
+           divergence(ctx, chart, u)));
+    EXPECT_TRUE(
+        eq(ctx,
+           evaluate(ctx, chart, make_tensor_product(ctx, nab, u)),
+           gradient(ctx, chart, u)));
+    EXPECT_TRUE(
+        eq(ctx,
+           evaluate(ctx, chart, make_cross(ctx, nab, u)),
+           rot(ctx, chart, u)));
+    // ∇·(∇⊗u) → div(grad u) = Δu
+    EXPECT_TRUE(
+        eq(ctx,
+           evaluate(
+               ctx, chart, make_dot(ctx, nab, make_tensor_product(ctx, nab, u))),
+           laplacian(ctx, chart, u)));
+    // a scalar coefficient rides through: μ Δu
+    auto* mu = make_tensor_object(ctx, make_tensor_name("\\mu"), {}, 0);
+    EXPECT_TRUE(eq(
+        ctx,
+        evaluate(
+            ctx,
+            chart,
+            make_tensor_product(
+                ctx, mu, make_dot(ctx, nab, make_tensor_product(ctx, nab, u)))),
+        make_tensor_product(ctx, mu, laplacian(ctx, chart, u))));
+    // a bare ∇ has no operand to evaluate.
+    EXPECT_THROW((void)evaluate(ctx, chart, nab), std::invalid_argument);
+}
+
 TEST(Chart, ReassembleNablaRoundTripsSingleOperators)
 {
     Context ctx;

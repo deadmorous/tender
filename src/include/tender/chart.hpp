@@ -200,6 +200,19 @@ void validate_chart(CoordinateChart const& chart);
     Expr const* v,
     bool fold_identity = true) -> Expr const*;
 
+// Evaluate an invariant core-∇ expression in this chart (vibe 000084): walk the
+// Expr tree and lower every ∇-combination to the chart operators, inner-first —
+// `Dot(∇, X) → div`, `TensorProduct(∇, X) → grad`, `Cross(∇, X) → rot`, so
+// `∇·(∇⊗X) → div(grad X) = Δ`; `Sum/Difference/Negate/ScalarDiv/scalar⊗/
+// Transpose/Trace/vec/DDot` pass through and recurse; a ∇-free sub-expression
+// is an operand, returned untouched.  The result is an invariant in the chart's
+// physical frame (like `divergence`/`gradient`); `components` reads off the
+// physical components.  This bridges a coordinate-free `t.nabla` expression to
+// the curvilinear-correct operators without hand-rewriting via grad/div/rot
+// (relaxes the vibe-000081 ∇-first rule).  A bare ∇ (no operand) throws.
+[[nodiscard]] auto evaluate(
+    Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*;
+
 // The invariant dot u·v and cross u×v reduced in the chart's orthonormal
 // reference frame (vibe 000070 P8): distribute, turn frame-vector contractions
 // into δ/ε, and simplify.  These expose the reductions the operators use

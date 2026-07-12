@@ -1561,6 +1561,21 @@ NB_MODULE(_core, m)
             "brings v to the shared reference frame, then projects onto this "
             "frame's e_k.  The general change of basis (WCS is to_reference).")
         .def(
+            "evaluate",
+            [](PyChart const& c, PyExpr const& e) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, evaluate(*c.ctx, c.chart, e.expr)};
+            },
+            "e"_a,
+            "Evaluate an invariant core-∇ expression in this chart (vibe "
+            "000084): lower every ∇-combination to the chart operators "
+            "inner-first — Dot(∇,X)→div, TensorProduct(∇,X)→grad, "
+            "Cross(∇,X)→rot (so ∇·(∇⊗X)→Δ) — passing sums / scalar coefficients "
+            "/ transpose / I through.  Returns an invariant in this chart's "
+            "physical frame; `components` reads off the physical components.  "
+            "Bridges a coordinate-free ∇ expression to the curvilinear-correct "
+            "operators without hand-rewriting via grad/div/rot.")
+        .def(
             "expand",
             [](PyChart const& c, PyExpr const& v) -> PyExpr {
                 return PyExpr{
