@@ -602,7 +602,7 @@ def test_navier_lame_endpoint():
 
     assert (
         nl.latex()
-        == r"\mu \, \nabla \cdot \nabla \, \mathbf{u} + (\lambda + \mu) \, \nabla (\nabla \cdot \mathbf{u})"
+        == r"\mu \, \Delta \mathbf{u} + (\lambda + \mu) \, \nabla (\nabla \cdot \mathbf{u})"
     )
     # correctness: factor_common's constant-hoist ∇((λ+μ)∇·u)→(λ+μ)∇(∇·u) is an
     # operator-linearity rewrite that expand_products can't model, so the
@@ -684,7 +684,7 @@ def test_navier_lame_endpoint_standard_sym_form():
     nl = td.factor_common(td.collect_terms(reass))
     assert (
         nl.latex()
-        == r"\mu \, \nabla \cdot \nabla \, \mathbf{u} + (\lambda + \mu) \, \nabla (\nabla \cdot \mathbf{u})"
+        == r"\mu \, \Delta \mathbf{u} + (\lambda + \mu) \, \nabla (\nabla \cdot \mathbf{u})"
     )
     # and it holds componentwise in a Cartesian and a cylindrical frame.
     assert _navier_lame_holds(cart, ws.ctx, stress=_standard_hooke)

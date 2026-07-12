@@ -881,6 +881,14 @@ TEST(Render, NablaOperator)
         "\\Delta f");
     // But a bare ∇·∇ with no operand is NOT a Laplacian — it stays ∇·∇.
     EXPECT_EQ(latex(*make_dot(ctx, del, del)), "\\nabla \\cdot \\nabla");
+    // A scalar coefficient rides through: canonicalize left-associates
+    // c·∇·(∇⊗X) into (c ∇·∇)⊗X = tprod(tprod(c, ∇·∇), X), burying ∇·∇ under the
+    // scalar.  It must still render as c Δ X (vibe 000083 — the μ∇·∇u vs μΔu
+    // navier_lame case), not degrade to c ∇·∇ X.
+    auto* mu = T(ctx, "\\mu", 0);
+    auto* coeff_lap = make_tensor_product(
+        ctx, make_tensor_product(ctx, mu, make_dot(ctx, del, del)), eps);
+    EXPECT_EQ(latex(*coeff_lap), "\\mu \\, \\Delta \\mathbf{e}");
 
     // Operator-left normalisation (vibe 000080 Increment 6): a canonical
     // reorder can leave ∇ on the *right*; render it left where it acts. X·∇

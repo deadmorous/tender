@@ -212,6 +212,30 @@ def main():
     )
     assert td.algebraic_eq(reass, closed), "reassembly ≠ closed identity"
 
+    # ---- 4c. classical textbook form under the compatibility condition ------
+    # inc ε = 0 forces its trace to vanish too: tr(inc ε) = 0.  Taking the trace
+    # of the closed form (§1 of the notebook) gives −∇·(∇·ε) + Δ tr(ε), so the
+    # trace condition is exactly the scalar identity  ∇·(∇·ε) = Δ tr(ε).
+    # Feeding that back in as a rewrite cancels the −∇·(∇·ε)I term against the
+    # +Δ(tr ε)I term, collapsing the closed form to the classical Saint-Venant
+    # compatibility equations found in textbooks:
+    #     −Δε − ∇∇(tr ε) + ∇(∇·ε) + (∇(∇·ε))ᵀ = 0.
+    id_trace = td.Identity("inc_trace", nabla @ (nabla @ eps), t.laplacian(theta))
+    classical = td.apply_identity(id_trace)(reass)
+    classical_textbook = (
+        -t.laplacian(eps)  # −Δε
+        - (nabla * (nabla * theta))  # −∇∇(tr ε)
+        + (nabla * (nabla @ eps))  # +∇(∇·ε)
+        + (nabla * (nabla @ eps)).transpose()  # +(∇(∇·ε))ᵀ
+    )
+    assert td.algebraic_eq(classical, classical_textbook), "≠ classical form"
+    show(
+        "4c. classical form under inc ε = 0  (∇·(∇·ε) = Δ tr ε)",
+        [
+            ("inc ε  (Saint-Venant)", classical),
+        ],
+    )
+
     # ---- 5. verify the closed identity component-by-component ---------------
     print("\n5. Verification  (component-by-component, via the chart operators)")
     verify(cart, eps, "Cartesian")
@@ -231,7 +255,8 @@ def main():
     )
 
     print("\nCompatibility inc ε = 0 is thus the vanishing of the closed-form")
-    print("right-hand side — the same tensor equation in any frame.")
+    print("right-hand side — the same tensor equation in any frame; under its own")
+    print("trace condition it collapses to the classical Saint-Venant form (§4c).")
 
     write_latex()
 

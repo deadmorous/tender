@@ -125,6 +125,28 @@ static bool is_scalar_expr(Expr const& e)
         e);
 }
 
+// True iff `e` is the Laplacian operator ∇·∇ = dot(∇, ∇) (vibe 000083).  This
+// is the scalar operator whose application to an operand X is the Laplacian ΔX;
+// on its own (no operand) it is NOT a Laplacian and renders as ∇·∇.
+static bool is_laplacian_operator(Expr const& e)
+{
+    auto const* d = std::get_if<Dot>(&e.node);
+    return d && std::holds_alternative<Nabla>(d->left->node)
+           && std::holds_alternative<Nabla>(d->right->node);
+}
+
+// Flatten a ⊗-product tree into its factors, left to right.
+static void flatten_product(Expr const& e, std::vector<Expr const*>& out)
+{
+    if (auto const* p = std::get_if<TensorProduct>(&e.node))
+    {
+        flatten_product(*p->left, out);
+        flatten_product(*p->right, out);
+    }
+    else
+        out.push_back(&e);
+}
+
 // LaTeX for a scalar function applied to an already-rendered operand string.
 static auto scalar_fn_str(ScalarFnKind kind, std::string const& arg)
     -> std::string
@@ -501,17 +523,38 @@ struct Renderer
                 [&](TensorProduct const& p) -> std::string
                 {
                     // Laplacian recognition, floated form (vibe 000083):
-                    // canonicalize rewrites ∇·(∇⊗X) into the equivalent
-                    // (∇·∇)⊗X = tprod(dot(∇,∇), X) (the scalar Laplacian
-                    // operator applied to X).  Both are the Laplacian ΔX, so
-                    // render the floated form the same way — otherwise
-                    // canonicalize (e.g. inside apply_identity) silently
-                    // degrades a clean Δ back to ∇·∇.  A bare ∇·∇ with no
-                    // operand is NOT matched here and stays ∇·∇ (vibe 000083).
-                    if (auto const* dl = std::get_if<Dot>(&p.left->node);
-                        dl && std::holds_alternative<Nabla>(dl->left->node)
-                        && std::holds_alternative<Nabla>(dl->right->node))
-                        return "\\Delta " + sub(*p.right, TENSOR_PREC);
+                    // canonicalize rewrites c·∇·(∇⊗X) into the equivalent
+                    // (c ∇·∇)⊗X — the scalar Laplacian operator ∇·∇, carrying
+                    // any scalar coefficients c, applied to X.  Render it as
+                    // c Δ X so a clean Δ survives a canonicalize (e.g. inside
+                    // apply_identity or factor_common) instead of degrading to
+                    // c ∇·∇ X.  Matches when the left factor-chain is exactly
+                    // one ∇·∇ plus scalars, and X (= p.right) is a real operand
+                    // (not a bare ∇).  A standalone ∇·∇ with no operand is NOT
+                    // matched and stays ∇·∇.
+                    if (!std::holds_alternative<Nabla>(p.right->node))
+                    {
+                        std::vector<Expr const*> lf;
+                        flatten_product(*p.left, lf);
+                        int laplacians = 0;
+                        bool rest_scalar = true;
+                        for (auto const* f: lf)
+                        {
+                            if (is_laplacian_operator(*f))
+                                ++laplacians;
+                            else if (infer_rank(f) != std::optional<int>{0})
+                                rest_scalar = false;
+                        }
+                        if (laplacians == 1 && rest_scalar)
+                        {
+                            std::string out;
+                            for (auto const* f: lf)
+                                if (!is_laplacian_operator(*f))
+                                    out += sub_product_child(*f) + " \\, ";
+                            return out + "\\Delta "
+                                   + sub(*p.right, TENSOR_PREC);
+                        }
+                    }
                     // Operator-left normalisation (vibe 000080 Increment 6): a
                     // canonical reorder can leave a bare ∇ on the *right* of a
                     // dyad, `X⊗∇`, which reads as ∇ acting on nothing.  It is

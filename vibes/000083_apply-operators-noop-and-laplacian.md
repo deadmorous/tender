@@ -121,6 +121,21 @@ Guard test: `t.laplacian(eps.tr()).latex() == "Δ tr(ε)"` and it is structurall
    extended in `render_test.cpp` (floated scalar + rank-2 Δ; bare `∇·∇` unchanged).
    NB this is a *render* robustness fix; the deeper I2/B3 canonicalize corruption
    (float across an operator) is still the operations-revisit vibe's to resolve.
+   **Generalised (coefficient-carrying floated Laplacian).** A scalar coefficient
+   makes canonicalize left-associate `c·∇·(∇⊗X)` into `(c ∇·∇)⊗X =
+   tprod(tprod(c, ∇·∇), X)`, burying `∇·∇` under the scalar — so the first cut
+   (which needed `p.left` to be *exactly* `dot(∇,∇)`) still rendered navier_lame's
+   `μ∇·(∇⊗u)` as `μ ∇·∇ u`. Fix: the `TensorProduct` arm now flattens `p.left`,
+   and if the factor-chain is exactly one `∇·∇` plus rank-0 scalars (checked via
+   `infer_rank == 0`, since `is_scalar_expr` rejects every `TensorObject` incl.
+   rank-0 coefficients), renders `<scalars> Δ X`. So `μΔu` / `2μΔu` now render.
+   Helpers `is_laplacian_operator` + `flatten_product`. navier_lame endpoint tests
+   (`test_navier_lame_endpoint{,_standard_sym_form}`) updated to the `μΔu` form.
+   **Examples.** `strain_compatibility` gained §4c: under `inc ε = 0` the trace
+   condition `∇·(∇·ε) = Δ tr ε` (an `apply_identity` rewrite) collapses the closed
+   form to the classical Saint-Venant equations `−Δε − ∇∇(tr ε) + ∇(∇·ε) +
+   (∇(∇·ε))ᵀ` (both `.py` asserted and `.ipynb` §4b). navier_lame labels/prose
+   updated to `μΔu`.
 
 Constraints: buildable/tested per increment; ≥90% coverage; clang-format;
 strip notebooks. Both are small and independent — either can land first.
