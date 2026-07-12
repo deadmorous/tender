@@ -32,11 +32,43 @@ curvilinear + bare-∇ throw), `test_chart_evaluate_lowers_invariant_nabla_cylin
 `examples/navier_lame.py` §6.
 
 This **supersedes the vibe-000081 "∇-first is the only supported order" rule**:
-write it invariant, `chart.evaluate` it. (Follow-ups: N-field structural
-reassembly beyond two-field is still vibe 000088's; a `Dot`/`DDot` of two
-frame-reduced sub-results uses `frame_dot`/`make_ddot` best-effort — fine for the
-operator patterns, revisit if a genuine bilinear-of-evaluated-operands case
-needs full frame reduction.)
+write it invariant, `chart.evaluate` it.
+
+### Robustness pass (evaluating a *reduced* invariant)
+
+A user's expression is often the *reduced* endpoint a derivation leaves, not the
+raw `∇·T`. Evaluating `factor_common(collect_terms(reass))` — the Navier–Lamé
+`μΔu + (λ+μ)∇(∇·u)` — surfaced three shapes the first cut mishandled (obscure
+"bare ∇" errors / a wrong z-component). Fixed:
+
+1. **Floated Laplacian.** `(∇·∇)⊗X` (renders `ΔX` but is `Dot(∇,∇)⊗X`, the
+   vibe-000083 canonical form) → `laplacian`. `evaluate` now flattens the
+   ⊗-chain and treats a bare `∇·∇` factor as the Laplacian operator.
+2. **Operator-left-normalised gradient.** `X⊗∇` (∇ on the *right*, vibe-000080
+   `X⊗∇ = (∇⊗X)ᵀ`) → `gradient` (transposed for a rank-≥1 operand). The
+   flatten-and-find-operator handles the operator at the FRONT (`∇⊗X`, floated
+   `(c ∇·∇)⊗X`) or the BACK (`X⊗∇`).
+3. **Constant hoisting.** A diff-constant scalar coefficient *inside* an operator
+   (`grad((λ+μ) div u)`, as `factor_common` leaves it) is value-correct but hits
+   a **chart-operator index-collision** when summed with another operator term
+   (`grad(c·div u) + div(grad u)` mis-reduces — a *pre-existing* operator bug,
+   independent of `evaluate`). `evaluate` sidesteps it by hoisting diff-constant
+   scalars OUT of the operator (`∇(cX)=c∇X`, via a local `is_diff_constant`).
+
+Error messages clarified: a bare `∇` or a bare `∇·∇` (Laplacian operator with no
+operand) now name the problem and how to fix it.
+
+**KNOWN follow-up (separate bug):** the chart operators mis-reduce
+`chart.grad(c · chart.div(u)) + chart.div(chart.grad(u))` (a scalar coefficient
+inside one gradient, summed with another operator result) — an index-hygiene
+issue in the operators/`components`, not `evaluate`. `evaluate` avoids it by
+hoisting constants; a direct user hitting it would see the same. Worth its own
+vibe.
+
+(Other follow-ups: N-field structural reassembly beyond two-field is still vibe
+000088's; a `Dot`/`DDot` of two frame-reduced sub-results uses
+`frame_dot`/`make_ddot` best-effort — fine for the operator patterns, revisit if
+a genuine bilinear-of-evaluated-operands case needs full frame reduction.)
 
 ---
 

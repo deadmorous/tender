@@ -664,16 +664,82 @@ def test_chart_evaluate_lowers_invariant_nabla_cylindrical():
     assert same(cyl.evaluate(td.canonicalize(raw)), cyl.evaluate(raw))
 
 
+def test_chart_evaluate_reduced_navier_lame_endpoint():
+    # vibe 000084: chart.evaluate must also handle the *reduced* invariant a
+    # derivation leaves — the factor_common'd Navier–Lamé endpoint μΔu +
+    # (λ+μ)∇(∇·u).  That form uses the floated Laplacian (∇·∇)⊗u and the
+    # operator-left-normalised gradient (∇·u)⊗∇ (∇ on the right), and factors the
+    # constant (λ+μ) inside the gradient — all of which evaluate now lowers.
+    ws = t.Workspace()
+    u = ws.field("u", 1)
+    lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+    mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+    I = t.identity(ws.ctx)
+    nab = t.nabla(ctx=ws.ctx)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    r, th, zc = ws.coords("r", r"\theta", "z", nonneg=("r",))
+    cyl = ws.chart(ws.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+
+    # reduce ∇·T once (Cartesian) to the factored endpoint nl (coordinate-free)
+    divT = nab @ (lam * (nab @ u) * I + mu * (nab * u + (nab * u).transpose()))
+    reass = cart.reassemble_nabla(
+        td.canonicalize(td.contract_identity(td.canonicalize(cart.expand_nabla(divT))))
+    )
+    nl = td.factor_common(td.collect_terms(reass))
+
+    def is_zero(chart, e):
+        return td.simplify_scalars(td.canonicalize(chart.expand(e))).latex() == "0"
+
+    def same(chart, a, b):
+        ca, cb = _flat(chart.components(a)), _flat(chart.components(b))
+        return len(ca) == len(cb) and all(
+            is_zero(chart, chart.expand(ca[i]) - chart.expand(cb[i]))
+            for i in range(len(ca))
+        )
+
+    for chart in (cart, cyl):
+        nl_vec = mu * chart.div(chart.grad(u)) + (lam + mu) * chart.grad(chart.div(u))
+        # the reduced nl and the original ∇·T both evaluate to the same endpoint
+        assert same(chart, chart.evaluate(nl), nl_vec)
+        assert same(chart, chart.evaluate(nl), chart.evaluate(divT))
+
+
+def test_chart_evaluate_floated_and_back_forms():
+    # evaluate recognises the floated Laplacian (∇·∇)⊗X and the reordered
+    # gradient X⊗∇ (operator on the right), not just the nested/left forms.
+    ws = t.Workspace()
+    u = ws.field("u", 1)
+    nab = t.nabla(ctx=ws.ctx)
+    r, th, zc = ws.coords("r", r"\theta", "z", nonneg=("r",))
+    cyl = ws.chart(ws.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+
+    def is_zero(e):
+        return td.simplify_scalars(td.canonicalize(cyl.expand(e))).latex() == "0"
+
+    def same(a, b):
+        ca, cb = _flat(cyl.components(a)), _flat(cyl.components(b))
+        return len(ca) == len(cb) and all(
+            is_zero(cyl.expand(ca[i]) - cyl.expand(cb[i])) for i in range(len(ca))
+        )
+
+    assert same(cyl.evaluate((nab @ nab) * u), cyl.laplacian(u))  # floated (∇·∇)⊗u
+    assert same(cyl.evaluate((nab @ u) * nab), cyl.grad(cyl.div(u)))  # back (∇·u)⊗∇
+
+
 def test_chart_evaluate_bare_nabla_raises():
-    # A bare ∇ (no operand) is not evaluable in a chart.
+    # A bare ∇, or a ∇·∇ Laplacian operator with no operand, is not evaluable —
+    # with a clear message (not the obscure earlier "bare ∇" wording).
     ws = t.Workspace()
     nab = t.nabla(ctx=ws.ctx)
     x, y, z = ws.coords("x", "y", "z")
     cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
     import pytest
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not applied to any field"):
         cart.evaluate(nab)
+    with pytest.raises(ValueError, match="Laplacian operator"):
+        cart.evaluate(nab @ nab)  # bare ∇·∇, no operand
 
 
 def test_apply_operators_no_op_without_deriv():

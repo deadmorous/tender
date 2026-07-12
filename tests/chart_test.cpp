@@ -1428,8 +1428,25 @@ TEST(Chart, EvaluateLowersNablaToChartOperators)
             make_tensor_product(
                 ctx, mu, make_dot(ctx, nab, make_tensor_product(ctx, nab, u)))),
         make_tensor_product(ctx, mu, laplacian(ctx, chart, u))));
-    // a bare ∇ has no operand to evaluate.
+    // The reduced / re-associated forms a derivation leaves also lower: the
+    // floated Laplacian (∇·∇)⊗u and the operator-left-normalised gradient u⊗∇
+    // (∇ on the right), matching the nested/left forms (vibe 000084).
+    EXPECT_TRUE(
+        eq(ctx,
+           evaluate(
+               ctx, chart, make_tensor_product(ctx, make_dot(ctx, nab, nab), u)),
+           laplacian(ctx, chart, u))); // (∇·∇)⊗u
+    EXPECT_TRUE(
+        eq(ctx,
+           evaluate(
+               ctx, chart, make_tensor_product(ctx, make_dot(ctx, nab, u), nab)),
+           gradient(ctx, chart, divergence(ctx, chart, u)))); // (∇·u)⊗∇ =
+                                                              // ∇(∇·u)
+    // a bare ∇, or a bare ∇·∇, has no operand to evaluate.
     EXPECT_THROW((void)evaluate(ctx, chart, nab), std::invalid_argument);
+    EXPECT_THROW(
+        (void)evaluate(ctx, chart, make_dot(ctx, nab, nab)),
+        std::invalid_argument);
 }
 
 TEST(Chart, ReassembleNablaRoundTripsSingleOperators)

@@ -1482,6 +1482,53 @@ auto rot(
         fold_identity);
 }
 
+// The Laplacian *operator* ∇·∇ = Dot(∇, ∇) (vibe 000083): a scalar operator
+// that applied to X is ΔX.  canonicalize / factor_common can leave a Laplacian
+// in the *floated* form (scalars ⊗ ∇·∇) ⊗ X — which renders `<scalars> Δ X` —
+// instead of the nested ∇·(∇⊗X); `evaluate` must recognise both.
+auto is_laplacian_op(Expr const* e) -> bool
+{
+    auto const* d = std::get_if<Dot>(&e->node);
+    return d && std::holds_alternative<Nabla>(d->left->node)
+           && std::holds_alternative<Nabla>(d->right->node);
+}
+
+// Flatten a ⊗-product tree into its factors, left to right.
+void flatten_tensor_product(Expr const* e, std::vector<Expr const*>& out)
+{
+    if (auto const* p = std::get_if<TensorProduct>(&e->node))
+    {
+        flatten_tensor_product(p->left, out);
+        flatten_tensor_product(p->right, out);
+    }
+    else
+        out.push_back(e);
+}
+
+// ∇e = 0: a scalar built only from parameters / literals — no field,
+// coordinate, applied derivative, or ∇/∂ anywhere (mirrors derivation.cpp's
+// is_diff_constant). Licenses hoisting a constant out of an operator, ∇(cX) =
+// c∇X.
+auto is_diff_constant_here(Context& ctx, Expr const* e) -> bool
+{
+    bool constant = true;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (std::holds_alternative<Nabla>(n->node)
+                || std::holds_alternative<Deriv>(n->node))
+                constant = false;
+            else if (auto const* t = std::get_if<TensorObject>(&n->node))
+                if ((t->traits && (t->traits->field || t->traits->coordinate))
+                    || !t->deriv_marks.empty())
+                    constant = false;
+            return n;
+        });
+    return constant;
+}
+
 auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
     -> Expr const*
 {
@@ -1496,14 +1543,93 @@ auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
     // ∇-operator combinations: lower inner-first to the chart operators.
     if (auto const* d = std::get_if<Dot>(&e->node))
     {
+        if (is_laplacian_op(e)) // a bare ∇·∇, no operand
+            throw std::invalid_argument(
+                "chart.evaluate: a ∇·∇ (Laplacian operator) is not applied to "
+                "any field — write ΔX = ∇·(∇⊗X) so it has an operand.");
         if (std::holds_alternative<Nabla>(d->left->node))
             return divergence(ctx, chart, ev(d->right)); // ∇·X
         return frame_dot(ctx, chart, ev(d->left), ev(d->right));
     }
     if (auto const* p = std::get_if<TensorProduct>(&e->node))
     {
-        if (std::holds_alternative<Nabla>(p->left->node))
-            return gradient(ctx, chart, ev(p->right)); // ∇⊗X
+        // Lower a ∇-operator ⊗-chain.  canonicalize / factor_common
+        // re-associate and re-order these, so the operator — a bare ∇
+        // (gradient) or ∇·∇ (Laplacian) — can sit at the FRONT (`∇⊗X`, or
+        // floated `(c ∇·∇)⊗X`) or, after operator-left normalisation, at the
+        // BACK (`X⊗∇ = (∇⊗X)ᵀ`; vibe 000080).  Flatten the whole product, find
+        // that operator factor, and lower it over the operand it acts on
+        // (everything to its right at the front; everything to its left at the
+        // back).
+        std::vector<Expr const*> f;
+        flatten_tensor_product(e, f);
+        int op = -1;
+        for (std::size_t k = 0; k < f.size(); ++k)
+            if (std::holds_alternative<Nabla>(f[k]->node)
+                || is_laplacian_op(f[k]))
+            {
+                op = static_cast<int>(k);
+                break;
+            }
+        auto const n = static_cast<int>(f.size());
+        bool const lap =
+            op >= 0 && is_laplacian_op(f[static_cast<std::size_t>(op)]);
+        auto product = [&](int lo, int hi) // ⊗ of f[lo..hi)
+        {
+            Expr const* r = f[static_cast<std::size_t>(lo)];
+            for (int i = lo + 1; i < hi; ++i)
+                r = make_tensor_product(ctx, r, f[static_cast<std::size_t>(i)]);
+            return r;
+        };
+        // Lower the operator over `operand`, first hoisting any diff-constant
+        // scalar coefficients OUT: ∇(cX) = c∇X.  Keeping a constant inside the
+        // operator is value-correct but triggers an index collision when the
+        // result is summed with another operator term (a chart-operator index-
+        // hygiene issue), so factor the constants out here.
+        auto lower = [&](Expr const* operand, bool transposed) -> Expr const*
+        {
+            std::vector<Expr const*> fs;
+            flatten_tensor_product(operand, fs);
+            std::vector<Expr const*> consts, rest;
+            for (auto const* g: fs)
+                ((infer_rank(g) == std::optional<int>{0}
+                  && is_diff_constant_here(ctx, g)) ?
+                     consts :
+                     rest)
+                    .push_back(g);
+            Expr const* core =
+                rest.empty() ? make_scalar(ctx, Rational{1}) : rest.front();
+            for (std::size_t i = 1; i < rest.size(); ++i)
+                core = make_tensor_product(ctx, core, rest[i]);
+            Expr const* res = lap ? laplacian(ctx, chart, ev(core)) :
+                                    gradient(ctx, chart, ev(core));
+            if (transposed && !lap && infer_rank(core) != std::optional<int>{0})
+                res = make_transpose(ctx, res); // X⊗∇ = (∇⊗X)ᵀ for rank ≥ 1
+            for (auto const* c: consts)
+                res = make_tensor_product(ctx, c, res);
+            return res;
+        };
+        if (op == n - 1 && n >= 2)
+            // Back form `X⊗∇`: the operator acts on everything to its left.
+            return lower(product(0, n - 1), /*transposed=*/true);
+        if (op >= 0 && op < n - 1)
+        {
+            // Front / floated form: the leading factors must be ∇-free
+            // coefficients (outside the operator's right-acting scope).
+            bool clean = true;
+            for (int i = 0; i < op; ++i)
+                if (contains_nabla(ctx, f[static_cast<std::size_t>(i)]))
+                    clean = false;
+            if (clean)
+            {
+                Expr const* res =
+                    lower(product(op + 1, n), /*transposed=*/false);
+                for (int i = op; i-- > 0;)
+                    res = make_tensor_product(
+                        ctx, f[static_cast<std::size_t>(i)], res);
+                return res;
+            }
+        }
         return make_tensor_product(ctx, ev(p->left), ev(p->right));
     }
     if (auto const* c = std::get_if<Cross>(&e->node))
@@ -1533,8 +1659,8 @@ auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
         return make_ddot_alt(ctx, ev(d->left), ev(d->right));
     if (std::holds_alternative<Nabla>(e->node))
         throw std::invalid_argument(
-            "chart.evaluate: a bare ∇ has no operand to evaluate; apply it "
-            "(∇·X, ∇⊗X, ∇×X) first");
+            "chart.evaluate: a ∇ operator is not applied to any field. Every ∇ "
+            "must act on an operand — write ∇·X, ∇⊗X, ∇×X, or ΔX = ∇·(∇⊗X).");
     throw std::invalid_argument(
         "chart.evaluate: unsupported ∇-expression shape");
 }
