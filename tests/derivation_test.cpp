@@ -3223,6 +3223,49 @@ TEST(DistributeContraction, PlainContractionUnchanged)
     EXPECT_EQ(steps::distribute_contraction(ctx, dot), dot);
 }
 
+TEST(DistributeContraction, AbstractNablaFenceIsNotFloated)
+{
+    // ∇·(∇⊗X) must NOT float to (∇·∇)⊗X (vibe 000085): ∇ is a differential
+    // operator, not a vector — floating it strands the field it differentiates
+    // and is a moving-frame correctness trap.  The barrier keys on the fence
+    // leg being an abstract ∇, so the contraction is left positional.
+    Context ctx;
+    auto const* X = rank1(ctx, "X");
+    auto const* nab = make_nabla(ctx);
+    auto const* lap =
+        make_dot(ctx, nab, make_tensor_product(ctx, nab, X)); // ∇·(∇⊗X)
+    EXPECT_EQ(steps::distribute_contraction(ctx, lap), lap);  // unchanged
+    // …and canonicalize preserves the nesting (does not float it either), so an
+    // auto-canonicalize upstream of a chart expansion is non-destructive.
+    auto const* c = steps::canonicalize(ctx, lap);
+    ASSERT_TRUE(std::holds_alternative<Dot>(c->node));
+    auto const& cd = std::get<Dot>(c->node);
+    EXPECT_TRUE(std::holds_alternative<Nabla>(cd.left->node));
+    ASSERT_TRUE(std::holds_alternative<TensorProduct>(cd.right->node));
+    auto const& tp = std::get<TensorProduct>(cd.right->node);
+    EXPECT_TRUE(std::holds_alternative<Nabla>(tp.left->node));
+    EXPECT_TRUE(structural_eq(tp.right, X)); // operand preserved (canon
+                                             // rebuilds)
+    // idempotent: canon(canon(x)) == canon(x)
+    EXPECT_TRUE(structural_eq(c, steps::canonicalize(ctx, c)));
+}
+
+TEST(DistributeContraction, PlainDyadDivergenceStillDistributes)
+{
+    // A plain (operator-free) dyad divergence is unaffected by the ∇ barrier:
+    // a·(u⊗v) → (a·u) v still floats, since neither fence leg is a ∇.
+    Context ctx;
+    auto const* a = rank1(ctx, "a");
+    auto const* u = rank1(ctx, "u");
+    auto const* v = rank1(ctx, "v");
+    auto const* res = steps::distribute_contraction(
+        ctx, make_dot(ctx, a, make_tensor_product(ctx, u, v)));
+    auto const* tp = std::get_if<TensorProduct>(&res->node);
+    ASSERT_NE(tp, nullptr);
+    EXPECT_TRUE(std::holds_alternative<Dot>(tp->left->node));
+    EXPECT_EQ(tp->right, v);
+}
+
 TEST(DistributeContraction, SelfPreparesOverUndistributedSum)
 {
     // a · (u⊗v + p⊗q): the contraction is hidden behind an un-distributed sum.

@@ -85,12 +85,14 @@ invariant to that dispatch — NOT a new lowering algorithm.
 
 ## Obstacles/risks for approach A (the design work)
 
-1. **Interpret BEFORE canonicalize.** `canonicalize` floats scalars across `∇`
-   (`∇·(∇⊗X) → (∇·∇)⊗X`, the I2/B3 wall — vibe 000081/000083) and reorders
-   `Dot`/`⊗`, breaking the `Dot(∇, …)` patterns. A freshly-built invariant is
-   *un-canonicalized* (constructors don't canonicalize), so interpret the user's
-   expression as built. Decide behaviour if a canonicalized/floated form is
-   passed (re-recognise `(∇·∇)⊗X`? or require raw).
+1. **Interpret BEFORE canonicalize — RESOLVED by vibe 000085.** This *was* the
+   main risk: `canonicalize` floated the operand across `∇` (`∇·(∇⊗X) →
+   (∇·∇)⊗X`, the I2/B3 wall) irreversibly, so the interpreter had to run first.
+   Vibe 000085 barred that float at its one site (`distribute_contraction`) and
+   taught the nf model to carry the `∇⊗X` operator fence (a `Paren`), so
+   `canonicalize` now **preserves** `∇·(∇⊗X)` and is idempotent. **The
+   interpreter may canonicalize freely.** (The other reorderings the interpreter
+   cares about — `Dot`/`⊗` grouping — are stable under the preserved nesting.)
 2. **Operator precedence / association.** `nabla @ nabla * u` follows Python
    precedence; the interpreter follows whatever core tree that built. Document the
    parenthesisation, and recognise both `div(grad)` and the `(∇·∇)⊗` Laplacian.

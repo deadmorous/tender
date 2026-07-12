@@ -1277,6 +1277,17 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
     using Mk = Expr const* (*)(Context&, Expr const*, Expr const*);
     auto is_scalar = [](Expr const* x)
     { return infer_rank(x) == std::optional<int>{0}; };
+    // An abstract ∇ is a differential *operator*, not a vector: the fence
+    // identity a·(b⊗c)=(a·b)c is invalid for it — floating it contracts the
+    // operator with a neighbour and strands the field it must still
+    // differentiate (∇·(∇⊗X) → (∇·∇)⊗X, defensible only in a constant Cartesian
+    // frame, a correctness trap in a moving one; vibe 000085).  Treat an
+    // abstract ∇ on the contractor or on a fence leg as a barrier and keep the
+    // contraction positional, so canonicalize *preserves* the ∇-nesting for
+    // expand_nabla / a chart to lower.  (A concrete post-application `Deriv` is
+    // an ordinary factor once applied and still distributes.)
+    auto is_nabla = [](Expr const* x)
+    { return std::holds_alternative<Nabla>(x->node); };
     auto distribute = [&](Context& c,
                           Expr const* node,
                           Expr const* l,
@@ -1315,18 +1326,25 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
         if (auto const* rp = std::get_if<TensorProduct>(&r->node))
         {
             // op(L, A⊗B): float a scalar near leg out, else contract with the
-            // near vector A.
-            res = is_scalar(rp->left) ?
-                      make_tensor_product(c, rp->left, mk(c, l, rp->right)) :
-                      make_tensor_product(c, mk(c, l, rp->left), rp->right);
+            // near vector A — unless a fence leg is an abstract ∇ (operator
+            // barrier, see above).  Keying on a *leg* (not the contractor)
+            // guarantees every fence left un-distributed provably contains a ∇,
+            // so encapsulate can carry it and the plain-dyad throw still bites.
+            if (!is_nabla(rp->left) && !is_nabla(rp->right))
+                res =
+                    is_scalar(rp->left) ?
+                        make_tensor_product(c, rp->left, mk(c, l, rp->right)) :
+                        make_tensor_product(c, mk(c, l, rp->left), rp->right);
         }
         else if (auto const* lp = std::get_if<TensorProduct>(&l->node))
         {
             // op(A⊗B, R): float a scalar near leg (B) out, else contract with
-            // the near vector B.
-            res = is_scalar(lp->right) ?
-                      make_tensor_product(c, mk(c, lp->left, r), lp->right) :
-                      make_tensor_product(c, lp->left, mk(c, lp->right, r));
+            // the near vector B — same abstract-∇ leg barrier.
+            if (!is_nabla(lp->left) && !is_nabla(lp->right))
+                res =
+                    is_scalar(lp->right) ?
+                        make_tensor_product(c, mk(c, lp->left, r), lp->right) :
+                        make_tensor_product(c, lp->left, mk(c, lp->right, r));
         }
         // Peeling a wrapper may expose a sum that the entry expand_products
         // never saw (it was hidden under the quotient): distribute over it so

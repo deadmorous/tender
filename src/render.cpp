@@ -135,6 +135,22 @@ static bool is_laplacian_operator(Expr const& e)
            && std::holds_alternative<Nabla>(d->right->node);
 }
 
+// If `e` is the nested (un-floated) Laplacian ∇·(∇⊗X) = dot(∇, ∇⊗X), return its
+// operand X; else nullptr.  This is the form canonicalize now *preserves* (vibe
+// 000085 — the ∇ operator-fence barrier); the Dot render arm turns it into ΔX,
+// but a scalar coefficient c⊗(∇·(∇⊗X)) needs it recognised at the ⊗ level too
+// so `c Δ X` renders without wrapping the Dot in parens.
+static Expr const* nested_laplacian_operand(Expr const& e)
+{
+    auto const* d = std::get_if<Dot>(&e.node);
+    if (!d || !std::holds_alternative<Nabla>(d->left->node))
+        return nullptr;
+    auto const* tp = std::get_if<TensorProduct>(&d->right->node);
+    if (tp && std::holds_alternative<Nabla>(tp->left->node))
+        return tp->right;
+    return nullptr;
+}
+
 // Flatten a ⊗-product tree into its factors, left to right.
 static void flatten_product(Expr const& e, std::vector<Expr const*>& out)
 {
@@ -522,6 +538,31 @@ struct Renderer
                 },
                 [&](TensorProduct const& p) -> std::string
                 {
+                    // Laplacian recognition, nested form (vibe 000085):
+                    // canonicalize now *preserves* c·∇·(∇⊗X) as c ⊗ ∇·(∇⊗X)
+                    // (the ∇ operator-fence is no longer floated).  The Dot arm
+                    // renders the ∇·(∇⊗X) as ΔX, but a leading scalar
+                    // coefficient would wrap it in parens (c ⊗ Dot ⇒ "c (ΔX)");
+                    // recognise a scalar-only left chain times a nested
+                    // Laplacian here and render the clean "c Δ X".
+                    if (auto const* operand =
+                            nested_laplacian_operand(*p.right))
+                    {
+                        std::vector<Expr const*> lf;
+                        flatten_product(*p.left, lf);
+                        bool all_scalar = true;
+                        for (auto const* f: lf)
+                            if (infer_rank(f) != std::optional<int>{0})
+                                all_scalar = false;
+                        if (all_scalar)
+                        {
+                            std::string out;
+                            for (auto const* f: lf)
+                                out += sub_product_child(*f) + " \\, ";
+                            return out + "\\Delta "
+                                   + sub(*operand, TENSOR_PREC);
+                        }
+                    }
                     // Laplacian recognition, floated form (vibe 000083):
                     // canonicalize rewrites c·∇·(∇⊗X) into the equivalent
                     // (c ∇·∇)⊗X — the scalar Laplacian operator ∇·∇, carrying

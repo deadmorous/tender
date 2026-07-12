@@ -497,6 +497,32 @@ def test_invariant_laplacian_constructor():
     assert td.structural_eq(t.laplacian(eps), nab @ (nab * eps))
 
 
+def test_canonicalize_preserves_nabla_laplacian_nesting():
+    # vibe 000085: canonicalize must NOT float the abstract-∇ operator fence
+    # ∇·(∇⊗X) into (∇·∇)⊗X.  That float is a moving-frame correctness trap and,
+    # crucially, irreversible — a canonicalize done automatically at the start of
+    # some later step would silently break the ability to expand ΔX in a chart.
+    # Canonicalize is now non-destructive on the ∇-nesting (and idempotent).
+    ws = t.Workspace()
+    X = ws.field("X", 1)
+    nab = t.nabla(ctx=ws.ctx)
+    lap = nab @ (nab * X)  # ∇·(∇⊗X) = ΔX
+    floated = (nab @ nab) * X  # (∇·∇)⊗X — the old corrupted form
+
+    c = td.canonicalize(lap)
+    assert td.structural_eq(c, lap), "canonicalize floated the ∇ fence"
+    assert not td.structural_eq(c, floated)
+    assert td.structural_eq(c, td.canonicalize(c)), "not idempotent"
+    assert c.latex() == r"\Delta \mathbf{X}"
+
+    # a scalar coefficient rides through and still renders the clean Laplacian,
+    # not a parenthesised (ΔX): μΔX / 2μΔX (the navier_lame endpoint shape).
+    mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+    assert td.canonicalize(mu * lap).latex() == r"\mu \, \Delta \mathbf{X}"
+    two = t.scalar(2, ctx=ws.ctx)
+    assert td.canonicalize(two * mu * lap).latex() == r"2 \, \mu \, \Delta \mathbf{X}"
+
+
 def test_apply_operators_no_op_without_deriv():
     # vibe 000083 Part A: with no concrete Deriv to apply, apply_operators is a
     # genuine no-op — it must NOT canonicalize (which would float the scalar off
