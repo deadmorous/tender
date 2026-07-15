@@ -52,6 +52,7 @@ __all__ = [
     "saturate",
     "structural_eq",
     "algebraic_eq",
+    "at",
 ]
 
 
@@ -425,3 +426,22 @@ def algebraic_eq(a, b):
     so fraction shapes that T0 keeps apart (``x/r + y/r`` vs ``(x+y)/r``) compare
     equal (vibe 000074)."""
     return _core._algebraic_eq(a, b)
+
+
+def at(expr, path, step):
+    """Apply *step* to only the subexpression at *path*, splicing the result back.
+
+    *path* is a ``list[int]`` of child selectors from the root (see
+    :meth:`Expr.find` / :meth:`Expr.addends` to obtain one); *step* is any
+    ``(Expr) -> Expr`` callable — a built-in step, an ``expand_in_basis``
+    closure, ``apply_identity(...)``, etc.  This retargets *any* step to one
+    occurrence, so e.g. only one ``I`` in ``a × I × b`` expands::
+
+        p = expr.find(kind="Identity")[0]
+        out = td.at(expr, p, lambda s: tb.expand_in_basis(s, frame, cov))
+
+    Paths address one specific tree, so canonicalize *before* selecting and do
+    not canonicalize between selecting and applying (a reshaping step would
+    invalidate the path).
+    """
+    return expr.rewrite_at(path, step)

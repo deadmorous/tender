@@ -17,6 +17,7 @@
 #include <tender/nf_lower.hpp> // nf::raise
 #include <tender/rational.hpp>
 #include <tender/render.hpp>
+#include <tender/rewrite.hpp>
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -394,6 +395,98 @@ NB_MODULE(_core, m)
             "The invariant rank, inferred through the operators (TensorProduct "
             "adds ranks, Dot removes 2, DDot 4, Cross 1, ...). None when a leaf "
             "rank is undeclared or a contraction would be ill-formed.")
+        // ---- Positional addressing (vibe 000054) ---------------------- //
+        // A path is a list[int] of child selectors from the root (binary
+        // left=0/right=1, unary operand=0, …).  Paths address one specific
+        // tree, so the workflow is canonicalize → address → rewrite, with no
+        // canonicalize in between.
+        .def(
+            "at",
+            [](PyExpr const& e, Path const& path) -> PyExpr
+            { return derive(e, subexpr_at(e.expr, path)); },
+            "path"_a,
+            "The subexpression at `path` (a list[int] of child selectors) — "
+            "extract a part (e.g. one term) as a first-class expression.  An "
+            "out-of-range selector raises IndexError.")
+        .def(
+            "replace_at",
+            [](PyExpr const& e, Path const& path, PyExpr const& sub) -> PyExpr
+            { return derive(e, replace_at(*e.ctx, e.expr, path, sub.expr)); },
+            "path"_a,
+            "sub"_a,
+            "A copy of this expression with the subexpression at `path` replaced "
+            "by `sub` — splice a separately worked-on part back in.  Off-path "
+            "nodes are shared, so this is cheap.")
+        .def(
+            "rewrite_at",
+            [](PyExpr const& e, Path const& path, nb::callable fn) -> PyExpr
+            {
+                auto* out = rewrite_at(
+                    *e.ctx,
+                    e.expr,
+                    path,
+                    [&](Context&, Expr const* sub) -> Expr const*
+                    {
+                        nb::object res = fn(derive(e, sub));
+                        return nb::cast<PyExpr>(res).expr;
+                    });
+                return derive(e, out);
+            },
+            "path"_a,
+            "fn"_a,
+            "Apply `fn` (an (Expr)->Expr callable) to the subexpression at "
+            "`path`, splicing the result back — selectively apply any step to "
+            "one occurrence.  See also tender.derivation.at.")
+        .def(
+            "find",
+            [](PyExpr const& e,
+               std::optional<std::string> kind,
+               std::optional<std::string> name) -> std::vector<Path>
+            {
+                if (!kind && !name)
+                    throw nb::value_error(
+                        "find: pass at least one of kind= or name=");
+                auto well_known_name = [](WellKnownKind k) -> char const*
+                {
+                    switch (k)
+                    {
+                        case WellKnownKind::Identity: return "Identity";
+                        case WellKnownKind::Delta: return "Delta";
+                        case WellKnownKind::LeviCivita: return "LeviCivita";
+                        case WellKnownKind::Metric: return "Metric";
+                    }
+                    return "";
+                };
+                auto pred = [&](Expr const* n) -> bool
+                {
+                    auto const* t = std::get_if<TensorObject>(&n->node);
+                    if (!t)
+                        return false;
+                    if (kind)
+                    {
+                        if (!t->traits || !t->traits->well_known)
+                            return false;
+                        if (*kind != well_known_name(*t->traits->well_known))
+                            return false;
+                    }
+                    if (name && t->name.v.view() != *name)
+                        return false;
+                    return true;
+                };
+                return find_occurrences(e.expr, pred);
+            },
+            "kind"_a = nb::none(),
+            "name"_a = nb::none(),
+            "The paths (pre-order) to matching tensor objects: kind= a "
+            "well-known name (\"Identity\", \"Delta\", \"LeviCivita\", "
+            "\"Metric\"), name= a tensor's name; both narrow (AND).  find()[k] "
+            "is the k-th occurrence, ready for .at / .rewrite_at.")
+        .def(
+            "addends",
+            [](PyExpr const& e) -> std::vector<Path>
+            { return addend_paths(e.expr); },
+            "The paths to the top-level addends (walking the Sum/Difference "
+            "spine) — one per term, so `.at(e.addends()[k])` extracts a term.")
         .def(
             "__repr__",
             [](PyExpr const& e) -> std::string
