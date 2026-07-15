@@ -135,7 +135,20 @@ implemented.
 
 ---
 
-# Committed design (2026-07-15)
+# Committed design (2026-07-15) — IMPLEMENTED (increments 1–5)
+
+**Status: DONE** (2026-07-16). All five increments shipped: `children` /
+`with_children` (rewrite.hpp, rewrite_tree re-expressed on them, heap-free via
+`CappedVec`), `subexpr_at` / `rewrite_at` / `replace_at` / `find_occurrences` /
+`addend_paths`, and the Python surface `Expr.at` / `.replace_at` / `.rewrite_at`
+/ `.find(kind=/name=)` / `.addends()` + the free combinator `td.at(expr, path,
+step)`. Validated by selectively expanding one `I` in `a×I×b` (neighbours stay
+symbolic) and selectively reassembling one coordinate term (vibe 000075 gap D
+mechanism). 845 C++ + 308 Python pass; rewrite.hpp 93% line coverage. Tests:
+`tests/rewrite_test.cpp`, `python/tests/test_select.py`. The **labeled-LaTeX
+visual feedback remains the one deferred piece** (a future increment).
+
+
 
 The scope grew: alongside *selective application* (apply a step to one
 occurrence, not the whole tree) the user wants to **extract a specific part of

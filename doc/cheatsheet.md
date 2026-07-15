@@ -102,6 +102,33 @@ Methods:
 | `.latex(map=None)` | `str` | LaTeX math string (no `$`); pass an `IndexNameMap` to keep index names stable across renders | |
 | `.rank` | `int` or `None` | Inferred invariant rank (⊗ adds, · removes 2, `:` 4, × 1). `None` if a leaf rank is undeclared or a contraction is ill-formed | property |
 
+### Selecting and rewriting parts (vibe 54)
+
+Address one occurrence by its **path** — a `list[int]` of child selectors from
+the root (binary `left`=0/`right`=1, unary operand=0, …) — to apply a step to,
+or extract, just that part instead of the whole tree.
+
+| Method | Returns | Does | Notes |
+|---|---|---|---|
+| `.find(kind=None, name=None)` | `list[list[int]]` | Paths (pre-order) to matching tensor objects: `kind=` a well-known name (`"Identity"`, `"Delta"`, `"LeviCivita"`, `"Metric"`), `name=` a tensor's name; both narrow (AND) | `find()[k]` is the k-th occurrence |
+| `.addends()` | `list[list[int]]` | Paths to the top-level terms (walking the `+`/`−` spine) | so `.at(e.addends()[k])` extracts a term |
+| `.at(path)` | `Expr` | The subexpression at `path` — **extract** a part as a first-class expression | `IndexError` if out of range |
+| `.replace_at(path, sub)` | `Expr` | Copy with the part at `path` replaced by `sub` — **splice** back | off-path nodes are shared (cheap) |
+| `.rewrite_at(path, fn)` | `Expr` | Apply `fn` (an `Expr→Expr` step) at `path` only — **selective application** | see `td.at` below |
+
+`td.at(expr, path, step)` is the free-function form of `.rewrite_at` — it
+retargets *any* step to one occurrence: e.g. expand only one `I` in `a × I × b`,
+leaving `a`, `b` symbolic:
+
+```python
+p = expr.find(kind="Identity")[0]
+out = td.at(expr, p, lambda s: tb.expand_in_basis(s, frame, tb.Variance.Covariant))
+```
+
+> **Don't** canonicalize between selecting a path and rewriting it — a path
+> addresses one specific tree, and canonicalize reshapes it. The order is
+> *canonicalize → `find`/address → `at`*.
+
 Building blocks come from the top-level `tender` module (or the `Workspace`
 methods above). These take an explicit `ctx=` when used directly:
 
