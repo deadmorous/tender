@@ -135,18 +135,34 @@ implemented.
 
 ---
 
-# Committed design (2026-07-15) — IMPLEMENTED (increments 1–5)
+# Committed design (2026-07-15) — IMPLEMENTED (increments 1–5 + labeled view)
 
-**Status: DONE** (2026-07-16). All five increments shipped: `children` /
-`with_children` (rewrite.hpp, rewrite_tree re-expressed on them, heap-free via
-`CappedVec`), `subexpr_at` / `rewrite_at` / `replace_at` / `find_occurrences` /
-`addend_paths`, and the Python surface `Expr.at` / `.replace_at` / `.rewrite_at`
-/ `.find(kind=/name=)` / `.addends()` + the free combinator `td.at(expr, path,
-step)`. Validated by selectively expanding one `I` in `a×I×b` (neighbours stay
-symbolic) and selectively reassembling one coordinate term (vibe 000075 gap D
-mechanism). 845 C++ + 308 Python pass; rewrite.hpp 93% line coverage. Tests:
-`tests/rewrite_test.cpp`, `python/tests/test_select.py`. The **labeled-LaTeX
-visual feedback remains the one deferred piece** (a future increment).
+**Status: DONE** (2026-07-16), including the labeled-LaTeX visual feedback.
+Increments 1–5: `children` / `with_children` (rewrite.hpp, rewrite_tree
+re-expressed on them, heap-free via `CappedVec`), `subexpr_at` / `rewrite_at` /
+`replace_at` / `find_occurrences` / `addend_paths`, and the Python surface
+`Expr.at` / `.replace_at` / `.rewrite_at` / `.find(kind=/name=)` / `.addends()`
++ the free combinator `td.at(expr, path, step)`. Validated by selectively
+expanding one `I` in `a×I×b` (neighbours stay symbolic) and selectively
+reassembling one coordinate term (vibe 000075 gap D mechanism).
+
+**Labeled view (the visual feedback):** `Expr.paths(which)` enumerates node
+paths by policy (`all`/`atoms`/`tensors`/`wellknown`); `tender.render.labeled(
+expr, which)` returns a Jupyter/terminal display object — the whole expression
+above a **path → part** legend. *Design choice:* the legend renders each part
+**independently** rather than superimposing tags on the one pretty rendering.
+The pretty renderer diverges from the structural (`children`) tree in several
+arms — Δ-folding (`∇·(∇⊗X)`→`Δ X`), product flattening, subtraction rewrite,
+`X⊗∇`→`(∇X)ᵀ` — so threading a `children`-path through it to place in-line tags
+risks emitting a tag whose path silently points at the *wrong* node. Rendering
+each part on its own is exact by construction under both hash-consing and every
+fold (verified: a legend path reaches the `X` inside a folded `Δ X`). If literal
+above-node tags are wanted later, the marker-node route (option 4) is the safe
+way and plugs into the same paths.
+
+845 C++ + 316 Python pass; rewrite.hpp 93% line coverage. Tests:
+`tests/rewrite_test.cpp`, `python/tests/test_select.py`,
+`python/tests/test_render.py`.
 
 
 

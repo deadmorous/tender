@@ -112,6 +112,7 @@ or extract, just that part instead of the whole tree.
 |---|---|---|---|
 | `.find(kind=None, name=None)` | `list[list[int]]` | Paths (pre-order) to matching tensor objects: `kind=` a well-known name (`"Identity"`, `"Delta"`, `"LeviCivita"`, `"Metric"`), `name=` a tensor's name; both narrow (AND) | `find()[k]` is the k-th occurrence |
 | `.addends()` | `list[list[int]]` | Paths to the top-level terms (walking the `+`/`−` spine) | so `.at(e.addends()[k])` extracts a term |
+| `.paths(which="all")` | `list[list[int]]` | Paths (pre-order) to nodes by policy: `"all"`, `"atoms"` (leaves), `"tensors"`, `"wellknown"` | feeds the labeled view below |
 | `.at(path)` | `Expr` | The subexpression at `path` — **extract** a part as a first-class expression | `IndexError` if out of range |
 | `.replace_at(path, sub)` | `Expr` | Copy with the part at `path` replaced by `sub` — **splice** back | off-path nodes are shared (cheap) |
 | `.rewrite_at(path, fn)` | `Expr` | Apply `fn` (an `Expr→Expr` step) at `path` only — **selective application** | see `td.at` below |
@@ -128,6 +129,19 @@ out = td.at(expr, p, lambda s: tb.expand_in_basis(s, frame, tb.Variance.Covarian
 > **Don't** canonicalize between selecting a path and rewriting it — a path
 > addresses one specific tree, and canonicalize reshapes it. The order is
 > *canonicalize → `find`/address → `at`*.
+
+**Reading a path off the expression** — `tender.render.labeled(expr,
+which="all")` returns a display object (Jupyter table / terminal text): the
+whole expression above a **path → part** legend, so you can see which path to
+pass to `.at` / `td.at`. Each part is rendered on its own, so the legend is
+exact even where the pretty renderer folds structure (a `Δ` hides the
+`∇·(∇⊗X)` whose parts you still need to address).
+
+```python
+print(t.render.labeled(expr, which="wellknown"))
+# \Delta \mathbf{X}
+# [1, 1]  \mathbf{X}          ← e.at([1,1]) is the field X inside the Δ
+```
 
 Building blocks come from the top-level `tender` module (or the `Workspace`
 methods above). These take an explicit `ctx=` when used directly:
@@ -349,6 +363,7 @@ evaluation — nothing computes until `.evaluate(chart)`.
 | Function | Returns | Does |
 |---|---|---|
 | `display(expr, map=None)` | `IPython.display.Math` | Rich Jupyter render; pass an `IndexNameMap` to share index names across cells |
+| `labeled(expr, which="all", map=None)` | `LabeledExpr` | Path-labeled view (Jupyter table / terminal text): the expression + a path→part legend, for reading off selection paths (see "Selecting and rewriting parts") |
 | `to_latex_document(exprs, title=None)` | `str` | Standalone LaTeX doc from `(label, Expr)` pairs, one display equation each |
 | `expr.latex(map=None)` / `render_latex(expr, map=None)` | `str` | Bare LaTeX math string |
 
