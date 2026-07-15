@@ -488,6 +488,33 @@ NB_MODULE(_core, m)
             "The paths to the top-level addends (walking the Sum/Difference "
             "spine) — one per term, so `.at(e.addends()[k])` extracts a term.")
         .def(
+            "paths",
+            [](PyExpr const& e, std::string const& which) -> std::vector<Path>
+            {
+                if (which != "all" && which != "atoms" && which != "tensors"
+                    && which != "wellknown")
+                    throw nb::value_error(
+                        "paths: which must be one of "
+                        "\"all\", \"atoms\", \"tensors\", \"wellknown\"");
+                auto pred = [&](Expr const* n) -> bool
+                {
+                    if (which == "all")
+                        return true;
+                    if (which == "atoms")
+                        return children(n).size() == 0;
+                    auto const* t = std::get_if<TensorObject>(&n->node);
+                    if (which == "tensors")
+                        return t != nullptr;
+                    return t && t->traits && t->traits->well_known; // wellknown
+                };
+                return find_occurrences(e.expr, pred);
+            },
+            "which"_a = "all",
+            "The paths (pre-order) to nodes selected by `which`: \"all\" every "
+            "node, \"atoms\" the leaves, \"tensors\" every named tensor, "
+            "\"wellknown\" the I/δ/ε/g.  Feeds the labeled view (tender.render) "
+            "and `.at`.")
+        .def(
             "__repr__",
             [](PyExpr const& e) -> std::string
             {
