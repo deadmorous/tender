@@ -129,7 +129,110 @@ Open detailization questions:
 
 ## Status
 
-View + options captured; **not committed**.  Re-association (vibe 000055, the
-sibling usability fix from the same `a × I × b` exercise) is implemented.
-Awaiting further thoughts before choosing an addressing option and detailing the
-labeled-render design.
+View + options captured.  Committed design below (2026-07-15).  Re-association
+(vibe 000055, the sibling usability fix from the same `a × I × b` exercise) is
+implemented.
+
+---
+
+# Committed design (2026-07-15)
+
+The scope grew: alongside *selective application* (apply a step to one
+occurrence, not the whole tree) the user wants to **extract a specific part of
+an expression into another expression** (e.g. one term).  Both are the **same
+primitive** — address a node *by its path from the root* — so one addressing
+core serves both.
+
+## Decisions (locked with the user)
+
+- **Addressing model: lightweight paths.**  `Path = vector<int>` (Dewey
+  address) + `find`/`Nth`, governed by the sequencing rule *canonicalize →
+  address → rewrite, with no canonicalize in between* (the canon-stability
+  hazard above).  The **marker node** (option 4, canon-stable) is **not** built
+  now; it can be added later as an alternative front-end feeding the very same
+  `rewrite_at`, so nothing here is thrown away if it is wanted.
+- **Visual feedback (labeled LaTeX): deferred to a later increment.**  Ship the
+  headless core first, prove it on a real derivation, then add
+  `render_latex_labeled` once the addressing vocabulary has settled.  The label a
+  future renderer prints must be exactly the token passed back to `at` /
+  `find` (one vocabulary), which the headless API fixes first.
+- **Selective *step* application composes; it is not per-step plumbing.**  One
+  generic combinator `at(expr, path, step)` applies **any** `(Expr) -> Expr`
+  step to the sub-Expr at `path` and splices the result back.  So
+  `at(path_to_I, λs. expand_in_basis(s, frame))` expands *only that* `I`, and the
+  same combinator retargets `apply_identity`, `reassemble`, … — no step learns a
+  "target" argument.  (The cheap kind/predicate *filter* on `expand_in_basis` is
+  then unnecessary: the path lands on the exact node, so expanding "the whole
+  subtree at that path" **is** expanding that one occurrence.)
+
+## Architecture (bottom-up)
+
+**1. Navigation primitives** (`rewrite.hpp`).  Factor the per-node-kind child
+structure — currently hand-written once inside `rewrite_tree` — into two small
+functions so no second giant visitor is written (DRY):
+
+- `children(e) -> small_vector<Expr const*>` — the Expr children in selector
+  order (binary: `left`=0, `right`=1; unary: `operand`=0; `ExplicitSum`:
+  `body`=0, `bound`=1 *when present*; `NoSum`/`ScalarFn`/`Deriv`: their one child;
+  `Pow`: `base`=0, `exponent`=1; leaves: empty).
+- `with_children(ctx, e, new_children) -> Expr const*` — rebuild `e` with new
+  children, **copying non-Expr fields** (the bound `index`, `ScalarFn::kind`,
+  optional `ExplicitSum::bound` arity) from `e`.  Returns `e` unchanged (pointer
+  reuse) when every child is identical.
+
+`rewrite_tree` is then re-expressed as
+`f(ctx, with_children(ctx, e, map(rewrite_tree, children(e))))` — same pointer-
+reuse and bottom-up-then-`f` semantics as today.
+
+**2. Path operations** (`rewrite.hpp`), all layered on the two primitives:
+
+- `subexpr_at(e, path) -> Expr const*` — **extraction / navigation.**  The
+  returned sub-Expr shares the same ctx/arena, so it is a first-class expression
+  any step runs on.  Out-of-range selector ⇒ error (no silent nullptr).
+- `rewrite_at(ctx, e, path, f) -> Expr const*` — apply `f` at the target,
+  rebuild only the spine above it; everything off-path stays **shared** (sibling
+  pointer identity preserved — cheap).  **Selective application.**
+- `replace_at(ctx, e, path, sub)` = `rewrite_at` with a const `f` — splice a
+  worked-on sub back in.  Gives the **round-trip**: `sub = at(e, p)` → work on
+  `sub` → `e2 = replace_at(e, p, sub2)`.
+- `find_occurrences(e, predicate) -> vector<Path>` in **pre-order**, with
+  predicate sugar: by kind (well-known `Identity`, a generic `TensorObject`), by
+  name.  `Nth(kind, k)` = `find_occurrences(...)[k]`.  A convenience selector
+  enumerates the **top-level addends** of a canonical sum (walk the
+  `Sum`/`Difference` spine, one path per addend) so "extract *a term*" is a
+  natural call.
+
+**3. Python surface.**  Methods on `Expr` (`PyExpr` already carries
+`{ctx, expr}`, so `derive` re-wraps): `.at(path)` (extract), `.replace_at(path,
+sub)`, `.rewrite_at(path, fn)`, `.find(kind=…/name=…)`, plus the free combinator
+`tender.derivation.at(expr, path, step)`.  A `Path` is just a `list[int]`.
+
+## Increment plan (each buildable, tested, ≥90% coverage, clang-formatted)
+
+1. **Navigation primitives** — `children`/`with_children`; re-express
+   `rewrite_tree` on them.  Tests: `with_children ∘ children` round-trips every
+   node kind incl. `ExplicitSum` with/without bound; `rewrite_tree` behaviour
+   unchanged; pointer reuse when nothing changes.
+2. **Path ops** — `subexpr_at`, `rewrite_at`, `replace_at`.  Tests: navigate to
+   a deep node; rewrite at a path; splice; **off-path sharing** (untouched
+   sibling keeps its pointer); bad-path error.
+3. **`find_occurrences` + predicates + Nth + addend enumeration.**  Tests: find
+   both `I`s in `a×I×b×I` in order; Nth; enumerate addends of a canonical sum.
+4. **Python surface + `at` combinator.**  Tests: selectively `expand_in_basis`
+   *one* `I` in `a × I × b`, leaving `a`, `b` symbolic; extract a term from a
+   canonical sum, `simplify` it alone, splice back (round-trip equal to the
+   whole-tree result); `.find` reads off the same paths.
+5. **Validation on a real need** — apply the primitive to the pending
+   ∇-only-expansion + 2nd-derivative reassembly step (vibe 000075 gap D / the
+   strain-compat notebook, vibe 000080): expand only the `∇`/one leg, reassemble
+   that term.  Confirms the primitive unblocks the deferred work; not
+   necessarily finishing that whole derivation here.
+
+**Deferred (later increment):** `render_latex_labeled(e, map, policy) ->
+{latex, label→path}` for visual selection — label content (raw path vs
+occurrence-index-per-kind + legend) and which nodes get labels decided then; the
+printed token must equal the `at`/`find` argument.
+
+See [[route-b-curvilinear-derivations]] (vibe 000075 gap D — the pending need),
+[[vibe80-notebook-gaps-sprint]] (selective expansion deferred there),
+[[canonicalize-preserves-nabla-fence]] (canon reshaping — the stability hazard).
