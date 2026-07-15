@@ -45,6 +45,28 @@ def test_find_requires_a_selector():
         a.find()
 
 
+def test_find_other_well_known_kind():
+    ctx = tender.Context()
+    i = ctx.alloc_index()
+    d = tender.delta(
+        tender.Realm.Oblique, tender.space_3d,
+        tender.Level.Upper, tender.Level.Lower, i, i,
+    )
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    e = a * d
+    assert e.find(kind="Delta") == [[1]]
+    assert e.find(kind="Identity") == []
+
+
+def test_find_kind_and_name_together():
+    ctx = tender.Context()
+    a, b, I = _abI(ctx)
+    e = (a * I) * b
+    # kind and name both narrow (AND): the identity is not named "a".
+    assert e.find(kind="Identity", name="a") == []
+    assert e.find(kind="Identity", name="I") == [[0, 1]]
+
+
 # ---- at (extraction) -------------------------------------------------------
 
 def test_at_extracts_subexpression():
@@ -130,3 +152,47 @@ def test_at_targets_one_of_several_identities():
     )
     # Exactly one bare I remains (the untouched first occurrence).
     assert len(out.find(kind="Identity")) == 1
+
+
+# ---- Validation on the chart machinery (vibe 000054 increment 5) -----------
+#
+# Reassembly of one term is the mechanism vibe 000075 gap D needs (fold one
+# e_i-contracted second-derivative term back to an invariant operator without
+# disturbing its neighbours).  These exercise extract → transform → splice on
+# the real basis machinery.
+
+def _reassemble_term(frame):
+    return lambda s: td.canonicalize(tb.reassemble(td.canonicalize(s), frame))
+
+
+def test_selective_reassembly_round_trip():
+    """b + Σ_i a_i e_i → reassemble only the coordinate term → b + a."""
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    frame = tb.wcs(ctx)
+
+    ax = td.canonicalize(tb.expand_in_basis(a, frame, tb.Variance.Covariant))
+    e = td.canonicalize(ax + b)
+    coord_p = [p for p in e.addends() if r"\sum" in e.at(p).latex()][0]
+
+    out = td.at(e, coord_p, _reassemble_term(frame))
+    assert td.algebraic_eq(out, td.canonicalize(a + b))
+
+
+def test_selective_reassembly_folds_only_the_targeted_term():
+    """Two coordinate terms; fold exactly one — the other stays expanded."""
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    frame = tb.wcs(ctx)
+    cov = tb.Variance.Covariant
+
+    ax = td.canonicalize(tb.expand_in_basis(a, frame, cov))
+    bx = td.canonicalize(tb.expand_in_basis(b, frame, cov))
+    e = td.canonicalize(ax + bx)
+    assert e.latex().count(r"\sum") == 2
+
+    out = td.at(e, e.addends()[0], _reassemble_term(frame))
+    # One term reassembled to an invariant; the other is untouched.
+    assert out.latex().count(r"\sum") == 1

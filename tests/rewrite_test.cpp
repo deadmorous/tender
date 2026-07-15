@@ -124,6 +124,67 @@ TEST(WithChildren, ArityMismatchThrows)
     EXPECT_THROW(with_children(ctx, e, one), std::invalid_argument);
 }
 
+TEST(WithChildren, LeafWithEmptyChildrenReturnsSelf)
+{
+    Context ctx;
+    auto* s = make_scalar(ctx, Rational{2});
+    EXPECT_EQ(with_children(ctx, s, ExprChildren{}), s);
+}
+
+// Rebuild every remaining node kind with a swapped child, so with_children's
+// per-kind reconstruction branch is exercised directly.
+TEST(WithChildren, RebuildsEachRemainingKind)
+{
+    Context ctx;
+    auto* a = vec(ctx, "a");
+    auto* b = vec(ctx, "b");
+
+    auto swap0 = [&](Expr const* e, Expr const* nc) -> Expr const*
+    {
+        auto kids = children(e);
+        kids[0] = nc;
+        return with_children(ctx, e, kids);
+    };
+
+    // Unary kinds.
+    EXPECT_TRUE(
+        structural_eq(swap0(make_negate(ctx, a), b), make_negate(ctx, b)));
+    EXPECT_TRUE(structural_eq(
+        swap0(make_vector_invariant(ctx, a), b),
+        make_vector_invariant(ctx, b)));
+    auto* q = make_coordinate(ctx, make_tensor_name("q"));
+    auto* q2 = make_coordinate(ctx, make_tensor_name("s"));
+    EXPECT_TRUE(structural_eq(
+        swap0(make_scalar_fn(ctx, ScalarFnKind::Sin, q), q2),
+        make_scalar_fn(ctx, ScalarFnKind::Sin, q2)));
+    EXPECT_TRUE(
+        structural_eq(swap0(make_deriv(ctx, q), q2), make_deriv(ctx, q2)));
+
+    // Binary / annotation kinds not covered above.
+    EXPECT_TRUE(structural_eq(
+        swap0(make_difference(ctx, a, b), b), make_difference(ctx, b, b)));
+    EXPECT_TRUE(structural_eq(
+        swap0(make_scalar_div(ctx, a, b), b), make_scalar_div(ctx, b, b)));
+    EXPECT_TRUE(
+        structural_eq(swap0(make_dot(ctx, a, b), b), make_dot(ctx, b, b)));
+    EXPECT_TRUE(
+        structural_eq(swap0(make_ddot(ctx, a, b), b), make_ddot(ctx, b, b)));
+    EXPECT_TRUE(structural_eq(
+        swap0(make_ddot_alt(ctx, a, b), b), make_ddot_alt(ctx, b, b)));
+    EXPECT_TRUE(
+        structural_eq(swap0(make_sum(ctx, a, b), b), make_sum(ctx, b, b)));
+
+    auto* base = make_coordinate(ctx, make_tensor_name("r"));
+    auto* two = make_scalar(ctx, Rational{2});
+    auto* three = make_scalar(ctx, Rational{3});
+    EXPECT_TRUE(structural_eq(
+        swap0(make_pow(ctx, base, two), three), make_pow(ctx, three, two)));
+
+    CountableIndex i{ctx.alloc_index_id()};
+    EXPECT_TRUE(
+        structural_eq(swap0(make_no_sum(ctx, i, a), b), make_no_sum(ctx, i, b)));
+}
+
 // ---- subexpr_at --------------------------------------------------------
 
 TEST(SubexprAt, NavigatesToTarget)
