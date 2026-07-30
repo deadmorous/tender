@@ -1451,7 +1451,11 @@ auto dd_expand(Context& ctx, Expr const* l, Expr const* r, bool alt)
     auto rebuild = [&](Expr const* a, Expr const* b)
     { return alt ? make_ddot_alt(ctx, a, b) : make_ddot(ctx, a, b); };
 
-    // Distribute over sums on either side.
+    // Distribute over the additive structure on either side (Sum / Difference /
+    // Negate) — the same operand set expand_unary normalises for tr/vec/
+    // transpose.  A curvilinear component expansion carries signed addends
+    // (e.g. the `− v/r eθ⊗er` of ∇u in cylindrical coords), so distributing
+    // over Sum alone leaves a Difference/Negate node blocking the contraction.
     if (auto const* s = std::get_if<Sum>(&l->node))
         return make_sum(
             ctx,
@@ -1462,6 +1466,20 @@ auto dd_expand(Context& ctx, Expr const* l, Expr const* r, bool alt)
             ctx,
             dd_expand(ctx, l, s->left, alt),
             dd_expand(ctx, l, s->right, alt));
+    if (auto const* d = std::get_if<Difference>(&l->node))
+        return make_difference(
+            ctx,
+            dd_expand(ctx, d->left, r, alt),
+            dd_expand(ctx, d->right, r, alt));
+    if (auto const* d = std::get_if<Difference>(&r->node))
+        return make_difference(
+            ctx,
+            dd_expand(ctx, l, d->left, alt),
+            dd_expand(ctx, l, d->right, alt));
+    if (auto const* n = std::get_if<Negate>(&l->node))
+        return make_negate(ctx, dd_expand(ctx, n->operand, r, alt));
+    if (auto const* n = std::get_if<Negate>(&r->node))
+        return make_negate(ctx, dd_expand(ctx, l, n->operand, alt));
 
     // Pull a summation binder out (renaming to a fresh id to avoid capture).
     if (auto const* es = std::get_if<ExplicitSum>(&l->node); es && !es->bound)
@@ -1477,6 +1495,55 @@ auto dd_expand(Context& ctx, Expr const* l, Expr const* r, bool alt)
         auto const* body =
             substitute_index_id(ctx, es->body, es->index.id, fresh.id);
         return make_explicit_sum(ctx, fresh, dd_expand(ctx, l, body, alt));
+    }
+
+    // A contraction commutes through a scalar divisor:
+    //   (X/c)··r = (X··r)/c   and   l··(Y/c) = (l··Y)/c.
+    // `split_dyad` only peels *multiplied* scalars, so a symmetric part written
+    // as `(A+Aᵀ)/2` — a ScalarDiv over a Sum — would otherwise stall the whole
+    // double-dot (the strain energy `T··ε` with `ε = (∇u+(∇u)ᵀ)/2`).  Pulling
+    // the divisor out first lets the Sum distribution and dyad rule proceed
+    // (mirrors expand_unary's ScalarDiv handling for tr/vec/transpose).
+    if (auto const* d = std::get_if<ScalarDiv>(&l->node))
+        return make_scalar_div(ctx, dd_expand(ctx, d->left, r, alt), d->right);
+    if (auto const* d = std::get_if<ScalarDiv>(&r->node))
+        return make_scalar_div(ctx, dd_expand(ctx, l, d->left, alt), d->right);
+
+    // Pull scalar factors off a scalar-weighted *additive* operand so the
+    // distribution above can proceed: (s·(A + B))··r = s·((A··r) + (B··r)).  A
+    // coefficient in front of a sum of dyads — e.g. `λ(∇·u)·I` once the
+    // identity is resolved to Σ eᵢ⊗eᵢ — is neither a bare Sum nor a single
+    // dyad, so split_dyad cannot peel it; without this the contraction stalls.
+    // A scalar times a *single* dyad is left to split_dyad below.
+    auto peel_scaled_additive = [&](Expr const* e)
+        -> std::optional<std::pair<std::vector<Expr const*>, Expr const*>>
+    {
+        std::vector<Expr const*> flat;
+        flatten_factors(e, flat);
+        std::vector<Expr const*> scalars, rest;
+        for (auto const* f: flat)
+            (infer_rank(f) == std::optional<int>{0} ? scalars : rest)
+                .push_back(f);
+        if (scalars.empty() || rest.size() != 1)
+            return std::nullopt;
+        auto const& core = rest[0]->node;
+        if (!std::holds_alternative<Sum>(core)
+            && !std::holds_alternative<Difference>(core)
+            && !std::holds_alternative<Negate>(core))
+            return std::nullopt;
+        return std::pair{std::move(scalars), rest[0]};
+    };
+    if (auto p = peel_scaled_additive(l))
+    {
+        auto factors = p->first;
+        factors.push_back(dd_expand(ctx, p->second, r, alt));
+        return product_of(ctx, factors);
+    }
+    if (auto p = peel_scaled_additive(r))
+    {
+        auto factors = p->first;
+        factors.push_back(dd_expand(ctx, l, p->second, alt));
+        return product_of(ctx, factors);
     }
 
     // Core dyad rule.

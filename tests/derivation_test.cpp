@@ -3443,6 +3443,87 @@ TEST(ExpandDoubleDot, NonDyadUnchanged)
     EXPECT_EQ(steps::expand_double_dot(ctx, e), e);
 }
 
+TEST(ExpandDoubleDot, CommutesThroughScalarDiv)
+{
+    // (a⊗b) : ((c⊗d)/2) → (a·c)(b·d)/2.  A scalar divisor wrapping a dyad (the
+    // strain ε = (∇u+(∇u)ᵀ)/2) must not stall the contraction.
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* d = v("d");
+    auto const* two = make_scalar(ctx, Rational{2});
+    auto const* e = make_ddot(
+        ctx,
+        make_tensor_product(ctx, a, b),
+        make_scalar_div(ctx, make_tensor_product(ctx, c, d), two));
+    auto const* expected = make_scalar_div(
+        ctx,
+        make_tensor_product(ctx, make_dot(ctx, a, c), make_dot(ctx, b, d)),
+        two);
+    auto const* got = steps::expand_double_dot(ctx, e);
+    EXPECT_FALSE(std::holds_alternative<DDot>(got->node));
+    EXPECT_TRUE(algebraic_eq(ctx, got, expected));
+}
+
+TEST(ExpandDoubleDot, DistributesOverDifference)
+{
+    // (a⊗b) : (c⊗d − e⊗f) → (a·c)(b·d) − (a·e)(b·f).  A signed addend (the
+    // −v/r term of a curvilinear ∇u) is a Difference node, not a Sum.
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* d = v("d");
+    auto const* f = v("f");
+    auto const* g = v("g");
+    auto const* rhs = make_difference(
+        ctx, make_tensor_product(ctx, c, d), make_tensor_product(ctx, f, g));
+    auto const* got = steps::expand_double_dot(
+        ctx, make_ddot(ctx, make_tensor_product(ctx, a, b), rhs));
+    auto const* expected = make_difference(
+        ctx,
+        make_tensor_product(ctx, make_dot(ctx, a, c), make_dot(ctx, b, d)),
+        make_tensor_product(ctx, make_dot(ctx, a, f), make_dot(ctx, b, g)));
+    EXPECT_FALSE(std::holds_alternative<DDot>(got->node));
+    EXPECT_TRUE(algebraic_eq(ctx, got, expected));
+}
+
+TEST(ExpandDoubleDot, PeelsScalarOffScaledSum)
+{
+    // (s·(a⊗b + c⊗d)) : (p⊗q) → s·((a·p)(b·q) + (c·p)(d·q)).  A coefficient in
+    // front of a *sum* of dyads — e.g. λ(∇·u)·I after I → Σ eₖ⊗eₖ — is neither
+    // a bare Sum nor a single dyad, so split_dyad cannot peel it on its own.
+    Context ctx;
+    auto v = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto const* a = v("a");
+    auto const* b = v("b");
+    auto const* c = v("c");
+    auto const* d = v("d");
+    auto const* p = v("p");
+    auto const* q = v("q");
+    auto const* s = make_tensor_object(ctx, make_tensor_name("s"), {}, 0);
+    auto const* sum = make_sum(
+        ctx, make_tensor_product(ctx, a, b), make_tensor_product(ctx, c, d));
+    auto const* lhs = make_tensor_product(ctx, s, sum);
+    auto const* got = steps::expand_double_dot(
+        ctx, make_ddot(ctx, lhs, make_tensor_product(ctx, p, q)));
+    auto const* expected = make_tensor_product(
+        ctx,
+        s,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, make_dot(ctx, a, p), make_dot(ctx, b, q)),
+            make_tensor_product(ctx, make_dot(ctx, c, p), make_dot(ctx, d, q))));
+    EXPECT_FALSE(std::holds_alternative<DDot>(got->node));
+    EXPECT_TRUE(algebraic_eq(ctx, got, expected));
+}
+
 // ---- expand_dyad_ops -------------------------------------------------------
 
 TEST(ExpandDyadOps, TraceVecTransposeOnDyad)

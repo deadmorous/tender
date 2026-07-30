@@ -166,10 +166,13 @@ def expand_double_dot(expr):
     """Expand a double contraction of dyads by definition.
 
     ``(a⊗b) : (c⊗d) → (a·c)(b·d)`` and ``(a⊗b) ·· (c⊗d) → (a·d)(b·c)``;
-    scalar factors are pulled through and the contraction distributes over sums
-    and summation binders, so it also fires on indexed / implicitly-summed dyads
-    (e.g. ``(Σ_i e_i⊗e_i):(Σ_j e_j⊗e_j)``).  A double dot whose sides are not
-    both dyads is left unchanged.
+    scalar factors are pulled through and the contraction distributes over the
+    full additive structure of either side — ``Sum``, ``Difference``, ``Negate``,
+    a scalar divisor ``(X/c)``, a scalar-weighted sum ``s·(A+B)``, and summation
+    binders — so it fires on indexed / implicitly-summed dyads
+    (``(Σ_i e_i⊗e_i):(Σ_j e_j⊗e_j)``) and reduces a whole elastic energy
+    ``T ·· ε`` with ``ε = (∇u+(∇u)ᵀ)/2`` down to scalar dots in one pass.  A
+    double dot whose sides are not both dyads is left unchanged.
     """
     return _d._expand_double_dot(expr)
 
