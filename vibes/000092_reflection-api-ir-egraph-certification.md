@@ -7,6 +7,14 @@ abstractions are actually used, (4) a basis set of "certification" challenges,
 and (5) textbooks matching tender's notation, including the aimed-at analytical
 mechanics scope.
 
+**Feedback iteration (2026-08-03).** The user reviewed the reflection and
+settled the open questions; decisions are folded into the sections below and
+marked **DECIDED**. The future-scope section 6 replaces the earlier
+"aspirational" tier F with the user's actual roadmap. The implementation plan
+is deliberately a separate discussion — vibe 000093 — because the pieces
+(IR consolidation, e-graph revival, API unification, certification) are
+entangled and need their own ordering argument.
+
 ## 1. Python-facing interface
 
 What already works well: the `Workspace` facade (vibe 000070), operator
@@ -82,6 +90,25 @@ Structural issues — each has produced a recurring family of vibes:
    `Paren` (vibe 000085) is a presentation node doing semantic work. Operator
    applicativity should be node data the canonicalizer respects natively.
 
+**DECIDED — one interface, one engine.** Items 1–3 of this reflection are one
+problem, not three: the interface is unintuitive *because* the engine
+underneath is a bag of manually-ordered steps. The direction is: revive the
+saturation e-graph, use it extensively and consistently as the reasoning
+engine, and revisit the derivation-step catalog on top of it (verbs public,
+steps demoted), so the user-facing surface becomes goal-directed and
+order-insensitive.
+
+**DECIDED — chart-based coordinate systems are the one way.** There are two
+routes to a coordinate system today: the old well-known-basis factories
+(`coord_system.cpp`: `tb.wcs/cylindrical/spherical/polar_2d`, re-exported as
+`Workspace.cylindrical()` etc.) and the chart route (`ws.chart(reference,
+coords, embedding)`), which *derives* the frame, metric, scale factors, and
+connection from the embedding. The old route is obsolete except for `wcs()`
+(charts still need the orthonormal reference frame): every modern example
+builds charts. Plan: `Workspace` grows chart conveniences
+(`ws.cylindrical_chart()` …), the curvilinear well-known factories and
+`coord_system` retire to the attic once tests migrate.
+
 ## 3. Are all abstractions used?
 
 **The e-graph is complete and practically unused.** `nf_egraph` + e-matcher +
@@ -97,8 +124,10 @@ exact failure mode that now makes new challenges fail. Decision needed:
 - **Attic**: freeze it (move to `attic/`), stop paying maintenance every time
   the ANF changes.
 
-Half-alive is the one wrong answer. Recommendation: attempt the revival with a
-strict time box, gated on the certification suite below; attic on failure.
+Half-alive is the one wrong answer. **DECIDED: revive.** The e-graph becomes
+the engine behind the goal-directed verbs and is used extensively and
+consistently; the identity library becomes a first-class, growing asset. The
+step catalog is revisited in the same move (vibe 000093).
 
 Smaller findings: `coord_system` (84 lines) was validation scaffolding for
 charts and is a candidate for the attic; `polynomial` is genuinely used inside
@@ -154,16 +183,72 @@ A challenge counts as certified only at L2. Proposed basis set, in
   ODE in σ_rr — the rotating-cylinder challenge generalized.
 - E4 momentum balance `∇·T + ρb = ρü` projected in cyl and sph.
 
-**F. Aspirational (the analytical-mechanics direction)**
-- F1 inertia dyadic of a rigid body; angular momentum `L = J·ω`; Euler's
-  equations from `dL/dt` in a rotating frame.
-- F2 Lagrange equations of a pendulum and a double pendulum from `T`, `Π`
-  written in direct notation.
-- F3 virtual-work equilibrium of a simple constrained linkage.
+**F. Future scope** — superseded by section 6: challenges for the new
+directions are extracted from the books themselves (the user has most of them
+as Russian PDFs, so derivations can be lifted directly as challenge specs).
 
 Development discipline: features are motivated by moving a specific challenge
 from failing→L1→L2; the suite is the definition of "tender is a decent
 product".
+
+## 6. Future scope — the user's roadmap (feedback iteration)
+
+Ambition: cover the derivations found in the section-5 books. (These are
+exactly the books the user learned from as a student of St. Petersburg
+Polytechnic University, where Lurie, Eliseev, and Zhilin worked; Gantmacher is
+a favorite.) Most are available to the user as Russian PDFs — an immediate,
+concrete source of challenges. Today tender covers a small core of general
+linear continuum mechanics; the extensions go in two directions.
+
+### 6a. Continuum mechanics (source: Eliseev — the mechanics-of-solids book
+and the crack-theory book)
+
+1. **Generalized Saint-Venant problem** — extension, bending, torsion of a
+   prismatic body.
+2. **2D elasticity** — biharmonic Airy function, then Muskhelishvili complex
+   potentials. Requires complex scalars and the Kolosov–Muskhelishvili
+   ∂/∂z, ∂/∂z̄ calculus (each potential depends on both z and z̄).
+   Deliberately **not** an early step.
+3. **Thin curved rods** — two routes: (a) voluntarily constrained strain
+   field → Ritz-type approximations; (b) asymptotic analysis with a formal
+   small parameter in the coordinate along the rod axis. Prerequisite:
+   collecting terms at specific powers of a formal parameter.
+4. **Thin shells and plates** — asymptotic analysis leading to a variant of
+   Kirchhoff–Love theory. Same formal-small-parameter machinery.
+5. **Applied rod/shell/plate problems** — once the governing equations are
+   *derived* (3, 4), a stock of practical problems built on them.
+6. **Linear fracture mechanics** — stress intensity factors via asymptotic
+   analysis near the crack tip.
+7. **Later/maybe**: inelasticity and nonlinear kinematics — several
+   prerequisites missing; explicitly not among the first steps.
+
+### 6b. Applied mechanics (sources: Gantmacher; Zhilin/Eliseev for rotation;
+Neimark & Fufaev for nonholonomic systems)
+
+1. **Finite-DOF constrained systems** from Gantmacher: virtual work principle,
+   Lagrange equations, Appell's equations — the certification-tier material.
+2. **3D rotation done right.** Gantmacher's gap is the absence of a consistent
+   3D-rotation treatment; Zhilin and Eliseev supply it — rotation tensors used
+   directly, in conjunction with Euler angles or other angle sets, *or with no
+   angles introduced at all*. Tender should support the angle-free
+   rotation-tensor calculus natively (orthogonal tensors, angular-velocity
+   tensor/vector, Poisson kinematic equations).
+3. **Hamiltonian mechanics** — a significant part of Gantmacher, cool to
+   support; the user does not feel expert enough to drive its design best, so
+   it is queued for later (possibly a future contributor, possibly the user).
+4. **Nonholonomic systems** — Neimark & Fufaev as a challenge source
+   (quasi-velocities, Appell/Chaplygin-style derivations).
+
+### New capability prerequisites implied by 6a/6b
+
+- **Formal small parameter & series**: a formal ε, truncated expansions,
+  `collect_orders(expr, eps)` — gates rods, shells, plates, cracks.
+- **Time & variation**: generalized coordinates q(t), total d/dt, the
+  variation δ and integration by parts in time — gates Lagrange equations and
+  virtual work.
+- **Rotation-tensor algebra**: proper-orthogonal tensors as first-class
+  citizens — gates rigid-body and rod/shell kinematics.
+- **Complex scalars + z/z̄ calculus** — gates 2D elasticity; last in line.
 
 ## 5. Textbooks in tender's notation
 
