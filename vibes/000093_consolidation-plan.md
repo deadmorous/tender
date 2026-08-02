@@ -190,6 +190,39 @@ identity-group entries + render + challenge, in the same increment.
 Challenge sourcing for both arcs: derivations lifted directly from the user's
 Russian PDFs of the section-5 books; each challenge file cites book + section.
 
+## Execution notes (for whichever model implements this)
+
+This plan is strategy, not a work order. The protocol for executing it:
+
+**Per-milestone briefs.** At the start of each milestone, write a new vibe
+(the project's established practice, cf. vibe 000078) breaking it into
+increments, each with a one-line testable "done when". Do not implement from
+this vibe directly, and do not detail a future milestone early — M2+ details
+would go stale under M1's changes.
+
+**Decision ledger — pre-resolved so no mid-flight judgment is needed:**
+
+- `tender.operators` shadow AST → becomes **sugar emitting core `Expr`**
+  (keeps notebooks working); attic only if the sugar turns out to fight the
+  core. Cheap to revisit.
+- Saturation budgets (initial, revisit with benchmarks): **30 iterations /
+  10k e-nodes** per verb call; on budget trip, fall back to the directed
+  pipeline and say so in the result object — never fail silently.
+- E-graph proof extraction: **out of scope for M2.** The rule-firing trace is
+  the M2 deliverable; full proofs are a later, separate discussion.
+- Anything not covered here that changes a public surface or deletes code:
+  **ask Stepan** — do not resolve by picking the smaller diff.
+
+**Guardrails (repeating the ones that get violated under pressure):**
+
+- Never encode AC/commutativity as e-graph rules — the ANF owns that.
+- Never encode semantics in presentation nodes (the vibe-000085 lesson).
+- Attic, never delete; shims live one milestone.
+- A red challenge is a roadmap entry, not a failure to hide: expected-fail,
+  never skip.
+- Keep every increment alive (build + tests green) — no long-lived broken
+  intermediate states, per CLAUDE.md.
+
 ## Working agreements
 
 - The scoreboard is the single definition of progress; a feature PR that
