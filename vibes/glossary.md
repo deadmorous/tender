@@ -1,7 +1,7 @@
-# Abbreviations and jargon
+# Glossary
 
-Every abbreviation used across the vibes, the source, and the Python surface,
-in one place — so a term met months later can be looked up rather than
+Every abbreviation and piece of project jargon used across the vibes, the
+source, and the Python surface, in one place — so a term met months later can be looked up rather than
 reverse-engineered.  Unlike the numbered vibes this file is not a dated
 discussion: it is a living index, edited in place.
 

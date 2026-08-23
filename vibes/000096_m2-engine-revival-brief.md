@@ -65,7 +65,7 @@ Known limits found in the audit, addressed below:
      rules are deliberately NOT in the library.  The fix is AC matching
      (*associative-commutative*: matching modulo the operand orders the
      operator permits, rather than positionally — see
-     `vibes/abbreviations.md`) for symmetric chains — promoted to increment 3 as the *third* engine gap,
+     `vibes/glossary.md`) for symmetric chains — promoted to increment 3 as the *third* engine gap,
      and the most important one.  Every shipped rule is guarded by a
      name-robustness sweep test.
 
