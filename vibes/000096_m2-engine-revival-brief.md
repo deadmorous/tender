@@ -1,0 +1,138 @@
+# 000096 M2 brief — engine revival, increment breakdown
+
+The per-milestone brief for M2 (vibe 000093), grounded in an audit of
+`nf_egraph.{hpp,cpp}`, `nf_match.{hpp,cpp}`, `identities.{hpp,cpp}`, the
+`_saturate` binding, and the saturation benchmark.
+
+## The audit finding that reshapes M2
+
+Vibe 000093 sketched M2.1 as "port the e-graph to the flattened ANF".
+**That port already happened**: the vibe-000034 Expr-structural `EGraph` is
+gone from the tree, and what stands is `NfEGraph` (vibe 000058 / C14d) —
+Nf-native e-nodes (`Factor`/`Term`/`Sum`), union-find, hash-consing,
+congruence `rebuild`, ε-weighted `extract` (the vibe-000046 Levi-Civita
+weight), and a `saturate` that fires identities through the `nf_match`
+matcher.  Better still, **subtree pattern variables exist** (vibe 000051): a
+slot-less, non-well-known named tensor in a rule's LHS binds a whole target
+factor — so invariant-level rules (bac-cab, dyadic identities) are
+expressible today, not just index rules.  `td.saturate` already drives all
+of this from Python.  M1's ParenKind is already keyed into e-node congruence.
+
+So M2 is not "build the engine" — it is **put the engine to work**: verbs
+with budgets and a trace, a real rule library, the two engine gaps that
+block it, and the tier-A scoreboard promotions that prove it.
+
+Known limits found in the audit, addressed below:
+
+- `saturate` skips multi-term-LHS rules (no Nf sub-sum matcher) — rules can
+  only fire in the "expand" direction when their other side is a sum.
+- Pattern variables bind `Factor`s, not arbitrary sub-`Nf`s.
+- `saturate` caps passes but has **no node budget** and reports only a pass
+  count — no reason, no per-rule trace.
+- The M1 observation: `place_factors`' `has_operator` does not see an
+  operator inside a fence factor (possible term-placement scope bug).
+
+## Increments
+
+Each keeps all suites green.  Scoreboard moves are expected ONLY in
+increment 4, each as an explicit strict-xfail-removal commit.
+
+1. **Verbs on the existing engine: budgets, outcome, trace.**
+   - `Budget{max_passes = 30, max_nodes = 10'000}` (the vibe-000093 decision
+     ledger).  `NfEGraph::saturate` learns the node budget and returns an
+     outcome — `Saturated` (fixed point) / `PassBudget` / `NodeBudget` —
+     plus a per-rule fired count (the rule-firing trace; full proof
+     extraction stays out of scope per the ledger).
+   - `prove_equal(ctx, lhs, rhs, rules, budget)`: add both sides, saturate,
+     proved ⇔ same e-class.  Returns a result object — proved / not-proved-
+     within-budget are *different* answers (a budget trip must never read as
+     "not equal"), with passes, node count, and the trace.
+   - `simplify(ctx, e, rules, budget)`: saturate + ε-weighted extract;
+     result carries the same outcome + trace.  On a budget trip the caller
+     still gets the best extraction, loudly marked.
+   - Thin provisional Python bindings (`td._prove_equal`-style; the blessed
+     public names are M3's), with the loud-fallback warning on budget trips.
+   - *Done when:* `prove_equal` proves the four existing library identities'
+     targets; a deliberately tiny budget yields the budget outcome (test);
+     the trace lists which rules fired how often.
+
+2. **The rule library becomes a first-class asset.**
+   Reorganize `tender/identities` into named groups with a registry
+   (`identities::group("eps_delta")`, `all_groups()`), each rule carrying a
+   name and a direction policy (directed, or bidirectional where the
+   reversed LHS is single-term — emitted as two directed rules):
+   - `eps_delta` — the four existing rules, regrouped.
+   - `cross` — bac-cab `a×(b×c)`, `a×I = I×a`, the Lagrange contraction
+     `(a×b)·(c×d)`.
+   - `dyadic` — `tr(a⊗b) = a·b`, `vec(a⊗b) = a×b`, `(a⊗b)ᵀ = b⊗a`,
+     `(Aᵀ)ᵀ = A`, `I·x = x`, `tr(I) = n` (dimensioned).
+   - `double_dot` — `(a⊗b):(c⊗d)` both pairings, `I··A = tr A`,
+     `A··(b⊗c) = c·A·b`.
+   - `basis` (minimal) — completeness `Σ_i e_i⊗e_i = I` and frame-dot rules,
+     factory-parameterized by a `Basis`; grown only as far as increment 4
+     needs.  Differential/Leibniz rules are explicitly NOT an M2 group (see
+     out-of-scope).
+   Every rule lands with a test that it *fires* under `saturate` on a
+   minimal target (the vibe-000040 lesson: canon α-renaming and symmetry
+   normalization can silently kill a match — per-rule tests catch that at
+   birth).
+   - *Done when:* every tier-A challenge identity has its rules present and
+     firing in isolation; groups are selectable per verb call.
+
+3. **The two engine gaps.**
+   - **Multi-term LHS:** decide by evidence, not upfront.  For
+     `prove_equal`, both sides are saturated, so single-term forward rules
+     can meet in the middle and a sub-sum matcher may be unnecessary; for
+     `simplify`, the factoring direction needs it.  Increment 3 writes the
+     boundary test (a proof that needs the factoring direction), and either
+     implements the term-subset matcher or records the limit in this vibe
+     with the failing test as a strict xfail.  No silent skipping: `saturate`
+     reports skipped multi-term rules in the trace.
+   - **`place_factors` fence scope** (M1 observation): determine whether a
+     term like `s · Paren-fence(∇⊗u)` mis-places `s` into the commutative
+     scalar region; fix (has_operator looks through `OperatorFence` parens —
+     now trivial, the kind is data) or document why it cannot matter.  With
+     a regression test either way.
+   - *Done when:* both items closed with tests; any deferral is a strict
+     xfail plus a paragraph here.
+
+4. **Tier-A promotions + benchmark baseline.**
+   The six strict-xfailed L2s of tier A/B become the acceptance suite:
+   000004 (a·b = b·a), 000005 (a×I = I×a), 000010 (energy T··ε
+   invariantly), 000014 (Lagrange), 000015 (a×(b×I) — THE vibe-000056
+   case), 000016 (tr(A·B) = tr(B·A)).  Each becomes a verb one-liner in its
+   L2 test; each promotion is its own commit removing the strict xfail.
+   A challenge the engine genuinely cannot reach gets its xfail reason
+   updated to name the missing piece instead — no forced wins.
+   Benchmarks: extend `egraph_saturate_bench` with the cross/dyadic groups
+   on the challenge shapes; record passes/nodes/wall-clock here and confirm
+   the default `Budget` covers them with headroom.
+   - *Done when:* the scoreboard shows the promotions (target: all six; the
+     honest number is whatever survives), and this vibe records the bench
+     numbers.
+
+## Deliberately out of scope
+
+- Public naming, `Expr` methods, step demotion — M3.
+- Full e-graph proof production — decision ledger; the trace is the M2
+  deliverable.
+- Differential/Leibniz rule groups (∇ inside the e-graph): the fence
+  machinery makes this a correctness minefield (vibes 000085/000088) and
+  tier-C L2s are M4 material; M2 keeps ∇-bearing terms inert in the graph
+  (fence parens are opaque congruence nodes — already the case).
+- Chart/coordinate lowering through the engine.
+
+## Risks
+
+- **Blowup**: cross + dyadic rules are the explosive kind.  Mitigations:
+  node budget (increment 1 lands before the rules), per-verb groups (never
+  "all rules"), AC handled by canon not rules, and the benchmark gate in
+  increment 4.
+- **Canon eats matches**: symmetry/α normalization can make a textbook rule
+  unmatchable in canonical form (vibe 000040).  Mitigation: per-rule
+  fire-tests at birth (increment 2's rule).
+- **Meet-in-the-middle optimism**: if increment 3's boundary test shows
+  `prove_equal` needs the factoring direction after all, the sub-sum matcher
+  becomes real work — it is the one item in M2 with genuine design risk,
+  which is why it is isolated in its own increment with an honest-deferral
+  exit.
