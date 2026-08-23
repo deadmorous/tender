@@ -1,7 +1,6 @@
 #include <tender/engine.hpp>
 
 #include <tender/derivation.hpp>
-#include <tender/identities.hpp>
 #include <tender/index_space.hpp>
 #include <tender/name.hpp>
 
@@ -46,9 +45,23 @@ auto contraction(
             ctx, delta_ul(ctx, sp, q, m), delta_ul(ctx, sp, q, n)));
 }
 
+// The δ-contraction rule, built locally: the shipped identity library lives
+// in Python (tender/identities.py) so it can be extended without a rebuild,
+// so the C++ engine tests carry the small rules they need themselves.
 auto rules_eps_delta(Context& ctx) -> std::vector<Identity>
 {
-    return {identities::delta_contraction(ctx, space_3d(), Realm::Oblique)};
+    auto const* sp = space_3d();
+    CountableIndex const p{ctx.alloc_index_id()};
+    CountableIndex const a{ctx.alloc_index_id()};
+    CountableIndex const b{ctx.alloc_index_id()};
+    return {Identity{
+        "delta-contraction",
+        make_explicit_sum(
+            ctx,
+            p,
+            make_tensor_product(
+                ctx, delta_ul(ctx, sp, p, a), delta_ul(ctx, sp, p, b))),
+        delta_ll(ctx, sp, a, b)}};
 }
 
 } // namespace

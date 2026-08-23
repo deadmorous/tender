@@ -468,27 +468,40 @@ def saturate(expr, rules, max_iterations=30):
 
 
 def rule_groups():
-    """The names of the identity groups the library ships (vibe 000096)."""
-    return list(_d._rule_group_names())
+    """The names of the identity groups the library ships (vibe 000096).
+
+    The library itself lives in :mod:`tender.identities` — plain Python, so
+    you can add rules without rebuilding anything.
+    """
+    from . import identities as _ident
+
+    return _ident.group_names()
 
 
-def rules(*groups, ctx=None, orthonormal=False):
+def rules(*groups, ctx=None, realm=None, space=None):
     """The rules of one or more named identity groups, ready for the verbs.
 
     Groups are the unit of rule selection: pass the ones a problem needs
     (``rules("cross")``) rather than everything, since rule count is the main
     driver of saturation cost.  All rules are built in *ctx*, so they can be
-    matched against any expression from the same context.
+    matched against any expression from the same context::
 
-        >>> td.prove_equal(lhs, rhs, td.rules("cross"))
+        >>> td.prove_equal(lhs, rhs, td.rules("cross", ctx=ctx))
 
-    ``orthonormal=True`` spells index-level rules in the orthonormal
-    convention (every index lower); the invariant groups ignore it.
+    ``realm`` / ``space`` parameterize the index-level group (``eps_delta``);
+    the invariant groups ignore them.  Your own rules are ordinary
+    :class:`Identity` objects — just add them to the list.
     """
+    from . import identities as _ident
+
+    if ctx is None:
+        ctx = _core.Context()
+    kw = {}
+    if realm is not None:
+        kw["realm"] = realm
     out = []
     for name in groups:
-        for rule_name, lhs, rhs in _d._rule_group(name, ctx, orthonormal):
-            out.append(Identity(rule_name, lhs, rhs))
+        out.extend(_ident.group(ctx, name, space=space, **kw))
     return out
 
 
