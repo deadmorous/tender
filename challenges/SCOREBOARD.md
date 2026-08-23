@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**23 challenges** — 12 at L2, 5 at L1, 6 at L0.
+**23 challenges** — 14 at L2, 3 at L1, 6 at L0.
 
 ## Tier A — Algebra (chart-free)
 
@@ -14,10 +14,10 @@ L0 failing = enumerated, not yet reached (strict xfail).
 | 000001 | bac-cab: a×(b×c) = b(a·c) − c(a·b) | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix; vibe 000035 |
 | 000002 | δ-contractions: δ^i_i = 3, δ^i_j δ^i_j = 3 | **L2 performed** | Borisenko–Tarapov §Kronecker delta; examples/delta_trace.py |
 | 000003 | ε-pairs: Σ_i ε^ijk ε_iml = δδ−δδ, Σ_ij ε^ijk ε_ijl = 2δ | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix; examples/eps_delta.py |
-| 000005 | a×I = I×a | L1 verified | Zhilin, Vectors and Second-Rank Tensors; examples/cross_identity.py |
+| 000005 | a×I = I×a | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors; examples/cross_identity.py |
 | 000010 | T··ε = λ(tr ε)² + 2μ ε··ε (energy density) | L1 verified | Lurie, Theory of Elasticity §elastic energy; vibe 000091 |
 | 000014 | (a×b)·(c×d) = (a·c)(b·d) − (a·d)(b·c) | **L2 performed** | Gibbs–Wilson, Vector Analysis |
-| 000015 | a×(b×I) = b⊗a − (a·b)I | L1 verified | Zhilin, Vectors and Second-Rank Tensors; vibe 000056 |
+| 000015 | a×(b×I) = b⊗a − (a·b)I | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors; vibe 000056 |
 | 000016 | tr(A·B) = tr(B·A) | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors |
 
 ## Tier B — Basis / coordinates
