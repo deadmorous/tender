@@ -55,6 +55,37 @@ def test_reduces_to_the_textbook_quadratic_form():
     assert r"\varepsilon_{ii} \, \varepsilon_{jj}" in lhs.latex()
 
 
-@harness.level("L2", expected=False, reason="needs invariant dyadic algebra (M2 engine)")
+@harness.level(
+    "L2",
+    expected=False,
+    reason="canon cannot state T··ε: a ⊗-product inside a double-dot operand "
+    "throws 'awaits fence distribution' (vibe 000096 increment 3, open)",
+)
 def test_performed_invariantly():
-    harness.todo("derive T··ε = λ(tr ε)² + 2μ ε··ε without expanding in a frame")
+    """Blocked on a canonicalization limit, not on a missing identity.
+
+    The rule this needs — `A··I = tr A`, the `double_dot` group — exists and
+    fires.  What fails is stating the problem at all: `T = λ tr(ε) I + 2με`
+    puts a ⊗-product (`λ ⊗ tr(ε) ⊗ I`) inside the double-dot's operand, and
+    `encapsulate` rejects a nested ⊗ there with "awaits fence distribution".
+    So `prove_equal` does not return a negative — it raises, which is also a
+    verb-surface defect worth fixing in M3: a goal-directed call should never
+    surface a canon-internal error message.
+
+    Promote this by teaching canon to distribute that fence; the identity
+    side of it is already done.
+    """
+    ws = t.Workspace()
+    ctx = ws.ctx
+    lam = t.tensor(r"\lambda", 0, ctx=ctx)
+    mu = t.tensor(r"\mu", 0, ctx=ctx)
+    I = t.identity(ctx)
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    T = lam * t.tr(eps) * I + 2 * mu * eps
+
+    result = td.prove_equal(
+        T // eps,
+        lam * t.tr(eps) * t.tr(eps) + 2 * mu * (eps // eps),
+        td.rules("double_dot", "dyadic", ctx=ctx),
+    )
+    assert result.proved

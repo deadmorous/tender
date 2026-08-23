@@ -76,6 +76,44 @@ auto eps_pair(
                 ctx, eps(Level::Upper, i, j, k), eps(Level::Lower, i, j, l))));
 }
 
+// A rank-`r` abstract tensor: a slot-less pattern variable in a rule LHS, an
+// ordinary operand in a target.  (The shipped rule library lives in Python
+// now, so this benchmark carries the invariant rules it measures.)
+auto abstract(Context& ctx, char const* name, int rank) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(name), {}, rank);
+}
+
+// a × (b × c) = b (a·c) − c (a·b)
+auto bac_cab_rule(Context& ctx) -> Identity
+{
+    auto const* u = abstract(ctx, "u", 1);
+    auto const* v = abstract(ctx, "v", 1);
+    auto const* w = abstract(ctx, "w", 1);
+    return Identity{
+        "bac-cab",
+        make_cross(ctx, u, make_cross(ctx, v, w)),
+        make_difference(
+            ctx,
+            make_tensor_product(ctx, v, make_dot(ctx, u, w)),
+            make_tensor_product(ctx, w, make_dot(ctx, u, v)))};
+}
+
+// a × (b × I) = b ⊗ a − (a·b) I
+auto cross_removal_rule(Context& ctx) -> Identity
+{
+    auto const* u = abstract(ctx, "u", 1);
+    auto const* v = abstract(ctx, "v", 1);
+    auto const* id = make_identity(ctx);
+    return Identity{
+        "cross-removal",
+        make_cross(ctx, u, make_cross(ctx, v, id)),
+        make_difference(
+            ctx,
+            make_tensor_product(ctx, v, u),
+            make_tensor_product(ctx, make_dot(ctx, u, v), id))};
+}
+
 template <typename F>
 auto ns_per_op(int reps, F&& f) -> double
 {
@@ -146,9 +184,21 @@ auto main() -> int
         make_tensor_product(
             ctx, make_scalar(ctx, Rational{2}), delta_ul(ctx, k, l))};
 
+    // Invariant (subtree-variable) rules on the shapes the challenge suite
+    // uses — the cross group is the one with real blow-up potential, since
+    // its right-hand sides are larger than its left.
+    auto const* av = abstract(ctx, "a", 1);
+    auto const* bv = abstract(ctx, "b", 1);
+    auto const* cv = abstract(ctx, "c", 1);
+    auto const* triple = make_cross(ctx, av, make_cross(ctx, bv, cv));
+    auto const* fenced =
+        make_cross(ctx, av, make_cross(ctx, bv, make_identity(ctx)));
+
     std::vector<Case> cases = {
         {"delta-contraction", contraction(ctx, q, m, n), contraction_rule},
         {"eps-delta-2", eps_pair(ctx, e, f, g, h), eps_rule},
+        {"bac-cab", triple, bac_cab_rule(ctx)},
+        {"cross-removal", fenced, cross_removal_rule(ctx)},
     };
 
     std::printf("e-graph saturation benchmark\n");

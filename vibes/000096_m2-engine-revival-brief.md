@@ -129,6 +129,57 @@ Known limits found in the audit, addressed below:
   `eps-delta-2` 2 passes / 7 nodes — both far inside the default budget
   (30 passes / 10k nodes).
 
+- **Increment 4 DONE — M2 COMPLETE.**  Scoreboard **9 → 14 at L2**
+  (3 L1, 6 L0 unchanged).  Five promotions, each its own commit:
+
+  | # | Challenge | How it proves | Honest? |
+  |---|---|---|---|
+  | 000004 | `a·b = b·a` | `prove_equal` with an **empty** rule set — canon decides it in 0 passes | nothing cited |
+  | 000014 | Lagrange | 9-step ε-δ derivation, every step asserted to fire | **derived** |
+  | 000005 | `a×I = I×a` | proved *and* rewritten by `engine_simplify` from the left side alone | derived-ish |
+  | 000015 | `a×(b×I)` | one call, `cross` group | cites `cross-removal` |
+  | 000016 | `tr(A·B)=tr(B·A)` | one call, `dyadic` group | cites `trace-cyclic` |
+
+  **On circularity.**  Proving a stated identity by citing the library rule
+  *for that identity* certifies little, so each promotion says in its
+  docstring which it is.  Two are cite-based (000015, 000016) and both are
+  defensible: the cited identity is independently verified in components by
+  the *same challenge's* L1 test and carries its own fire-test, and citing a
+  standard identity from a toolbox is what a human does.  000014 was
+  deliberately upgraded from a citation to a real derivation once the ε-pair
+  route turned out to work (the δ from the frame dot has to be contracted
+  *first*, to bring the two ε's onto a shared index).
+
+  **Discovery vs verification.**  `engine_simplify` reaches the answer from
+  the problem alone only when the target is *cheaper*: it rewrites `a×I` to
+  `I×a` and `I·a` to `a`, but keeps `a×(b×c)` rather than expanding it —
+  correctly, since the compact cross form has fewer nodes.  Expansion-
+  direction identities are therefore `prove_equal` material, not `simplify`
+  material.  This is the cost function behaving, not a gap.
+
+  **000010 (elastic energy) not promoted — no forced win.**  Its xfail now
+  names the true blocker: the rule it needs (`A··I = tr A`) exists and
+  fires; what fails is *stating* the problem, since `T = λ tr(ε) I + 2με`
+  puts a ⊗-product inside the double-dot operand and `encapsulate` rejects
+  it ("awaits fence distribution").  A second defect surfaced here and is
+  filed for M3: `prove_equal` *raises* that canon-internal error instead of
+  returning a result — a goal-directed verb should never leak an internals
+  message.
+
+  **Benchmarks** (invariant rules added to `egraph_saturate_bench`, built
+  locally there since the library is Python now):
+
+  | case | passes | nodes | ns/op |
+  |---|---|---|---|
+  | delta-contraction | 2 | 7 | 185k |
+  | eps-delta-2 | 2 | 7 | 360k |
+  | bac-cab | 2 | 12 | 371k |
+  | cross-removal | 2 | 11 | 325k |
+
+  No blow-up: the cross group — the one with right-hand sides larger than
+  its left, i.e. the explosive shape — saturates in 2 passes and ~12 nodes,
+  three orders of magnitude inside the 10k-node default budget.
+
 ## Increments
 
 Each keeps all suites green.  Scoreboard moves are expected ONLY in
