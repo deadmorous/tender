@@ -1,13 +1,13 @@
 # Glossary
 
 Every abbreviation and piece of project jargon used across the vibes, the
-source, and the Python surface, in one place — so a term met months later can be looked up rather than
-reverse-engineered.  Unlike the numbered vibes this file is not a dated
-discussion: it is a living index, edited in place.
+source, and the Python surface, in one place — so a term met months later can
+be looked up rather than reverse-engineered.  Unlike the numbered vibes this
+file is not a dated discussion: it is a living index, edited in place.
 
-**Rule:** introduce an abbreviation by spelling it out at its first use in a
-vibe, and add it here in the same commit.  If it is not worth an entry, it is
-probably not worth abbreviating.
+**Rule:** spell a term out at its first use in a vibe, doc comment or
+docstring, and add it here in the same commit.  If it is not worth an entry, it
+is probably not worth abbreviating.
 
 ## Rewriting engine
 
