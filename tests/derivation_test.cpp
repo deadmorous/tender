@@ -4653,3 +4653,28 @@ TEST(ApplyOperators, ZeroContractionOfConstantsFolds)
         ctx, make_tensor_product(ctx, dx, make_dot(ctx, a, b)));
     EXPECT_TRUE(algebraic_eq(ctx, got, make_scalar(ctx, Rational{0})));
 }
+
+// ---- step no-op pointer contract (vibe 000095 increment 3) -----------------
+
+// A step that changes nothing must return its input pointer, so callers (and
+// the Python Derivation's fired/no-op reporting) can tell a no-op without a
+// structural comparison.
+
+TEST(StepNoOpContract, InertInputsComeBackAsTheSamePointer)
+{
+    Context ctx;
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* ab = make_tensor_product(ctx, a, b); // plain dyad, no sums
+
+    // Nothing for any of these to do on a bare dyad of abstract vectors:
+    EXPECT_EQ(steps::expand_products(ctx, ab), ab);
+    EXPECT_EQ(steps::expand_double_dot(ctx, ab), ab);
+    EXPECT_EQ(steps::expand_dyad_ops(ctx, ab), ab);
+    EXPECT_EQ(steps::distribute_contraction(ctx, ab), ab);
+    EXPECT_EQ(steps::expand_eps(ctx, ab), ab);
+    EXPECT_EQ(steps::contract_identity(ctx, ab), ab);
+    EXPECT_EQ(steps::fold_arithmetic(ctx, ab), ab);
+    EXPECT_EQ(steps::eval_delta_concrete(ctx, ab), ab);
+    EXPECT_EQ(steps::eval_eps_concrete(ctx, ab), ab);
+}

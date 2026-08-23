@@ -64,27 +64,38 @@ def test_verified_in_concrete_components():
 
 @harness.level("L2")
 def test_performed_by_eps_pair_contraction():
-    """The symbolic ε-route: ε ε → δδ − δδ → the invariant rhs, as performed."""
+    """The symbolic ε-route: ε ε → δδ − δδ → the invariant rhs, as performed.
+
+    Run as a :class:`td.Derivation`, so every step's *fired* status is
+    recorded (vibe 000095 increment 3) and narrated — each line below shows
+    [fired] (the step changed the expression) next to its result."""
     frame, a, b, c = _setup()
     lhs = a % (b % c)
     rhs = b * (a @ c) - c * (a @ b)
     show("claim: lhs", lhs)
     show("claim: rhs", rhs)
 
-    x = tb.expand_in_basis(lhs, frame, tb.Variance.Covariant)
-    x = tb.simplify_basis_cross(x, frame)  # outer cross → ε
-    x = tb.simplify_basis_cross(x, frame)  # inner cross → ε
-    x = td.canonicalize(x)  # materialize the Einstein sums
-    show("both crosses as an ε-pair", x)
+    # Historical note: this route originally carried two extra steps — a
+    # second `simplify_basis_cross` "for the inner cross" and an
+    # `expand_products` "to split the −".  The fired/no-op reporting exposed
+    # both as no-ops on its first run (one basis-cross pass handles both
+    # crosses; contract_delta eats both addends unsplit), so they are gone —
+    # the reporting doing exactly its vibe-000056 job.
+    cov = tb.Variance.Covariant
+    drv = td.Derivation(lhs)
+    drv.step(lambda e: tb.expand_in_basis(e, frame, cov), label="expand in basis")
+    drv.step(lambda e: tb.simplify_basis_cross(e, frame), label="crosses → ε-pair")
+    drv.step(td.canonicalize, label="materialize Einstein sums")
+    drv.step(td.contract_eps_pair, label="Σ_m ε ε → δδ − δδ")
+    drv.step(td.contract_delta, label="contract the δ's")
+    drv.step(td.simplify, label="simplify")
+    drv.step(lambda e: tb.reassemble(e, frame), label="reassemble invariant")
 
-    x = td.contract_eps_pair(x)  # Σ_m ε ε → δδ − δδ
-    show("ε-pair contracted to δ's", x)
+    for (name, fired), result in zip(drv.steps, drv.history[1:]):
+        show(f"[{'fired' if fired else 'no-op'}] {name}", result)
 
-    x = td.contract_delta(td.expand_products(x))  # split the −, eat the δ's
-    x = td.simplify(x)
-    show("coordinate form", x)
-
-    back = tb.reassemble(x, frame)  # fold Σ a_j c_j → a·c etc.
-    show("reassembled invariant", back)
-
-    harness.assert_algebraic_eq(back, rhs, "bac-cab, symbolic derivation")
+    assert all(fired for _, fired in drv.steps), (
+        "every step of the bac-cab route is load-bearing; a no-op means the "
+        "route changed underneath us: " + repr(drv.steps)
+    )
+    harness.assert_algebraic_eq(drv.current, rhs, "bac-cab, symbolic derivation")

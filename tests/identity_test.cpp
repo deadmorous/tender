@@ -85,7 +85,7 @@ TEST(ApplyIdentity, FactorOrderIndependent)
     EXPECT_TRUE(algebraic_eq(ctx, result, delta_ll(ctx, sp, m, n)));
 }
 
-TEST(ApplyIdentity, NoMatchReturnsCanonicalUnchanged)
+TEST(ApplyIdentity, NoMatchReturnsInputPointerUntouched)
 {
     Context ctx;
     auto const* sp = space_3d();
@@ -95,8 +95,31 @@ TEST(ApplyIdentity, NoMatchReturnsCanonicalUnchanged)
     CountableIndex n{ctx.alloc_index_id()};
     auto const* target = delta_ul(ctx, sp, m, n);
 
+    // The step no-op contract (vibe 000095 increment 3): a failed match must
+    // not reshape the input — not even by canonicalizing it — so the caller
+    // can tell whether the identity fired.
     auto const* result = apply_identity(ctx, target, id);
-    EXPECT_TRUE(algebraic_eq(ctx, result, target));
+    EXPECT_EQ(result, target);
+}
+
+TEST(ApplyIdentity, MultiTermLhsIsANoMatchAndKeepsTheInput)
+{
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    // A multi-term LHS has no Nf sub-sum matcher: never fires, input kept.
+    // (Two *distinct* tensors — like terms such as δ + δ would collapse to a
+    // single canonical term 2δ and genuinely fire.)
+    (void)sp;
+    (void)m;
+    (void)n;
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    Identity id{"two-term lhs", make_sum(ctx, A, B), A};
+    auto const* target = make_sum(ctx, A, B); // even an exact copy of the LHS
+    EXPECT_EQ(apply_identity(ctx, target, id), target);
 }
 
 TEST(ApplyIdentity, MatchesNestedSubexpression)

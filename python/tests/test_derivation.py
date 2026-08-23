@@ -94,9 +94,9 @@ def test_derivation_history_length():
     e = tender.scalar(1)
     drv = td.Derivation(e)
     assert len(drv.history) == 1
-    drv.step(td.fold_arithmetic)
+    drv.step(td.fold_arithmetic, optional=True)
     assert len(drv.history) == 2
-    drv.step(td.fold_arithmetic)
+    drv.step(td.fold_arithmetic, optional=True)
     assert len(drv.history) == 3
 
 
@@ -111,7 +111,9 @@ def test_derivation_chaining():
     """step() returns self for fluent chaining."""
     e = tender.scalar(1)
     drv = td.Derivation(e)
-    result = drv.step(td.fold_arithmetic).step(td.fold_arithmetic)
+    result = drv.step(td.fold_arithmetic, optional=True).step(
+        td.fold_arithmetic, optional=True
+    )
     assert result is drv
 
 
@@ -455,7 +457,9 @@ def test_apply_identity_delta_contraction():
     assert td.algebraic_eq(result, expected)
 
 
-def test_apply_identity_no_match_returns_canonical():
+def test_apply_identity_no_match_returns_input_unchanged():
+    # The step no-op contract (vibe 000095): a failed match must not reshape
+    # the input, not even by canonicalizing it.
     ctx = tender.Context()
     sp = _sp3()
     U, L = tender.Level.Upper, tender.Level.Lower
@@ -464,7 +468,54 @@ def test_apply_identity_no_match_returns_canonical():
     m, n = (ctx.alloc_index() for _ in range(2))
     target = tender.delta(tender.Realm.Oblique, sp, U, L, m, n, ctx=ctx)
     result = ident(target)
-    assert td.algebraic_eq(result, target)
+    assert td.structural_eq(result, target)
+
+
+def test_derivation_step_warns_on_noop():
+    import warnings
+
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    drv = td.Derivation(a * b)  # a plain dyad: nothing to expand
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        drv.step(td.expand_products)
+    assert len(caught) == 1
+    assert issubclass(caught[0].category, td.NoOpStep)
+    assert "expand_products" in str(caught[0].message)
+
+
+def test_derivation_step_optional_silences_noop():
+    import warnings
+
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    drv = td.Derivation(a * b)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        drv.step(td.expand_products, optional=True)
+    assert caught == []
+
+
+def test_derivation_records_step_names_and_fired_flags():
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    c = tender.tensor("c", rank=1, ctx=ctx)
+    drv = td.Derivation((a + b) * c)
+    drv.step(td.expand_products)  # fires: distributes over the sum
+    drv.step(td.expand_products, optional=True)  # second pass: no-op
+    drv.step(lambda e: td.simplify(e), label="simplify", optional=True)
+
+    names = [name for name, _ in drv.steps]
+    fired = [f for _, f in drv.steps]
+    assert names == ["expand_products", "expand_products", "simplify"]
+    assert fired[0] is True
+    assert fired[1] is False
 
 
 def test_apply_identity_as_derivation_step():

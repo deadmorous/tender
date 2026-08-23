@@ -19,11 +19,14 @@ Steps are plain callables ``(Expr) -> Expr``, so users can define custom steps
 and pass them to :meth:`Derivation.step` alongside the built-in ones.
 """
 
+import warnings
+
 from tender import _core
 from tender._core import derivation as _d
 
 __all__ = [
     "Derivation",
+    "NoOpStep",
     "unroll_sums",
     "eval_delta_concrete",
     "eval_eps_concrete",
@@ -56,11 +59,24 @@ __all__ = [
 ]
 
 
+class NoOpStep(UserWarning):
+    """A derivation step changed nothing (vibe 000095 increment 3).
+
+    Steps obey the no-op contract: a step that has nothing to do returns its
+    input unchanged.  :meth:`Derivation.step` surfaces that as this warning,
+    because a silent no-op is how derivations go wrong invisibly (vibe
+    000056 §1) — either the step was unnecessary (drop it) or it was expected
+    to fire and did not (the derivation has stalled).  Pass ``optional=True``
+    for a step that is legitimately conditional.
+    """
+
+
 class Derivation:
     """Sequence of rewriting steps applied to an expression.
 
     ``history[0]`` is the initial expression; ``history[k]`` is the result
-    after applying the k-th step.
+    after applying the k-th step.  ``steps`` records, per applied step, its
+    name and whether it *fired* (changed the expression).
 
     Pass an ``index_map`` (a :class:`tender.IndexNameMap`) at construction to
     keep index names consistent across all rendering calls on the history.
@@ -68,12 +84,37 @@ class Derivation:
 
     def __init__(self, initial, index_map=None):
         self._history = [initial]
+        self._steps = []  # (name, fired) per applied step
         self.index_map = index_map
 
-    def step(self, step_fn):
-        """Apply *step_fn* to the current expression; return *self* for chaining."""
-        self._history.append(step_fn(self._history[-1]))
+    def step(self, step_fn, *, optional=False, label=None):
+        """Apply *step_fn* to the current expression; return *self* for chaining.
+
+        Records whether the step *fired* (changed the expression) under
+        *label* (default: the callable's name).  A step that changes nothing
+        raises a :class:`NoOpStep` warning unless ``optional=True`` — a
+        legitimately conditional step (one applied "in case it helps") should
+        say so explicitly.
+        """
+        before = self._history[-1]
+        after = step_fn(before)
+        fired = not _core._structural_eq(after, before)
+        name = label or getattr(step_fn, "__name__", None) or repr(step_fn)
+        if not fired and not optional:
+            warnings.warn(
+                f"derivation step {name!r} changed nothing (a no-op): either "
+                "drop it or mark it step(..., optional=True)",
+                NoOpStep,
+                stacklevel=2,
+            )
+        self._history.append(after)
+        self._steps.append((name, fired))
         return self
+
+    @property
+    def steps(self):
+        """Per applied step: ``(name, fired)`` — did it change the expression?"""
+        return list(self._steps)
 
     @property
     def history(self):
@@ -395,8 +436,10 @@ def apply_identity(identity):
     """Return a derivation step that applies *identity* to its argument.
 
     The step rewrites the first (deepest-first) subtree matching ``identity.lhs``
-    into the instantiated ``identity.rhs``; the result is canonical.  If nothing
-    matches, the result equals :func:`canonicalize` of the input.
+    into the instantiated ``identity.rhs``; a fired result is canonical.  If
+    nothing matches, the input comes back **unchanged** (the step no-op
+    contract, vibe 000095) — so :meth:`Derivation.step` can tell you the
+    identity did not fire instead of silently canonicalizing.
     """
     return lambda expr: identity(expr)
 

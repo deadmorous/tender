@@ -39,9 +39,11 @@ struct Identity final
 // term) or as a *sub-chain* (a contiguous run inside a `Contraction`/`Cross`
 // factor).  The instantiated RHS replaces the matched part, the rest of the
 // term and the other additive terms are carried through, and the result is
-// raised back and re-canonicalized.  The return value is always canonical: if
-// nothing matched (including a multi-term LHS, which has no Nf sub-sum matcher
-// yet) it equals canonicalize(e).  The matching engine is `nf_match`.
+// raised back and re-canonicalized (a fired result is always canonical,
+// implicit form).  If nothing matched (including a multi-term LHS, which has
+// no Nf sub-sum matcher yet) the INPUT POINTER is returned untouched — the
+// step no-op contract (vibe 000095 increment 3) — so callers can tell whether
+// the identity fired.  The matching engine is `nf_match`.
 [[nodiscard]] auto apply_identity(Context&, Expr const* e, Identity const& id)
     -> Expr const*;
 

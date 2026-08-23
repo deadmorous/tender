@@ -660,13 +660,18 @@ auto substitute_concrete(
 
 // Generic product distribution over Sum/Difference only: the term-view
 // bilinear distributor with every optional peel off (vibe 000095).
-// make_prod(l, r) creates the leaf product node.
+// make_prod(l, r) creates the leaf product node; `original` is the node being
+// rewritten, returned untouched when nothing distributes (the step no-op
+// pointer contract — otherwise the core rebuilds an identical product).
 template <typename F>
 auto distribute_any(
-    Context& ctx, Expr const* l, Expr const* r, F const& make_prod)
-    -> Expr const*
+    Context& ctx,
+    Expr const* original,
+    Expr const* l,
+    Expr const* r,
+    F const& make_prod) -> Expr const*
 {
-    return view::distribute_bilinear(
+    auto const* out = view::distribute_bilinear(
         ctx,
         l,
         r,
@@ -676,6 +681,7 @@ auto distribute_any(
             .binders = false,
             .scalar_div = false,
             .scaled_additive = false});
+    return structural_eq(out, original) ? original : out;
 }
 
 // Extract (rational coefficient, core expression) from an addend.
@@ -1940,6 +1946,7 @@ auto expand_products(Context& ctx, Expr const* e) -> Expr const*
                     {
                         return distribute_any(
                             ctx,
+                            e,
                             p.left,
                             p.right,
                             [&](Expr const* a, Expr const* b)
@@ -1949,6 +1956,7 @@ auto expand_products(Context& ctx, Expr const* e) -> Expr const*
                     {
                         return distribute_any(
                             ctx,
+                            e,
                             p.left,
                             p.right,
                             [&](Expr const* a, Expr const* b)
@@ -1958,6 +1966,7 @@ auto expand_products(Context& ctx, Expr const* e) -> Expr const*
                     {
                         return distribute_any(
                             ctx,
+                            e,
                             p.left,
                             p.right,
                             [&](Expr const* a, Expr const* b)
@@ -1967,6 +1976,7 @@ auto expand_products(Context& ctx, Expr const* e) -> Expr const*
                     {
                         return distribute_any(
                             ctx,
+                            e,
                             p.left,
                             p.right,
                             [&](Expr const* a, Expr const* b)
@@ -1976,6 +1986,7 @@ auto expand_products(Context& ctx, Expr const* e) -> Expr const*
                     {
                         return distribute_any(
                             ctx,
+                            e,
                             p.left,
                             p.right,
                             [&](Expr const* a, Expr const* b)

@@ -23,6 +23,17 @@
   touching it belongs with increment 4's fence work, not a mechanical port.
   `flatten_factors`/`product_of` stay in derivation.cpp: single definitions,
   not duplicated peels; unifying them is cosmetic.
+- **Increment 3 DONE**: step contract + fired/no-op reporting.
+  `apply_identity` no-match now returns the input pointer untouched (was:
+  canonicalized input — the vibe-000056 §1 offender); `expand_products` no
+  longer rebuilds identical products (exposed by the new inert-input pointer
+  tests over 9 public steps); Python `Derivation.step` records
+  `(name, fired)` per step (`steps` property), warns `NoOpStep` on a no-op
+  unless `optional=True`, and takes a `label=`.  **The reporting caught two
+  dead steps in challenge 000001's own L2 route on its first run** (a second
+  `simplify_basis_cross` and an `expand_products` — both no-ops all along);
+  the route is now 7 steps, all fired, asserted as such.  867 C++ + 349
+  Python tests green; scoreboard unchanged.
 
 The per-milestone brief for M1 (vibe 000093), grounded in a code audit of
 `expr.hpp`, `nf.hpp`, `nf_lower.{hpp,cpp}`, and `derivation.cpp`.

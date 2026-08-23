@@ -22,11 +22,17 @@ auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
     // term, the gap the old binary-tree matcher could not reach.
     auto const* target = nf::canonicalize_nf(ctx, steps::canonicalize(ctx, e));
 
-    // Both the fired and the no-match results leave the function in one uniform
-    // canonical, implicit shape (so a derivation chain stays consistent): raise
-    // the resulting `Nf` and re-canonicalize (re-α-renaming any freshened RHS
-    // dummies, merging like terms), then implicitize so the explicit binders
-    // the normal form carries do not leak into the user's implicit notation.
+    // A fired result leaves the function in one uniform canonical, implicit
+    // shape (so a derivation chain stays consistent): raise the resulting
+    // `Nf` and re-canonicalize (re-α-renaming any freshened RHS dummies,
+    // merging like terms), then implicitize so the explicit binders the
+    // normal form carries do not leak into the user's implicit notation.
+    //
+    // A NO-MATCH returns the input pointer untouched (vibe 000095 increment
+    // 3, fixing vibe 000056 §1): the old behaviour — returning the
+    // *canonicalized* input — made a failed match simultaneously "do
+    // nothing" and rewrite the tree, so callers could not tell whether the
+    // identity fired, and a no-op silently reshaped their expression.
     auto finish = [&](nf::Nf const* nf) -> Expr const*
     {
         return steps::implicitize(
@@ -38,9 +44,9 @@ auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
 
     // Only a single-term LHS is matched as a sub-product / sub-chain; a
     // multi-term LHS (a sub-sum pattern) has no Nf matcher yet, so it never
-    // fires — the target comes back unchanged (canonical).
+    // fires — a no-match, input unchanged.
     if (lhs->terms.size() != 1)
-        return finish(target);
+        return e;
 
     auto const* rhs =
         nf::canonicalize_nf(ctx, steps::canonicalize(ctx, id.rhs));
@@ -66,7 +72,7 @@ auto apply_identity(Context& ctx, Expr const* e, Identity const& id)
         out.push_back(tterm);
     }
 
-    return finish(fired ? nf::make_nf(ctx, std::move(out)) : target);
+    return fired ? finish(nf::make_nf(ctx, std::move(out))) : e;
 }
 
 namespace steps
