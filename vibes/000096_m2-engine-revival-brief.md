@@ -32,6 +32,52 @@ Known limits found in the audit, addressed below:
 - The M1 observation: `place_factors`' `has_operator` does not see an
   operator inside a fence factor (possible term-placement scope bug).
 
+## Progress record
+
+- **Increment 1 DONE** (ac90848): `SaturateBudget` / `SaturateOutcome` /
+  `SaturateReport` (per-rule fired counts + *skipped* uncompilable rules),
+  a `stop()` goal check, and the `tender::engine` verbs `prove_equal`
+  (three-valued `Proved` / `Exhausted` / `Budget`) and `simplify`
+  (best-form-so-far on a budget trip).  Python: `td.prove_equal`,
+  `td.engine_simplify`, both warning `BudgetExceeded`.
+
+- **Increment 2 DONE**: rule library as groups — `eps_delta` (4, existing),
+  `cross` (bac-cab, cross-identity, cross-removal, Lagrange), `dyadic`
+  (trace-cyclic, identity-dot); `identities::group/group_names/all_rules`,
+  Python `td.rules("cross")` / `td.rule_groups()`.  Every rule fire-tested
+  at birth.  **Findings, all from those tests:**
+
+  1. **Canon already does much of the dyadic work.**  `tr(a⊗b) = a·b`,
+     `vec(a⊗b) = a×b`, `(a⊗b)ᵀ = b⊗a`, `(a⊗b)··(c⊗d)`, `(Aᵀ)ᵀ = A`,
+     `a·b = b·a` and `tr(I) = n` are all *canon-equal already* —
+     `prove_equal` proves them in **0 passes with no rules**.  They were
+     dropped from the library rather than shipped as inert decoration.
+     Consequence: challenge 000004 (`a·b = b·a`) needs no rules at all.
+
+  2. **Pattern-variable NAMES are load-bearing — a real engine defect.**
+     Canon sorts a symmetric contraction chain (`:`/`··`, rank-1 `·`) by
+     tensor name and the matcher compares chain factors *positionally*, so
+     a rule's variable name decides which targets it matches.  Measured:
+     the rule `X··I = tr X` fires when its variable is named B/C/H and
+     silently fails when it is named X/Z — because the target `I··A`
+     canonicalizes to `A··I` while the pattern `I··X` stays `I··X`.  **No
+     single spelling works for all targets**, so the double-dot-with-`I`
+     rules are deliberately NOT in the library.  The fix is AC matching for
+     symmetric chains — promoted to increment 3 as the *third* engine gap,
+     and the most important one.  Every shipped rule is guarded by a
+     name-robustness sweep test.
+
+  3. **Soundness holds where it matters.** A subtree variable binds any
+     factor *regardless of rank*, so bac-cab could in principle fire on
+     `a×(B×c)` with `B` rank-2 — where the identity is false.  It does not:
+     canon's rank-2 fence reassociation (vibe 000055) puts that expression
+     in a different shape.  Now pinned by an explicit soundness test rather
+     than left to luck.
+
+  4. `A··(b⊗c) = c·A·b` cannot even be *stated* today: canonicalizing it
+     throws `encapsulate: unsupported factor node (a nested ⊗ inside an
+     operand awaits fence distribution)`.  Filed for increment 3.
+
 ## Increments
 
 Each keeps all suites green.  Scoreboard moves are expected ONLY in

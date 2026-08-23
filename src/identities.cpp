@@ -3,7 +3,11 @@
 #include <tender/context.hpp>
 #include <tender/expr.hpp>
 #include <tender/index_space.hpp>
+#include <tender/name.hpp>
 
+#include <algorithm>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace tender::identities
@@ -27,6 +31,19 @@ auto fresh(Context& ctx) -> CountableIndex
 auto level_for(Realm realm, Level requested) -> Level
 {
     return realm == Realm::Orthonormal ? Level::Lower : requested;
+}
+
+// A rank-`r` subtree pattern variable (vibe 000051): a slot-less,
+// non-well-known named tensor, which the matcher binds to a whole target
+// factor.
+//
+// The *name* matters (see the header's warning): canon sorts symmetric
+// contraction chains by name, so a rule spelled with an ill-chosen variable
+// name silently matches only part of the alphabet.  The names here are the ones
+// the fire-tests in identities_test verify across a spread of target names.
+auto var(Context& ctx, char const* name, int rank) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(name), {}, rank);
 }
 } // namespace
 
@@ -123,6 +140,122 @@ auto eps_delta_2(Context& ctx, Realm realm) -> Identity
         make_delta(
             ctx, realm, sp, level_for(realm, U), level_for(realm, L), k, l));
     return Identity{"eps-delta-2", lhs, rhs};
+}
+
+// ---- cross group --------------------------------------------------------
+
+auto bac_cab(Context& ctx) -> Identity
+{
+    auto const* u = var(ctx, "u", 1);
+    auto const* v = var(ctx, "v", 1);
+    auto const* w = var(ctx, "w", 1);
+    // u × (v × w) = v (u·w) − w (u·v)
+    auto const* lhs = make_cross(ctx, u, make_cross(ctx, v, w));
+    auto const* rhs = make_difference(
+        ctx,
+        make_tensor_product(ctx, v, make_dot(ctx, u, w)),
+        make_tensor_product(ctx, w, make_dot(ctx, u, v)));
+    return Identity{"bac-cab", lhs, rhs};
+}
+
+auto cross_identity(Context& ctx) -> Identity
+{
+    auto const* u = var(ctx, "u", 1);
+    auto const* id = make_identity(ctx);
+    return Identity{
+        "cross-identity", make_cross(ctx, u, id), make_cross(ctx, id, u)};
+}
+
+auto cross_removal(Context& ctx) -> Identity
+{
+    auto const* u = var(ctx, "u", 1);
+    auto const* v = var(ctx, "v", 1);
+    auto const* id = make_identity(ctx);
+    // u × (v × I) = v ⊗ u − (u·v) I
+    auto const* lhs = make_cross(ctx, u, make_cross(ctx, v, id));
+    auto const* rhs = make_difference(
+        ctx,
+        make_tensor_product(ctx, v, u),
+        make_tensor_product(ctx, make_dot(ctx, u, v), id));
+    return Identity{"cross-removal", lhs, rhs};
+}
+
+auto lagrange(Context& ctx) -> Identity
+{
+    auto const* p = var(ctx, "p", 1);
+    auto const* q = var(ctx, "q", 1);
+    auto const* r = var(ctx, "r", 1);
+    auto const* s = var(ctx, "s", 1);
+    // (p × q) · (r × s) = (p·r)(q·s) − (p·s)(q·r)
+    auto const* lhs =
+        make_dot(ctx, make_cross(ctx, p, q), make_cross(ctx, r, s));
+    auto const* rhs = make_difference(
+        ctx,
+        make_tensor_product(ctx, make_dot(ctx, p, r), make_dot(ctx, q, s)),
+        make_tensor_product(ctx, make_dot(ctx, p, s), make_dot(ctx, q, r)));
+    return Identity{"lagrange", lhs, rhs};
+}
+
+// ---- dyadic group -------------------------------------------------------
+
+auto trace_cyclic(Context& ctx) -> Identity
+{
+    auto const* a = var(ctx, "U", 2);
+    auto const* b = var(ctx, "W", 2);
+    return Identity{
+        "trace-cyclic",
+        make_trace(ctx, make_dot(ctx, a, b)),
+        make_trace(ctx, make_dot(ctx, b, a))};
+}
+
+auto identity_dot(Context& ctx) -> Identity
+{
+    auto const* u = var(ctx, "u", 1);
+    return Identity{"identity-dot", make_dot(ctx, make_identity(ctx), u), u};
+}
+
+// ---- groups -------------------------------------------------------------
+
+auto group_names() -> std::vector<std::string_view>
+{
+    return {"eps_delta", "cross", "dyadic"};
+}
+
+auto group(
+    Context& ctx,
+    std::string_view name,
+    Realm realm,
+    IndexSpace const* space) -> std::vector<Identity>
+{
+    auto const* sp = space ? space : space_3d();
+    if (name == "eps_delta")
+        return {
+            delta_contraction(ctx, sp, realm),
+            delta_trace(ctx, sp, realm),
+            eps_delta_1(ctx, realm),
+            eps_delta_2(ctx, realm)};
+    if (name == "cross")
+        return {
+            bac_cab(ctx),
+            cross_identity(ctx),
+            cross_removal(ctx),
+            lagrange(ctx)};
+    if (name == "dyadic")
+        return {trace_cyclic(ctx), identity_dot(ctx)};
+    throw std::invalid_argument(
+        "identities::group: unknown group name \'" + std::string{name} + "\'");
+}
+
+auto all_rules(Context& ctx, Realm realm, IndexSpace const* space)
+    -> std::vector<Identity>
+{
+    std::vector<Identity> out;
+    for (auto n: group_names())
+    {
+        auto g = group(ctx, n, realm, space);
+        out.insert(out.end(), g.begin(), g.end());
+    }
+    return out;
 }
 
 } // namespace tender::identities

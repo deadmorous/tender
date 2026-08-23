@@ -10,6 +10,7 @@
 #include <tender/derivation.hpp>
 #include <tender/engine.hpp>
 #include <tender/expr.hpp>
+#include <tender/identities.hpp>
 #include <tender/identity.hpp>
 #include <tender/index.hpp>
 #include <tender/index_space.hpp>
@@ -1197,6 +1198,47 @@ NB_MODULE(_core, m)
         "max_nodes"_a,
         "Saturate expr under the rules and extract the cheapest form; returns "
         "(expr, report dict).");
+
+    // ---- rule library groups (vibe 000096 M2 increment 2) --------------
+
+    md.def(
+        "_rule_group",
+        [](std::string const& name,
+           nb::object ctx_arg,
+           bool orthonormal) -> nb::list
+        {
+            auto [ctx, keep] = resolve_ctx(ctx_arg);
+            auto const rules = identities::group(
+                *ctx,
+                name,
+                orthonormal ? Realm::Orthonormal : Realm::Oblique,
+                nullptr);
+            nb::list out;
+            for (auto const& r: rules)
+            {
+                nb::list triple;
+                triple.append(nb::str(r.name.c_str()));
+                triple.append(nb::cast(PyExpr{keep, ctx, r.lhs}));
+                triple.append(nb::cast(PyExpr{keep, ctx, r.rhs}));
+                out.append(triple);
+            }
+            return out;
+        },
+        "name"_a,
+        "ctx"_a = nb::none(),
+        "orthonormal"_a = false,
+        "The rules of one named identity group, as (name, lhs, rhs) triples.");
+
+    md.def(
+        "_rule_group_names",
+        []() -> nb::list
+        {
+            nb::list out;
+            for (auto n: identities::group_names())
+                out.append(nb::str(std::string{n}.c_str()));
+            return out;
+        },
+        "The names of every group in the identity library.");
 
     // Equality predicates (not steps).
     m.def(

@@ -54,6 +54,8 @@ __all__ = [
     "apply_identity",
     "saturate",
     "prove_equal",
+    "rules",
+    "rule_groups",
     "engine_simplify",
     "ProofResult",
     "BudgetExceeded",
@@ -463,6 +465,31 @@ def saturate(expr, rules, max_iterations=30):
     lhss = [r.lhs for r in rules]
     rhss = [r.rhs for r in rules]
     return _d._saturate(expr, lhss, rhss, max_iterations)
+
+
+def rule_groups():
+    """The names of the identity groups the library ships (vibe 000096)."""
+    return list(_d._rule_group_names())
+
+
+def rules(*groups, ctx=None, orthonormal=False):
+    """The rules of one or more named identity groups, ready for the verbs.
+
+    Groups are the unit of rule selection: pass the ones a problem needs
+    (``rules("cross")``) rather than everything, since rule count is the main
+    driver of saturation cost.  All rules are built in *ctx*, so they can be
+    matched against any expression from the same context.
+
+        >>> td.prove_equal(lhs, rhs, td.rules("cross"))
+
+    ``orthonormal=True`` spells index-level rules in the orthonormal
+    convention (every index lower); the invariant groups ignore it.
+    """
+    out = []
+    for name in groups:
+        for rule_name, lhs, rhs in _d._rule_group(name, ctx, orthonormal):
+            out.append(Identity(rule_name, lhs, rhs))
+    return out
 
 
 class BudgetExceeded(UserWarning):

@@ -1179,3 +1179,47 @@ def test_uncompilable_rule_is_reported_not_silently_inert():
         result = td.prove_equal(a, b, [multi])
     assert result.skipped == ["sum_lhs"]
     assert any("could not be compiled" in str(c.message) for c in caught)
+
+
+# ---- rule library groups (vibe 000096 M2 increment 2) ----------------------
+
+
+def test_rule_groups_are_named_and_populated():
+    assert set(td.rule_groups()) == {"eps_delta", "cross", "dyadic"}
+    ctx = tender.Context()
+    assert [r.name for r in td.rules("cross", ctx=ctx)] == [
+        "bac-cab",
+        "cross-identity",
+        "cross-removal",
+        "lagrange",
+    ]
+    assert len(td.rules("eps_delta", "cross", "dyadic", ctx=ctx)) == 10
+
+
+def test_cross_group_proves_bac_cab():
+    ctx = tender.Context()
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    result = td.prove_equal(
+        a % (b % c), b * (a @ c) - c * (a @ b), td.rules("cross", ctx=ctx)
+    )
+    assert result.proved
+    assert result.fired.get("bac-cab") == 1
+
+
+def test_cross_group_proves_the_vibe56_case():
+    # a×(b×I) = b⊗a − (a·b)I — the derivation vibe 000056 said no user could
+    # discover as a step sequence; here it is one goal-directed call.
+    ctx = tender.Context()
+    a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+    I = tender.identity(ctx=ctx)
+    result = td.prove_equal(
+        a % (b % I), b * a - (a @ b) * I, td.rules("cross", ctx=ctx)
+    )
+    assert result.proved
+
+
+def test_unknown_group_raises():
+    import pytest
+
+    with pytest.raises(ValueError):
+        td.rules("no_such_group")
