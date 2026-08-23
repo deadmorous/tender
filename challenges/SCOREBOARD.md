@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**23 challenges** — 9 at L2, 8 at L1, 6 at L0.
+**23 challenges** — 11 at L2, 6 at L1, 6 at L0.
 
 ## Tier A — Algebra (chart-free)
 
@@ -18,13 +18,13 @@ L0 failing = enumerated, not yet reached (strict xfail).
 | 000010 | T··ε = λ(tr ε)² + 2μ ε··ε (energy density) | L1 verified | Lurie, Theory of Elasticity §elastic energy; vibe 000091 |
 | 000014 | (a×b)·(c×d) = (a·c)(b·d) − (a·d)(b·c) | L1 verified | Gibbs–Wilson, Vector Analysis |
 | 000015 | a×(b×I) = b⊗a − (a·b)I | L1 verified | Zhilin, Vectors and Second-Rank Tensors; vibe 000056 |
-| 000016 | tr(A·B) = tr(B·A) | L1 verified | Zhilin, Vectors and Second-Rank Tensors |
+| 000016 | tr(A·B) = tr(B·A) | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors |
 
 ## Tier B — Basis / coordinates
 
 | # | Challenge | Level | Source |
 |---|---|---|---|
-| 000004 | a·b = b·a through the basis | L1 verified | Gibbs–Wilson, Vector Analysis; examples/basis_dot_product.py |
+| 000004 | a·b = b·a through the basis | **L2 performed** | Gibbs–Wilson, Vector Analysis; examples/basis_dot_product.py |
 | 000017 | reassemble ∘ expand_in_basis = id (shape battery) | L0 failing | vibes 000053/000061/000063 (reassembly engine) |
 | 000018 | a·b = g_ij a^i b^j in an oblique basis | L0 failing | Lurie, Theory of Elasticity, tensor-calculus appendix |
 

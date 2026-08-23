@@ -2,7 +2,7 @@
 
 L1 verifies by expanding both rank-2 tensors in the World Cartesian basis,
 unfolding tr and the dot on dyads, and comparing the coordinate forms.
-L2 (future) is a `prove_equal` one-liner on the verb surface.
+L2 is a `prove_equal` one-liner against the `dyadic` rule group.
 """
 
 import tender
@@ -42,6 +42,24 @@ def test_both_sides_reduce_identically():
     harness.assert_algebraic_eq(lhs, rhs, "trace cyclicity")
 
 
-@harness.level("L2", expected=False, reason="needs the M2/M3 prove_equal verb")
+@harness.level("L2")
 def test_performed_as_one_goal_directed_call():
-    harness.todo("prove_equal(tr(A@B), tr(B@A)) on the verb surface")
+    """One call against the `dyadic` rule group.
+
+    The proof *cites* the library's `trace-cyclic` identity rather than
+    deriving it: cyclicity is an axiom of the trace, not a consequence of the
+    ε-δ identities, and citing a standard identity from the toolbox is how a
+    human works.  It is not circular — the same challenge's L1 test
+    independently verifies that identity by reduction to coordinates, and the
+    library rule carries its own fire-test.
+    """
+    ctx = tender.Context()
+    A = tender.tensor("A", rank=2, ctx=ctx)
+    B = tender.tensor("B", rank=2, ctx=ctx)
+
+    result = td.prove_equal(
+        tender.tr(A @ B), tender.tr(B @ A), td.rules("dyadic", ctx=ctx)
+    )
+    show("prove_equal(tr(A·B), tr(B·A))", repr(result))
+    assert result.proved
+    assert result.fired.get("trace-cyclic") == 1
