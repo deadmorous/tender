@@ -1313,3 +1313,64 @@ TEST(ParenKind, RaiseAndRelowerReproducesTheFenceKind)
     auto const* twice = canonicalize_nf(ctx, raise(ctx, *once));
     EXPECT_TRUE(equal(once, twice)); // kind-aware equality
 }
+
+// ---- operator ⊗-fences survive flattening (vibe 000096 increment 3) -----
+
+TEST(OperatorFence, ScalarWeightedGradientKeepsItsFence)
+{
+    // `λ (∇⊗u)`: the gradient must reach encapsulate whole, becoming an
+    // OperatorFence factor, so λ stays an ordinary scalar beside it.  When the
+    // ⊗-chain was flattened blindly, ∇ became a loose sibling of λ — widening
+    // the operator's apparent scope to `∇(λ u)`.
+    Context ctx;
+    auto const* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto const* lam =
+        make_tensor_object(ctx, make_tensor_name("\\lambda"), {}, 0);
+    auto const* grad = make_tensor_product(ctx, tender::make_nabla(ctx), u);
+
+    auto const* nf = canonicalize_nf(ctx, make_tensor_product(ctx, lam, grad));
+    ASSERT_EQ(nf->terms.size(), 1u);
+
+    bool found_fence = false;
+    for (auto const* f: nf->terms[0].tensors)
+        if (auto const* p = std::get_if<Paren>(&f->node))
+            if (p->kind == ParenKind::OperatorFence)
+                found_fence = true;
+    EXPECT_TRUE(found_fence) << "the ∇⊗u fence was dissolved by flattening";
+}
+
+TEST(OperatorFence, ScalarOrderNoLongerChangesTheNormalForm)
+{
+    // The canonicality regression the dissolved fence caused: with ∇ loose at
+    // the top level every factor stayed positional, so the two spellings of
+    // `λ μ (∇⊗u)` produced *different* normal forms.
+    Context ctx;
+    auto const* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto const* lam =
+        make_tensor_object(ctx, make_tensor_name("\\lambda"), {}, 0);
+    auto const* mu = make_tensor_object(ctx, make_tensor_name("\\mu"), {}, 0);
+    auto const* grad = make_tensor_product(ctx, tender::make_nabla(ctx), u);
+
+    auto const* lm =
+        make_tensor_product(ctx, make_tensor_product(ctx, lam, mu), grad);
+    auto const* ml =
+        make_tensor_product(ctx, make_tensor_product(ctx, mu, lam), grad);
+
+    EXPECT_TRUE(equal(canonicalize_nf(ctx, lm), canonicalize_nf(ctx, ml)));
+}
+
+TEST(OperatorFence, ConcreteDerivProductsStillDistribute)
+{
+    // The fence is for the *abstract* ∇ only.  A concrete ∂-bearing product is
+    // the frame-expanded route, which canon deliberately distributes; fencing
+    // those instead lands on encapsulate's "awaits fence distribution" throw.
+    Context ctx;
+    auto const* x = make_coordinate(ctx, make_tensor_name("x"), 1, 0);
+    auto const* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto const* e = make_field(ctx, make_tensor_name("e"), 1, {});
+    // (∂_x ⊗ f) ⊗ e — a Deriv-bearing ⊗ nested in a larger product.
+    auto const* d = make_deriv(ctx, x);
+    auto const* inner = make_tensor_product(ctx, d, f);
+    EXPECT_NO_THROW(
+        (void)canonicalize_nf(ctx, make_tensor_product(ctx, inner, e)));
+}

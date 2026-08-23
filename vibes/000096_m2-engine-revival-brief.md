@@ -78,6 +78,55 @@ Known limits found in the audit, addressed below:
      throws `encapsulate: unsupported factor node (a nested ⊗ inside an
      operand awaits fence distribution)`.  Filed for increment 3.
 
+- **Library moved to Python** (7058525), on user direction: rules are data,
+  and authoring them is empirical, so they belong in the language users
+  iterate in — and extending the set needs no rebuild.
+  `python/tender/identities.py` holds all rules + the group registry;
+  `src/identities.{hpp,cpp}`, the `_rule_group` binding and
+  `identities_test.cpp` are gone (the C++ library was a leaf — no engine
+  code called it).  Coverage moved to `python/tests/test_identities.py`.
+  Accepted tradeoff: a C++-only consumer gets the engine but no shipped
+  rules; tender is Python-first.
+
+- **Increment 3 DONE**: all three engine gaps resolved or bounded.
+
+  1. **AC matching for symmetric chains — FIXED.**  `match_factor`'s
+     Contraction arm now retries with the operands swapped, gated by
+     `contraction_commutes_factors`, a Factor-level mirror of canon's own
+     `contraction_commutes` (so `·` swaps only between two rank-1 vectors,
+     `:`/`··` only between two rank-2 tensors).  The measured defect is
+     gone: `X··I = tr X` now fires for every variable/target naming, where
+     before *no* spelling worked for the whole alphabet.  Soundness pinned
+     by a test that a **directional** contraction (`A·b` vs `b·A`) is still
+     matched strictly.  This unblocked the `double_dot` group, now shipped.
+
+  2. **`place_factors` fence scope — a real bug, FIXED, and worse than the
+     M1 note guessed.**  The fence was not mis-*placed*, it was never
+     *formed*: `multiplicative_flatten` flattened `λ μ (∇⊗u)` to the loose
+     factors `[λ, μ, ∇, u]`, so ∇ never reached `encapsulate` as a
+     TensorProduct and no `OperatorFence` Paren was built.  Two consequences,
+     both measured: the rendered form read `∇ λ μ u` — the operator's scope
+     silently widened — and, since a term holding a top-level operator keeps
+     *every* factor positional, `λμ(∇⊗u)` and `μλ(∇⊗u)` canonicalized to
+     **different** normal forms, i.e. canon was not canonical.  Fix:
+     `flatten_operand` keeps a ∇-bearing ⊗ operand whole.  Deliberately
+     ∇-only — a concrete `Deriv` product is the frame-expanded route canon
+     means to distribute, and fencing those lands on encapsulate's throw
+     (caught immediately by `test_express_div_of_symmetric_gradient_stress`).
+
+  3. **Multi-term LHS — bounded by evidence, deferred.**  The boundary test
+     settles it: `prove_equal` does **not** need a sub-sum matcher, because
+     both sides saturate in one graph and a forward rule closes the gap from
+     either end (proved, `fired={bac-cab: 1}`, starting from the expanded
+     side).  It bites only `simplify`'s *factoring* direction, where no
+     compilable rule introduces the compact form — recorded as a strict
+     xfail (`test_simplify_can_factor_an_expanded_form_back`), with skipped
+     rules already visible in the trace since increment 1.
+
+  Benchmarks after the changes: `delta-contraction` 2 passes / 7 nodes,
+  `eps-delta-2` 2 passes / 7 nodes — both far inside the default budget
+  (30 passes / 10k nodes).
+
 ## Increments
 
 Each keeps all suites green.  Scoreboard moves are expected ONLY in

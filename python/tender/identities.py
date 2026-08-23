@@ -22,15 +22,16 @@ Two conventions matter when writing a rule, both learned the hard way:
 ``t.tensor("u", rank=1)`` in a rule's left-hand side binds any whole factor.
 Well-known tensors (``I``, δ, ε) and index-slotted tensors stay literal.
 
-**Variable names are load-bearing.**  Canon sorts a *symmetric* contraction
-chain (``:``, ``··``, and ``·`` between rank-1 operands) by tensor name, and
-the matcher compares chain factors positionally — so a rule whose LHS is such
-a chain fires only on targets whose own names sort the same way, and the
-variable's name silently decides which those are.  Measured case: ``X··I =
-tr X`` fires with a variable named ``B`` and not one named ``X``.  Until AC
-chain matching lands, test any such rule across a spread of target names —
-:func:`tender.derivation.prove_equal` reports which rules actually fired, so
-an inert rule is visible rather than mysterious.
+**Symmetric chains are AC-matched.**  Canon puts a *commutative* binary
+contraction's operands in name order (``:``, ``··``, and ``·`` between rank-1
+operands), so a pattern variable's own name once decided which targets a rule
+fired on — ``X··I = tr X`` matched targets named A–H and silently missed J–Z.
+The matcher now tries the swapped order for exactly those chains that canon
+may reorder (vibe 000096 increment 3), so rules are name-independent while a
+*directional* contraction (``A·b``, ``C:ε``) is still matched strictly.
+Fire-test new rules anyway: :func:`tender.derivation.prove_equal` reports
+which rules actually fired, so an inert rule is visible rather than
+mysterious.
 """
 
 import tender as _t
@@ -54,6 +55,8 @@ __all__ = [
     # dyadic
     "trace_cyclic",
     "identity_dot",
+    # double_dot
+    "ddot_identity",
 ]
 
 _U = _t.Level.Upper
@@ -192,6 +195,21 @@ def lagrange(ctx):
     )
 
 
+# ---- double_dot group: double contractions -------------------------------
+
+
+def ddot_identity(ctx):
+    """A ·· I = tr A — the identity tensor's double contraction is the trace.
+
+    Name-robust only since AC chain matching landed (vibe 000096 increment
+    3): canon puts a commutative binary contraction's operands in name order,
+    so before that this rule fired on targets named A–H and silently missed
+    J–Z, whatever spelling it was given.
+    """
+    a = _var(ctx, "B", 2)
+    return Identity("ddot-identity", a // _t.identity(ctx=ctx), _t.tr(a))
+
+
 # ---- dyadic group: rank-2 algebra ----------------------------------------
 
 
@@ -213,13 +231,15 @@ def identity_dot(ctx):
 # = a·b, vec(a⊗b) = a×b, (a⊗b)ᵀ = b⊗a, the dyad double-dots, (Aᵀ)ᵀ = A,
 # a·b = b·a and tr(I) = n are all proved with **zero** rules (vibe 000096
 # increment 2).  Shipping them would be inert decoration that looks like
-# coverage.  The double-dot-with-I rules are absent for the opposite reason:
-# no spelling of them is name-robust until AC chain matching lands.
+# coverage.  `A··(b⊗c) = c·A·b` is still absent for a different reason: canon
+# cannot yet *state* it — a nested ⊗ inside a contraction operand throws
+# "awaits fence distribution" (vibe 000096 increment 3, still open).
 
 _GROUPS = {
     "eps_delta": (delta_contraction, delta_trace, eps_delta_1, eps_delta_2),
     "cross": (bac_cab, cross_identity, cross_removal, lagrange),
     "dyadic": (trace_cyclic, identity_dot),
+    "double_dot": (ddot_identity,),
 }
 
 

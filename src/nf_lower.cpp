@@ -64,12 +64,49 @@ auto additive_flatten(Expr const* e) -> std::vector<SignedExpr>
 namespace
 {
 
+// Does `e` contain an abstract ∇ anywhere?  Ctx-free (unlike `rewrite.hpp`'s
+// `contains_nabla`) so the flattening pass keeps its signature.
+//
+// Deliberately ∇-only, matching `encapsulate`'s fence condition exactly: a
+// *concrete* `Deriv` product is the frame-expanded route, which canon means to
+// distribute (`distribute_contraction`) rather than fence — keeping those
+// whole instead lands them on encapsulate's "awaits fence distribution" throw.
+auto holds_nabla(Expr const* e) -> bool
+{
+    if (std::holds_alternative<tender::Nabla>(e->node))
+        return true;
+    for (auto const* c: children(e))
+        if (holds_nabla(c))
+            return true;
+    return false;
+}
+
+void flatten_product(Expr const* e, ProductParts& out);
+
+// One operand of a ⊗-chain being flattened.  An operand that is *itself* a
+// ⊗ carrying an operator is kept **whole** (vibe 000096 increment 3): the
+// gradient fence `∇⊗u` in `λ μ (∇⊗u)` must reach `encapsulate` as one factor
+// so it becomes an `OperatorFence` Paren.  Flattening it instead strands ∇ as
+// a loose sibling of λ and μ, which silently widens the operator's scope in
+// the rendered form (`∇ λ μ u`) and — because a term holding a top-level
+// operator keeps *every* factor positional — leaves the scalars unsorted, so
+// `λμ(∇⊗u)` and `μλ(∇⊗u)` canonicalized to different normal forms.
+void flatten_operand(Expr const* e, ProductParts& out)
+{
+    if (std::holds_alternative<TensorProduct>(e->node) && holds_nabla(e))
+    {
+        out.factors.push_back(e);
+        return;
+    }
+    flatten_product(e, out);
+}
+
 void flatten_product(Expr const* e, ProductParts& out)
 {
     if (auto const* p = std::get_if<TensorProduct>(&e->node))
     {
-        flatten_product(p->left, out);
-        flatten_product(p->right, out);
+        flatten_operand(p->left, out);
+        flatten_operand(p->right, out);
     }
     else if (auto const* sl = std::get_if<ScalarLiteral>(&e->node))
     {

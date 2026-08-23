@@ -217,6 +217,50 @@ def test_identity_dot_fires():
     _proves(ctx, t.identity(ctx=ctx) @ a, a, [ti.identity_dot(ctx)], "I·a = a")
 
 
+# ---- double_dot group -----------------------------------------------------
+
+
+def test_ddot_identity_fires():
+    ctx = t.Context()
+    A = _mat(ctx, "A")
+    I = t.identity(ctx=ctx)
+    _proves(ctx, I // A, t.tr(A), [ti.ddot_identity(ctx)], "I··A = tr A")
+
+
+@pytest.mark.parametrize("name", ["A", "F", "P", "X", "Z"])
+def test_ddot_identity_is_name_independent(name):
+    """The regression test for AC chain matching (vibe 000096 increment 3).
+
+    Canon puts a commutative binary contraction's operands in name order, so
+    with positional-only matching this rule fired on targets named A–H and
+    silently missed J–Z — and *no* spelling of the rule worked for both, since
+    the pattern variable's own name decided where it sorted.  Every letter
+    must now work, from either side of the contraction.
+    """
+    ctx = t.Context()
+    A = _mat(ctx, name)
+    I = t.identity(ctx=ctx)
+    _proves(ctx, I // A, t.tr(A), [ti.ddot_identity(ctx)], f"I··{name}")
+    _proves(ctx, A // I, t.tr(A), [ti.ddot_identity(ctx)], f"{name}··I")
+
+
+def test_ac_matching_does_not_break_directional_contractions():
+    """AC matching applies only where canon may reorder.
+
+    `·` between a rank-2 and a rank-1 is directional (A·b ≠ b·A), so a rule
+    written for one order must not fire on the other — otherwise the fix
+    would trade a missed match for a wrong rewrite.
+    """
+    ctx = t.Context()
+    A, b = _mat(ctx, "A"), _vec(ctx, "b")
+    x, Y = _vec(ctx, "x"), _mat(ctx, "Y")
+    zero = t.scalar(0, ctx=ctx)
+    rule = td.Identity("directional", x @ Y, zero)  # vector · matrix
+
+    assert td.prove_equal(b @ A, zero, [rule]).proved  # same order: fires
+    assert not td.prove_equal(A @ b, zero, [rule]).proved  # swapped: must not
+
+
 # ---- name robustness (the vibe-000096 finding) ----------------------------
 
 
@@ -252,11 +296,12 @@ def test_rules_are_name_robust_across_the_alphabet(first):
 
 def test_groups_are_named_and_populated():
     ctx = t.Context()
-    assert ti.group_names() == ["eps_delta", "cross", "dyadic"]
+    assert ti.group_names() == ["eps_delta", "cross", "dyadic", "double_dot"]
     assert len(ti.group(ctx, "eps_delta")) == 4
     assert len(ti.group(ctx, "cross")) == 4
+    assert len(ti.group(ctx, "double_dot")) == 1
     assert len(ti.group(ctx, "dyadic")) == 2
-    assert len(ti.all_rules(ctx)) == 10
+    assert len(ti.all_rules(ctx)) == 11
 
 
 def test_unknown_group_raises_with_the_available_names():

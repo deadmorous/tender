@@ -244,6 +244,28 @@ auto match_factors_ac(
 
 } // namespace
 
+// Whether a *binary* contraction of these two factors is commutative, so canon
+// may have put its operands in name order.  Mirrors `nf_lower`'s
+// `contraction_commutes` exactly, at the `Factor` level: `·` commutes only
+// between two rank-1 vectors, `:` / `··` only between two rank-2 tensors (a
+// directional `C:ε` keeps its order).  Kept in lockstep with that function —
+// if one gains a case, so must the other.
+auto contraction_commutes_factors(COp op, Factor const* l, Factor const* r)
+    -> bool
+{
+    auto const lr = factor_rank(l);
+    auto const rr = factor_rank(r);
+    if (!lr || !rr)
+        return false;
+    switch (op)
+    {
+        case COp::Dot: return *lr == 1 && *rr == 1;
+        case COp::DDot:
+        case COp::DDotAlt: return *lr == 2 && *rr == 2;
+    }
+    return false;
+}
+
 auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
 {
     return visit(
@@ -284,9 +306,39 @@ auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
                 if (!t || p.factors.size() != t->factors.size()
                     || p.ops != t->ops)
                     return false;
-                for (std::size_t i = 0; i < p.factors.size(); ++i)
-                    if (!match_factor(p.factors[i], t->factors[i], bnd))
-                        return false;
+                auto positional = [&](NfBinding& b)
+                {
+                    for (std::size_t i = 0; i < p.factors.size(); ++i)
+                        if (!match_factor(p.factors[i], t->factors[i], b))
+                            return false;
+                    return true;
+                };
+                {
+                    NfBinding trial = bnd;
+                    if (positional(trial))
+                    {
+                        bnd = std::move(trial);
+                        return true;
+                    }
+                }
+                // Symmetric chains are AC-matched (vibe 000096 increment 3).
+                // Canon puts a *commutative* binary contraction's operands in
+                // name order, and a pattern variable's name sorts arbitrarily
+                // among them — so a positional-only match makes the rule fire
+                // on some targets and silently miss others purely by naming
+                // (measured: `X··I = tr X` matched targets named A–H and not
+                // J–Z).  Trying the swapped order removes that dependence.
+                // Restricted to exactly the shape canon may reorder, so a
+                // directional contraction (`A·b`, `C:ε`) is never mismatched.
+                if (!contraction_commutes_factors(
+                        t->ops.front(), t->factors[0], t->factors[1]))
+                    return false;
+                NfBinding swapped = bnd;
+                if (!match_factor(p.factors[0], t->factors[1], swapped))
+                    return false;
+                if (!match_factor(p.factors[1], t->factors[0], swapped))
+                    return false;
+                bnd = std::move(swapped);
                 return true;
             },
             [&](Cross const& p) -> bool

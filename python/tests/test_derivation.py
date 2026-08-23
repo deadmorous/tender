@@ -1,5 +1,7 @@
 """Tests for tender.derivation — derivation steps and history."""
 
+import pytest
+
 import tender
 import tender.derivation as td
 
@@ -1185,7 +1187,7 @@ def test_uncompilable_rule_is_reported_not_silently_inert():
 
 
 def test_rule_groups_are_named_and_populated():
-    assert set(td.rule_groups()) == {"eps_delta", "cross", "dyadic"}
+    assert set(td.rule_groups()) == {"eps_delta", "cross", "double_dot", "dyadic"}
     ctx = tender.Context()
     assert [r.name for r in td.rules("cross", ctx=ctx)] == [
         "bac-cab",
@@ -1223,3 +1225,53 @@ def test_unknown_group_raises():
 
     with pytest.raises(ValueError):
         td.rules("no_such_group")
+
+
+# ---- the multi-term-LHS boundary (vibe 000096 increment 3) -----------------
+
+
+def _bac_cab_case():
+    ctx = tender.Context()
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    u, v, w = (tender.tensor(n, rank=1, ctx=ctx) for n in "uvw")
+    forward = td.Identity("bac-cab", u % (v % w), v * (u @ w) - w * (u @ v))
+    return ctx, a % (b % c), b * (a @ c) - c * (a @ b), forward
+
+
+def test_prove_equal_does_not_need_the_factoring_direction():
+    """Both sides saturate in one graph, so a forward rule proves either way.
+
+    This is why the engine's inability to compile a multi-term left-hand side
+    does not block `prove_equal`: starting from the *expanded* side, the rule
+    still fires on the other side and the two meet in the middle.
+    """
+    _, crossed, expanded, forward = _bac_cab_case()
+    assert td.prove_equal(expanded, crossed, [forward]).proved
+
+
+def test_multi_term_lhs_rule_is_reported_skipped_not_silently_inert():
+    _, crossed, expanded, _ = _bac_cab_case()
+    ctx = tender.Context()
+    u, v, w = (tender.tensor(n, rank=1, ctx=ctx) for n in "uvw")
+    reverse = td.Identity(
+        "bac-cab-rev", v * (u @ w) - w * (u @ v), u % (v % w)
+    )
+    result = td.prove_equal(expanded, crossed, [reverse])
+    assert result.skipped == ["bac-cab-rev"]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="vibe 000096: simplify cannot factor — a multi-term LHS has no Nf "
+    "sub-sum matcher, so the compact form is never introduced into the graph",
+)
+def test_simplify_can_factor_an_expanded_form_back():
+    """The one place the missing sub-sum matcher genuinely bites.
+
+    `prove_equal` gets both forms handed to it; `simplify` is given only the
+    expanded one, and no compilable rule rewrites *toward* the cross form, so
+    the cheaper representative never enters the e-graph to be extracted.
+    """
+    _, crossed, expanded, forward = _bac_cab_case()
+    out, _ = td.engine_simplify(expanded, [forward])
+    assert td.algebraic_eq(out, crossed)
