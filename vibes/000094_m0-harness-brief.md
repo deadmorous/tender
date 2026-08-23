@@ -1,5 +1,13 @@
 # 000094 M0 brief — certification harness, increment breakdown
 
+Status: **DONE** (all five increments, 2026-08-03; commits bdb64f9…e57391d).
+Outcome: 23 challenges on the scoreboard — 9 L2, 8 L1, 6 L0.  Notable
+finding while seeding: vibe 000090's forward direction had already shipped
+(the memory of it was stale) — `cyl.evaluate(∇⊗R_cart) = I` passes; the
+enumerated red for that challenge is the deferred reverse direction
+(approach B).  Every attempted tier-C/D seed passed on the first run,
+including the full spherical operator table.
+
 The per-milestone brief for M0 (vibe 000093), incorporating the 2026-08-03
 layout refinement: directory-per-challenge, six-digit global numbering, no
 tier letter in names, fixed `test.py`, free-form `meta/`.
