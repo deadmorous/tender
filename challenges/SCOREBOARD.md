@@ -5,10 +5,52 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**1 challenges** — 1 at L2, 0 at L1, 0 at L0.
+**23 challenges** — 9 at L2, 8 at L1, 6 at L0.
 
 ## Tier A — Algebra (chart-free)
 
 | # | Challenge | Level | Source |
 |---|---|---|---|
 | 000001 | bac-cab: a×(b×c) = b(a·c) − c(a·b) | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix; vibe 000035 |
+| 000002 | δ-contractions: δ^i_i = 3, δ^i_j δ^i_j = 3 | **L2 performed** | Borisenko–Tarapov §Kronecker delta; examples/delta_trace.py |
+| 000003 | ε-pairs: Σ_i ε^ijk ε_iml = δδ−δδ, Σ_ij ε^ijk ε_ijl = 2δ | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix; examples/eps_delta.py |
+| 000005 | a×I = I×a | L1 verified | Zhilin, Vectors and Second-Rank Tensors; examples/cross_identity.py |
+| 000010 | T··ε = λ(tr ε)² + 2μ ε··ε (energy density) | L1 verified | Lurie, Theory of Elasticity §elastic energy; vibe 000091 |
+| 000014 | (a×b)·(c×d) = (a·c)(b·d) − (a·d)(b·c) | L1 verified | Gibbs–Wilson, Vector Analysis |
+| 000015 | a×(b×I) = b⊗a − (a·b)I | L1 verified | Zhilin, Vectors and Second-Rank Tensors; vibe 000056 |
+| 000016 | tr(A·B) = tr(B·A) | L1 verified | Zhilin, Vectors and Second-Rank Tensors |
+
+## Tier B — Basis / coordinates
+
+| # | Challenge | Level | Source |
+|---|---|---|---|
+| 000004 | a·b = b·a through the basis | L1 verified | Gibbs–Wilson, Vector Analysis; examples/basis_dot_product.py |
+| 000017 | reassemble ∘ expand_in_basis = id (shape battery) | L0 failing | vibes 000053/000061/000063 (reassembly engine) |
+| 000018 | a·b = g_ij a^i b^j in an oblique basis | L0 failing | Lurie, Theory of Elasticity, tensor-calculus appendix |
+
+## Tier C — Vector calculus (invariant ∇)
+
+| # | Challenge | Level | Source |
+|---|---|---|---|
+| 000011 | ∇×∇f = 0 and ∇·(∇×u) = 0, any chart | **L2 performed** | Borisenko–Tarapov §vector calculus identities |
+| 000012 | ∇×(∇×u) = ∇(∇·u) − Δu | L1 verified | Lurie, Theory of Elasticity, tensor-calculus appendix |
+| 000013 | ∇ product rules: ∇(fg), ∇·(fu), ∇×(fu), ∇·(a×b) | L1 verified | Borisenko–Tarapov §differential identities |
+| 000019 | (u·∇)u = ∇(u²/2) − u×(∇×u) | L0 failing | Kochin, Vector Calculus §applications |
+
+## Tier D — Curvilinear
+
+| # | Challenge | Level | Source |
+|---|---|---|---|
+| 000006 | chart-derived operators: cyl and sph endpoints | **L2 performed** | Borisenko–Tarapov, ch. on curvilinear coordinates; examples/curvilinear_operators.py |
+| 000020 | grad/div/Δ tables in cylindrical and spherical charts | **L2 performed** | Borisenko–Tarapov, appendix of curvilinear formulas |
+| 000021 | ∇ ⊗ R across charts sharing a world frame | L0 failing | vibe 000090 (cross-chart coordinate dependencies) |
+
+## Tier E — Mechanics endpoints
+
+| # | Challenge | Level | Source |
+|---|---|---|---|
+| 000007 | ∇·T in cylindrical coordinates = textbook equilibrium equations | **L2 performed** | Eliseev, Mechanics of Elastic Bodies; examples/cyl_equilibrium.py (vibe 000073) |
+| 000008 | ∇·T → μΔu + (λ+μ)∇(∇·u), u abstract | **L2 performed** | Lurie, Theory of Elasticity; examples/navier_lame.py (vibe 000080) |
+| 000009 | inc ε = ∇×(∇×ε)ᵀ closed identity + Saint-Venant form | **L2 performed** | Eliseev, Mechanics of Elastic Bodies §compatibility; examples/strain_compatibility.py (vibes 000075/000078/000080) |
+| 000022 | thick-walled cylinder → Lamé displacement ODE | L0 failing | Lurie, Theory of Elasticity §Lamé problem |
+| 000023 | ∇·T in spherical coordinates = textbook equilibrium equations | L0 failing | Lurie, Theory of Elasticity, appendix of coordinate formulas |
