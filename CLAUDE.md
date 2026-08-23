@@ -43,3 +43,11 @@ Feel free to do any read operations on the repository when necessary.
 
 All notable design discussions and decisions are recorded in `vibes/` as Markdown files.
 Each distinct topic gets its own file, named `NNNNNN_subject.md` where NNNNNN is a zero-padded sequential number reflecting the order the topic was first discussed.
+
+## Abbreviations
+
+`vibes/abbreviations.md` is the project glossary — a living index, edited in
+place rather than a dated discussion.  **Spell an abbreviation out at its first
+use** in a vibe, doc comment, or docstring, and add it to the glossary in the
+same commit.  If a term is not worth a glossary entry, it is probably not worth
+abbreviating.

@@ -62,8 +62,10 @@ Known limits found in the audit, addressed below:
      silently fails when it is named X/Z — because the target `I··A`
      canonicalizes to `A··I` while the pattern `I··X` stays `I··X`.  **No
      single spelling works for all targets**, so the double-dot-with-`I`
-     rules are deliberately NOT in the library.  The fix is AC matching for
-     symmetric chains — promoted to increment 3 as the *third* engine gap,
+     rules are deliberately NOT in the library.  The fix is AC matching
+     (*associative-commutative*: matching modulo the operand orders the
+     operator permits, rather than positionally — see
+     `vibes/abbreviations.md`) for symmetric chains — promoted to increment 3 as the *third* engine gap,
      and the most important one.  Every shipped rule is guarded by a
      name-robustness sweep test.
 
