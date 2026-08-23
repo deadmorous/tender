@@ -302,7 +302,7 @@ auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
             [&](Paren const& p) -> bool
             {
                 auto const* t = std::get_if<Paren>(&tgt->node);
-                return t && match_nf(p.body, t->body, bnd);
+                return t && p.kind == t->kind && match_nf(p.body, t->body, bnd);
             },
             [&](Unary const& p) -> bool
             {
@@ -654,7 +654,7 @@ auto inst_factor(
                 return make_cross(ctx, std::move(fs));
             },
             [&](Paren const& p) -> Factor const*
-            { return make_paren(ctx, inst_nf(ctx, p.body, bnd)); },
+            { return make_paren(ctx, inst_nf(ctx, p.body, bnd), p.kind); },
             [&](Unary const& u) -> Factor const* {
                 return make_unary(
                     ctx, u.op, inst_factor(ctx, u.operand, bnd, fresh));

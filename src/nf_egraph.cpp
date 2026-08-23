@@ -52,6 +52,7 @@ struct NfENode final
     std::vector<EClassId> children;
     std::vector<COp> ops = {};
     UnaryOp uop = UnaryOp::Trace;
+    ParenKind pkind = ParenKind::Grouping;
     Rational coeff = Rational{1};
     std::vector<BoundIndex> bound = {};
     std::size_t scalar_count = 0;
@@ -93,6 +94,7 @@ auto node_hash(NfENode const& n) -> std::size_t
                 hash_combine(seed, std::size_t(o));
             break;
         case NfEKind::Unary: hash_combine(seed, std::size_t(n.uop)); break;
+        case NfEKind::Paren: hash_combine(seed, std::size_t(n.pkind)); break;
         case NfEKind::Term:
             hash_combine(seed, std::hash<std::int64_t>{}(n.coeff.num()));
             hash_combine(seed, std::hash<std::int64_t>{}(n.coeff.den()));
@@ -133,6 +135,7 @@ auto node_eq(NfENode const& a, NfENode const& b) -> bool
         case NfEKind::Atom: return equal(a.atom, b.atom);
         case NfEKind::Contraction: return a.ops == b.ops;
         case NfEKind::Unary: return a.uop == b.uop;
+        case NfEKind::Paren: return a.pkind == b.pkind;
         case NfEKind::Term:
             return a.coeff == b.coeff && a.scalar_count == b.scalar_count
                    && bound_eq(a.bound, b.bound);
@@ -236,9 +239,11 @@ struct NfEGraph::Impl final
                     return add_node(
                         NfENode{NfEKind::Cross, nullptr, std::move(ch)});
                 },
-                [&](Paren const& p) -> EClassId {
-                    return add_node(
-                        NfENode{NfEKind::Paren, nullptr, {add_nf(p.body)}});
+                [&](Paren const& p) -> EClassId
+                {
+                    NfENode n{NfEKind::Paren, nullptr, {add_nf(p.body)}};
+                    n.pkind = p.kind;
+                    return add_node(std::move(n));
                 },
                 [&](Unary const& u) -> EClassId
                 {
@@ -438,7 +443,9 @@ struct NfEGraph::Impl final
             }
             case NfEKind::Paren:
                 r = make_paren(
-                    ctx, reconstruct_nf(n.children[0], best, nfmemo, fmemo));
+                    ctx,
+                    reconstruct_nf(n.children[0], best, nfmemo, fmemo),
+                    n.pkind);
                 break;
             case NfEKind::Unary: r = make_unary(ctx, n.uop, fac(0)); break;
             case NfEKind::Div:

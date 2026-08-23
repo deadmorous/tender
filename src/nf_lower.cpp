@@ -507,10 +507,16 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
     // round-trips: `∇·(∇⊗X)` raises back to `Dot(∇, ∇⊗X)`, which renders `ΔX`.
     // The barrier keeps *any* fence containing an abstract ∇, so match the same
     // way; a fence WITHOUT an operator should already be distributed — the
-    // throw below still catches that genuine bug.
+    // throw below still catches that genuine bug.  This is the ONE place
+    // fence-ness is decided (its definition); downstream it is explicit data —
+    // `ParenKind::OperatorFence` — never re-inferred from the body
+    // (vibe 000095 increment 4).
     if (std::holds_alternative<TensorProduct>(factor->node)
         && contains_nabla(ctx, factor))
-        return {+1, make_paren(ctx, canonicalize_nf(ctx, factor))};
+        return {
+            +1,
+            make_paren(
+                ctx, canonicalize_nf(ctx, factor), ParenKind::OperatorFence)};
 
     throw std::invalid_argument(
         "encapsulate: unsupported factor node (a nested ⊗ inside an operand "

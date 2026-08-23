@@ -81,11 +81,27 @@ struct Cross final
     std::vector<Factor const*> factors;
 };
 
-// An opaque parenthesised sum: a `Factor` whose interior is a recursively
-// canonical `Nf`.  Canon never distributes through it (vibe 000057).
+// Why a `Paren` exists — explicit data, never inferred from the body
+// (vibe 000095 increment 4):
+//   Grouping      : a genuine, never-distributed sum being grouped
+//                   (vibe 000057).
+//   OperatorFence : an operator ⊗-fence — `∇⊗X` kept nested because ∇ is an
+//                   operator, not a vector (vibe 000085); carried opaquely
+//                   through canon exactly like a grouped sum, but a distinct
+//                   thing: fence-ness participates in equality/order/hash.
+enum class ParenKind : uint8_t
+{
+    Grouping,
+    OperatorFence,
+};
+
+// An opaque parenthesised interior: a `Factor` whose interior is a recursively
+// canonical `Nf`.  Canon never distributes through it (vibe 000057); `kind`
+// says why it is opaque.
 struct Paren final
 {
     Nf const* body;
+    ParenKind kind = ParenKind::Grouping;
 };
 
 // A unary invariant operator applied to a rank-2 factor: `tr(·)` (rank 0),
@@ -246,7 +262,10 @@ decltype(auto) visit(Visitor&& v, Factor const& f)
 [[nodiscard]] auto make_cross(Context&, std::vector<Factor const*> factors)
     -> Factor const*;
 
-[[nodiscard]] auto make_paren(Context&, Nf const* body) -> Factor const*;
+[[nodiscard]] auto make_paren(
+    Context&,
+    Nf const* body,
+    ParenKind kind = ParenKind::Grouping) -> Factor const*;
 
 [[nodiscard]] auto make_unary(Context&, UnaryOp, Factor const* operand)
     -> Factor const*;

@@ -1241,3 +1241,75 @@ TEST(CanonicalizeNf, TransposeOfDyadExpands)
     EXPECT_EQ(tname(nf->terms[0], 0), "b"); // b⊗a, positional
     EXPECT_EQ(tname(nf->terms[0], 1), "a");
 }
+
+// ---- ParenKind: fence-ness as explicit data (vibe 000095 increment 4) ---
+
+TEST(ParenKind, GenuineSumEncapsulatesAsGrouping)
+{
+    Context ctx;
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto sf = encapsulate(ctx, make_sum(ctx, b, c));
+    ASSERT_TRUE(std::holds_alternative<Paren>(sf.factor->node));
+    EXPECT_EQ(std::get<Paren>(sf.factor->node).kind, ParenKind::Grouping);
+}
+
+TEST(ParenKind, OperatorFenceIsMarkedExplicitly)
+{
+    // ∇·(∇⊗X): the inner ∇⊗X fence survives canon as a Paren (vibe 000085)
+    // and now carries its reason as data — OperatorFence, not Grouping.
+    Context ctx;
+    auto const* X = make_field(ctx, make_tensor_name("X"), 1, {});
+    auto const* grad =
+        make_tensor_product(ctx, tender::make_nabla(ctx), X); // ∇⊗X fence
+    auto const* lap = make_dot(ctx, tender::make_nabla(ctx), grad); // ∇·(∇⊗X)
+
+    auto const* nf = canonicalize_nf(ctx, lap);
+    ASSERT_EQ(nf->terms.size(), 1u);
+
+    // Find the Paren among the term's positional factors.
+    Paren const* paren = nullptr;
+    for (auto const* f: nf->terms[0].tensors)
+    {
+        if (auto const* c = std::get_if<Contraction>(&f->node))
+            for (auto const* cf: c->factors)
+                if (auto const* p = std::get_if<Paren>(&cf->node))
+                    paren = p;
+        if (auto const* p = std::get_if<Paren>(&f->node))
+            paren = p;
+    }
+    ASSERT_NE(paren, nullptr) << "expected the ∇⊗X fence to survive as Paren";
+    EXPECT_EQ(paren->kind, ParenKind::OperatorFence);
+}
+
+TEST(ParenKind, KindParticipatesInEqualityOrderAndHash)
+{
+    Context ctx;
+    auto const* b = atom(ctx, "b");
+    auto const* c = atom(ctx, "c");
+    auto const* body = canonicalize_nf(ctx, make_sum(ctx, b, c));
+
+    auto const* grouping = make_paren(ctx, body, ParenKind::Grouping);
+    auto const* fence = make_paren(ctx, body, ParenKind::OperatorFence);
+
+    EXPECT_FALSE(equal(grouping, fence)); // same body, different meaning
+    EXPECT_NE(compare(*grouping, *fence), 0);
+    EXPECT_NE(hash(*grouping), hash(*fence));
+    EXPECT_TRUE(equal(grouping, make_paren(ctx, body, ParenKind::Grouping)));
+}
+
+TEST(ParenKind, RaiseAndRelowerReproducesTheFenceKind)
+{
+    // The round trip raise → canonicalize_nf must land on the same kind: the
+    // fence's provenance is structural, so kinds are stable across trips.
+    Context ctx;
+    auto const* X = make_field(ctx, make_tensor_name("X"), 1, {});
+    auto const* lap = make_dot(
+        ctx,
+        tender::make_nabla(ctx),
+        make_tensor_product(ctx, tender::make_nabla(ctx), X));
+
+    auto const* once = canonicalize_nf(ctx, lap);
+    auto const* twice = canonicalize_nf(ctx, raise(ctx, *once));
+    EXPECT_TRUE(equal(once, twice)); // kind-aware equality
+}

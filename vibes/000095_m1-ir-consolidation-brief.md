@@ -23,6 +23,21 @@
   touching it belongs with increment 4's fence work, not a mechanical port.
   `flatten_factors`/`product_of` stay in derivation.cpp: single definitions,
   not duplicated peels; unifying them is cosmetic.
+- **Increment 4 DONE — M1 COMPLETE**: ∇ fence as explicit data.
+  `nf::ParenKind { Grouping, OperatorFence }` on `nf::Paren`; the one
+  creation site (`encapsulate`'s TensorProduct-with-∇ arm, where fence-ness
+  is *defined* via `contains_nabla`) stamps `OperatorFence`; downstream the
+  kind is data — included in `equal`/`compare`/`hash`, required by the
+  Nf matcher, carried through pattern instantiation, and keyed into the
+  e-graph's `NfENode` congruence and rebuilt at extraction.  4 new tests
+  incl. the raise→re-lower kind-stability round trip.  Audit note: the only
+  content-sniffing ever present was at the creation site (legitimate — the
+  definition); consumers never sniffed, they just couldn't distinguish.
+  **Observation filed for M2**: `place_factors`' `has_operator` scans only
+  top-level factors for `Deriv`/`Nabla` — an operator buried inside a fence
+  factor does not make the sibling scalars positional; whether that is a
+  latent scope bug deserves a dedicated look when the e-graph work touches
+  term placement.  871 C++ + 349 Python green; scoreboard unchanged.
 - **Increment 3 DONE**: step contract + fired/no-op reporting.
   `apply_identity` no-match now returns the input pointer untouched (was:
   canonicalized input — the vibe-000056 §1 offender); `expand_products` no

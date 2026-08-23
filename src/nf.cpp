@@ -41,11 +41,11 @@ auto make_cross(Context& ctx, std::vector<Factor const*> factors)
     return ctx.make<Factor>(Cross{.factors = std::move(factors)});
 }
 
-auto make_paren(Context& ctx, Nf const* body) -> Factor const*
+auto make_paren(Context& ctx, Nf const* body, ParenKind kind) -> Factor const*
 {
     if (body == nullptr)
         throw std::invalid_argument("make_paren: null body");
-    return ctx.make<Factor>(Paren{.body = body});
+    return ctx.make<Factor>(Paren{.body = body, .kind = kind});
 }
 
 auto make_unary(Context& ctx, UnaryOp op, Factor const* operand) -> Factor const*
@@ -135,7 +135,10 @@ auto equal(Factor const& a, Factor const& b) -> bool
                 return factor_seq_eq(fa.factors, fb.factors);
             },
             [&](Paren const& fa) -> bool
-            { return equal(fa.body, std::get<Paren>(b.node).body); },
+            {
+                auto const& fb = std::get<Paren>(b.node);
+                return fa.kind == fb.kind && equal(fa.body, fb.body);
+            },
             [&](Unary const& fa) -> bool
             {
                 auto const& fb = std::get<Unary>(b.node);
@@ -243,7 +246,12 @@ auto compare(Factor const& a, Factor const& b) -> int
                     fa.factors, std::get<Cross>(b.node).factors);
             },
             [&](Paren const& fa) -> int
-            { return compare(*fa.body, *std::get<Paren>(b.node).body); },
+            {
+                auto const& fb = std::get<Paren>(b.node);
+                if (fa.kind != fb.kind)
+                    return fa.kind < fb.kind ? -1 : 1;
+                return compare(*fa.body, *fb.body);
+            },
             [&](Unary const& fa) -> int
             {
                 auto const& fb = std::get<Unary>(b.node);
@@ -399,7 +407,11 @@ auto hash(Factor const& f) -> std::size_t
             [&](Cross const& c) -> std::size_t
             { return hash_mix(tag, hash_factor_seq(c.factors)); },
             [&](Paren const& p) -> std::size_t
-            { return hash_mix(tag, p.body ? hash(*p.body) : 0); },
+            {
+                std::size_t h = static_cast<std::size_t>(p.kind);
+                h = hash_mix(h, p.body ? hash(*p.body) : 0);
+                return hash_mix(tag, h);
+            },
             [&](Unary const& u) -> std::size_t
             {
                 std::size_t h = static_cast<std::size_t>(u.op);
