@@ -56,6 +56,14 @@ config, both suites runnable separately (`pytest python/tests`,
 
 **Numbering**: next number = max existing + 1, no central registry file.
 
+**Human readability (user requirement, 2026-08-03).** Every challenge test
+must be understandable by a human — what it does and what the result is —
+from the test code and, where applicable, the test output. Concretely: the
+docstring states the claim in mathematical language; the test body reads as
+the derivation, not as plumbing; and the harness provides `show(label, expr)`
+so tests narrate their key intermediate and final expressions to the test
+output (visible under `pytest -s` and in failure reports).
+
 ## Increments
 
 Each keeps the build and all existing tests green.
