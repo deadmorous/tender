@@ -227,3 +227,117 @@ TEST(Fixpoint, ThrowsWhenStepNeverConverges)
     { return make_negate(c, x); };
     EXPECT_THROW((void)view::fixpoint(ctx, a, flip, 8), std::runtime_error);
 }
+
+// ---- distribute_bilinear -----------------------------------------------
+
+namespace
+{
+auto tensor_core(Context& ctx)
+{
+    return [&ctx](Expr const* a, Expr const* b)
+    { return make_tensor_product(ctx, a, b); };
+}
+} // namespace
+
+TEST(DistributeBilinear, LeftShapesPeelFirst)
+{
+    Context ctx;
+    auto const* a = vec(ctx, "a");
+    auto const* b = vec(ctx, "b");
+    auto const* c = vec(ctx, "c");
+    auto const* d = vec(ctx, "d");
+    // (a − b) ⊗ (c + d): the left Difference distributes first (normative
+    // order), each half then distributes the right Sum.
+    auto const* out = view::distribute_bilinear(
+        ctx, make_difference(ctx, a, b), make_sum(ctx, c, d), tensor_core(ctx));
+
+    auto const* expected = make_difference(
+        ctx,
+        make_sum(
+            ctx, make_tensor_product(ctx, a, c), make_tensor_product(ctx, a, d)),
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, b, c),
+            make_tensor_product(ctx, b, d)));
+    EXPECT_TRUE(structural_eq(out, expected));
+}
+
+TEST(DistributeBilinear, NegateAndScalarDivPeel)
+{
+    Context ctx;
+    auto const* a = vec(ctx, "a");
+    auto const* b = vec(ctx, "b");
+    auto const* two = make_scalar(ctx, Rational{2});
+    // (−a) ⊗ (b/2)  →  −((a ⊗ b)/2)
+    auto const* out = view::distribute_bilinear(
+        ctx,
+        make_negate(ctx, a),
+        make_scalar_div(ctx, b, two),
+        tensor_core(ctx));
+    auto const* expected = make_negate(
+        ctx, make_scalar_div(ctx, make_tensor_product(ctx, a, b), two));
+    EXPECT_TRUE(structural_eq(out, expected));
+}
+
+TEST(DistributeBilinear, OptionalPeelsCanBeDisabled)
+{
+    Context ctx;
+    auto const* a = vec(ctx, "a");
+    auto const* b = vec(ctx, "b");
+    // With negate off, the core sees the Negate wrapper itself.
+    Expr const* seen_l = nullptr;
+    auto const* neg_a = make_negate(ctx, a);
+    (void)view::distribute_bilinear(
+        ctx,
+        neg_a,
+        b,
+        [&](Expr const* l, Expr const* r)
+        {
+            seen_l = l;
+            return make_tensor_product(ctx, l, r);
+        },
+        view::BilinearOptions{
+            .negate = false,
+            .binders = false,
+            .scalar_div = false,
+            .scaled_additive = false});
+    EXPECT_EQ(seen_l, neg_a);
+}
+
+TEST(DistributeBilinear, ScaledAdditivePeel)
+{
+    Context ctx;
+    auto const* s = sym(ctx, "s");
+    auto const* a = vec(ctx, "a");
+    auto const* b = vec(ctx, "b");
+    auto const* c = vec(ctx, "c");
+    // (s ⊗ (a + b)) ⊗ c  →  s ⊗ ((a ⊗ c) + (b ⊗ c))
+    auto const* out = view::distribute_bilinear(
+        ctx,
+        make_tensor_product(ctx, s, make_sum(ctx, a, b)),
+        c,
+        tensor_core(ctx));
+    auto const* expected = make_tensor_product(
+        ctx,
+        s,
+        make_sum(
+            ctx,
+            make_tensor_product(ctx, a, c),
+            make_tensor_product(ctx, b, c)));
+    EXPECT_TRUE(structural_eq(out, expected));
+}
+
+TEST(DistributeBilinear, BinderPeelsWithFreshIndex)
+{
+    Context ctx;
+    auto const* a = vec(ctx, "a");
+    auto const* b = vec(ctx, "b");
+    CountableIndex const i{ctx.alloc_index_id()};
+    // (Σ_i a) ⊗ b  →  Σ_j (a ⊗ b) with a fresh dummy j ≠ i.
+    auto const* out = view::distribute_bilinear(
+        ctx, make_explicit_sum(ctx, i, a), b, tensor_core(ctx));
+    auto const* es = std::get_if<ExplicitSum>(&out->node);
+    ASSERT_NE(es, nullptr);
+    EXPECT_NE(es->index.id, i.id); // α-renamed, capture-free
+    EXPECT_TRUE(structural_eq(es->body, make_tensor_product(ctx, a, b)));
+}

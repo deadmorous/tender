@@ -1,5 +1,29 @@
 # 000095 M1 brief — IR consolidation, increment breakdown
 
+## Progress record
+
+- **Increment 1 DONE** (badcc82): `tender::view` combinators
+  (signed_addends/sum_of over `nf::additive_flatten`, skeleton-preserving
+  `map_additive_leaves` with no-op pointer reuse, canonical `map_nf_terms`,
+  guarded `fixpoint`) + `expand_unary` ported.  Byte-identical.
+- **Increment 2 DONE**: `view::distribute_bilinear` — the one bilinear
+  distributor (Sum/Diff always; Negate, α-renamed binders, ScalarDiv,
+  scaled-additive as options) with the **left-operand-first normative peel
+  order**.  Ported: `dd_expand` (the whole vibe-000091 cascade deleted; only
+  the dyad rule remains), `distribute_any`/`expand_products` (options all
+  off), and the signed-addends family (`fold_equal_addends_structural`,
+  `collect_terms`, `factor_common` now consume `view::signed_addends`;
+  `collect_signed_addends` deleted).  Order note: dd_expand's old
+  per-shape interleave was replaced by the left-first order — no test,
+  example, or challenge output changed (860 C++ + 346 Python green,
+  scoreboard unchanged).  `derivation.cpp` 4697 → 4569 (−128);
+  `nf_view.cpp` 211 shared, unit-tested lines (17 tests).
+  **Deliberately not ported**: `distribute_contraction` — its additive
+  peeling is entangled with the vibe-000085/000088 operator-fence barrier;
+  touching it belongs with increment 4's fence work, not a mechanical port.
+  `flatten_factors`/`product_of` stay in derivation.cpp: single definitions,
+  not duplicated peels; unifying them is cosmetic.
+
 The per-milestone brief for M1 (vibe 000093), grounded in a code audit of
 `expr.hpp`, `nf.hpp`, `nf_lower.{hpp,cpp}`, and `derivation.cpp`.
 

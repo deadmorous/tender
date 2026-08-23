@@ -204,34 +204,6 @@ void collect_addends(Expr const* e, std::vector<Expr const*>& out)
     }
 }
 
-// Flatten an additive expression into signed leaf addends: Sum keeps the sign,
-// Difference flips it on the right operand, Negate flips it.  Non-additive
-// nodes are leaves.  This lets like-term collection see through subtraction and
-// negation uniformly (X - X, 2X - X, X + Y - X), independently of whether a
-// sign is encoded as Sum+Negate or as Difference.
-void collect_signed_addends(
-    Expr const* e, int sign, std::vector<std::pair<int, Expr const*>>& out)
-{
-    if (auto const* s = std::get_if<Sum>(&e->node))
-    {
-        collect_signed_addends(s->left, sign, out);
-        collect_signed_addends(s->right, sign, out);
-    }
-    else if (auto const* d = std::get_if<Difference>(&e->node))
-    {
-        collect_signed_addends(d->left, sign, out);
-        collect_signed_addends(d->right, -sign, out);
-    }
-    else if (auto const* n = std::get_if<Negate>(&e->node))
-    {
-        collect_signed_addends(n->operand, -sign, out);
-    }
-    else
-    {
-        out.push_back({sign, e});
-    }
-}
-
 // Find an IndexSpace from any ConcreteIndex-bearing TensorObject slot.
 auto find_space_from_concrete(Expr const* e) -> IndexSpace const*
 {
@@ -686,34 +658,24 @@ auto substitute_concrete(
         });
 }
 
-// Generic product distribution: distribute any binary product over
-// Sum/Difference. make_prod(l, r) creates the leaf product node.
+// Generic product distribution over Sum/Difference only: the term-view
+// bilinear distributor with every optional peel off (vibe 000095).
+// make_prod(l, r) creates the leaf product node.
 template <typename F>
 auto distribute_any(
     Context& ctx, Expr const* l, Expr const* r, F const& make_prod)
     -> Expr const*
 {
-    if (auto const* s = std::get_if<Sum>(&l->node))
-        return make_sum(
-            ctx,
-            distribute_any(ctx, s->left, r, make_prod),
-            distribute_any(ctx, s->right, r, make_prod));
-    if (auto const* d = std::get_if<Difference>(&l->node))
-        return make_difference(
-            ctx,
-            distribute_any(ctx, d->left, r, make_prod),
-            distribute_any(ctx, d->right, r, make_prod));
-    if (auto const* s = std::get_if<Sum>(&r->node))
-        return make_sum(
-            ctx,
-            distribute_any(ctx, l, s->left, make_prod),
-            distribute_any(ctx, l, s->right, make_prod));
-    if (auto const* d = std::get_if<Difference>(&r->node))
-        return make_difference(
-            ctx,
-            distribute_any(ctx, l, d->left, make_prod),
-            distribute_any(ctx, l, d->right, make_prod));
-    return make_prod(l, r);
+    return view::distribute_bilinear(
+        ctx,
+        l,
+        r,
+        [&](Expr const* a, Expr const* b) { return make_prod(a, b); },
+        view::BilinearOptions{
+            .negate = false,
+            .binders = false,
+            .scalar_div = false,
+            .scaled_additive = false});
 }
 
 // Extract (rational coefficient, core expression) from an addend.
@@ -1442,122 +1404,39 @@ auto product_of(Context& ctx, std::vector<Expr const*> const& factors)
     return p;
 }
 
-// Expand one double-dot of two dyads by definition, distributing through sums
-// and summation binders.  `alt` selects the pairing:
+// Expand one double-dot of two dyads by definition.  `alt` selects the
+// pairing:
 //   :  (a⊗b):(c⊗d)  = (a·c)(b·d)
 //   ·· (a⊗b)··(c⊗d) = (a·d)(b·c)
+//
+// The whole wrapper cascade — Sum/Difference/Negate on either side, binders
+// (α-renamed), the ScalarDiv of a symmetric part `(A+Aᵀ)/2`, and a
+// scalar-weighted additive operand `s·(A+B)` (the vibe-000091 shape list) —
+// is the term-view bilinear distributor's job (vibe 000095); only the core
+// dyad rule lives here.
 auto dd_expand(Context& ctx, Expr const* l, Expr const* r, bool alt)
     -> Expr const*
 {
-    auto rebuild = [&](Expr const* a, Expr const* b)
-    { return alt ? make_ddot_alt(ctx, a, b) : make_ddot(ctx, a, b); };
+    return view::distribute_bilinear(
+        ctx,
+        l,
+        r,
+        [&](Expr const* a, Expr const* b) -> Expr const*
+        {
+            auto const ls = split_dyad(a);
+            auto const rs = split_dyad(b);
+            if (!ls || !rs) // not a dyad pair — leave the double dot
+                return alt ? make_ddot_alt(ctx, a, b) : make_ddot(ctx, a, b);
 
-    // Distribute over the additive structure on either side (Sum / Difference /
-    // Negate) — the same operand set expand_unary normalises for tr/vec/
-    // transpose.  A curvilinear component expansion carries signed addends
-    // (e.g. the `− v/r eθ⊗er` of ∇u in cylindrical coords), so distributing
-    // over Sum alone leaves a Difference/Negate node blocking the contraction.
-    if (auto const* s = std::get_if<Sum>(&l->node))
-        return make_sum(
-            ctx,
-            dd_expand(ctx, s->left, r, alt),
-            dd_expand(ctx, s->right, r, alt));
-    if (auto const* s = std::get_if<Sum>(&r->node))
-        return make_sum(
-            ctx,
-            dd_expand(ctx, l, s->left, alt),
-            dd_expand(ctx, l, s->right, alt));
-    if (auto const* d = std::get_if<Difference>(&l->node))
-        return make_difference(
-            ctx,
-            dd_expand(ctx, d->left, r, alt),
-            dd_expand(ctx, d->right, r, alt));
-    if (auto const* d = std::get_if<Difference>(&r->node))
-        return make_difference(
-            ctx,
-            dd_expand(ctx, l, d->left, alt),
-            dd_expand(ctx, l, d->right, alt));
-    if (auto const* n = std::get_if<Negate>(&l->node))
-        return make_negate(ctx, dd_expand(ctx, n->operand, r, alt));
-    if (auto const* n = std::get_if<Negate>(&r->node))
-        return make_negate(ctx, dd_expand(ctx, l, n->operand, alt));
-
-    // Pull a summation binder out (renaming to a fresh id to avoid capture).
-    if (auto const* es = std::get_if<ExplicitSum>(&l->node); es && !es->bound)
-    {
-        CountableIndex fresh{ctx.alloc_index_id()};
-        auto const* body =
-            substitute_index_id(ctx, es->body, es->index.id, fresh.id);
-        return make_explicit_sum(ctx, fresh, dd_expand(ctx, body, r, alt));
-    }
-    if (auto const* es = std::get_if<ExplicitSum>(&r->node); es && !es->bound)
-    {
-        CountableIndex fresh{ctx.alloc_index_id()};
-        auto const* body =
-            substitute_index_id(ctx, es->body, es->index.id, fresh.id);
-        return make_explicit_sum(ctx, fresh, dd_expand(ctx, l, body, alt));
-    }
-
-    // A contraction commutes through a scalar divisor:
-    //   (X/c)··r = (X··r)/c   and   l··(Y/c) = (l··Y)/c.
-    // `split_dyad` only peels *multiplied* scalars, so a symmetric part written
-    // as `(A+Aᵀ)/2` — a ScalarDiv over a Sum — would otherwise stall the whole
-    // double-dot (the strain energy `T··ε` with `ε = (∇u+(∇u)ᵀ)/2`).  Pulling
-    // the divisor out first lets the Sum distribution and dyad rule proceed
-    // (mirrors expand_unary's ScalarDiv handling for tr/vec/transpose).
-    if (auto const* d = std::get_if<ScalarDiv>(&l->node))
-        return make_scalar_div(ctx, dd_expand(ctx, d->left, r, alt), d->right);
-    if (auto const* d = std::get_if<ScalarDiv>(&r->node))
-        return make_scalar_div(ctx, dd_expand(ctx, l, d->left, alt), d->right);
-
-    // Pull scalar factors off a scalar-weighted *additive* operand so the
-    // distribution above can proceed: (s·(A + B))··r = s·((A··r) + (B··r)).  A
-    // coefficient in front of a sum of dyads — e.g. `λ(∇·u)·I` once the
-    // identity is resolved to Σ eᵢ⊗eᵢ — is neither a bare Sum nor a single
-    // dyad, so split_dyad cannot peel it; without this the contraction stalls.
-    // A scalar times a *single* dyad is left to split_dyad below.
-    auto peel_scaled_additive = [&](Expr const* e)
-        -> std::optional<std::pair<std::vector<Expr const*>, Expr const*>>
-    {
-        std::vector<Expr const*> flat;
-        flatten_factors(e, flat);
-        std::vector<Expr const*> scalars, rest;
-        for (auto const* f: flat)
-            (infer_rank(f) == std::optional<int>{0} ? scalars : rest)
-                .push_back(f);
-        if (scalars.empty() || rest.size() != 1)
-            return std::nullopt;
-        auto const& core = rest[0]->node;
-        if (!std::holds_alternative<Sum>(core)
-            && !std::holds_alternative<Difference>(core)
-            && !std::holds_alternative<Negate>(core))
-            return std::nullopt;
-        return std::pair{std::move(scalars), rest[0]};
-    };
-    if (auto p = peel_scaled_additive(l))
-    {
-        auto factors = p->first;
-        factors.push_back(dd_expand(ctx, p->second, r, alt));
-        return product_of(ctx, factors);
-    }
-    if (auto p = peel_scaled_additive(r))
-    {
-        auto factors = p->first;
-        factors.push_back(dd_expand(ctx, l, p->second, alt));
-        return product_of(ctx, factors);
-    }
-
-    // Core dyad rule.
-    auto const ls = split_dyad(l);
-    auto const rs = split_dyad(r);
-    if (!ls || !rs)
-        return rebuild(l, r); // not a dyad pair — leave it
-
-    std::vector<Expr const*> factors = ls->scalars;
-    factors.insert(factors.end(), rs->scalars.begin(), rs->scalars.end());
-    factors.push_back(make_dot(ctx, ls->leg0, alt ? rs->leg1 : rs->leg0));
-    factors.push_back(make_dot(ctx, ls->leg1, alt ? rs->leg0 : rs->leg1));
-    return product_of(ctx, factors);
+            std::vector<Expr const*> factors = ls->scalars;
+            factors.insert(
+                factors.end(), rs->scalars.begin(), rs->scalars.end());
+            factors.push_back(
+                make_dot(ctx, ls->leg0, alt ? rs->leg1 : rs->leg0));
+            factors.push_back(
+                make_dot(ctx, ls->leg1, alt ? rs->leg0 : rs->leg1));
+            return product_of(ctx, factors);
+        });
 }
 
 } // namespace
@@ -3104,8 +2983,7 @@ auto fold_equal_addends_structural(Context& ctx, Expr const* e) -> Expr const*
         e,
         [](Context& ctx, Expr const* e) -> Expr const*
         {
-            std::vector<std::pair<int, Expr const*>> addends;
-            collect_signed_addends(e, +1, addends);
+            auto const addends = view::signed_addends(e);
             if (addends.size() < 2)
                 return e;
 
@@ -3194,8 +3072,7 @@ auto collect_terms(Context& ctx, Expr const* e) -> Expr const*
     {
         prepped = e;
     }
-    std::vector<std::pair<int, Expr const*>> addends;
-    collect_signed_addends(prepped, 1, addends);
+    auto const addends = view::signed_addends(prepped);
 
     // Group by the tensor (non-scalar) part; accumulate the scalar coefficient.
     struct Group final
@@ -3328,14 +3205,13 @@ auto factor_common(Context& ctx, Expr const* e) -> Expr const*
             if (!std::holds_alternative<Sum>(node->node)
                 && !std::holds_alternative<Difference>(node->node))
                 return node;
-            std::vector<std::pair<int, Expr const*>> addends;
-            collect_signed_addends(node, +1, addends);
+            auto const addends = view::signed_addends(node);
             if (addends.size() < 2)
                 return node;
 
             std::vector<std::vector<Expr const*>> avail(addends.size());
             for (std::size_t i = 0; i < addends.size(); ++i)
-                flatten_factors(addends[i].second, avail[i]);
+                flatten_factors(addends[i].body, avail[i]);
 
             // A candidate common factor: a rank-0, non-literal factor of the
             // first addend that occurs (with multiplicity) in every addend.
@@ -3377,7 +3253,7 @@ auto factor_common(Context& ctx, Expr const* e) -> Expr const*
                         rem.push_back(f);
                 Expr const* term = rem.empty() ? make_scalar(ctx, Rational{1}) :
                                                  product_of(ctx, rem);
-                if (addends[i].first < 0)
+                if (addends[i].sign < 0)
                     term = make_negate(ctx, term);
                 rem_sum = rem_sum ? make_sum(ctx, rem_sum, term) : term;
             }

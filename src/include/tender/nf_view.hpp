@@ -64,6 +64,40 @@ struct AdditiveOptions final
     std::function<Expr const*(Expr const*)> const& leaf,
     AdditiveOptions = {}) -> Expr const*;
 
+// ---- surface: bilinear distribution ------------------------------------
+
+struct BilinearOptions final
+{
+    // Peel `Negate` (op(−X, R) = −op(X, R)).
+    bool negate = true;
+    // Pull an (unbounded) `ExplicitSum` binder out, α-renaming its dummy to a
+    // fresh id so nothing in the other operand is captured.
+    bool binders = true;
+    // A contraction commutes through a scalar divisor:
+    // op(X/c, R) = op(X, R)/c.
+    bool scalar_div = true;
+    // Peel scalar factors off a scalar-weighted *additive* operand so the
+    // additive distribution can proceed: op(s·(A ± B), R) = s·op(A ± B, R).
+    bool scaled_additive = true;
+};
+
+// Distribute a bilinear operation over the additive / wrapper structure of
+// its two operands, calling `core(l', r')` on each pair of multiplicative
+// cores.  This is the one implementation of the shape cascade that
+// `dd_expand` (vibe 000091) and `distribute_any` each grew independently.
+//
+// The peel order is normative: within the LEFT operand first, then the
+// right — Sum, Difference, then (per the options) Negate, binder,
+// ScalarDiv, scaled-additive — so "expand the left factor first" is the one
+// documented convention.  `core` receives operands free of every enabled
+// wrapper shape and rebuilds the operation (or leaves it) as it sees fit.
+[[nodiscard]] auto distribute_bilinear(
+    Context&,
+    Expr const* l,
+    Expr const* r,
+    std::function<Expr const*(Expr const*, Expr const*)> const& core,
+    BilinearOptions = {}) -> Expr const*;
+
 // ---- canonical: normal-form term map -----------------------------------
 
 // Expose `e` as its canonical term set and let `transform` edit it in place
