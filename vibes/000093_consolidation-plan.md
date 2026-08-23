@@ -39,12 +39,29 @@ their replacements are proven by the suite.
 
 ## M0 — Certification harness
 
-- `challenges/` directory, one file per challenge, named `TNN_slug.py`
-  (T = tier letter from vibe 000092 §4). Each file states: source (book +
-  section where applicable), the claim, and asserts the endpoint.
+- `challenges/` directory, one **directory per challenge** (refined
+  2026-08-03 — a challenge is constituted by multiple files, including
+  scanned hand-made derivations):
+
+  ```
+  challenges/
+    NNNNNN_descriptive-name/
+      test.py     # the runnable assertion of the claim
+      meta/       # free-form human material: scans, notes, references
+  ```
+
+  `NNNNNN` is a six-digit global sequence in creation order, exactly the
+  vibes convention; no tier letter in the name — the tier (vibe 000092 §4)
+  is recorded in challenge metadata, since tiers are a planning taxonomy
+  that may be reorganized and a challenge can span tiers. `test.py` is a
+  fixed name (the directory carries the identity); pytest must run with
+  `--import-mode=importlib` so same-named test modules don't collide.
+  Each `test.py` declares machine-readable metadata — tier, title, source
+  (book + section where applicable) — exact shape settled in the M0 brief;
+  `meta/` inner structure is refined only when needed.
 - A pytest-based runner plus a CI job; a generated scoreboard table
-  (challenge → L0 failing / L1 verified / L2 performed) committed or rendered
-  in CI output.
+  (challenge → L0 failing / L1 verified / L2 performed, grouped by tier
+  from metadata) committed or rendered in CI output.
 - L1 = endpoint confirmed by component check (`algebraic_eq` after chart
   expansion). L2 = direct-notation derivation using only the documented
   public surface, no trial-and-error steps.
