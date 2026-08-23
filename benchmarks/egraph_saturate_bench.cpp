@@ -99,7 +99,7 @@ void run(Context& ctx, Case const& c, int reps)
     // Deterministic shape: one cold run.
     nf::NfEGraph eg{ctx};
     auto const root = eg.add(c.target);
-    int const passes = eg.saturate({c.rule});
+    int const passes = eg.saturate({c.rule}).passes;
     auto const nodes = eg.node_count();
     auto const classes = eg.class_count();
     (void)eg.extract(eg.find(root));

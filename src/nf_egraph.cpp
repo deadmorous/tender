@@ -502,14 +502,22 @@ struct NfEGraph::Impl final
     // Read phase: every (Sum class, rewritten Nf) a compiled rule produces over
     // a stable graph.  The rewritten Nf is raw (freshened RHS dummies, unmerged
     // terms); the caller canonicalizes it before insertion.
-    auto collect_rewrites(
-        std::vector<std::pair<Term, Nf const*>> const& compiled)
-        -> std::vector<std::pair<EClassId, Nf const*>>
+    // One rewrite the read phase produced: which class it applies to, the raw
+    // rewritten `Nf`, and which compiled rule made it (for the trace).
+    struct Rewrite final
+    {
+        EClassId cls;
+        Nf const* raw;
+        std::size_t rule;
+    };
+
+    auto collect_rewrites(std::vector<std::pair<Term, Nf const*>> const&
+                              compiled) -> std::vector<Rewrite>
     {
         auto best = compute_best();
         std::unordered_map<EClassId, Nf const*> nfmemo;
         std::unordered_map<EClassId, Factor const*> fmemo;
-        std::vector<std::pair<EClassId, Nf const*>> out;
+        std::vector<Rewrite> out;
 
         for (auto const& [id, ec]: classes_)
             for (NfENode const& sumnode: ec.nodes)
@@ -521,7 +529,9 @@ struct NfEGraph::Impl final
                 for (EClassId tc: sumnode.children)
                     terms.push_back(reconstruct_term(tc, best, nfmemo, fmemo));
 
-                for (auto const& [lhs_term, rhs]: compiled)
+                for (std::size_t r = 0; r < compiled.size(); ++r)
+                {
+                    auto const& [lhs_term, rhs] = compiled[r];
                     for (std::size_t i = 0; i < terms.size(); ++i)
                         if (auto rep = fire_identity_on_term(
                                 *ctx_, lhs_term, rhs, terms[i]))
@@ -534,58 +544,103 @@ struct NfEGraph::Impl final
                                         nt.end(), rep->begin(), rep->end());
                                 else
                                     nt.push_back(terms[k]);
-                            out.emplace_back(id, make_nf(*ctx_, std::move(nt)));
+                            out.push_back(
+                                Rewrite{id, make_nf(*ctx_, std::move(nt)), r});
                         }
+                }
             }
         return out;
     }
 
-    auto saturate(std::vector<Identity> const& rules, int max_iterations) -> int
+    auto saturate(
+        std::vector<Identity> const& rules,
+        SaturateBudget budget,
+        std::function<bool()> const& stop) -> SaturateReport
     {
         Context& ctx = *ctx_;
+        SaturateReport report;
+        report.fired.assign(rules.size(), 0);
 
         // Compile once: each rule's LHS / RHS canonicalized to `Nf`.  Only a
         // single-term LHS is matched as a sub-product / sub-chain; a multi-term
-        // LHS (a sub-sum pattern) has no Nf matcher yet and is skipped.
+        // LHS (a sub-sum pattern) has no Nf matcher yet — recorded in
+        // `skipped` rather than silently dropped (vibe 000096).
+        // `origin[k]` is the caller's rule index for compiled rule k, so the
+        // trace attributes firings to the rules the caller passed in.
         std::vector<std::pair<Term, Nf const*>> compiled;
+        std::vector<std::size_t> origin;
         compiled.reserve(rules.size());
-        for (auto const& r: rules)
+        origin.reserve(rules.size());
+        for (std::size_t i = 0; i < rules.size(); ++i)
         {
             auto const* lhs =
-                canonicalize_nf(ctx, steps::canonicalize(ctx, r.lhs));
+                canonicalize_nf(ctx, steps::canonicalize(ctx, rules[i].lhs));
             auto const* rhs =
-                canonicalize_nf(ctx, steps::canonicalize(ctx, r.rhs));
+                canonicalize_nf(ctx, steps::canonicalize(ctx, rules[i].rhs));
             if (lhs->terms.size() != 1)
+            {
+                report.skipped.push_back(i);
                 continue;
+            }
             compiled.emplace_back(lhs->terms.front(), rhs);
+            origin.push_back(i);
         }
 
-        int passes = 0;
-        while (passes < max_iterations)
+        // An empty goal check never stops early.
+        auto goal_reached = [&] { return stop && stop(); };
+
+        if (goal_reached())
         {
-            ++passes;
+            report.outcome = SaturateOutcome::EarlyStop;
+            report.nodes = node_count();
+            return report;
+        }
+
+        report.outcome = SaturateOutcome::Saturated;
+        while (true)
+        {
+            if (report.passes >= budget.max_passes)
+            {
+                report.outcome = SaturateOutcome::PassBudget;
+                break;
+            }
+            // Checked between passes: a pass never *starts* over budget, so
+            // the final graph may exceed `max_nodes` by one pass's growth.
+            if (node_count() >= budget.max_nodes)
+            {
+                report.outcome = SaturateOutcome::NodeBudget;
+                break;
+            }
+            ++report.passes;
 
             auto rewrites = collect_rewrites(compiled);
 
             bool changed = false;
-            for (auto const& [cls, raw]: rewrites)
+            for (auto const& rw: rewrites)
             {
                 // Re-canonicalize the spliced Nf (re-α-rename freshened RHS
                 // dummies, merge like terms) before hash-consing it in.
                 auto const* canon = canonicalize_nf(
-                    ctx, steps::canonicalize(ctx, raise(ctx, *raw)));
+                    ctx, steps::canonicalize(ctx, raise(ctx, *rw.raw)));
                 EClassId const rcls = add_nf(canon);
-                if (find(cls) != find(rcls))
+                if (find(rw.cls) != find(rcls))
                 {
-                    merge(cls, rcls);
+                    merge(rw.cls, rcls);
                     changed = true;
+                    ++report.fired[origin[rw.rule]];
                 }
             }
             rebuild();
             if (!changed)
+                break; // fixed point — outcome stays Saturated
+            if (goal_reached())
+            {
+                report.outcome = SaturateOutcome::EarlyStop;
                 break;
+            }
         }
-        return passes;
+        report.nodes = node_count();
+        return report;
     }
 };
 
@@ -639,10 +694,12 @@ auto NfEGraph::extract(EClassId id) -> Nf const*
     return impl_->reconstruct_nf(id, best, nfmemo, fmemo);
 }
 
-auto NfEGraph::saturate(std::vector<Identity> const& rules, int max_iterations)
-    -> int
+auto NfEGraph::saturate(
+    std::vector<Identity> const& rules,
+    SaturateBudget budget,
+    std::function<bool()> const& stop) -> SaturateReport
 {
-    return impl_->saturate(rules, max_iterations);
+    return impl_->saturate(rules, budget, stop);
 }
 
 auto NfEGraph::merge(EClassId a, EClassId b) -> EClassId

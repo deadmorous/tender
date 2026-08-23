@@ -220,11 +220,13 @@ TEST(NfEGraphSaturate, ContractsDelta)
 
     NfEGraph g(ctx);
     auto root = g.add(contraction(ctx, sp, q, m, n));
-    int passes = g.saturate({contraction_rule(ctx, sp)});
+    auto const report = g.saturate({contraction_rule(ctx, sp)});
 
     EXPECT_TRUE(
         equal(g.extract(g.find(root)), canon_nf(ctx, delta_ll(ctx, sp, m, n))));
-    EXPECT_LT(passes, 30); // converged below the cap
+    EXPECT_LT(report.passes, 30); // converged below the cap
+    EXPECT_EQ(report.outcome, SaturateOutcome::Saturated);
+    EXPECT_EQ(report.fired.at(0), 1); // the rule did the work
 }
 
 TEST(NfEGraphSaturate, FiresOnSubProductOfLargerTerm)
@@ -281,7 +283,10 @@ TEST(NfEGraphSaturate, NoMatchLeavesGraphUnchanged)
     auto root = g.add(delta_ll(ctx, sp, m, n)); // bare delta, no contraction
     auto before = g.class_count();
 
-    EXPECT_EQ(g.saturate({contraction_rule(ctx, sp)}), 1); // one no-op pass
+    auto const report = g.saturate({contraction_rule(ctx, sp)});
+    EXPECT_EQ(report.passes, 1); // one no-op pass
+    EXPECT_EQ(report.outcome, SaturateOutcome::Saturated);
+    EXPECT_EQ(report.fired.at(0), 0); // nothing matched
     EXPECT_EQ(g.class_count(), before);
     EXPECT_TRUE(
         equal(g.extract(g.find(root)), canon_nf(ctx, delta_ll(ctx, sp, m, n))));
@@ -299,7 +304,7 @@ TEST(NfEGraphSaturate, ReachesFixedPointAndIsIdempotent)
     (void)g.add(contraction(ctx, sp, q, m, n));
     (void)g.saturate({contraction_rule(ctx, sp)});
     // A second saturation merges nothing new: one pass, then convergence.
-    EXPECT_EQ(g.saturate({contraction_rule(ctx, sp)}), 1);
+    EXPECT_EQ(g.saturate({contraction_rule(ctx, sp)}).passes, 1);
 }
 
 TEST(NfEGraphSaturate, RespectsIterationCap)
@@ -312,7 +317,10 @@ TEST(NfEGraphSaturate, RespectsIterationCap)
 
     NfEGraph g(ctx);
     (void)g.add(contraction(ctx, sp, q, m, n));
-    EXPECT_EQ(g.saturate({contraction_rule(ctx, sp)}, 1), 1); // hard stop
+    auto const report =
+        g.saturate({contraction_rule(ctx, sp)}, {.max_passes = 1});
+    EXPECT_EQ(report.passes, 1); // hard stop
+    EXPECT_EQ(report.outcome, SaturateOutcome::PassBudget);
 }
 
 TEST(NfEGraphCore, ContractionStructureDedups)

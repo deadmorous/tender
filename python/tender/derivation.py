@@ -53,6 +53,10 @@ __all__ = [
     "Identity",
     "apply_identity",
     "saturate",
+    "prove_equal",
+    "engine_simplify",
+    "ProofResult",
+    "BudgetExceeded",
     "structural_eq",
     "algebraic_eq",
     "at",
@@ -459,6 +463,117 @@ def saturate(expr, rules, max_iterations=30):
     lhss = [r.lhs for r in rules]
     rhss = [r.rhs for r in rules]
     return _d._saturate(expr, lhss, rhss, max_iterations)
+
+
+class BudgetExceeded(UserWarning):
+    """Saturation stopped on its budget, so the answer is inconclusive.
+
+    A budget trip is *not* a negative result: the rules may well prove or
+    simplify the expression given more room.  Raised as a warning so a
+    shortfall can never pass silently for a fixed point.
+    """
+
+
+class ProofResult:
+    """The outcome of :func:`prove_equal` — deliberately not a bare bool.
+
+    ``proved`` is the answer; ``status`` says *why*: ``"proved"``,
+    ``"exhausted"`` (the rules ran out without a proof — which is **not** a
+    claim that the two sides differ, since saturation can exhibit proofs but
+    never refutations), or ``"budget"`` (stopped early; nothing concluded).
+    ``fired`` maps rule name → firing count, ``skipped`` lists rules the
+    engine could not compile, and ``passes``/``nodes`` size the search.
+    """
+
+    def __init__(self, report):
+        self.proved = report["proved"]
+        self.status = report["status"]
+        self.passes = report["passes"]
+        self.nodes = report["nodes"]
+        self.fired = dict(report["fired"])
+        self.skipped = list(report["skipped"])
+
+    def __bool__(self):
+        return bool(self.proved)
+
+    def __repr__(self):
+        detail = f", fired={self.fired}" if self.fired else ""
+        return (
+            f"ProofResult(proved={self.proved}, status={self.status!r}, "
+            f"passes={self.passes}, nodes={self.nodes}{detail})"
+        )
+
+
+def _rule_arrays(rules):
+    rules = list(rules)
+    return (
+        [r.lhs for r in rules],
+        [r.rhs for r in rules],
+        [r.name or f"rule{i}" for i, r in enumerate(rules)],
+    )
+
+
+def _warn_skipped(skipped, what):
+    if skipped:
+        warnings.warn(
+            f"{what}: {len(skipped)} rule(s) could not be compiled and never "
+            f"fired (a multi-term left-hand side has no matcher yet): "
+            f"{', '.join(skipped)}",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
+def prove_equal(lhs, rhs, rules, max_passes=30, max_nodes=10000):
+    """Try to prove ``lhs == rhs`` by equality saturation under *rules*.
+
+    Both sides are saturated together in one e-graph, so rules that rewrite
+    either side toward the other suffice — neither has to be driven all the
+    way into the other.  Returns a :class:`ProofResult`; a budget trip also
+    warns :class:`BudgetExceeded`, because "not proved within budget" must
+    never be mistaken for "not equal".
+    """
+    lhss, rhss, names = _rule_arrays(rules)
+    result = ProofResult(
+        _d._prove_equal(lhs, rhs, lhss, rhss, names, max_passes, max_nodes)
+    )
+    _warn_skipped(result.skipped, "prove_equal")
+    if result.status == "budget":
+        warnings.warn(
+            f"prove_equal stopped on its budget after {result.passes} pass(es) "
+            f"/ {result.nodes} nodes — inconclusive, NOT a disproof; retry "
+            f"with a larger max_passes/max_nodes",
+            BudgetExceeded,
+            stacklevel=2,
+        )
+    return result
+
+
+def engine_simplify(expr, rules, max_passes=30, max_nodes=10000):
+    """Saturate *expr* under *rules* and return the cheapest form found.
+
+    Cost is the ε-weighted measure (fewest Levi-Civita symbols first, then
+    fewest nodes).  Returns ``(expr, report)``; on a budget trip the best
+    form found so far is still returned, with a :class:`BudgetExceeded`
+    warning and ``report["complete"] is False``.
+    """
+    lhss, rhss, names = _rule_arrays(rules)
+    out, report = _d._engine_simplify(
+        expr, lhss, rhss, names, max_passes, max_nodes
+    )
+    report = dict(report)
+    report["fired"] = dict(report["fired"])
+    report["skipped"] = list(report["skipped"])
+    _warn_skipped(report["skipped"], "engine_simplify")
+    if not report["complete"]:
+        warnings.warn(
+            f"engine_simplify stopped on its budget after {report['passes']} "
+            f"pass(es) / {report['nodes']} nodes — the result is the best form "
+            f"found so far, not a fixed point",
+            BudgetExceeded,
+            stacklevel=2,
+        )
+    return out, report
 
 
 def structural_eq(a, b):

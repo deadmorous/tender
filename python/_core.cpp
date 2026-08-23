@@ -8,6 +8,7 @@
 #include <tender/context.hpp>
 #include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>
+#include <tender/engine.hpp>
 #include <tender/expr.hpp>
 #include <tender/identity.hpp>
 #include <tender/index.hpp>
@@ -1074,7 +1075,7 @@ NB_MODULE(_core, m)
             rules.reserve(lhss.size());
             for (std::size_t i = 0; i < lhss.size(); ++i)
                 rules.push_back(Identity{"", lhss[i].expr, rhss[i].expr});
-            eg.saturate(rules, max_iterations);
+            eg.saturate(rules, nf::SaturateBudget{.max_passes = max_iterations});
             // Raise the cheapest extracted `Nf` back to the user-facing
             // implicit form (the same final shape `apply_identity` returns).
             auto const* nf = eg.extract(eg.find(root));
@@ -1088,6 +1089,114 @@ NB_MODULE(_core, m)
         "max_iterations"_a,
         "Equality-saturate expr under the rules (lhs=rhs pairs) and return the "
         "cheapest extracted expression. All exprs must share one Context.");
+
+    // ---- engine verbs (vibe 000096 M2) ---------------------------------
+    // Provisional names: the blessed public surface is M3's job.  Each
+    // returns a dict so the *report* travels with the answer — a budget trip
+    // must be visible to the caller, never silently read as a negative.
+
+    md.def(
+        "_prove_equal",
+        [](PyExpr const& lhs,
+           PyExpr const& rhs,
+           std::vector<PyExpr> const& rule_lhss,
+           std::vector<PyExpr> const& rule_rhss,
+           std::vector<std::string> const& rule_names,
+           int max_passes,
+           std::size_t max_nodes) -> nb::dict
+        {
+            Context& ctx = *lhs.ctx;
+            std::vector<Identity> rules;
+            rules.reserve(rule_lhss.size());
+            for (std::size_t i = 0; i < rule_lhss.size(); ++i)
+                rules.push_back(Identity{
+                    rule_names.at(i), rule_lhss[i].expr, rule_rhss[i].expr});
+
+            auto const res = engine::prove_equal(
+                ctx,
+                lhs.expr,
+                rhs.expr,
+                rules,
+                nf::SaturateBudget{
+                    .max_passes = max_passes, .max_nodes = max_nodes});
+
+            nb::dict d;
+            d["proved"] = res.proved();
+            d["status"] =
+                res.status == engine::ProofStatus::Proved    ? "proved" :
+                res.status == engine::ProofStatus::Exhausted ? "exhausted" :
+                                                               "budget";
+            d["passes"] = res.report.passes;
+            d["nodes"] = res.report.nodes;
+            nb::dict fired;
+            for (std::size_t i = 0; i < res.report.fired.size(); ++i)
+                if (res.report.fired[i] > 0)
+                    fired[nb::str(rule_names.at(i).c_str())] =
+                        res.report.fired[i];
+            d["fired"] = fired;
+            nb::list skipped;
+            for (auto i: res.report.skipped)
+                skipped.append(nb::str(rule_names.at(i).c_str()));
+            d["skipped"] = skipped;
+            return d;
+        },
+        "lhs"_a,
+        "rhs"_a,
+        "rule_lhss"_a,
+        "rule_rhss"_a,
+        "rule_names"_a,
+        "max_passes"_a,
+        "max_nodes"_a,
+        "Try to prove lhs == rhs by equality saturation; returns a report "
+        "dict (proved/status/passes/nodes/fired/skipped).");
+
+    md.def(
+        "_engine_simplify",
+        [](PyExpr const& expr,
+           std::vector<PyExpr> const& rule_lhss,
+           std::vector<PyExpr> const& rule_rhss,
+           std::vector<std::string> const& rule_names,
+           int max_passes,
+           std::size_t max_nodes) -> nb::tuple
+        {
+            Context& ctx = *expr.ctx;
+            std::vector<Identity> rules;
+            rules.reserve(rule_lhss.size());
+            for (std::size_t i = 0; i < rule_lhss.size(); ++i)
+                rules.push_back(Identity{
+                    rule_names.at(i), rule_lhss[i].expr, rule_rhss[i].expr});
+
+            auto const res = engine::simplify(
+                ctx,
+                expr.expr,
+                rules,
+                nf::SaturateBudget{
+                    .max_passes = max_passes, .max_nodes = max_nodes});
+
+            nb::dict d;
+            d["complete"] = res.complete();
+            d["passes"] = res.report.passes;
+            d["nodes"] = res.report.nodes;
+            nb::dict fired;
+            for (std::size_t i = 0; i < res.report.fired.size(); ++i)
+                if (res.report.fired[i] > 0)
+                    fired[nb::str(rule_names.at(i).c_str())] =
+                        res.report.fired[i];
+            d["fired"] = fired;
+            nb::list skipped;
+            for (auto i: res.report.skipped)
+                skipped.append(nb::str(rule_names.at(i).c_str()));
+            d["skipped"] = skipped;
+            return nb::make_tuple(derive(expr, res.expr), d);
+        },
+        "expr"_a,
+        "rule_lhss"_a,
+        "rule_rhss"_a,
+        "rule_names"_a,
+        "max_passes"_a,
+        "max_nodes"_a,
+        "Saturate expr under the rules and extract the cheapest form; returns "
+        "(expr, report dict).");
 
     // Equality predicates (not steps).
     m.def(

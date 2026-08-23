@@ -1090,3 +1090,92 @@ def test_factor_common_nested_in_gradient_and_noop():
     # no common factor → unchanged.
     s2 = lam * (nab @ u) + mu * u
     assert td.structural_eq(td.factor_common(s2), s2)
+
+
+# ---- engine verbs (vibe 000096 M2) -----------------------------------------
+
+
+def _delta(ctx, a, b, levels=None):
+    U, L = tender.Level.Upper, tender.Level.Lower
+    lv = levels or (U, L)
+    return tender.delta(tender.Realm.Oblique, _sp3(), lv[0], lv[1], a, b, ctx=ctx)
+
+
+def _contraction_setup():
+    """Σ_q δ^q_m δ^q_n, its contracted form δ_mn, and the rule between them."""
+    ctx = tender.Context()
+    L = tender.Level.Lower
+    q, m, n = (ctx.alloc_index() for _ in range(3))
+    lhs = tender.explicit_sum(q, _delta(ctx, q, m) * _delta(ctx, q, n), ctx=ctx)
+    rhs = _delta(ctx, m, n, (L, L))
+    p1, p2, p3 = (ctx.alloc_index() for _ in range(3))
+    rule = td.Identity(
+        "delta_contraction",
+        tender.explicit_sum(p1, _delta(ctx, p1, p2) * _delta(ctx, p1, p3), ctx=ctx),
+        _delta(ctx, p2, p3, (L, L)),
+    )
+    return ctx, lhs, rhs, rule
+
+
+def test_prove_equal_proves_and_attributes_the_rule():
+    _, lhs, rhs, rule = _contraction_setup()
+    result = td.prove_equal(lhs, rhs, [rule])
+    assert result.proved
+    assert bool(result) is True
+    assert result.status == "proved"
+    assert result.fired == {"delta_contraction": 1}
+
+
+def test_prove_equal_exhausted_is_not_a_disproof():
+    ctx, lhs, _, rule = _contraction_setup()
+    unrelated = tender.tensor("c", rank=2, ctx=ctx)
+    result = td.prove_equal(lhs, unrelated, [rule])
+    assert not result.proved
+    # Exhausted means "these rules did not suffice", never "they differ".
+    assert result.status == "exhausted"
+
+
+def test_prove_equal_budget_trip_warns_and_is_inconclusive():
+    import warnings
+
+    _, lhs, rhs, rule = _contraction_setup()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = td.prove_equal(lhs, rhs, [rule], max_passes=0)
+    assert not result.proved
+    assert result.status == "budget"  # NOT "exhausted"
+    assert any(issubclass(c.category, td.BudgetExceeded) for c in caught)
+
+
+def test_engine_simplify_contracts_and_reports():
+    _, lhs, rhs, rule = _contraction_setup()
+    out, report = td.engine_simplify(lhs, [rule])
+    assert td.algebraic_eq(out, rhs)
+    assert report["complete"] is True
+    assert report["fired"] == {"delta_contraction": 1}
+
+
+def test_engine_simplify_budget_returns_best_so_far_with_warning():
+    import warnings
+
+    _, lhs, _, rule = _contraction_setup()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out, report = td.engine_simplify(lhs, [rule], max_passes=0)
+    assert report["complete"] is False
+    assert td.algebraic_eq(out, lhs)  # unsimplified, but never garbage
+    assert any(issubclass(c.category, td.BudgetExceeded) for c in caught)
+
+
+def test_uncompilable_rule_is_reported_not_silently_inert():
+    import warnings
+
+    ctx = tender.Context()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+    multi = td.Identity("sum_lhs", a + b, a)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = td.prove_equal(a, b, [multi])
+    assert result.skipped == ["sum_lhs"]
+    assert any("could not be compiled" in str(c.message) for c in caught)
