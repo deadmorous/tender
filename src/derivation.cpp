@@ -3,6 +3,7 @@
 #include <mpk/mix/util/overloads.hpp>
 #include <tender/context.hpp>
 #include <tender/nf_lower.hpp>
+#include <tender/nf_view.hpp>
 #include <tender/rewrite.hpp>
 #include <tender/summation.hpp>
 #include <tender/tensor_order.hpp>
@@ -1625,31 +1626,26 @@ auto well_known_trace_dim(Expr const* e) -> std::optional<int>
 }
 
 // Apply a linear rank-2 operation (tr/vec/transpose) by its definition,
-// distributing over sums/negation and acting on each dyad.  `dyad_rule` builds
-// the result from a dyad's scalar factors and its two legs; `make_node`
-// rebuilds the original unary node when the operand is not reducible.
+// acting on each dyad.  Linearity over the additive skeleton — Sum /
+// Difference / Negate, and op(X/c) = op(X)/c through a scalar divisor so a
+// symmetric part ((A+Aᵀ)/2)ᵀ normalises and folds (vibe 000080 Increment
+// 7 b1) — is the term-view combinator's job (vibe 000095).  `dyad_rule`
+// builds the result from a dyad's scalar factors and its two legs;
+// `make_node` rebuilds the original unary node when a leaf is not reducible.
 template <typename DyadRule, typename MakeNode>
 auto expand_unary(
     Context& ctx, Expr const* operand, DyadRule dyad_rule, MakeNode make_node)
     -> Expr const*
 {
-    auto recur = [&](Expr const* x)
-    { return expand_unary(ctx, x, dyad_rule, make_node); };
-
-    if (auto const* s = std::get_if<Sum>(&operand->node))
-        return make_sum(ctx, recur(s->left), recur(s->right));
-    if (auto const* d = std::get_if<Difference>(&operand->node))
-        return make_difference(ctx, recur(d->left), recur(d->right));
-    if (auto const* n = std::get_if<Negate>(&operand->node))
-        return make_negate(ctx, recur(n->operand));
-    // A linear unary (tr/vec/transpose) commutes through a scalar divisor:
-    // op(X/c) = op(X)/c.  So a symmetric part ((A+Aᵀ)/2)ᵀ normalises to
-    // (Aᵀ + A)/2 = (A+Aᵀ)/2 and folds symmetric (vibe 000080 Increment 7 b1).
-    if (auto const* d = std::get_if<ScalarDiv>(&operand->node))
-        return make_scalar_div(ctx, recur(d->left), d->right);
-    if (auto const sp = split_dyad(operand))
-        return dyad_rule(*sp);
-    return make_node(operand); // not reducible — leave the op in place
+    return view::map_additive_leaves(
+        ctx,
+        operand,
+        [&](Expr const* leaf) -> Expr const*
+        {
+            if (auto const sp = split_dyad(leaf))
+                return dyad_rule(*sp);
+            return make_node(leaf); // not reducible — leave the op in place
+        });
 }
 
 } // namespace
