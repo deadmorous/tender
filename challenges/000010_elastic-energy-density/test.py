@@ -1,13 +1,24 @@
 """Elastic energy density: T ·· ε = λ (tr ε)² + 2μ ε ·· ε.
 
-For the isotropic Hooke stress T = λ tr(ε) I + 2με of a symmetric strain ε,
-the double contraction T··ε is the (doubled) energy density; in components,
+**Constitutive assumption: Hooke's law for a linearly elastic, ISOTROPIC
+material** — the stress depends on the strain through just two moduli, the
+Lamé constants λ and μ:
+
+    T = λ tr(ε) I + 2μ ε ,        ε symmetric.
+
+Isotropy is what makes the two-constant form legitimate: a general linear
+elastic solid needs a rank-4 stiffness `T = C ·· ε` with up to 21 independent
+moduli, and the identity below is *false* for such a material.  The
+anisotropic case needs the rank-4 route and is not this challenge.
+
+The double contraction T··ε is then twice the strain energy density; in
+components,
 
     T ·· ε  =  λ ε_ii ε_jj + 2μ ε_ij ε_ij .
 
 L1 verifies by expanding both in the frame and reducing the double dots
-(the vibe-000091 route).  L2 (future) derives it invariantly — I··ε = tr ε
-plus dyadic distributivity, the M2 engine's material.
+(the vibe-000091 route).  L2 derives it invariantly — I··ε = tr ε plus
+dyadic distributivity — and is currently blocked, see below.
 """
 
 import tender as t
@@ -36,7 +47,7 @@ def test_reduces_to_the_textbook_quadratic_form():
     frame = cart.physical_frame()
 
     eps = ws.field(r"\varepsilon", 2, symmetric=True)
-    T = lam * t.tr(eps) * I + 2 * mu * eps
+    T = lam * t.tr(eps) * I + 2 * mu * eps  # isotropic Hooke's law
 
     def reduce(e):
         e = tb.expand_in_basis(e, frame, tb.Variance.Covariant)
@@ -81,7 +92,7 @@ def test_performed_invariantly():
     mu = t.tensor(r"\mu", 0, ctx=ctx)
     I = t.identity(ctx)
     eps = ws.field(r"\varepsilon", 2, symmetric=True)
-    T = lam * t.tr(eps) * I + 2 * mu * eps
+    T = lam * t.tr(eps) * I + 2 * mu * eps  # isotropic Hooke's law
 
     result = td.prove_equal(
         T // eps,
