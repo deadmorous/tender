@@ -172,6 +172,39 @@ Notes:
   stays meaningful to a mechanician: "fewest crosses", "no ε", "componentwise",
   "operator form".
 
+## Implementation status
+
+- **(4) intent-driven cost — DONE** (a519a33).  `nf::CostModel` with a node
+  baseline and per-kind extras (eps, cross, delta, identity, unary, div);
+  named intents `fewest_eps` (the historical default), `smallest`,
+  `fewest_crosses`, plus raw weights.  Python: `engine_simplify(...,
+  prefer=..., cost={...})` and the documented `td.PREFER` map.  The cross
+  weight counts *operators* (chain length − 1), not chain nodes.  Cost
+  governs extraction only, never the search, so re-reading a saturated graph
+  under another intent is one extraction.  Demonstrated: one expression, one
+  rule set — `fewest_eps` keeps `a×(b×c)`, `fewest_crosses` returns
+  `b(a·c) − c(a·b)`.  This also retires the M2 note that `simplify` was
+  useless for expansion-direction identities.
+
+- **(2) refutation — DONE**.  `ProofStatus` gains `Refuted`;
+  `engine::decide_by_components` expands both sides on the World-Cartesian
+  frame, evaluates ε and δ at concrete indices, folds, and compares — the
+  same reduction the L1 challenges perform by hand, deliberately built from
+  *independent* machinery so an e-graph bug cannot silently confirm itself.
+  `prove_equal` runs it only when the rules exhaust (never on a budget trip,
+  which concludes nothing).  Three outcomes, all tested:
+  `a×b = b×a` → **refuted**; Lagrange with an empty rule set → `exhausted`
+  with `components_agree`, i.e. *the claim looks true and your rules are
+  incomplete*; anything holding a ∇ → undecided, since the procedure decides
+  only the chart-free algebraic fragment and silence beats a wrong verdict.
+  A residue check (leftover ε/δ/binder/∇) gates the negative, so "did not
+  reduce" is never mistaken for "differs".
+
+  Implementation note worth keeping: the first cut wrote the residue check as
+  a substring search over rendered LaTeX.  That is the kind of shortcut that
+  works until a tensor is named `delta_max`; it was replaced with a tree walk
+  before landing.
+
 ## Status
 
 All four are M3 material and are recorded in vibe 000093's plan as such.

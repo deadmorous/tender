@@ -1124,8 +1124,11 @@ NB_MODULE(_core, m)
             d["proved"] = res.proved();
             d["status"] =
                 res.status == engine::ProofStatus::Proved    ? "proved" :
+                res.status == engine::ProofStatus::Refuted   ? "refuted" :
                 res.status == engine::ProofStatus::Exhausted ? "exhausted" :
                                                                "budget";
+            d["refuted"] = res.refuted();
+            d["components_agree"] = res.components_agree;
             d["passes"] = res.report.passes;
             d["nodes"] = res.report.nodes;
             nb::dict fired;
@@ -1147,8 +1150,9 @@ NB_MODULE(_core, m)
         "rule_names"_a,
         "max_passes"_a,
         "max_nodes"_a,
-        "Try to prove lhs == rhs by equality saturation; returns a report "
-        "dict (proved/status/passes/nodes/fired/skipped).");
+        "Try to prove lhs == rhs by equality saturation, falling back to the "
+        "component decision procedure for a refutation; returns a report dict "
+        "(proved/refuted/status/components_agree/passes/nodes/fired/skipped).");
 
     md.def(
         "_engine_simplify",

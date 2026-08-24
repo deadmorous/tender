@@ -518,10 +518,22 @@ class BudgetExceeded(UserWarning):
 class ProofResult:
     """The outcome of :func:`prove_equal` — deliberately not a bare bool.
 
-    ``proved`` is the answer; ``status`` says *why*: ``"proved"``,
-    ``"exhausted"`` (the rules ran out without a proof — which is **not** a
-    claim that the two sides differ, since saturation can exhibit proofs but
-    never refutations), or ``"budget"`` (stopped early; nothing concluded).
+    ``proved`` is the answer; ``status`` says *why*:
+
+    ``"proved"``
+        The two sides joined in the e-graph.
+    ``"refuted"``
+        Expanding both sides into concrete components produced *different*
+        results — a real negative, from a decision procedure independent of
+        the rules (vibe 000097).  ``refuted`` is the property to test.
+    ``"exhausted"``
+        The rules ran to a fixed point and the component check could not
+        decide either.  If ``components_agree`` is set, the claim looks
+        **true** and it is the *rule set* that is incomplete — a very
+        different problem from a false claim.
+    ``"budget"``
+        Stopped early; nothing at all is concluded.
+
     ``fired`` maps rule name → firing count, ``skipped`` lists rules the
     engine could not compile, and ``passes``/``nodes`` size the search.
     """
@@ -529,6 +541,8 @@ class ProofResult:
     def __init__(self, report):
         self.proved = report["proved"]
         self.status = report["status"]
+        self.refuted = report["status"] == "refuted"
+        self.components_agree = report.get("components_agree", False)
         self.passes = report["passes"]
         self.nodes = report["nodes"]
         self.fired = dict(report["fired"])
@@ -539,6 +553,9 @@ class ProofResult:
 
     def __repr__(self):
         detail = f", fired={self.fired}" if self.fired else ""
+        if self.components_agree:
+            detail += ", components_agree=True (claim looks true; rules "
+            detail += "incomplete)"
         return (
             f"ProofResult(proved={self.proved}, status={self.status!r}, "
             f"passes={self.passes}, nodes={self.nodes}{detail})"
@@ -570,9 +587,14 @@ def prove_equal(lhs, rhs, rules, max_passes=30, max_nodes=10000):
 
     Both sides are saturated together in one e-graph, so rules that rewrite
     either side toward the other suffice — neither has to be driven all the
-    way into the other.  Returns a :class:`ProofResult`; a budget trip also
-    warns :class:`BudgetExceeded`, because "not proved within budget" must
-    never be mistaken for "not equal".
+    way into the other.  If the rules run out without a proof, an independent
+    component-expansion check decides the chart-free algebraic fragment, so a
+    false claim comes back ``"refuted"`` rather than merely unproved
+    (vibe 000097).
+
+    Returns a :class:`ProofResult`; a budget trip also warns
+    :class:`BudgetExceeded`, because "not proved within budget" must never be
+    mistaken for "not equal".
     """
     lhss, rhss, names = _rule_arrays(rules)
     result = ProofResult(

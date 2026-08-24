@@ -1327,3 +1327,74 @@ def test_named_intents_are_documented_weight_maps():
     for name, weights in td.PREFER.items():
         assert isinstance(weights, dict), name
         assert all(isinstance(v, int) for v in weights.values()), name
+
+
+# ---- refutation (vibe 000097) ----------------------------------------------
+
+
+def test_false_statements_are_refuted():
+    """A false claim gets a verdict, not merely "I could not prove it".
+
+    Saturation alone can only exhaust; an independent component expansion
+    decides the chart-free algebraic fragment and supplies the negative.
+    """
+    ctx = tender.Context()
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    rules = td.rules("cross", ctx=ctx)
+
+    swapped = td.prove_equal(a % b, b % a, rules)  # cross anticommutes
+    assert swapped.refuted
+    assert swapped.status == "refuted"
+    assert not swapped.proved
+
+    wrong = td.prove_equal(  # bac-cab with the terms interchanged
+        a % (b % c), c * (a @ b) - b * (a @ c), rules
+    )
+    assert wrong.refuted
+
+
+def test_true_statements_are_never_refuted():
+    ctx = tender.Context()
+    a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+    result = td.prove_equal(a % b, -(b % a), [])
+    assert result.proved
+    assert not result.refuted
+
+
+def test_true_but_unprovable_points_at_the_rules():
+    """Lagrange holds, but with no rules saturation cannot reach it.
+
+    The component check agrees the sides are equal, so the result blames the
+    incomplete rule set rather than the claim — a different problem, and the
+    useful thing to tell the user.
+    """
+    ctx = tender.Context()
+    a, b, c, d = (tender.tensor(n, rank=1, ctx=ctx) for n in "abcd")
+    result = td.prove_equal(
+        (a % b) @ (c % d), (a @ c) * (b @ d) - (a @ d) * (b @ c), []
+    )
+    assert result.status == "exhausted"
+    assert not result.refuted
+    assert result.components_agree
+    assert "rules incomplete" in repr(result)
+
+
+def test_differential_content_is_undecided_not_refuted():
+    """The component procedure decides the algebraic fragment only.
+
+    A ∇ leaves a residue it cannot evaluate, so it stays silent rather than
+    returning a wrong verdict.
+    """
+    import warnings
+
+    ws = tender.Workspace()
+    u = ws.field("u", 1)
+    nabla = tender.nabla(ctx=ws.ctx)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = td.prove_equal(
+            nabla @ u, nabla @ u + tender.scalar(1, ctx=ws.ctx), []
+        )
+    assert result.status == "exhausted"
+    assert not result.refuted
+    assert not result.components_agree

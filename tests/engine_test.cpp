@@ -326,3 +326,98 @@ TEST(CostModel, CrossWeightCountsOperatorsNotChains)
     EXPECT_NE(one.expr, nullptr);
     EXPECT_NE(two.expr, nullptr);
 }
+
+// ---- refutation by component expansion (vibe 000097) --------------------
+
+TEST(Refutation, FalseStatementsAreRefutedNotMerelyUnproved)
+{
+    // Saturation alone can only exhaust; the component decision procedure
+    // supplies the negative, so a false claim gets a verdict.
+    Context ctx;
+    auto const* a = vec1(ctx, "a");
+    auto const* b = vec1(ctx, "b");
+    auto const* c = vec1(ctx, "c");
+
+    // a×b = b×a is false (the cross anticommutes).
+    auto const swapped = prove_equal(
+        ctx, make_cross(ctx, a, b), make_cross(ctx, b, a), {bac_cab(ctx)});
+    EXPECT_TRUE(swapped.refuted());
+    EXPECT_EQ(swapped.status, ProofStatus::Refuted);
+
+    // bac-cab with the two terms interchanged is false.
+    auto const wrong_sign = prove_equal(
+        ctx,
+        make_cross(ctx, a, make_cross(ctx, b, c)),
+        make_difference(
+            ctx,
+            make_tensor_product(ctx, c, make_dot(ctx, a, b)),
+            make_tensor_product(ctx, b, make_dot(ctx, a, c))),
+        {bac_cab(ctx)});
+    EXPECT_TRUE(wrong_sign.refuted());
+}
+
+TEST(Refutation, TrueStatementsAreNeverRefuted)
+{
+    Context ctx;
+    auto const* a = vec1(ctx, "a");
+    auto const* b = vec1(ctx, "b");
+    // a×b = −(b×a) is true and canon decides it.
+    auto const res = prove_equal(
+        ctx, make_cross(ctx, a, b), make_negate(ctx, make_cross(ctx, b, a)), {});
+    EXPECT_TRUE(res.proved());
+    EXPECT_FALSE(res.refuted());
+}
+
+TEST(Refutation, TrueButUnprovableBlamesTheRulesNotTheClaim)
+{
+    // The Lagrange identity holds, but with no rule supplied saturation
+    // cannot reach it.  The component check agrees the sides are equal, so
+    // the answer points at the incomplete rule set rather than the claim.
+    Context ctx;
+    auto const* a = vec1(ctx, "a");
+    auto const* b = vec1(ctx, "b");
+    auto const* c = vec1(ctx, "c");
+    auto const* d = vec1(ctx, "d");
+
+    auto const res = prove_equal(
+        ctx,
+        make_dot(ctx, make_cross(ctx, a, b), make_cross(ctx, c, d)),
+        make_difference(
+            ctx,
+            make_tensor_product(ctx, make_dot(ctx, a, c), make_dot(ctx, b, d)),
+            make_tensor_product(ctx, make_dot(ctx, a, d), make_dot(ctx, b, c))),
+        {});
+    EXPECT_EQ(res.status, ProofStatus::Exhausted);
+    EXPECT_FALSE(res.refuted());
+    EXPECT_TRUE(res.components_agree);
+}
+
+TEST(Refutation, DifferentialContentIsUndecidedNotRefuted)
+{
+    // The component procedure decides the chart-free *algebraic* fragment
+    // only.  Anything holding a ∇ leaves a residue, so no refutation is
+    // claimed — silence is the safe answer, not a wrong verdict.
+    Context ctx;
+    auto const* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto const* lhs = make_dot(ctx, tender::make_nabla(ctx), u);
+    auto const* rhs = make_sum(ctx, lhs, make_scalar(ctx, Rational{1}));
+    EXPECT_EQ(decide_by_components(ctx, lhs, rhs), ComponentVerdict::Undecided);
+}
+
+TEST(Refutation, BudgetTripDoesNotAttemptRefutation)
+{
+    // A budget trip concludes nothing: the rules might have proved it given
+    // room, so the component pass must not turn "ran out of time" into a
+    // verdict either way.
+    Context ctx;
+    auto const* a = vec1(ctx, "a");
+    auto const* b = vec1(ctx, "b");
+    auto const res = prove_equal(
+        ctx,
+        make_cross(ctx, a, b),
+        make_cross(ctx, b, a),
+        {bac_cab(ctx)},
+        SaturateBudget{.max_passes = 0});
+    EXPECT_EQ(res.status, ProofStatus::Budget);
+    EXPECT_FALSE(res.refuted());
+}
