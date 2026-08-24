@@ -56,6 +56,7 @@ __all__ = [
     "prove_equal",
     "rules",
     "rule_groups",
+    "citable_for",
     "engine_simplify",
     "PREFER",
     "ProofResult",
@@ -477,6 +478,29 @@ def rule_groups():
     from . import identities as _ident
 
     return _ident.group_names()
+
+
+def citable_for(name, ctx=None, realm=None, space=None):
+    """The rules a derivation of identity *name* may legitimately cite.
+
+    An identity's proof may lean only on identities standing *below* it in
+    tender's DAG (:mod:`tender.identities`) — never on itself, never on
+    anything that already rests on it.  Passing this to :func:`prove_equal`
+    makes a derivation honest by construction instead of by review::
+
+        >>> td.prove_equal(lhs, rhs, td.citable_for("bac-cab", ctx=ctx))
+
+    Returns the ancestors' rules; an identity derived straight from
+    definitions (proved by reduction to components) legitimately has none.
+    """
+    from . import identities as _ident
+
+    if ctx is None:
+        ctx = _core.Context()
+    kw = {}
+    if realm is not None:
+        kw["realm"] = realm
+    return _ident.citable_for(ctx, name, space=space, **kw)
 
 
 def rules(*groups, ctx=None, realm=None, space=None):

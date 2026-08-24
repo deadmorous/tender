@@ -39,6 +39,21 @@ import tender as _t
 from .derivation import Identity
 
 __all__ = [
+    # the DAG
+    "IdentityNode",
+    "register",
+    "node",
+    "names",
+    "nodes",
+    "ancestors",
+    "descendants",
+    "citable_for",
+    "check_acyclic",
+    "depth",
+    "rules_for",
+    "AXIOM",
+    "DERIVED",
+    # groups (a labelling over the DAG)
     "group",
     "group_names",
     "all_rules",
@@ -225,59 +240,270 @@ def identity_dot(ctx):
     return Identity("identity-dot", _t.identity(ctx=ctx) @ u, u)
 
 
-# ---- groups ---------------------------------------------------------------
+# ---- the identity DAG -----------------------------------------------------
+#
+# An identity is normally *derived*, and its derivation is exactly what a
+# challenge is; a derivation in turn uses other, already-derived identities.
+# Those uses are dependencies, and the dependency relation makes a directed
+# acyclic graph (vibe 000097).
+#
+# The graph lives here, in the library, because it is what a *user* needs:
+# which identities exist, what each rests on, and which ones may legitimately
+# be cited when deriving something new.  It records each node's proof
+# obligation as inert data — a challenge id — and never imports the challenge
+# suite; the development harness reads this registry and checks that the
+# obligations are met.  So the library ships the graph, the suite satisfies it,
+# and neither depends on the other's internals.
+#
+# `kind` distinguishes the two ways a node earns its place:
+#
+#   "axiom"    a defining property, taken as given (Σ_p δ^p_a δ^p_b = δ_ab
+#              *is* what δ means).  No proof obligation.
+#   "derived"  a theorem, which owes a derivation.  `proof` names the
+#              challenge that supplies it, and `cites` the identities that
+#              derivation is allowed to lean on.
+#
+# A derivation may cite exactly its node's *ancestors* — never the node
+# itself, never anything downstream — which is what makes circularity a
+# detectable bug instead of a matter of judgement.  Note that a challenge's
+# L1 test (reduction to components) is a proof *from definitions*: it needs no
+# citations at all, which is why several nodes below are `derived` with an
+# empty `cites`.
+
+class IdentityNode:
+    """One identity in the DAG: how to build it, and what it rests on."""
+
+    __slots__ = ("name", "factory", "kind", "cites", "summary", "proof", "tags")
+
+    def __init__(self, name, factory, kind, cites, summary, proof, tags):
+        self.name = name
+        self.factory = factory
+        self.kind = kind
+        self.cites = tuple(cites)
+        self.summary = summary
+        self.proof = proof
+        self.tags = tuple(tags)
+
+    def __repr__(self):
+        return (
+            f"IdentityNode({self.name!r}, kind={self.kind!r}, "
+            f"cites={list(self.cites)}, proof={self.proof!r})"
+        )
+
+
+_NODES = {}
+
+AXIOM = "axiom"
+DERIVED = "derived"
+
+
+def register(
+    name, factory, *, kind=DERIVED, cites=(), summary="", proof=None, tags=()
+):
+    """Add an identity to the DAG — yours are first-class alongside the shipped ones.
+
+    ``factory`` is ``ctx -> Identity``; ``cites`` names the identities its
+    derivation leans on (they must already be registered, which is what makes
+    a cycle impossible to create); ``proof`` optionally references the
+    challenge that derives it.  Re-registering a name replaces it.
+
+        >>> ti.register("my-rule", lambda ctx: td.Identity(...),
+        ...             cites=["bac-cab"], summary="…")
+    """
+    if kind not in (AXIOM, DERIVED):
+        raise ValueError(f"kind must be {AXIOM!r} or {DERIVED!r}, got {kind!r}")
+    for dep in cites:
+        if dep not in _NODES:
+            raise ValueError(
+                f"identity {name!r} cites {dep!r}, which is not registered "
+                f"(register dependencies first — this is what keeps the graph "
+                f"acyclic by construction)"
+            )
+    if kind == AXIOM and cites:
+        raise ValueError(f"axiom {name!r} cannot cite anything: {list(cites)}")
+    node = IdentityNode(name, factory, kind, cites, summary, proof, tags)
+    _NODES[name] = node
+    return node
+
+
+def node(name):
+    """The :class:`IdentityNode` called *name*; raises ``ValueError`` if unknown."""
+    try:
+        return _NODES[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown identity {name!r}; registered: {', '.join(sorted(_NODES))}"
+        ) from None
+
+
+def names():
+    """Every registered identity name, in registration (dependency) order."""
+    return list(_NODES)
+
+
+def ancestors(name):
+    """Every identity *name* transitively rests on — what its proof may cite."""
+    seen = set()
+    stack = list(node(name).cites)
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        stack.extend(node(current).cites)
+    return seen
+
+
+def descendants(name):
+    """Every identity that transitively rests on *name*."""
+    return {n for n in _NODES if name in ancestors(n)}
+
+
+def check_acyclic():
+    """Raise ``ValueError`` if the DAG has a cycle.
+
+    Registration already prevents one (a node may only cite names already
+    present), so this is a belt-and-braces check for a registry mutated by
+    other means.
+    """
+    for name in _NODES:
+        if name in ancestors(name):
+            raise ValueError(f"identity {name!r} transitively cites itself")
+
+
+def depth(name):
+    """How far *name* stands above the axioms — 0 for an axiom or a node
+    derived straight from definitions."""
+    cites = node(name).cites
+    return 0 if not cites else 1 + max(depth(c) for c in cites)
+
+
+def _build(n, ctx, realm, space):
+    """Instantiate one node's Identity in `ctx`."""
+    factory = n.factory
+    if factory in (delta_contraction, delta_trace):
+        return factory(ctx, space=space, realm=realm)
+    if factory in (eps_delta_1, eps_delta_2):
+        return factory(ctx, realm=realm)
+    return factory(ctx)
+
+
+def rules_for(ctx, *identity_names, realm=_t.Realm.Oblique, space=None):
+    """Build the named identities as rules, ready for the verbs."""
+    return [_build(node(n), ctx, realm, space) for n in identity_names]
+
+
+def citable_for(ctx, name, realm=_t.Realm.Oblique, space=None):
+    """The rules a derivation of *name* may legitimately use: its ancestors.
+
+    Deriving an identity from itself — or from anything that already rests on
+    it — is circular, so those are exactly the rules left out.  Passing this
+    to :func:`tender.derivation.prove_equal` makes a proof honest by
+    construction rather than by review.
+    """
+    order = [n for n in _NODES if n in ancestors(name)]
+    return rules_for(ctx, *order, realm=realm, space=space)
+
+
+# ---- groups: a labelling over the DAG, for convenient selection -----------
 #
 # Rules that canonicalization already decides are deliberately absent: tr(a⊗b)
 # = a·b, vec(a⊗b) = a×b, (a⊗b)ᵀ = b⊗a, the dyad double-dots, (Aᵀ)ᵀ = A,
 # a·b = b·a and tr(I) = n are all proved with **zero** rules (vibe 000096
 # increment 2).  Shipping them would be inert decoration that looks like
-# coverage.  `A··(b⊗c) = c·A·b` is still absent for a different reason: canon
-# cannot yet *state* it — a nested ⊗ inside a contraction operand throws
-# "awaits fence distribution" (vibe 000096 increment 3, still open).
-
-_GROUPS = {
-    "eps_delta": (delta_contraction, delta_trace, eps_delta_1, eps_delta_2),
-    "cross": (bac_cab, cross_identity, cross_removal, lagrange),
-    "dyadic": (trace_cyclic, identity_dot),
-    "double_dot": (ddot_identity,),
-}
+# coverage.  `A··(b⊗c) = c·A·b` is absent for a different reason: canon cannot
+# yet *state* it — a nested ⊗ inside a contraction operand throws "awaits
+# fence distribution" (vibe 000096 increment 3, still open).
 
 
 def group_names():
-    """The names of every group in the library."""
-    return list(_GROUPS)
+    """The names of every group (tag) in the library."""
+    seen = []
+    for n in _NODES.values():
+        for tag in n.tags:
+            if tag not in seen:
+                seen.append(tag)
+    return seen
 
 
 def group(ctx, name, realm=_t.Realm.Oblique, space=None):
-    """The rules of one named group; raises ``ValueError`` if unknown.
-
-    ``realm`` / ``space`` parameterize the index-level group (``eps_delta``);
-    the invariant groups ignore them.
-    """
-    try:
-        factories = _GROUPS[name]
-    except KeyError:
+    """The rules tagged *name*; raises ``ValueError`` if the tag is unknown."""
+    tagged = [n.name for n in _NODES.values() if name in n.tags]
+    if not tagged:
         raise ValueError(
-            f"unknown identity group {name!r}; available: {', '.join(_GROUPS)}"
-        ) from None
-    out = []
-    for factory in factories:
-        if factory in (delta_contraction, delta_trace):
-            out.append(factory(ctx, space=space, realm=realm))
-        elif factory in (eps_delta_1, eps_delta_2):
-            out.append(factory(ctx, realm=realm))
-        else:
-            out.append(factory(ctx))
-    return out
+            f"unknown identity group {name!r}; available: "
+            f"{', '.join(group_names())}"
+        )
+    return rules_for(ctx, *tagged, realm=realm, space=space)
 
 
 def all_rules(ctx, realm=_t.Realm.Oblique, space=None):
-    """Every group concatenated — for exploration and benchmarking.
+    """Every registered identity — for exploration and benchmarking.
 
-    Prefer naming the groups a problem needs: rule count is the main driver
-    of saturation cost.
+    Prefer naming the groups a problem needs, or :func:`citable_for` when
+    deriving: rule count is the main driver of saturation cost.
     """
-    out = []
-    for name in _GROUPS:
-        out.extend(group(ctx, name, realm=realm, space=space))
-    return out
+    return rules_for(ctx, *_NODES, realm=realm, space=space)
+
+
+# ---- the shipped graph ----------------------------------------------------
+#
+# Registration order is dependency order: a node may only cite names already
+# registered, so the graph cannot be given a cycle.
+
+register(
+    "delta-contraction", delta_contraction, kind=AXIOM, tags=("eps_delta",),
+    summary="Σ_p δ^p_a δ^p_b = δ_ab — the defining property of δ",
+)
+register(
+    "delta-trace", delta_trace, kind=AXIOM, tags=("eps_delta",),
+    summary="Σ_p δ^p_p = dim(space)",
+)
+register(
+    "identity-dot", identity_dot, kind=AXIOM, tags=("dyadic",),
+    summary="I · a = a — the defining property of the identity tensor",
+)
+register(
+    "eps-delta-1", eps_delta_1, tags=("eps_delta",), proof="000003",
+    summary="Σ_i ε^ijk ε_ilm = δ^j_l δ^k_m − δ^j_m δ^k_l",
+)
+register(
+    "eps-delta-2", eps_delta_2, tags=("eps_delta",), proof="000003",
+    summary="Σ_ij ε^ijk ε_ijl = 2 δ^k_l",
+)
+register(
+    "bac-cab", bac_cab, tags=("cross",), proof="000001",
+    cites=("eps-delta-1",),
+    summary="a × (b × c) = b (a·c) − c (a·b)",
+)
+register(
+    "lagrange", lagrange, tags=("cross",), proof="000014",
+    cites=("eps-delta-1", "delta-contraction"),
+    summary="(a × b) · (c × d) = (a·c)(b·d) − (a·d)(b·c)",
+)
+register(
+    "cross-identity", cross_identity, tags=("cross",), proof="000005",
+    summary="a × I = I × a",
+)
+register(
+    "cross-removal", cross_removal, tags=("cross",), proof="000015",
+    summary="a × (b × I) = b ⊗ a − (a·b) I",
+)
+register(
+    "trace-cyclic", trace_cyclic, tags=("dyadic",), proof="000016",
+    summary="tr(A · B) = tr(B · A)",
+)
+register(
+    # No challenge derives this one yet — the DAG says so rather than hiding
+    # it, and the harness reports it as an open proof obligation.
+    "ddot-identity", ddot_identity, tags=("double_dot",), proof=None,
+    summary="A ·· I = tr A",
+)
+
+
+def nodes():
+    """Every :class:`IdentityNode`, in registration (dependency) order."""
+    return list(_NODES.values())
+
+
+check_acyclic()

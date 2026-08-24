@@ -19,6 +19,7 @@ CHALLENGE = harness.declare(
     tier="A",
     source="Lurie, Theory of Elasticity, tensor-calculus appendix; "
     "examples/eps_delta.py",
+    proves=["eps-delta-1", "eps-delta-2"],
 )
 
 sp = tender.space_3d

@@ -25,6 +25,7 @@ CHALLENGE = harness.declare(
     tier="A",
     source="Lurie, Theory of Elasticity, tensor-calculus appendix; "
     "vibe 000035",
+    proves="bac-cab",
 )
 
 

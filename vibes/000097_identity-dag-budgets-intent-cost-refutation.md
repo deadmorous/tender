@@ -205,6 +205,47 @@ Notes:
   works until a tensor is named `delta_max`; it was replaced with a tree walk
   before landing.
 
+- **(1) identity DAG — DONE**.  The reconciliation question — `challenges/`
+  is development scaffolding while the DAG must be a library feature — is
+  settled by making the dependency *one-directional*:
+
+  * **The library owns the graph.**  `tender.identities` holds nodes
+    (name, summary, `kind`, `cites`, `proof`, tags), the queries users need
+    (`ancestors`, `descendants`, `depth`, `citable_for`, `rules_for`), and
+    `register()` so a user's identity is a first-class node with dependencies
+    of its own.  A node records its proof obligation as **inert data** — a
+    challenge id, meaningless to the library, meaningful to the harness — so
+    `tender` never imports `challenges`.
+  * **The suite satisfies it.**  `harness.declare(proves=...)` names the
+    identity (or identities) a challenge derives.
+  * **One file reconciles them**: `challenges/test_dag.py`, development
+    scaffolding, checks both directions — acyclicity, citations naming real
+    nodes, no identity citing itself or a descendant, axioms owing no proof,
+    every `proves` naming a real node, no two challenges claiming the same
+    identity, node `proof` and challenge `proves` agreeing, and the open
+    obligations being exactly the known set.
+
+  The invariant that makes this work: **every derived identity owes a
+  challenge, but not every challenge proves an identity** — 000007
+  (cylindrical equilibrium), 000020 (operator tables) and 000006 (chart
+  endpoints) verify endpoints against textbook results and have no node to
+  point at.  So the arrow runs from identity to challenge, never back.
+
+  Circularity is now structural rather than rhetorical.  `citable_for(name)`
+  returns exactly the ancestors — never the identity itself, never anything
+  resting on it — so passing it to `prove_equal` makes a derivation honest by
+  construction instead of by review.  This retires the per-promotion
+  circularity arguments M2 had to write in prose.
+
+  Two findings from building it, both from the meta-test's first run:
+  challenge 000003 derives *both* ε-δ contractions, so `proves` had to accept
+  several — a single-valued field was a modelling error the check caught
+  immediately; and `ddot-identity` has no derivation at all, which the DAG now
+  states in the scoreboard ("**not yet derived**") instead of leaving implicit.
+
+  The scoreboard gained an Identity DAG table: kind, depth above the axioms,
+  what each rests on, and which challenge discharges it.
+
 ## Status
 
 All four are M3 material and are recorded in vibe 000093's plan as such.

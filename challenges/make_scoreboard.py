@@ -72,6 +72,43 @@ _BADGE = {
 }
 
 
+def _identity_dag_section():
+    """The identity DAG, and which challenge discharges each proof obligation.
+
+    tender's library owns the graph; this suite owns the derivations.  Showing
+    them together is the point: an identity's trustworthiness is the
+    trustworthiness of its derivation, and depth says how far a result stands
+    above the axioms.
+    """
+    import tender.identities as ti
+
+    lines = [
+        "## Identity DAG",
+        "",
+        "Axioms are definitional (no proof obligation); a derived identity "
+        "owes a derivation, and `cites` is what that derivation may lean on. "
+        "Depth counts steps above the axioms.",
+        "",
+        "| Identity | Kind | Depth | Rests on | Derived by |",
+        "|---|---|---|---|---|",
+    ]
+    for n in ti.nodes():
+        kind = "axiom" if n.kind == ti.AXIOM else "derived"
+        depth = "—" if n.kind == ti.AXIOM else str(ti.depth(n.name))
+        cites = ", ".join(f"`{c}`" for c in n.cites) or "—"
+        if n.kind == ti.AXIOM:
+            proof = "—"
+        elif n.proof:
+            proof = f"challenge {n.proof}"
+        else:
+            proof = "**not yet derived**"
+        lines.append(
+            f"| `{n.name}` | {kind} | {depth} | {cites} | {proof} |"
+        )
+    lines.append("")
+    return lines
+
+
 def render(collector):
     by_tier = defaultdict(list)
     for name in sorted(collector.meta):
@@ -94,6 +131,7 @@ def render(collector):
         f"{counts['L2']} at L2, {counts['L1']} at L1, {counts['L0']} at L0.",
         "",
     ]
+    lines += _identity_dag_section()
     for tier in sorted(by_tier):
         lines += [f"## Tier {tier} — {harness.TIERS.get(tier, 'unknown')}", ""]
         lines += ["| # | Challenge | Level | Source |", "|---|---|---|---|"]

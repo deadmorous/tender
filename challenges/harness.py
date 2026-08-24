@@ -47,10 +47,27 @@ TIERS = {
 }
 
 
-def declare(*, title, tier, source=None):
-    """The challenge's machine-readable metadata (module-level ``CHALLENGE``)."""
+def declare(*, title, tier, source=None, proves=None):
+    """The challenge's machine-readable metadata (module-level ``CHALLENGE``).
+
+    ``proves`` optionally names the identity — or identities, as a list —
+    in tender's DAG (:mod:`tender.identities`) that this challenge derives.
+    Not every challenge proves an identity (many verify an endpoint against a
+    textbook result and have no node to point at), and one challenge may
+    derive several: the two ε-δ contractions come out of the same machinery
+    and share a file.  Every *derived* identity owes a challenge, and
+    ``test_dag.py`` checks that correspondence in both directions.  The
+    library declares the obligation; the suite satisfies it; neither imports
+    the other's internals.
+    """
     assert tier in TIERS, f"unknown tier {tier!r}"
-    return {"title": title, "tier": tier, "source": source}
+    if proves is None:
+        proves = ()
+    elif isinstance(proves, str):
+        proves = (proves,)
+    else:
+        proves = tuple(proves)
+    return {"title": title, "tier": tier, "source": source, "proves": proves}
 
 
 def level(lvl, *, expected=True, reason=""):

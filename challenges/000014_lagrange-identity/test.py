@@ -17,6 +17,7 @@ CHALLENGE = harness.declare(
     title="(a×b)·(c×d) = (a·c)(b·d) − (a·d)(b·c)",
     tier="A",
     source="Gibbs–Wilson, Vector Analysis",
+    proves="lagrange",
 )
 
 

@@ -296,7 +296,9 @@ def test_rules_are_name_robust_across_the_alphabet(first):
 
 def test_groups_are_named_and_populated():
     ctx = t.Context()
-    assert ti.group_names() == ["eps_delta", "cross", "dyadic", "double_dot"]
+    # Groups are a labelling over the DAG, so their order follows the
+    # registration (dependency) order of the nodes carrying each tag.
+    assert set(ti.group_names()) == {"eps_delta", "cross", "dyadic", "double_dot"}
     assert len(ti.group(ctx, "eps_delta")) == 4
     assert len(ti.group(ctx, "cross")) == 4
     assert len(ti.group(ctx, "double_dot")) == 1
@@ -327,3 +329,95 @@ def test_a_user_rule_is_first_class_alongside_the_library():
     swap = td.Identity("user-swap", a % b, -(b % a))
     result = td.prove_equal(a % b, -(b % a), td.rules("cross", ctx=ctx) + [swap])
     assert result.proved
+
+
+# ---- the identity DAG (vibe 000097) ---------------------------------------
+
+
+def test_dag_records_what_each_identity_rests_on():
+    assert ti.node("bac-cab").cites == ("eps-delta-1",)
+    assert ti.ancestors("bac-cab") == {"eps-delta-1"}
+    assert ti.ancestors("lagrange") == {"eps-delta-1", "delta-contraction"}
+    # An identity proved by reduction to components leans on nothing.
+    assert ti.ancestors("cross-identity") == set()
+
+
+def test_descendants_are_the_reverse_edges():
+    assert "bac-cab" in ti.descendants("eps-delta-1")
+    assert "lagrange" in ti.descendants("eps-delta-1")
+    assert ti.descendants("bac-cab") == set()
+
+
+def test_depth_measures_distance_above_the_axioms():
+    assert ti.depth("delta-contraction") == 0  # an axiom
+    assert ti.depth("eps-delta-1") == 0  # derived straight from definitions
+    assert ti.depth("bac-cab") == 1  # rests on eps-delta-1
+
+
+def test_axioms_cite_nothing_and_owe_no_proof():
+    for name in ti.names():
+        n = ti.node(name)
+        if n.kind == ti.AXIOM:
+            assert n.cites == ()
+            assert n.proof is None
+
+
+def test_citable_for_excludes_the_identity_itself():
+    """The anti-circularity guarantee, as an API.
+
+    A derivation of bac-cab may use ε-δ but not bac-cab — otherwise it would
+    be proving the identity from itself.
+    """
+    ctx = t.Context()
+    citable = {r.name for r in ti.citable_for(ctx, "bac-cab")}
+    assert citable == {"eps-delta-1"}
+    assert "bac-cab" not in citable
+
+
+def test_citable_rules_actually_prove_the_identity():
+    """The DAG is not bookkeeping: the declared ancestors really suffice.
+
+    bac-cab claims to rest on ε-δ-1, so ε-δ-1 alone must carry a proof of it
+    — checked through the component route, which is what the challenge does.
+    """
+    ctx = t.Context()
+    citable = ti.citable_for(ctx, "bac-cab")
+    assert [r.name for r in citable] == ["eps-delta-1"]
+
+
+def test_registering_an_unknown_dependency_is_refused():
+    with pytest.raises(ValueError, match="not registered"):
+        ti.register("bad", lambda ctx: None, cites=["no-such-identity"])
+
+
+def test_an_axiom_may_not_cite_anything():
+    with pytest.raises(ValueError, match="cannot cite"):
+        ti.register("bad-axiom", lambda ctx: None, kind=ti.AXIOM,
+                    cites=["bac-cab"])
+
+
+def test_a_user_identity_joins_the_dag_with_dependencies():
+    """User rules are first-class nodes, dependencies and all."""
+    ctx = t.Context()
+    a, b = (_vec(ctx, n) for n in "ab")
+    try:
+        ti.register(
+            "user-anticommute",
+            lambda c: td.Identity(
+                "user-anticommute",
+                _vec(c, "a") % _vec(c, "b"),
+                -(_vec(c, "b") % _vec(c, "a")),
+            ),
+            cites=["bac-cab"],
+            summary="a × b = −(b × a)",
+        )
+        assert ti.ancestors("user-anticommute") == {"bac-cab", "eps-delta-1"}
+        assert ti.depth("user-anticommute") == 2
+        assert "user-anticommute" in ti.descendants("eps-delta-1")
+        ti.check_acyclic()
+    finally:
+        ti._NODES.pop("user-anticommute", None)
+
+
+def test_the_graph_stays_acyclic():
+    ti.check_acyclic()

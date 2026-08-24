@@ -16,6 +16,7 @@ CHALLENGE = harness.declare(
     title="tr(A·B) = tr(B·A)",
     tier="A",
     source="Zhilin, Vectors and Second-Rank Tensors",
+    proves="trace-cyclic",
 )
 
 

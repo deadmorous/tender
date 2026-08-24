@@ -7,6 +7,24 @@ L0 failing = enumerated, not yet reached (strict xfail).
 
 **23 challenges** — 14 at L2, 3 at L1, 6 at L0.
 
+## Identity DAG
+
+Axioms are definitional (no proof obligation); a derived identity owes a derivation, and `cites` is what that derivation may lean on. Depth counts steps above the axioms.
+
+| Identity | Kind | Depth | Rests on | Derived by |
+|---|---|---|---|---|
+| `delta-contraction` | axiom | — | — | — |
+| `delta-trace` | axiom | — | — | — |
+| `identity-dot` | axiom | — | — | — |
+| `eps-delta-1` | derived | 0 | — | challenge 000003 |
+| `eps-delta-2` | derived | 0 | — | challenge 000003 |
+| `bac-cab` | derived | 1 | `eps-delta-1` | challenge 000001 |
+| `lagrange` | derived | 1 | `eps-delta-1`, `delta-contraction` | challenge 000014 |
+| `cross-identity` | derived | 0 | — | challenge 000005 |
+| `cross-removal` | derived | 0 | — | challenge 000015 |
+| `trace-cyclic` | derived | 0 | — | challenge 000016 |
+| `ddot-identity` | derived | 0 | — | **not yet derived** |
+
 ## Tier A — Algebra (chart-free)
 
 | # | Challenge | Level | Source |

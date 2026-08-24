@@ -20,6 +20,7 @@ CHALLENGE = harness.declare(
     title="a×(b×I) = b⊗a − (a·b)I",
     tier="A",
     source="Zhilin, Vectors and Second-Rank Tensors; vibe 000056",
+    proves="cross-removal",
 )
 
 

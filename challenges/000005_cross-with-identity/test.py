@@ -19,6 +19,7 @@ CHALLENGE = harness.declare(
     title="a×I = I×a",
     tier="A",
     source="Zhilin, Vectors and Second-Rank Tensors; examples/cross_identity.py",
+    proves="cross-identity",
 )
 
 
