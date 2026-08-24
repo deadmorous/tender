@@ -57,6 +57,7 @@ __all__ = [
     "rules",
     "rule_groups",
     "engine_simplify",
+    "PREFER",
     "ProofResult",
     "BudgetExceeded",
     "structural_eq",
@@ -589,17 +590,55 @@ def prove_equal(lhs, rhs, rules, max_passes=30, max_nodes=10000):
     return result
 
 
-def engine_simplify(expr, rules, max_passes=30, max_nodes=10000):
-    """Saturate *expr* under *rules* and return the cheapest form found.
+#: Named extraction intents (vibe 000097).  "Simplest" is not a property of
+#: the algebra — it is what the user is trying to achieve — so the cost is a
+#: parameter.  A large weight means "minimize this first, then size".
+PREFER = {
+    # Contract the ε's away, even though the δ-expansion is the larger form
+    # (vibe 000046).  The historical default.
+    "fewest_eps": {"eps": 1_000_000},
+    # Plain size: no thumb on any scale.
+    "smallest": {"eps": 1},
+    # Get rid of cross products — this is what makes the *expansion* of
+    # bac-cab the preferred reading of the very same saturated graph.
+    "fewest_crosses": {"eps": 1_000, "cross": 1_000_000},
+    # Prefer forms without the identity tensor (fold I·x → x, I··A → tr A).
+    "fewest_identities": {"eps": 1_000, "identity": 1_000_000},
+}
 
-    Cost is the ε-weighted measure (fewest Levi-Civita symbols first, then
-    fewest nodes).  Returns ``(expr, report)``; on a budget trip the best
-    form found so far is still returned, with a :class:`BudgetExceeded`
-    warning and ``report["complete"] is False``.
+
+def engine_simplify(
+    expr, rules, prefer="fewest_eps", cost=None, max_passes=30, max_nodes=10000
+):
+    """Saturate *expr* under *rules* and return the best form found.
+
+    "Best" is *your* choice, not a fixed notion of simplicity: pass ``prefer``
+    to name an intent (see :data:`PREFER` — ``"fewest_eps"`` (default),
+    ``"smallest"``, ``"fewest_crosses"``, ``"fewest_identities"``), or
+    ``cost`` for raw per-kind weights (keys: ``node``, ``eps``, ``cross``,
+    ``delta``, ``identity``, ``unary``, ``div``).  A large weight means
+    "minimize this first, then size".
+
+        >>> td.engine_simplify(a % (b % c), rules, prefer="fewest_crosses")
+
+    Because the cost governs only *extraction*, re-reading the same rule set
+    under another intent costs one extraction, not another saturation.
+
+    Returns ``(expr, report)``; on a budget trip the best form found so far is
+    still returned, with a :class:`BudgetExceeded` warning and
+    ``report["complete"] is False``.
     """
+    if cost is None:
+        try:
+            cost = PREFER[prefer]
+        except KeyError:
+            raise ValueError(
+                f"unknown intent {prefer!r}; available: {', '.join(PREFER)} "
+                f"(or pass cost={{...}} for raw weights)"
+            ) from None
     lhss, rhss, names = _rule_arrays(rules)
     out, report = _d._engine_simplify(
-        expr, lhss, rhss, names, max_passes, max_nodes
+        expr, lhss, rhss, names, max_passes, max_nodes, dict(cost)
     )
     report = dict(report)
     report["fired"] = dict(report["fired"])

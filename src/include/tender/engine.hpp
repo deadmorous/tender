@@ -18,6 +18,7 @@
 namespace tender::engine
 {
 
+using nf::CostModel;
 using nf::SaturateBudget;
 using nf::SaturateOutcome;
 using nf::SaturateReport;
@@ -72,8 +73,10 @@ struct SimplifyResult final
     }
 };
 
-// Saturate `e` under `rules` and extract the cheapest form (the ε-weighted
-// cost of vibe 000046: fewest Levi-Civita symbols first, then fewest nodes).
+// Saturate `e` under `rules` and extract the best form under `cost` — which
+// is the caller's *intent*, not a fixed notion of simplicity (vibe 000097):
+// the default minimizes Levi-Civita symbols then size, `CostModel::
+// fewest_crosses()` will happily take a larger form to be rid of a `×`.
 // The result is returned in the user-facing canonical implicit form.  On a
 // budget trip the best form found *is* returned — with `complete() == false`,
 // so a caller can report the shortfall rather than pretend to a fixed point.
@@ -81,6 +84,7 @@ struct SimplifyResult final
     Context&,
     Expr const* e,
     std::vector<Identity> const& rules,
-    SaturateBudget budget = {}) -> SimplifyResult;
+    SaturateBudget budget = {},
+    CostModel const& cost = {}) -> SimplifyResult;
 
 } // namespace tender::engine

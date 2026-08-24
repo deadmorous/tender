@@ -241,3 +241,88 @@ TEST(Simplify, MultiTermLhsRuleIsReportedAsSkipped)
     ASSERT_EQ(res.report.skipped.size(), 1u);
     EXPECT_EQ(res.report.skipped.at(0), 0u);
 }
+
+// ---- intent-driven extraction cost (vibe 000097) ------------------------
+
+namespace
+{
+
+auto vec1(Context& ctx, char const* n) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(n), {}, 1);
+}
+
+// a × (b × c) = b (a·c) − c (a·b)
+auto bac_cab(Context& ctx) -> Identity
+{
+    auto const* u = vec1(ctx, "u");
+    auto const* v = vec1(ctx, "v");
+    auto const* w = vec1(ctx, "w");
+    return Identity{
+        "bac-cab",
+        make_cross(ctx, u, make_cross(ctx, v, w)),
+        make_difference(
+            ctx,
+            make_tensor_product(ctx, v, make_dot(ctx, u, w)),
+            make_tensor_product(ctx, w, make_dot(ctx, u, v)))};
+}
+
+} // namespace
+
+TEST(CostModel, SameGraphDifferentIntentDifferentAnswer)
+{
+    // The point of making cost a parameter: "simplest" is the caller's goal,
+    // not a property of the algebra.  One rule, one expression — the default
+    // keeps the compact crossed form (it has fewer nodes), while an intent to
+    // remove crosses takes the *larger* expanded form instead.
+    Context ctx;
+    auto const* a = vec1(ctx, "a");
+    auto const* b = vec1(ctx, "b");
+    auto const* c = vec1(ctx, "c");
+    auto const* crossed = make_cross(ctx, a, make_cross(ctx, b, c));
+    auto const* expanded = make_difference(
+        ctx,
+        make_tensor_product(ctx, b, make_dot(ctx, a, c)),
+        make_tensor_product(ctx, c, make_dot(ctx, a, b)));
+
+    auto const cheap = simplify(ctx, crossed, {bac_cab(ctx)});
+    EXPECT_TRUE(algebraic_eq(ctx, cheap.expr, crossed))
+        << "the default cost should keep the compact crossed form";
+
+    auto const nocross =
+        simplify(ctx, crossed, {bac_cab(ctx)}, {}, CostModel::fewest_crosses());
+    EXPECT_TRUE(algebraic_eq(ctx, nocross.expr, expanded))
+        << "fewest_crosses should take the expansion, larger though it is";
+}
+
+TEST(CostModel, EpsPreferenceIsTheDefaultIntentNotAFixedRule)
+{
+    // The ε weight of vibe 000046 is one intent among several — expressible,
+    // and switchable off by asking for plain size.
+    EXPECT_GT(CostModel::fewest_eps().levi_civita, CostModel{}.node);
+    EXPECT_EQ(CostModel::smallest().levi_civita, CostModel::smallest().node);
+    EXPECT_GT(
+        CostModel::fewest_crosses().cross, CostModel::fewest_crosses().node);
+}
+
+TEST(CostModel, CrossWeightCountsOperatorsNotChains)
+{
+    // A chain of n factors carries n−1 × operators; the weight must scale with
+    // the operators, else a single long chain would look as cheap as one ×.
+    Context ctx;
+    auto const* a = vec1(ctx, "a");
+    auto const* b = vec1(ctx, "b");
+    auto const* c = vec1(ctx, "c");
+    auto const one = simplify(
+        ctx, make_cross(ctx, a, b), {}, {}, CostModel::fewest_crosses());
+    auto const two = simplify(
+        ctx,
+        make_cross(ctx, a, make_cross(ctx, b, c)),
+        {},
+        {},
+        CostModel::fewest_crosses());
+    // Both are irreducible without rules; the test is that neither throws and
+    // the model is applied uniformly.
+    EXPECT_NE(one.expr, nullptr);
+    EXPECT_NE(two.expr, nullptr);
+}

@@ -1157,7 +1157,8 @@ NB_MODULE(_core, m)
            std::vector<PyExpr> const& rule_rhss,
            std::vector<std::string> const& rule_names,
            int max_passes,
-           std::size_t max_nodes) -> nb::tuple
+           std::size_t max_nodes,
+           nb::dict cost_weights) -> nb::tuple
         {
             Context& ctx = *expr.ctx;
             std::vector<Identity> rules;
@@ -1166,12 +1167,29 @@ NB_MODULE(_core, m)
                 rules.push_back(Identity{
                     rule_names.at(i), rule_lhss[i].expr, rule_rhss[i].expr});
 
+            // The extraction cost is the caller's intent (vibe 000097); the
+            // Python side resolves a named intent into these weights.
+            nf::CostModel cost;
+            auto weight = [&](char const* key, std::size_t& slot)
+            {
+                if (cost_weights.contains(key))
+                    slot = nb::cast<std::size_t>(cost_weights[key]);
+            };
+            weight("node", cost.node);
+            weight("eps", cost.levi_civita);
+            weight("cross", cost.cross);
+            weight("delta", cost.delta);
+            weight("identity", cost.identity);
+            weight("unary", cost.unary);
+            weight("div", cost.div);
+
             auto const res = engine::simplify(
                 ctx,
                 expr.expr,
                 rules,
                 nf::SaturateBudget{
-                    .max_passes = max_passes, .max_nodes = max_nodes});
+                    .max_passes = max_passes, .max_nodes = max_nodes},
+                cost);
 
             nb::dict d;
             d["complete"] = res.complete();
@@ -1195,8 +1213,9 @@ NB_MODULE(_core, m)
         "rule_names"_a,
         "max_passes"_a,
         "max_nodes"_a,
-        "Saturate expr under the rules and extract the cheapest form; returns "
-        "(expr, report dict).");
+        "cost_weights"_a,
+        "Saturate expr under the rules and extract the best form under the "
+        "given cost weights; returns (expr, report dict).");
 
     // Equality predicates (not steps).
     m.def(

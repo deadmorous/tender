@@ -1275,3 +1275,55 @@ def test_simplify_can_factor_an_expanded_form_back():
     _, crossed, expanded, forward = _bac_cab_case()
     out, _ = td.engine_simplify(expanded, [forward])
     assert td.algebraic_eq(out, crossed)
+
+
+# ---- intent-driven extraction cost (vibe 000097) ---------------------------
+
+
+def _cross_setup():
+    ctx = tender.Context()
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    return ctx, a, b, c, td.rules("cross", ctx=ctx)
+
+
+def test_intent_changes_the_answer_for_the_same_graph():
+    """The point of vibe 000097: "simplest" is the user's goal, not a fact.
+
+    One expression, one rule set — the default keeps the compact crossed form
+    because it has fewer nodes, while `prefer="fewest_crosses"` takes the
+    *larger* expansion in order to be rid of the ×.
+    """
+    ctx, a, b, c, rules = _cross_setup()
+    crossed = a % (b % c)
+    expanded = b * (a @ c) - c * (a @ b)
+
+    default, _ = td.engine_simplify(crossed, rules)
+    assert td.algebraic_eq(default, crossed)
+
+    nocross, _ = td.engine_simplify(crossed, rules, prefer="fewest_crosses")
+    assert td.algebraic_eq(nocross, expanded)
+
+
+def test_raw_cost_weights_bypass_the_named_intents():
+    ctx, a, b, c, rules = _cross_setup()
+    out, _ = td.engine_simplify(a % (b % c), rules, cost={"cross": 1_000_000})
+    assert td.algebraic_eq(out, b * (a @ c) - c * (a @ b))
+
+
+def test_unknown_intent_raises_listing_the_available_ones():
+    ctx, a, b, c, rules = _cross_setup()
+    with pytest.raises(ValueError, match="fewest_crosses"):
+        td.engine_simplify(a % (b % c), rules, prefer="no_such_intent")
+
+
+def test_named_intents_are_documented_weight_maps():
+    assert set(td.PREFER) >= {
+        "fewest_eps",
+        "smallest",
+        "fewest_crosses",
+        "fewest_identities",
+    }
+    # Every intent is a plain dict of weights, so a user can start from one.
+    for name, weights in td.PREFER.items():
+        assert isinstance(weights, dict), name
+        assert all(isinstance(v, int) for v in weights.values()), name

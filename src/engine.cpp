@@ -47,7 +47,8 @@ auto simplify(
     Context& ctx,
     Expr const* e,
     std::vector<Identity> const& rules,
-    SaturateBudget budget) -> SimplifyResult
+    SaturateBudget budget,
+    CostModel const& cost) -> SimplifyResult
 {
     nf::NfEGraph g{ctx};
     auto const root = g.add(e);
@@ -58,7 +59,7 @@ auto simplify(
     // Extract the cheapest member of the root's class and raise it back to the
     // user-facing implicit form — the same final shape `apply_identity`
     // returns, so an engine result drops into a derivation chain unchanged.
-    auto const* best = g.extract(g.find(root));
+    auto const* best = g.extract(g.find(root), cost);
     out.expr =
         steps::implicitize(ctx, steps::canonicalize(ctx, nf::raise(ctx, *best)));
     return out;

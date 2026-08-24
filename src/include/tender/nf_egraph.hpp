@@ -34,6 +34,55 @@ namespace tender::nf
 // current representative after merges.
 using EClassId = int;
 
+// What "simplest" means when a saturated e-graph is read back (vibe 000097).
+//
+// Cheapness is a fine default but it is not always what the user wants: "get
+// rid of the two crosses" is a legitimate goal even though the crossed form
+// has fewer nodes.  So the extraction cost is a *parameter* — an expression of
+// intent — rather than a fixed property of the algebra.
+//
+// Each weight is added to `node` for the node kinds it names, and a class's
+// cost is the sum over its chosen subtree.  Large weights encode a
+// lexicographic order (minimize the weighted thing first, then total size),
+// which is how the ε preference of vibe 000046 has always worked; keep them
+// far apart and far above any realistic node count, and well below overflow.
+//
+// The cost affects *extraction only*, never which rewrites the engine
+// explores — so the same saturated graph can be read out under several
+// intents for the price of one saturation.
+struct CostModel final
+{
+    std::size_t node = 1;              // every node: the baseline size term
+    std::size_t levi_civita = 1000000; // extra, per ε symbol
+    std::size_t cross = 0;             // extra, per × operator in a chain
+    std::size_t delta = 0;             // extra, per δ symbol
+    std::size_t identity = 0;          // extra, per identity tensor I
+    std::size_t unary = 0;             // extra, per tr / vec / transpose
+    std::size_t div = 0;               // extra, per division
+
+    // Fewest Levi-Civita symbols, then fewest nodes — the default, and the
+    // intent behind the ε-δ identities: contract the ε's away even though the
+    // δ-expansion is the larger form (vibe 000046).
+    [[nodiscard]] static auto fewest_eps() -> CostModel
+    {
+        return CostModel{};
+    }
+
+    // Plain node count: no thumb on any scale.
+    [[nodiscard]] static auto smallest() -> CostModel
+    {
+        return CostModel{.node = 1, .levi_civita = 1};
+    }
+
+    // Fewest cross products, then fewest ε, then fewest nodes — "remove the
+    // crosses", which is what turns bac-cab's *expansion* into the preferred
+    // reading of the same graph.
+    [[nodiscard]] static auto fewest_crosses() -> CostModel
+    {
+        return CostModel{.node = 1, .levi_civita = 1000, .cross = 1000000};
+    }
+};
+
 // Saturation budget (vibe 000096 increment 1; defaults from the vibe
 // 000093 decision ledger).  `max_nodes` is checked *between* passes: a
 // pass is never started on a graph already at the limit, so one pass may
@@ -95,9 +144,12 @@ public:
     // Canonical representative of the class containing id.
     [[nodiscard]] auto find(EClassId id) -> EClassId;
 
-    // Cheapest (smallest node-count) representative `Nf` of a class.  Requires
-    // a `Sum`-sort class (an `add`-returned id, or one merged with such).
-    [[nodiscard]] auto extract(EClassId id) -> Nf const*;
+    // Cheapest representative `Nf` of a class under `cost` (vibe 000097).
+    // Requires a `Sum`-sort class (an `add`-returned id, or one merged with
+    // such).  Extracting the same class again under a different `CostModel`
+    // costs one more extraction, not another saturation.
+    [[nodiscard]] auto extract(EClassId id, CostModel const& cost = {})
+        -> Nf const*;
 
     // Equality saturation over the `Nf` (vibe 000058 / C14d).  Each
     // single-term identity `lhs = rhs` is fired — via the `nf_match` matcher —

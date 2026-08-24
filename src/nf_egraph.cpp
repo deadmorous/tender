@@ -63,21 +63,38 @@ void hash_combine(std::size_t& seed, std::size_t v)
     seed ^= v + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
 }
 
-// Per-node extraction weight, lexicographic: minimize the number of Levi-Civita
-// symbols first (the object the index identities exist to contract away — its
-// δ-expansion is often *larger*, so a plain node count would keep the ε form),
-// then total node count.  The weight dominates any realistic count, giving the
-// (eps-count, node-count) ordering.  Mirrors the Expr e-graph's `node_cost`.
-constexpr std::size_t kLeviCivitaWeight = 1'000'000;
-
-auto node_cost(NfENode const& n) -> std::size_t
+// Per-node extraction weight under a `CostModel` (vibe 000097).  The baseline
+// `node` term makes the cost a size measure; the named extras put a thumb on
+// whichever scale the caller's intent asks for — by default, minimize the
+// number of Levi-Civita symbols first (the object the index identities exist to
+// contract away: its δ-expansion is often *larger*, so a plain node count would
+// keep the ε form), then total size.
+auto node_cost(NfENode const& n, CostModel const& cm) -> std::size_t
 {
-    if (n.kind == NfEKind::Atom)
-        if (auto const* a = std::get_if<Atom>(&n.atom->node))
-            if (a->obj.traits
-                && a->obj.traits->well_known == WellKnownKind::LeviCivita)
-                return kLeviCivitaWeight;
-    return 1;
+    std::size_t c = cm.node;
+    switch (n.kind)
+    {
+        case NfEKind::Atom:
+            if (auto const* a = std::get_if<Atom>(&n.atom->node);
+                a && a->obj.traits && a->obj.traits->well_known)
+                switch (*a->obj.traits->well_known)
+                {
+                    case WellKnownKind::LeviCivita: c += cm.levi_civita; break;
+                    case WellKnownKind::Delta: c += cm.delta; break;
+                    case WellKnownKind::Identity: c += cm.identity; break;
+                    case WellKnownKind::Metric: break;
+                }
+            break;
+        // A chain of n factors carries n-1 cross operators, so "fewest
+        // crosses" counts operators rather than chain nodes.
+        case NfEKind::Cross:
+            c += cm.cross * (n.children.empty() ? 0 : n.children.size() - 1);
+            break;
+        case NfEKind::Unary: c += cm.unary; break;
+        case NfEKind::Div: c += cm.div; break;
+        default: break;
+    }
+    return c;
 }
 
 auto node_hash(NfENode const& n) -> std::size_t
@@ -365,7 +382,8 @@ struct NfEGraph::Impl final
 
     // The cheapest e-node per class by total node count (a fixpoint over the
     // child costs, so cyclic classes converge).
-    auto compute_best() -> std::unordered_map<EClassId, NfENode>
+    auto compute_best(CostModel const& cm = {})
+        -> std::unordered_map<EClassId, NfENode>
     {
         std::unordered_map<EClassId, std::size_t> cost;
         std::unordered_map<EClassId, NfENode> best;
@@ -376,7 +394,7 @@ struct NfEGraph::Impl final
             for (auto const& [id, ec]: classes_)
                 for (NfENode const& n: ec.nodes)
                 {
-                    std::size_t c = node_cost(n);
+                    std::size_t c = node_cost(n, cm);
                     bool ok = true;
                     for (EClassId ch: n.children)
                     {
@@ -686,9 +704,9 @@ void NfEGraph::rebuild()
     impl_->rebuild();
 }
 
-auto NfEGraph::extract(EClassId id) -> Nf const*
+auto NfEGraph::extract(EClassId id, CostModel const& cost) -> Nf const*
 {
-    auto best = impl_->compute_best();
+    auto best = impl_->compute_best(cost);
     std::unordered_map<EClassId, Nf const*> nfmemo;
     std::unordered_map<EClassId, Factor const*> fmemo;
     return impl_->reconstruct_nf(id, best, nfmemo, fmemo);
