@@ -1398,3 +1398,93 @@ def test_differential_content_is_undecided_not_refuted():
     assert result.status == "exhausted"
     assert not result.refuted
     assert not result.components_agree
+
+
+# ---- budgets in user units (vibe 000097) -----------------------------------
+
+
+def _bac_cab_rules():
+    ctx = tender.Context()
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    return ctx, a % (b % c), b * (a @ c) - c * (a @ b), td.rules("cross", ctx=ctx)
+
+
+def test_budget_defaults_are_the_deterministic_pair():
+    b = td.Budget()
+    assert (b.max_passes, b.max_nodes) == (30, 10_000)
+    # No resource cap unless asked for: a default that depended on machine
+    # speed would make every result unreproducible.
+    assert b.max_seconds is None
+    assert b.max_bytes is None
+
+
+def test_memory_cap_stops_and_is_reported_as_such():
+    import warnings
+
+    _, lhs, rhs, rules = _bac_cab_rules()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = td.prove_equal(lhs, rhs, rules, budget=td.Budget(max_bytes=1))
+    assert result.status == "budget"
+    assert result.stopped_by == "memory"
+
+
+def test_deterministic_caps_win_over_resource_caps():
+    """Which cap is reported matters: a "passes" stop can be reasoned about
+    on any machine, a "time" stop cannot."""
+    import warnings
+
+    _, lhs, rhs, rules = _bac_cab_rules()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = td.prove_equal(
+            lhs,
+            rhs,
+            rules,
+            budget=td.Budget(
+                max_passes=0, max_nodes=1, max_seconds=0.001, max_bytes=1
+            ),
+        )
+    assert result.stopped_by == "passes"
+
+
+def test_default_budget_is_settable_and_per_call_wins():
+    import warnings
+
+    _, lhs, rhs, rules = _bac_cab_rules()
+    previous = td.set_default_budget(td.Budget(max_passes=0))
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # The session default applies…
+            assert td.prove_equal(lhs, rhs, rules).status == "budget"
+            # …and a per-call budget overrides it.
+            assert td.prove_equal(
+                lhs, rhs, rules, budget=td.Budget()
+            ).proved
+    finally:
+        td.set_default_budget(previous)
+    assert td.default_budget().max_passes == 30
+
+
+def test_reports_carry_resource_usage():
+    _, lhs, rhs, rules = _bac_cab_rules()
+    result = td.prove_equal(lhs, rhs, rules)
+    assert result.proved
+    assert result.seconds >= 0.0
+    assert result.bytes > 0
+    assert result.stopped_by == ""  # not a budget stop
+
+
+def test_budget_replace_rejects_unknown_fields():
+    with pytest.raises(ValueError, match="unknown budget field"):
+        td.Budget().replace(max_wishes=3)
+
+
+def test_legacy_kwargs_still_work():
+    import warnings
+
+    _, lhs, rhs, rules = _bac_cab_rules()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert td.prove_equal(lhs, rhs, rules, max_passes=0).status == "budget"

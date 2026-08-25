@@ -61,6 +61,9 @@ __all__ = [
     "PREFER",
     "ProofResult",
     "BudgetExceeded",
+    "Budget",
+    "set_default_budget",
+    "default_budget",
     "structural_eq",
     "algebraic_eq",
     "at",
@@ -530,6 +533,101 @@ def rules(*groups, ctx=None, realm=None, space=None):
     return out
 
 
+class Budget:
+    """How much effort a verb may spend, in units you can reason about.
+
+    Two kinds of cap, and the difference matters:
+
+    **Deterministic** — ``max_passes``, ``max_nodes``.  The same input gives
+    the same answer on every machine.  These are what a test suite and CI
+    must use: a result that depends on how fast the machine is cannot be
+    reproduced or reviewed.
+
+    **Resource** — ``max_seconds``, ``max_bytes``.  What a person actually
+    wants to say ("don't spend more than two seconds on this"), and the right
+    dial for interactive work — but machine-dependent, so a run that trips one
+    here may not trip it there.  ``None`` (the default) means no limit.
+
+    ``max_bytes`` is an **estimate** — e-node count times a per-node figure —
+    not a measurement of process memory.  Treat it as a coarse guard, not an
+    accounting.
+
+    Set a session-wide default with :func:`set_default_budget`, and override
+    per call with ``budget=``::
+
+        td.set_default_budget(td.Budget(max_seconds=10))
+        td.prove_equal(lhs, rhs, rules, budget=td.Budget(max_passes=5))
+    """
+
+    __slots__ = ("max_passes", "max_nodes", "max_seconds", "max_bytes")
+
+    def __init__(
+        self, max_passes=30, max_nodes=10_000, max_seconds=None, max_bytes=None
+    ):
+        self.max_passes = max_passes
+        self.max_nodes = max_nodes
+        self.max_seconds = max_seconds
+        self.max_bytes = max_bytes
+
+    def replace(self, **changes):
+        """A copy with some caps changed."""
+        fields = {f: getattr(self, f) for f in self.__slots__}
+        unknown = set(changes) - set(fields)
+        if unknown:
+            raise ValueError(f"unknown budget field(s): {', '.join(sorted(unknown))}")
+        fields.update(changes)
+        return Budget(**fields)
+
+    def _args(self):
+        return (
+            self.max_passes,
+            self.max_nodes,
+            0.0 if self.max_seconds is None else float(self.max_seconds),
+            0 if self.max_bytes is None else int(self.max_bytes),
+        )
+
+    def __repr__(self):
+        caps = [f"max_passes={self.max_passes}", f"max_nodes={self.max_nodes}"]
+        if self.max_seconds is not None:
+            caps.append(f"max_seconds={self.max_seconds}")
+        if self.max_bytes is not None:
+            caps.append(f"max_bytes={self.max_bytes}")
+        return f"Budget({', '.join(caps)})"
+
+
+_DEFAULT_BUDGET = Budget()
+
+
+def set_default_budget(budget):
+    """Set the budget the verbs use when none is passed; returns the previous one.
+
+    This is the session-wide default a user sets once.  Per-call ``budget=``
+    always wins, so a single expensive derivation can be given more room
+    without loosening anything else.
+    """
+    global _DEFAULT_BUDGET
+    previous, _DEFAULT_BUDGET = _DEFAULT_BUDGET, budget
+    return previous
+
+
+def default_budget():
+    """The budget the verbs use when none is passed."""
+    return _DEFAULT_BUDGET
+
+
+def _resolve_budget(budget, max_passes, max_nodes):
+    """Per-call budget, or the default — with the legacy kwargs still honoured."""
+    if budget is not None:
+        return budget
+    base = _DEFAULT_BUDGET
+    changes = {}
+    if max_passes is not None:
+        changes["max_passes"] = max_passes
+    if max_nodes is not None:
+        changes["max_nodes"] = max_nodes
+    return base.replace(**changes) if changes else base
+
+
 class BudgetExceeded(UserWarning):
     """Saturation stopped on its budget, so the answer is inconclusive.
 
@@ -569,6 +667,11 @@ class ProofResult:
         self.components_agree = report.get("components_agree", False)
         self.passes = report["passes"]
         self.nodes = report["nodes"]
+        #: Which cap stopped the search ("passes", "nodes", "time", "memory"),
+        #: or "" if it was not a budget stop.
+        self.stopped_by = report.get("stopped_by", "")
+        self.seconds = report.get("seconds", 0.0)
+        self.bytes = report.get("bytes", 0)
         self.fired = dict(report["fired"])
         self.skipped = list(report["skipped"])
 
@@ -606,7 +709,7 @@ def _warn_skipped(skipped, what):
         )
 
 
-def prove_equal(lhs, rhs, rules, max_passes=30, max_nodes=10000):
+def prove_equal(lhs, rhs, rules, budget=None, max_passes=None, max_nodes=None):
     """Try to prove ``lhs == rhs`` by equality saturation under *rules*.
 
     Both sides are saturated together in one e-graph, so rules that rewrite
@@ -621,15 +724,17 @@ def prove_equal(lhs, rhs, rules, max_passes=30, max_nodes=10000):
     mistaken for "not equal".
     """
     lhss, rhss, names = _rule_arrays(rules)
+    budget = _resolve_budget(budget, max_passes, max_nodes)
     result = ProofResult(
-        _d._prove_equal(lhs, rhs, lhss, rhss, names, max_passes, max_nodes)
+        _d._prove_equal(lhs, rhs, lhss, rhss, names, *budget._args())
     )
     _warn_skipped(result.skipped, "prove_equal")
     if result.status == "budget":
         warnings.warn(
-            f"prove_equal stopped on its budget after {result.passes} pass(es) "
-            f"/ {result.nodes} nodes — inconclusive, NOT a disproof; retry "
-            f"with a larger max_passes/max_nodes",
+            f"prove_equal stopped on its {result.stopped_by} budget after "
+            f"{result.passes} pass(es) / {result.nodes} nodes / "
+            f"{result.seconds:.3f}s — inconclusive, NOT a disproof; retry with "
+            f"a larger budget",
             BudgetExceeded,
             stacklevel=2,
         )
@@ -654,7 +759,13 @@ PREFER = {
 
 
 def engine_simplify(
-    expr, rules, prefer="fewest_eps", cost=None, max_passes=30, max_nodes=10000
+    expr,
+    rules,
+    prefer="fewest_eps",
+    cost=None,
+    budget=None,
+    max_passes=None,
+    max_nodes=None,
 ):
     """Saturate *expr* under *rules* and return the best form found.
 
@@ -683,8 +794,9 @@ def engine_simplify(
                 f"(or pass cost={{...}} for raw weights)"
             ) from None
     lhss, rhss, names = _rule_arrays(rules)
+    budget = _resolve_budget(budget, max_passes, max_nodes)
     out, report = _d._engine_simplify(
-        expr, lhss, rhss, names, max_passes, max_nodes, dict(cost)
+        expr, lhss, rhss, names, *budget._args(), dict(cost)
     )
     report = dict(report)
     report["fired"] = dict(report["fired"])
@@ -692,9 +804,10 @@ def engine_simplify(
     _warn_skipped(report["skipped"], "engine_simplify")
     if not report["complete"]:
         warnings.warn(
-            f"engine_simplify stopped on its budget after {report['passes']} "
-            f"pass(es) / {report['nodes']} nodes — the result is the best form "
-            f"found so far, not a fixed point",
+            f"engine_simplify stopped on its {report['stopped_by']} budget "
+            f"after {report['passes']} pass(es) / {report['nodes']} nodes / "
+            f"{report['seconds']:.3f}s — the result is the best form found so "
+            f"far, not a fixed point",
             BudgetExceeded,
             stacklevel=2,
         )

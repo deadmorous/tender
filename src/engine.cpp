@@ -128,10 +128,13 @@ auto prove_equal(
         out.status = ProofStatus::Proved;
         return out;
     }
-    if (out.report.outcome != SaturateOutcome::Saturated)
+    if (nf::is_budget_stop(out.report.outcome))
     {
         // A budget trip concludes nothing, so do not spend the component pass
-        // on it: the rules might still have proved it given room.
+        // on it: the rules might still have proved it given room.  Which cap
+        // fired is in `report.outcome` — a caller that hit the wall clock may
+        // simply retry with more room, while a node-count trip usually means
+        // the rule set is explosive.
         out.status = ProofStatus::Budget;
         return out;
     }

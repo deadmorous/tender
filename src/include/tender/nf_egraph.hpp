@@ -21,6 +21,7 @@
 #include <tender/identity.hpp> // Identity
 #include <tender/nf.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -83,14 +84,36 @@ struct CostModel final
     }
 };
 
-// Saturation budget (vibe 000096 increment 1; defaults from the vibe
-// 000093 decision ledger).  `max_nodes` is checked *between* passes: a
-// pass is never started on a graph already at the limit, so one pass may
-// overshoot it.
+// Roughly how much memory one e-node costs, for the `max_bytes` cap.  An
+// *estimate*, not a measurement: the node itself plus its child vector and its
+// share of the hash-cons table.  Real usage depends on allocator behaviour and
+// on the `Nf` structures the arena holds, which this does not see.
+constexpr std::size_t kEstimatedBytesPerNode = 256;
+
+// Saturation budget (vibe 000096 increment 1, extended in vibe 000097).
+//
+// Two kinds of cap, deliberately both available:
+//
+//   *Deterministic* — `max_passes`, `max_nodes`.  The same input gives the
+//   same outcome on any machine, which is what a test suite and CI need.
+//   These are also the mechanism: the wall-clock and memory caps are checked
+//   at the same points.
+//
+//   *Resource* — `max_time`, `max_bytes`.  What a person actually wants to
+//   say ("don't spend more than two seconds on this"), but machine-dependent:
+//   a run that trips a time cap here may not trip it there, so a result that
+//   depends on one is not reproducible.  Use them interactively; keep the
+//   suite on the deterministic pair.
+//
+// A zero resource cap means "no limit", which is the default.  Every cap is
+// checked *between* passes — a pass is never started once one is reached, so
+// the final graph may overshoot by one pass's growth.
 struct SaturateBudget final
 {
     int max_passes = 30;
     std::size_t max_nodes = 10'000;
+    std::chrono::milliseconds max_time{0}; // 0 = no wall-clock cap
+    std::size_t max_bytes = 0;             // 0 = no memory cap (estimated)
 };
 
 // Why saturation stopped.  Only `Saturated` means the rule set was
@@ -98,11 +121,22 @@ struct SaturateBudget final
 // read it as "the rules cannot do it".
 enum class SaturateOutcome : std::uint8_t
 {
-    Saturated,  // fixed point: a pass merged nothing new
-    PassBudget, // stopped by max_passes while still changing
-    NodeBudget, // graph reached max_nodes
-    EarlyStop,  // the caller's stop() reported its goal reached
+    Saturated,    // fixed point: a pass merged nothing new
+    PassBudget,   // stopped by max_passes while still changing
+    NodeBudget,   // graph reached max_nodes
+    TimeBudget,   // wall clock reached max_time (machine-dependent)
+    MemoryBudget, // estimated memory reached max_bytes (machine-dependent)
+    EarlyStop,    // the caller's stop() reported its goal reached
 };
+
+// Did saturation stop because it ran out of budget?  Every such outcome is
+// *inconclusive* — never read one as "the rules cannot do it".
+[[nodiscard]] constexpr auto is_budget_stop(SaturateOutcome o) -> bool
+{
+    return o == SaturateOutcome::PassBudget || o == SaturateOutcome::NodeBudget
+           || o == SaturateOutcome::TimeBudget
+           || o == SaturateOutcome::MemoryBudget;
+}
 
 // The saturation trace (vibe 000096): what happened, and which rules did
 // it.  `fired[i]` counts rule i's graph-changing merges (a rewrite that
@@ -114,6 +148,8 @@ struct SaturateReport final
     SaturateOutcome outcome = SaturateOutcome::Saturated;
     int passes = 0;
     std::size_t nodes = 0;
+    std::chrono::milliseconds elapsed{0};
+    std::size_t bytes = 0; // estimated, see kEstimatedBytesPerNode
     std::vector<int> fired = {};
     std::vector<std::size_t> skipped = {};
 };

@@ -3,6 +3,8 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <chrono>
+
 #include <tender/basis.hpp>
 #include <tender/chart.hpp>
 #include <tender/context.hpp>
@@ -1103,7 +1105,9 @@ NB_MODULE(_core, m)
            std::vector<PyExpr> const& rule_rhss,
            std::vector<std::string> const& rule_names,
            int max_passes,
-           std::size_t max_nodes) -> nb::dict
+           std::size_t max_nodes,
+           double max_seconds,
+           std::size_t max_bytes) -> nb::dict
         {
             Context& ctx = *lhs.ctx;
             std::vector<Identity> rules;
@@ -1118,7 +1122,12 @@ NB_MODULE(_core, m)
                 rhs.expr,
                 rules,
                 nf::SaturateBudget{
-                    .max_passes = max_passes, .max_nodes = max_nodes});
+                    .max_passes = max_passes,
+                    .max_nodes = max_nodes,
+                    .max_time =
+                        std::chrono::milliseconds{
+                            static_cast<long long>(max_seconds * 1000.0)},
+                    .max_bytes = max_bytes});
 
             nb::dict d;
             d["proved"] = res.proved();
@@ -1131,6 +1140,18 @@ NB_MODULE(_core, m)
             d["components_agree"] = res.components_agree;
             d["passes"] = res.report.passes;
             d["nodes"] = res.report.nodes;
+            d["stopped_by"] =
+                res.report.outcome == nf::SaturateOutcome::PassBudget ?
+                    "passes" :
+                res.report.outcome == nf::SaturateOutcome::NodeBudget ?
+                    "nodes" :
+                res.report.outcome == nf::SaturateOutcome::TimeBudget ?
+                    "time" :
+                res.report.outcome == nf::SaturateOutcome::MemoryBudget ?
+                    "memory" :
+                    "";
+            d["seconds"] = res.report.elapsed.count() / 1000.0;
+            d["bytes"] = res.report.bytes;
             nb::dict fired;
             for (std::size_t i = 0; i < res.report.fired.size(); ++i)
                 if (res.report.fired[i] > 0)
@@ -1150,6 +1171,8 @@ NB_MODULE(_core, m)
         "rule_names"_a,
         "max_passes"_a,
         "max_nodes"_a,
+        "max_seconds"_a,
+        "max_bytes"_a,
         "Try to prove lhs == rhs by equality saturation, falling back to the "
         "component decision procedure for a refutation; returns a report dict "
         "(proved/refuted/status/components_agree/passes/nodes/fired/skipped).");
@@ -1162,6 +1185,8 @@ NB_MODULE(_core, m)
            std::vector<std::string> const& rule_names,
            int max_passes,
            std::size_t max_nodes,
+           double max_seconds,
+           std::size_t max_bytes,
            nb::dict cost_weights) -> nb::tuple
         {
             Context& ctx = *expr.ctx;
@@ -1192,13 +1217,30 @@ NB_MODULE(_core, m)
                 expr.expr,
                 rules,
                 nf::SaturateBudget{
-                    .max_passes = max_passes, .max_nodes = max_nodes},
+                    .max_passes = max_passes,
+                    .max_nodes = max_nodes,
+                    .max_time =
+                        std::chrono::milliseconds{
+                            static_cast<long long>(max_seconds * 1000.0)},
+                    .max_bytes = max_bytes},
                 cost);
 
             nb::dict d;
             d["complete"] = res.complete();
             d["passes"] = res.report.passes;
             d["nodes"] = res.report.nodes;
+            d["stopped_by"] =
+                res.report.outcome == nf::SaturateOutcome::PassBudget ?
+                    "passes" :
+                res.report.outcome == nf::SaturateOutcome::NodeBudget ?
+                    "nodes" :
+                res.report.outcome == nf::SaturateOutcome::TimeBudget ?
+                    "time" :
+                res.report.outcome == nf::SaturateOutcome::MemoryBudget ?
+                    "memory" :
+                    "";
+            d["seconds"] = res.report.elapsed.count() / 1000.0;
+            d["bytes"] = res.report.bytes;
             nb::dict fired;
             for (std::size_t i = 0; i < res.report.fired.size(); ++i)
                 if (res.report.fired[i] > 0)
@@ -1217,6 +1259,8 @@ NB_MODULE(_core, m)
         "rule_names"_a,
         "max_passes"_a,
         "max_nodes"_a,
+        "max_seconds"_a,
+        "max_bytes"_a,
         "cost_weights"_a,
         "Saturate expr under the rules and extract the best form under the "
         "given cost weights; returns (expr, report dict).");

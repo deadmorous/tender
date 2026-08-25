@@ -246,6 +246,37 @@ Notes:
   The scoreboard gained an Identity DAG table: kind, depth above the axioms,
   what each rests on, and which challenge discharges it.
 
+- **(3) budgets in user units — DONE**.  `SaturateBudget` keeps
+  `max_passes` / `max_nodes` and gains `max_time` / `max_bytes` (0 = no cap);
+  `SaturateOutcome` gains `TimeBudget` / `MemoryBudget`, with
+  `is_budget_stop()` so every shortfall is recognised as inconclusive in one
+  place.  The report carries `elapsed` and an estimated `bytes`.
+
+  Three decisions the implementation pinned down:
+
+  * **Deterministic caps are checked first.**  When several limits could
+    fire, the reproducible reason wins — a result that says "stopped on
+    passes" can be reasoned about on any machine, one that says "stopped on
+    time" cannot.  Tested.
+  * **Resource caps default to off.**  A default that depended on machine
+    speed would make every result unreproducible, so `max_seconds` /
+    `max_bytes` are `None` unless asked for, and the challenge suite stays on
+    the deterministic pair.
+  * **Memory is estimated, not measured** — node count × a per-node figure,
+    named `kEstimatedBytesPerNode` and documented as coarse, so the number is
+    not believed more precisely than it deserves.
+
+  Python: `td.Budget(max_passes, max_nodes, max_seconds, max_bytes)` with
+  `.replace()`, a session default via `set_default_budget()` /
+  `default_budget()`, and per-call `budget=` which always wins.  Results carry
+  `stopped_by` ("passes" / "nodes" / "time" / "memory"), `seconds` and
+  `bytes`, and the `BudgetExceeded` warning now names which cap fired.
+
+  Not done, and worth stating: the default is *session-wide*, not
+  per-`Context`.  The verbs take expressions and reach the Context through
+  them, so a genuinely Context-scoped default needs the Context-aware verb
+  surface of M3 — at which point it is a small change.
+
 ## Status
 
 All four are M3 material and are recorded in vibe 000093's plan as such.

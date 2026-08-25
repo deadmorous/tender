@@ -6,6 +6,7 @@
 #include <tender/nf_lower.hpp>   // canonicalize_nf, raise
 #include <tender/nf_match.hpp>   // fire_identity_on_term
 
+#include <chrono>
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
@@ -607,26 +608,50 @@ struct NfEGraph::Impl final
         // An empty goal check never stops early.
         auto goal_reached = [&] { return stop && stop(); };
 
-        if (goal_reached())
+        if (stop && stop())
         {
             report.outcome = SaturateOutcome::EarlyStop;
             report.nodes = node_count();
+            report.bytes = report.nodes * kEstimatedBytesPerNode;
             return report;
         }
+
+        // The wall clock runs from here: rule compilation above is part of
+        // what a time cap is meant to bound.
+        auto const started = std::chrono::steady_clock::now();
+        auto elapsed = [&]
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started);
+        };
 
         report.outcome = SaturateOutcome::Saturated;
         while (true)
         {
+            // Every cap is checked between passes: a pass never *starts* over
+            // budget, so the final graph may exceed a limit by one pass's
+            // growth.  Deterministic caps are tested first, so a run that
+            // would stop for a reproducible reason reports that reason rather
+            // than whichever machine-dependent limit happened to trip too.
             if (report.passes >= budget.max_passes)
             {
                 report.outcome = SaturateOutcome::PassBudget;
                 break;
             }
-            // Checked between passes: a pass never *starts* over budget, so
-            // the final graph may exceed `max_nodes` by one pass's growth.
             if (node_count() >= budget.max_nodes)
             {
                 report.outcome = SaturateOutcome::NodeBudget;
+                break;
+            }
+            if (budget.max_bytes > 0
+                && node_count() * kEstimatedBytesPerNode >= budget.max_bytes)
+            {
+                report.outcome = SaturateOutcome::MemoryBudget;
+                break;
+            }
+            if (budget.max_time.count() > 0 && elapsed() >= budget.max_time)
+            {
+                report.outcome = SaturateOutcome::TimeBudget;
                 break;
             }
             ++report.passes;
@@ -658,6 +683,8 @@ struct NfEGraph::Impl final
             }
         }
         report.nodes = node_count();
+        report.elapsed = elapsed();
+        report.bytes = report.nodes * kEstimatedBytesPerNode;
         return report;
     }
 };

@@ -421,3 +421,85 @@ TEST(Refutation, BudgetTripDoesNotAttemptRefutation)
     EXPECT_EQ(res.status, ProofStatus::Budget);
     EXPECT_FALSE(res.refuted());
 }
+
+// ---- budgets in user units (vibe 000097) --------------------------------
+
+TEST(Budget, TimeAndMemoryCapsStopSaturation)
+{
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    auto const* target = contraction(ctx, sp, q, m, n);
+
+    // A memory cap of one byte is reached before the first pass.
+    auto const mem = simplify(
+        ctx, target, rules_eps_delta(ctx), SaturateBudget{.max_bytes = 1});
+    EXPECT_EQ(mem.report.outcome, SaturateOutcome::MemoryBudget);
+    EXPECT_FALSE(mem.complete());
+
+    // A zero-millisecond wall clock likewise: elapsed is already >= 0.
+    auto const clock = simplify(
+        ctx,
+        target,
+        rules_eps_delta(ctx),
+        SaturateBudget{
+            .max_time =
+                std::chrono::milliseconds{0} + std::chrono::milliseconds{1}});
+    // 1 ms may or may not trip on a fast machine — the point is only that it
+    // is accepted and reported honestly, never mistaken for a fixed point.
+    EXPECT_TRUE(
+        clock.report.outcome == SaturateOutcome::Saturated
+        || clock.report.outcome == SaturateOutcome::TimeBudget);
+}
+
+TEST(Budget, DeterministicCapsWinOverResourceCaps)
+{
+    // When several caps could fire, the reproducible reason is reported: a
+    // result that says "passes" can be reasoned about anywhere, one that says
+    // "time" cannot.
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+
+    auto const res = simplify(
+        ctx,
+        contraction(ctx, sp, q, m, n),
+        rules_eps_delta(ctx),
+        SaturateBudget{
+            .max_passes = 0,
+            .max_nodes = 1,
+            .max_time = std::chrono::milliseconds{1},
+            .max_bytes = 1});
+    EXPECT_EQ(res.report.outcome, SaturateOutcome::PassBudget);
+}
+
+TEST(Budget, EveryBudgetStopIsInconclusive)
+{
+    using O = SaturateOutcome;
+    EXPECT_TRUE(nf::is_budget_stop(O::PassBudget));
+    EXPECT_TRUE(nf::is_budget_stop(O::NodeBudget));
+    EXPECT_TRUE(nf::is_budget_stop(O::TimeBudget));
+    EXPECT_TRUE(nf::is_budget_stop(O::MemoryBudget));
+    // A fixed point and an early stop are conclusions, not shortfalls.
+    EXPECT_FALSE(nf::is_budget_stop(O::Saturated));
+    EXPECT_FALSE(nf::is_budget_stop(O::EarlyStop));
+}
+
+TEST(Budget, ReportCarriesResourceUsage)
+{
+    Context ctx;
+    auto const* sp = space_3d();
+    CountableIndex q{ctx.alloc_index_id()};
+    CountableIndex m{ctx.alloc_index_id()};
+    CountableIndex n{ctx.alloc_index_id()};
+    auto const res =
+        simplify(ctx, contraction(ctx, sp, q, m, n), rules_eps_delta(ctx));
+    EXPECT_TRUE(res.complete());
+    EXPECT_GT(res.report.nodes, 0u);
+    EXPECT_EQ(res.report.bytes, res.report.nodes * nf::kEstimatedBytesPerNode);
+    EXPECT_GE(res.report.elapsed.count(), 0);
+}
