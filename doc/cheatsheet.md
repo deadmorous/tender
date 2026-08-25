@@ -204,6 +204,11 @@ drv.current.latex()
 
 ### `Derivation` class
 
+In Jupyter a `Derivation` renders as a table — each step, whether it *fired*,
+and the expression it produced; a `ProofResult` renders its verdict with the
+identities that produced it.
+
+
 | Member | Returns | Does |
 |---|---|---|
 | `Derivation(initial, index_map=None)` | — | Start a history; pass an `IndexNameMap` to keep index names consistent across all renders |

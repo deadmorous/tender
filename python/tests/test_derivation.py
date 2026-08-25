@@ -1528,3 +1528,45 @@ def test_engine_simplify_returns_the_input_when_unsupported():
     # the binding wraps the same underlying expression in a fresh object.)
     assert td.structural_eq(out, bad)
     assert any("could not process" in str(c.message) for c in caught)
+
+
+# ---- notebook display (vibe 000098) ----------------------------------------
+
+
+def test_derivation_renders_as_a_table_with_fired_marks():
+    """A derivation is a narrative; a Python repr loses the part that matters."""
+    ctx = tender.Context()
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    drv = td.Derivation((a + b) * c)
+    drv.step(td.expand_products)
+    drv.step(td.expand_products, optional=True)  # second pass: no-op
+
+    html = drv._repr_html_()
+    assert "initial" in html
+    assert "expand_products" in html
+    assert "✓" in html and "·" in html  # one fired, one did not
+    assert "changed\nnothing" in html or "changed " in html  # the legend
+
+
+def test_proof_result_renders_its_verdict_and_evidence():
+    ctx = tender.Context()
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    rules = td.rules("cross", ctx=ctx)
+
+    proved = td.prove_equal(a % (b % c), b * (a @ c) - c * (a @ b), rules)
+    html = proved._repr_html_()
+    assert "proved" in html
+    assert "bac-cab" in html  # the identity that did the work
+
+    refuted = td.prove_equal(a % b, b % a, rules)
+    assert "false" in refuted._repr_html_()
+
+
+def test_proof_result_display_explains_an_incomplete_rule_set():
+    ctx = tender.Context()
+    a, b, c, d = (tender.tensor(n, rank=1, ctx=ctx) for n in "abcd")
+    result = td.prove_equal(
+        (a % b) @ (c % d), (a @ c) * (b @ d) - (a @ d) * (b @ c), []
+    )
+    html = result._repr_html_()
+    assert "looks" in html and "incomplete" in html

@@ -148,6 +148,44 @@ class Derivation:
         imap = index_map or self.index_map
         return self._history[k].latex(imap)
 
+    def _repr_html_(self):
+        """The derivation as a table, for Jupyter: each step, what it did, and
+        the expression it produced.
+
+        A derivation is a narrative, and reading it as a Python repr loses
+        exactly the part that matters.  The *fired* column is the one to watch:
+        a step that changed nothing is either unnecessary or a sign the
+        derivation has stalled — which is how derivations go wrong invisibly
+        (vibe 000056).
+        """
+        rows = [
+            "<tr><th style='text-align:left'>#</th>"
+            "<th style='text-align:left'>step</th>"
+            "<th style='text-align:left'></th>"
+            "<th style='text-align:left'>result</th></tr>",
+            "<tr><td>0</td><td><i>initial</i></td><td></td>"
+            f"<td>${self.latex(0)}$</td></tr>",
+        ]
+        for k, (name, fired) in enumerate(self._steps, start=1):
+            mark = "✓" if fired else "·"
+            colour = "" if fired else " style='opacity:.55'"
+            rows.append(
+                f"<tr{colour}><td>{k}</td><td><code>{name}</code></td>"
+                f"<td>{mark}</td><td>${self.latex(k)}$</td></tr>"
+            )
+        note = ""
+        if any(not fired for _, fired in self._steps):
+            note = (
+                "<div style='opacity:.7;font-size:90%'>· = the step changed "
+                "nothing</div>"
+            )
+        return (
+            "<table style='border-collapse:collapse'>"
+            + "".join(rows)
+            + "</table>"
+            + note
+        )
+
 
 def unroll_sums(expr, *indices):
     """Expand ``ExplicitSum`` nodes into concrete ``Sum`` trees.
@@ -685,6 +723,41 @@ class ProofResult:
 
     def __bool__(self):
         return bool(self.proved)
+
+    def _repr_html_(self):
+        """The proof outcome for Jupyter: the verdict, and what produced it."""
+        verdict = {
+            "proved": ("proved", "#1a7f37"),
+            "refuted": ("refuted — the statement is false", "#b42318"),
+            "exhausted": ("not proved: the rules were not enough", "#9a6700"),
+            "budget": ("inconclusive: stopped on budget", "#9a6700"),
+            "unsupported": ("tender could not process this", "#9a6700"),
+        }.get(self.status, (self.status, ""))
+        parts = [
+            f"<b style='color:{verdict[1]}'>{verdict[0]}</b>",
+        ]
+        if self.status == "unsupported":
+            parts.append(f"<div style='opacity:.8'>{self.detail}</div>")
+        if self.components_agree:
+            parts.append(
+                "<div style='opacity:.8'>components agree, so the claim looks "
+                "true — it is the rule set that is incomplete</div>"
+            )
+        if self.fired:
+            used = ", ".join(
+                f"<code>{k}</code>&nbsp;×{v}" for k, v in self.fired.items()
+            )
+            parts.append(f"<div>identities used: {used}</div>")
+        if self.stopped_by:
+            parts.append(
+                f"<div style='opacity:.8'>stopped by the "
+                f"<b>{self.stopped_by}</b> cap</div>"
+            )
+        parts.append(
+            f"<div style='opacity:.6;font-size:90%'>{self.passes} pass(es), "
+            f"{self.nodes} e-nodes, {self.seconds:.3f}s</div>"
+        )
+        return "".join(parts)
 
     def __repr__(self):
         detail = f", fired={self.fired}" if self.fired else ""

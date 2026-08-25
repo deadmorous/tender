@@ -38,6 +38,51 @@ with the `nonneg=("r",)` detail easy to forget and silently load-bearing
 (it licenses √(r²) → r).  So the valuable move is not retiring the old
 factories — that is a small cleanup — but giving the common charts a name.
 
+## Progress record
+
+- **Increment 1 DONE** (2c09cce): named charts (`cartesian_chart` /
+  `cylindrical_chart` / `spherical_chart` / `polar_chart`, each minting its
+  coordinates with `nonneg` correct and returning `(chart, coords)`); all 16
+  hand-written chart constructions migrated, zero remain.  Because that
+  removed every instance of arbitrary construction, `examples/custom_chart.py`
+  was added — parabolic cylindrical coordinates from nothing but the
+  embedding.  **Finding recorded there:** on a chart whose scale factors are
+  *surds*, `∇R = I` is not recognised, because `simplify_scalars` cannot
+  cancel `(σ²+τ²)/√(σ²+τ²)`.  The named charts hide this (their scale factors
+  are `r`, `r sinθ`, `1`); a user's own chart likely will not.  The geometry
+  is correct regardless — a simplification gap, now documented where a user
+  meets it, and a backlog item.
+
+- **Increment 2 PARTIAL**: `Workspace.nabla()` gives the composable
+  coordinate-free operator as a real `Expr`, and `tender.operators` is marked
+  superseded in its module docstring with the core route spelled out.
+  **Deferred:** atticing it and migrating callers.  The brief said "three
+  callers", which understated the work — one of them is a 982-line test suite
+  written against the shadow AST.  Mechanical but large; better as its own
+  commit than squeezed into this milestone.
+
+- **Increment 3 DONE**: `tender.steps` holds the six internals the audit
+  measured as uncalled (`saturate`, `implicitize`, `distribute_contraction`,
+  `fold_equal_addends_structural`, `deriv`, `apply_operators`); the advertised
+  surface drops 42 → 36 names.  They still import, so nothing breaks.
+
+- **Increment 4 DONE (errors)**: `ProofStatus::Unsupported` + `detail`, and
+  `SimplifyResult::unsupported`.  A canonicalization failure is now reported
+  as a statement about *tender* — "tender cannot yet put this expression in
+  canonical form: …" — instead of escaping as `ValueError: encapsulate:
+  unsupported factor node`.  Challenge 000010 asserts the new behaviour; its
+  xfail stands, since being reported is not being proved.  **Deferred:**
+  Context-scoped budget defaults, which need the verbs to take a Context.
+
+- **Increment 5 DONE**: `Derivation._repr_html_` renders the derivation as a
+  table with per-step fired marks, and `ProofResult._repr_html_` shows the
+  verdict, the identities that produced it, and — where relevant — that the
+  rule set rather than the claim is what fell short.
+
+- **`doc/cheatsheet.md` updated** through M3, including a new section on the
+  verbs, which the headline change of M2/M3 had left undocumented.  Every API
+  named in the file was checked to exist.
+
 ## Increments
 
 Each keeps all suites green.  Scoreboard moves are not expected; M3 is
