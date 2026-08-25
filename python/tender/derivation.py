@@ -17,6 +17,13 @@ A derivation records an expression at each rewriting step::
 
 Steps are plain callables ``(Expr) -> Expr``, so users can define custom steps
 and pass them to :meth:`Derivation.step` alongside the built-in ones.
+
+Most work should not need them.  The goal-directed verbs — :func:`prove_equal`
+and :func:`engine_simplify`, driven by :func:`rules` — say *what* you want
+rather than which rewriting to apply in which order, which is the difference
+between a derivation you can write and one you have to discover.  The purely
+internal steps live in :mod:`tender.steps`; they remain importable,
+but reaching for one usually means the verb surface is missing something.
 """
 
 import warnings
@@ -36,23 +43,17 @@ __all__ = [
     "fold_sums",
     "contract_delta",
     "contract_identity",
-    "distribute_contraction",
     "expand_double_dot",
     "expand_dyad_ops",
     "contract_eps_pair",
     "fold_equal_addends",
-    "fold_equal_addends_structural",
     "collect_terms",
     "canonicalize",
     "partial",
-    "deriv",
-    "apply_operators",
     "simplify_scalars",
-    "implicitize",
     "simplify",
     "Identity",
     "apply_identity",
-    "saturate",
     "prove_equal",
     "rules",
     "rule_groups",
