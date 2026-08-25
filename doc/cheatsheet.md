@@ -14,6 +14,23 @@ Conventions used in the tables:
 - "does **not**" columns flag the common expectation a method deliberately does
   not meet.
 
+**Start here.** Two things carry most of the work:
+
+```python
+ws = t.Workspace()                        # owns the context
+cyl, (r, th, z) = ws.cylindrical_chart()  # a chart derives all its geometry
+```
+
+and then either say what you want —
+
+```python
+td.prove_equal(a % (b % I), b*a - (a@b)*I, td.rules("cross", ctx=ws.ctx))
+```
+
+— or differentiate directly in the chart (`cyl.grad(f)`, `cyl.div(T)`), or
+write it coordinate-free with `ws.nabla()` and evaluate later
+(`cyl.evaluate(nabla @ T)`).
+
 ---
 
 ## The pieces and how they fit
@@ -69,8 +86,10 @@ chart → write an invariant expression (optionally with ∇ operators) → `eva
 | `coordinate(name, chart_id=0, slot=0, nonneg=False)` | `Expr` | One coordinate atom; prefer `coords` for a set | — |
 | `coords(*names, chart_id=None, nonneg=())` | `list[Expr]` | Mint a coordinate set, slots by position, one fresh `chart_id`; `nonneg` names license `√(x²)→x` | — |
 | `wcs()` | `Basis` | World Cartesian frame i, j, k — **memoised** (same basis every call, so sibling charts share a reference) | Return a fresh frame per call |
-| `cylindrical()` / `spherical()` / `polar_2d()` | `Basis` | Well-known physical frames | — |
-| `chart(reference, coords, embedding)` | `CoordinateChart` | Build a chart from a reference basis, coord atoms, and the Cartesian embedding `xᵃ=fᵃ(q)` | — |
+| `cartesian_chart()` / `cylindrical_chart()` / `spherical_chart()` / `polar_chart()` | `(chart, coords)` | **The standard charts, by name.** Mints the coordinates too, with `nonneg` set where it matters | — |
+| `nabla()` | `Expr` | The coordinate-free ∇, bound to this context; `nabla*T` grad, `nabla@T` div, `nabla%T` rot | Evaluate — hand it to `chart.evaluate` |
+| `chart(reference, coords, embedding)` | `CoordinateChart` | Build **any** chart from a reference basis, coord atoms, and the embedding `xᵃ=fᵃ(q)` — see `examples/custom_chart.py` | — |
+| `cylindrical()` / `spherical()` / `polar_2d()` | `Basis` | The well-known *bases* — superseded by the named charts above, which also carry a coordinate map and can therefore differentiate | — |
 | `.ctx` | `Context` | The owned context (pass as `ctx=` to any core factory) | — |
 
 ---
@@ -227,13 +246,35 @@ Any of these can be passed to `.step()` or called directly.
 | `structural_eq(a, b)` | `bool` — deep structural tree equality | Algebraic equality |
 | `algebraic_eq(a, b)` | `bool` — T0-canonical equality, falling back to `simplify_scalars(a−b)==0` (so `x/r+y/r == (x+y)/r`) | — |
 
-### Rule-based rewriting
+### The verbs — say *what* you want
+
+Prefer these to a hand-ordered chain of steps: they state a goal, and the
+engine finds the route.
 
 | API | Returns | Does |
 |---|---|---|
-| `Identity(name, lhs, rhs)` | — | A directed rule `lhs=rhs`; free indices of `lhs` are pattern vars. Callable as a step; matches deepest-first, result canonical |
+| `prove_equal(lhs, rhs, rules, budget=None)` | `ProofResult` | Saturate both sides together and report. `status` is `"proved"`, `"refuted"` (components differ — a real negative), `"exhausted"` (rules too weak; `components_agree` says the claim still looks true), `"budget"` (nothing concluded), or `"unsupported"` (tender cannot canonicalize it; see `detail`) |
+| `engine_simplify(expr, rules, prefer=…, cost=…)` | `(Expr, report)` | Saturate and extract the best form **under your intent** — `"fewest_eps"` (default), `"smallest"`, `"fewest_crosses"`, `"fewest_identities"`, or raw `cost={…}` weights |
+| `rules(*groups, ctx=…)` | `list[Identity]` | The shipped identities by group: `"eps_delta"`, `"cross"`, `"dyadic"`, `"double_dot"` |
+| `citable_for(name, ctx=…)` | `list[Identity]` | Exactly what a derivation of identity `name` may cite — its DAG ancestors, never itself |
+| `Budget(max_passes, max_nodes, max_seconds, max_bytes)` | — | Effort caps. Passes/nodes are **deterministic** (use these in tests); seconds/bytes are machine-dependent, for interactive work. `set_default_budget()` sets the session default |
+
+"Simplest" is your goal, not a property of the algebra — the same saturated
+graph read under `prefer="fewest_crosses"` expands bac-cab, where the default
+keeps the compact form.
+
+### Rule-based rewriting (lower level)
+
+| API | Returns | Does |
+|---|---|---|
+| `Identity(name, lhs, rhs)` | — | A directed rule `lhs=rhs`; free indices of `lhs` are pattern vars. Callable as a step; matches deepest-first, result canonical. **A no-match returns the input unchanged** |
 | `apply_identity(identity)` | step fn | Wrap an `Identity` as an `Expr->Expr` step |
-| `saturate(expr, rules, max_iterations=30)` | `Expr` | Equality-saturate under `Identity` rules in an e-graph; return the cheapest extraction. No manual step ordering; all share one `Context` |
+| `tender.identities` | module | The identity **DAG**: `node`, `ancestors`, `depth`, `register` your own. Rules are plain Python — extend without rebuilding |
+
+> Internal steps (`saturate`, `implicitize`, `distribute_contraction`,
+> `fold_equal_addends_structural`, `deriv`, `apply_operators`) moved to
+> `tender.steps`. They still import; reaching for one usually means the verb
+> surface is missing something.
 
 ---
 
@@ -274,12 +315,26 @@ Bridge steps:
 ## `CoordinateChart` (`tender.chart`)
 
 ```python
-cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
-cyl  = ws.chart(ws.wcs(), [r, th, z], [r*t.cos(th), r*t.sin(th), z])
+cart, (x, y, z)  = ws.cartesian_chart()      # the standard charts, by name
+cyl,  (r, th, z) = ws.cylindrical_chart()
+sph,  (r, th, ph) = ws.spherical_chart()
+pol,  (r, th)    = ws.polar_chart()
 ```
 
 Built from a reference `Basis`, the coordinate atoms `qⁱ`, and the Cartesian
-embedding `xᵃ=fᵃ(q)`. Everything else is derived.
+embedding `xᵃ=fᵃ(q)`. Everything else is derived — tangent basis, metric,
+scale factors, physical frame, connection, and hence the operators.
+
+For a coordinate system tender does not name, supply the embedding yourself:
+
+```python
+sigma, tau, z = ws.coords(r"\sigma", r"\tau", "z")
+parabolic = ws.chart(ws.wcs(), [sigma, tau, z],
+                     [(sigma**2 - tau**2)/t.scalar(2, ctx=ws.ctx), sigma*tau, z])
+```
+
+That is the whole interface — see `examples/custom_chart.py`, which also
+records what to expect when the scale factors come out as surds.
 
 ### Geometry (derived from the embedding)
 
@@ -328,7 +383,21 @@ embedding `xᵃ=fᵃ(q)`. Everything else is derived.
 
 ---
 
-## Differential-operator DSL (`tender.operators`)
+## Differential-operator DSL (`tender.operators`) — superseded
+
+> **Prefer the core route.** `ws.nabla()` is a real `Expr`, so it composes with
+> everything — sums, canonicalization, the engine verbs, rule matching:
+>
+> ```python
+> nabla = ws.nabla()
+> T = lam * (nabla @ u) * I + mu * (nabla * u + (nabla * u).transpose())
+> comps = chart.evaluate(nabla @ T)      # …when you want components
+> ```
+>
+> When you already have a chart and just want a derivative in it,
+> `chart.grad/div/rot/laplacian` says so most directly. This module builds a
+> Python-side tree that is *not* an `Expr` and cannot be canonicalized, mixed
+> into sums, or handed to a verb; it is kept for its existing users.
 
 Write differential expressions **symbolically**, then `.evaluate(chart)`. This
 lowers to the chart's `grad`/`div`/`rot`/`laplacian` and the `partial`
