@@ -83,3 +83,17 @@ def test_performed_without_magic_ordering():
     show("identities used", result.fired)
     assert result.proved
     assert result.fired.get("cross-removal") == 1
+
+    # Stronger still: the user need not know the answer.  Stating the *intent*
+    # — "get rid of the crosses" — makes the engine produce the right-hand
+    # side from the left alone (vibe 000097).  Under the default cost it
+    # would keep a×(b×I), which has fewer nodes; "simplest" here is the
+    # user's goal, not a property of the algebra.
+    found, report = td.engine_simplify(
+        a % (b % I), td.rules("cross", ctx=ctx), prefer="fewest_crosses"
+    )
+    show("engine_simplify(a×(b×I), prefer='fewest_crosses')", found)
+    harness.assert_algebraic_eq(
+        found, b * a - (a @ b) * I, "discovered, not merely verified"
+    )
+    assert report["complete"]

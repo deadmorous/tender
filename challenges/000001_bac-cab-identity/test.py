@@ -35,13 +35,13 @@ def _setup():
     a = tender.tensor("a", rank=1, ctx=ctx)
     b = tender.tensor("b", rank=1, ctx=ctx)
     c = tender.tensor("c", rank=1, ctx=ctx)
-    return frame, a, b, c
+    return ctx, frame, a, b, c
 
 
 @harness.level("L1")
 def test_verified_in_concrete_components():
     """Both sides agree component-by-component in the World Cartesian System."""
-    frame, a, b, c = _setup()
+    ctx, frame, a, b, c = _setup()
     lhs = a % (b % c)  # a × (b × c)
     rhs = b * (a @ c) - c * (a @ b)  # b (a·c) − c (a·b)
 
@@ -70,7 +70,7 @@ def test_performed_by_eps_pair_contraction():
     Run as a :class:`td.Derivation`, so every step's *fired* status is
     recorded (vibe 000095 increment 3) and narrated — each line below shows
     [fired] (the step changed the expression) next to its result."""
-    frame, a, b, c = _setup()
+    ctx, frame, a, b, c = _setup()
     lhs = a % (b % c)
     rhs = b * (a @ c) - c * (a @ b)
     show("claim: lhs", lhs)
@@ -100,3 +100,13 @@ def test_performed_by_eps_pair_contraction():
         "route changed underneath us: " + repr(drv.steps)
     )
     harness.assert_algebraic_eq(drv.current, rhs, "bac-cab, symbolic derivation")
+
+    # The same result, reached the other way: state the *intent* rather than
+    # the answer.  Under the default cost the engine keeps a×(b×c) — it has
+    # fewer nodes — so asking for fewest crosses is what makes the expansion
+    # the preferred reading of the same saturated graph (vibe 000097).
+    found, _ = td.engine_simplify(
+        lhs, td.rules("cross", ctx=ctx), prefer="fewest_crosses"
+    )
+    show("engine_simplify(prefer='fewest_crosses')", found)
+    harness.assert_algebraic_eq(found, rhs, "bac-cab, discovered by intent")

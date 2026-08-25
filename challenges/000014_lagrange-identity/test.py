@@ -25,12 +25,12 @@ def _setup():
     ctx = tender.Context()
     frame = tb.wcs(ctx)
     vecs = [tender.tensor(n, rank=1, ctx=ctx) for n in "abcd"]
-    return frame, vecs
+    return ctx, frame, vecs
 
 
 @harness.level("L1")
 def test_verified_in_concrete_components():
-    frame, (a, b, c, d) = _setup()
+    ctx, frame, (a, b, c, d) = _setup()
     lhs = (a % b) @ (c % d)
     rhs = (a @ c) * (b @ d) - (a @ d) * (b @ c)
 
@@ -65,7 +65,7 @@ def test_performed_by_eps_pair_contraction():
     Every step is asserted to fire, so a step that stops pulling its weight
     shows up as a failure rather than as silent decoration.
     """
-    frame, (a, b, c, d) = _setup()
+    ctx, frame, (a, b, c, d) = _setup()
     lhs = (a % b) @ (c % d)
     rhs = (a @ c) * (b @ d) - (a @ d) * (b @ c)
     show("claim: lhs", lhs)
@@ -90,3 +90,13 @@ def test_performed_by_eps_pair_contraction():
         "every step of this route is load-bearing: " + repr(drv.steps)
     )
     harness.assert_algebraic_eq(drv.current, rhs, "Lagrange, derived")
+
+    # And the same endpoint reached by stating the *intent* instead of the
+    # answer: "get rid of the crosses" (vibe 000097).  The default cost keeps
+    # (a×b)·(c×d), which is smaller — the expansion is preferred only because
+    # the user asked for it.
+    found, _ = td.engine_simplify(
+        lhs, td.rules("cross", ctx=ctx), prefer="fewest_crosses"
+    )
+    show("engine_simplify(prefer='fewest_crosses')", found)
+    harness.assert_algebraic_eq(found, rhs, "Lagrange, discovered by intent")
