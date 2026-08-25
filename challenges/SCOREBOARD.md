@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**23 challenges** — 14 at L2, 4 at L1, 5 at L0.
+**23 challenges** — 16 at L2, 5 at L1, 2 at L0.
 
 ## Identity DAG
 
@@ -53,7 +53,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000011 | ∇×∇f = 0 and ∇·(∇×u) = 0, any chart | **L2 performed** | Borisenko–Tarapov §vector calculus identities |
 | 000012 | ∇×(∇×u) = ∇(∇·u) − Δu | L1 verified | Lurie, Theory of Elasticity, tensor-calculus appendix |
 | 000013 | ∇ product rules: ∇(fg), ∇·(fu), ∇×(fu), ∇·(a×b) | L1 verified | Borisenko–Tarapov §differential identities |
-| 000019 | (u·∇)u = ∇(u²/2) − u×(∇×u) | L0 failing | Kochin, Vector Calculus §applications |
+| 000019 | (u·∇)u = ∇(u²/2) − u×(∇×u) | L1 verified | Kochin, Vector Calculus §applications |
 
 ## Tier D — Curvilinear
 
@@ -70,5 +70,5 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000007 | ∇·T in cylindrical coordinates = textbook equilibrium equations | **L2 performed** | Eliseev, Mechanics of Elastic Bodies; examples/cyl_equilibrium.py (vibe 000073) |
 | 000008 | ∇·T → μΔu + (λ+μ)∇(∇·u), u abstract | **L2 performed** | Lurie, Theory of Elasticity; examples/navier_lame.py (vibe 000080) |
 | 000009 | inc ε = ∇×(∇×ε)ᵀ closed identity + Saint-Venant form | **L2 performed** | Eliseev, Mechanics of Elastic Bodies §compatibility; examples/strain_compatibility.py (vibes 000075/000078/000080) |
-| 000022 | thick-walled cylinder → Lamé displacement ODE | L0 failing | Lurie, Theory of Elasticity §Lamé problem |
-| 000023 | ∇·T in spherical coordinates = textbook equilibrium equations | L0 failing | Lurie, Theory of Elasticity, appendix of coordinate formulas |
+| 000022 | thick-walled cylinder → Lamé displacement ODE | **L2 performed** | Lurie, Theory of Elasticity §Lamé problem |
+| 000023 | ∇·T in spherical coordinates = textbook equilibrium equations | **L2 performed** | Lurie, Theory of Elasticity, appendix of coordinate formulas |
