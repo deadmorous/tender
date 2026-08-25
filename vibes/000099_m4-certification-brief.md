@@ -6,6 +6,40 @@ attempt names a concrete gap (file it; fix it only if it is small).
 
 Starting state: **23 challenges — 14 L2, 3 L1, 6 L0.**
 
+## Outcome
+
+**14 L2 / 3 L1 / 6 L0  →  16 L2 / 6 L1 / 1 L0.**  Five challenges promoted,
+each its own commit; no feature was added, and no claim was weakened to get a
+green.
+
+| # | Result |
+|---|---|
+| 000017 | **L1** — a 13-shape battery; found that dots, traces and ⊗-polyads fold back but **crosses do not** |
+| 000019 | **L1** — the convective identity verifies componentwise |
+| 000023 | **L2** — all three spherical equilibrium equations, cot θ terms and all |
+| 000022 | **L2** — the Lamé cylinder collapses to the Euler ODE, in both the compact and expanded forms |
+| 000018 | **L1** — all three metric forms of `a·b` in a genuinely oblique basis |
+
+**The remaining reds are now capabilities, not omissions** — which was the
+point.  Every one names what is missing:
+
+1. **An invariant Leibniz rule group** (∇ over a product) — blocks 000012,
+   000013, 000019.  The single most valuable next capability: three
+   challenges wait on it, and it is the gateway to tier C.
+2. **Fence distribution inside a contraction operand** — blocks 000010; canon
+   cannot state `T··ε` when `T` holds a ⊗-product.
+3. **ε-reassembly** — `reassemble` folds δ-contractions back to invariants but
+   not ε-contractions, so an expanded cross cannot return to `a × b`
+   (000017).  This explains a pattern in the suite: challenges 000001 and
+   000014 contract the ε-*pair* into δ's first — not style, the only route.
+4. **Index raising/lowering** (`g_ij g^jk = δ_i^k`) — blocks 000018's L2.
+5. **Inverse chart embeddings** (vibe 000090 approach B) — blocks 000021, the
+   last L0.
+
+Findings 1 and 3 are the ones to act on: the Leibniz group unlocks the most,
+and ε-reassembly closes an asymmetry in the bridge that every cross-bearing
+derivation currently works around.
+
 ## The work, ordered by cost
 
 Ordered deliberately: the cheap ones first, so the expensive ones are

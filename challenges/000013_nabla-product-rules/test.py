@@ -67,6 +67,6 @@ def test_divergence_of_cross_product():
     )
 
 
-@harness.level("L2", expected=False, reason="needs invariant Leibniz on the M2 engine")
+@harness.level("L2", expected=False, reason="needs the invariant Leibniz rule group — rules for ∇ over a product, which the identity library does not have (M5 material: they need the ∇-fence to survive rewriting). Same blocker as challenges 000013 and 000019")
 def test_performed_invariantly():
     harness.todo("derive the product rules with ∇ abstract (Leibniz rule set)")
