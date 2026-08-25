@@ -24,8 +24,8 @@ CHALLENGE = harness.declare(
 
 
 def _cyl(ws):
-    r, th, z = ws.coords("r", r"\theta", "z", nonneg=("r",))
-    return ws.chart(ws.wcs(), [r, th, z], [r * t.cos(th), r * t.sin(th), z]), r, th, z
+    chart, (r, th, z) = ws.cylindrical_chart()
+    return chart, r, th, z
 
 
 @harness.level("L2")
@@ -71,12 +71,7 @@ def test_cylindrical_operator_endpoints():
 def test_spherical_endpoints():
     """h_φ = r sinθ and Δ(r²) = 6, same machinery, spherical chart."""
     ws = t.Workspace()
-    r, th, ph = ws.coords("r", r"\theta", r"\phi", nonneg=("r",))
-    sph = ws.chart(
-        ws.wcs(),
-        [r, th, ph],
-        [r * t.sin(th) * t.cos(ph), r * t.sin(th) * t.sin(ph), r * t.cos(th)],
-    )
+    sph, (r, th, ph) = ws.spherical_chart()
     show("h_φ", sph.scale_factor(2))
     show("Δ(r²)", sph.laplacian(r**2))
     harness.assert_algebraic_eq(sph.scale_factor(2), r * t.sin(th), "h_φ = r sinθ")

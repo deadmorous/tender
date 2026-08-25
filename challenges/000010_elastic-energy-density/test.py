@@ -42,8 +42,7 @@ def test_reduces_to_the_textbook_quadratic_form():
     lam = t.tensor(r"\lambda", 0, ctx=ctx)
     mu = t.tensor(r"\mu", 0, ctx=ctx)
     I = t.identity(ctx)
-    x, y, z = ws.coords("x", "y", "z")
-    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    cart, (x, y, z) = ws.cartesian_chart()
     frame = cart.physical_frame()
 
     eps = ws.field(r"\varepsilon", 2, symmetric=True)

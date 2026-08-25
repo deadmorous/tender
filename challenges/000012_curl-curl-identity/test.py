@@ -19,8 +19,7 @@ CHALLENGE = harness.declare(
 @harness.level("L1")
 def test_verified_in_cartesian_components():
     ws = t.Workspace()
-    x, y, z = ws.coords("x", "y", "z")
-    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    cart, (x, y, z) = ws.cartesian_chart()
     u = ws.field("u", 1)
 
     lhs = cart.rot(cart.rot(u))

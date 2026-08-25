@@ -34,8 +34,7 @@ CHALLENGE = harness.declare(
 def test_closed_identity_in_cartesian_components():
     ws = t.Workspace()
     eps = ws.field(r"\varepsilon", 2, symmetric=True)
-    x, y, z = ws.coords("x", "y", "z")
-    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    cart, (x, y, z) = ws.cartesian_chart()
 
     inc = cart.components(cart.rot(cart.rot(eps).transpose()))
 

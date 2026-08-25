@@ -26,19 +26,13 @@ CHALLENGE = harness.declare(
 
 def _cyl():
     ws = t.Workspace()
-    r, th, z = ws.coords("r", r"\theta", "z", nonneg=("r",))
-    chart = ws.chart(ws.wcs(), [r, th, z], [r * t.cos(th), r * t.sin(th), z])
+    chart, (r, th, z) = ws.cylindrical_chart()
     return ws, chart, (r, th, z)
 
 
 def _sph():
     ws = t.Workspace()
-    r, th, ph = ws.coords("r", r"\theta", r"\phi", nonneg=("r",))
-    chart = ws.chart(
-        ws.wcs(),
-        [r, th, ph],
-        [r * t.sin(th) * t.cos(ph), r * t.sin(th) * t.sin(ph), r * t.cos(th)],
-    )
+    chart, (r, th, ph) = ws.spherical_chart()
     return ws, chart, (r, th, ph)
 
 

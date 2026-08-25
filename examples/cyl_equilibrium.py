@@ -51,8 +51,7 @@ def show(title, rows):
 # ---------------------------------------------------------------------------
 
 WCS = ws.wcs()
-r, th, z = ws.coords("r", r"\theta", "z", nonneg=("r",))
-cyl = ws.chart(WCS, [r, th, z], [r * t.cos(th), r * t.sin(th), z])
+cyl, (r, th, z) = ws.cylindrical_chart()
 
 # ---------------------------------------------------------------------------
 # 1. The physical orthonormal frame e_r, e_θ, e_z

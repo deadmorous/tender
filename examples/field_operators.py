@@ -26,8 +26,7 @@ def show(title, rows):
 # --- P1/P2: a terse, context-bound preamble (no ctx threading, no slots) ----
 ws = t.Workspace()
 WCS = ws.wcs()
-r, th, z = ws.coords("r", r"\theta", "z", nonneg=["r"])
-cyl = ws.chart(WCS, [r, th, z], [r * t.cos(th), r * t.sin(th), z])
+cyl, (r, th, z) = ws.cylindrical_chart()
 I = ws.identity()
 
 # --- vibe 71: intrinsic operators in the chart's own frame ------------------
@@ -57,8 +56,7 @@ assert td.structural_eq(
 assert "cos" not in grad_grad_f.latex() and "mathbf{i}" not in grad_grad_f.latex()
 
 # A Cartesian chart for the abstract-field and first-class-operator sections.
-x, y, zc = ws.coords("x", "y", "z")
-cart = ws.chart(WCS, [x, y, zc], [x, y, zc])
+cart, (x, y, zc) = ws.cartesian_chart()
 
 # --- P7: abstract tensor fields differentiate (no longer constant) ----------
 T = cart.field("T", 2)  # a rank-2 field on all coordinates

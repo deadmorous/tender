@@ -29,8 +29,7 @@ CHALLENGE = harness.declare(
 @harness.level("L2")
 def test_divergence_matches_textbook_equations():
     ws = t.Workspace()
-    r, th, z = ws.coords("r", r"\theta", "z", nonneg=("r",))
-    cyl = ws.chart(ws.wcs(), [r, th, z], [r * t.cos(th), r * t.sin(th), z])
+    cyl, (r, th, z) = ws.cylindrical_chart()
 
     T = ws.field("T", 2, symmetric=True)  # T_ij = T_ji, depends on r, θ, z
     div_r, div_th, div_z = cyl.components(cyl.div(T))

@@ -20,11 +20,9 @@ CHALLENGE = harness.declare(
 
 def _charts():
     ws = t.Workspace()
-    x, y, z = ws.coords("x", "y", "z")
-    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    cart, (x, y, z) = ws.cartesian_chart()
     ws2 = t.Workspace()
-    r, th, zc = ws2.coords("r", r"\theta", "z", nonneg=("r",))
-    cyl = ws2.chart(ws2.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+    cyl, (r, th, zc) = ws2.cylindrical_chart()
     return (("Cartesian", ws, cart), ("cylindrical", ws2, cyl))
 
 

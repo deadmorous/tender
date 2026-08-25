@@ -82,6 +82,56 @@ class Workspace:
             self._wcs = _basis.wcs(self.ctx)
         return self._wcs
 
+    # ---- named charts (vibe 000098) -------------------------------------
+    #
+    # The standard coordinate systems, by name.  Each mints its own
+    # coordinates — with `nonneg` set where it matters, which is not a
+    # detail: a radius declared non-negative is what licenses √(r²) → r, and
+    # forgetting it makes scale factors fail to simplify in ways that are
+    # tedious to trace back.  Each returns `(chart, coords)`, so:
+    #
+    #     cyl, (r, th, z) = ws.cylindrical_chart()
+    #
+    # For a coordinate system tender does not name, build the chart directly
+    # from its embedding — see `examples/custom_chart.py`.
+
+    def cartesian_chart(self, names=("x", "y", "z")):
+        """The Cartesian chart — the identity embedding on the world frame."""
+        coords = self.coords(*names)
+        return self.chart(self.wcs(), coords, list(coords)), coords
+
+    def cylindrical_chart(self, names=("r", r"\theta", "z")):
+        """Cylindrical (r, θ, z):  x = r cosθ,  y = r sinθ,  z = z."""
+        r, th, z = self.coords(*names, nonneg=(names[0],))
+        embedding = [r * _core.cos(th), r * _core.sin(th), z]
+        return self.chart(self.wcs(), [r, th, z], embedding), (r, th, z)
+
+    def spherical_chart(self, names=("r", r"\theta", r"\phi")):
+        """Spherical (r, θ, φ):  x = r sinθ cosφ,  y = r sinθ sinφ,  z = r cosθ.
+
+        θ is the polar angle from the z axis (the physics convention, and
+        Lurie's).
+        """
+        r, th, ph = self.coords(*names, nonneg=(names[0],))
+        embedding = [
+            r * _core.sin(th) * _core.cos(ph),
+            r * _core.sin(th) * _core.sin(ph),
+            r * _core.cos(th),
+        ]
+        return self.chart(self.wcs(), [r, th, ph], embedding), (r, th, ph)
+
+    def polar_chart(self, names=("r", r"\theta")):
+        """Plane polar (r, θ), embedded in the z = 0 plane of the world frame."""
+        r, th = self.coords(*names, nonneg=(names[0],))
+        embedding = [r * _core.cos(th), r * _core.sin(th), self.scalar(0)]
+        return self.chart(self.wcs(), [r, th], embedding), (r, th)
+
+    # ---- the well-known *bases* (superseded by the charts above) ---------
+    #
+    # A basis alone carries no coordinate map, so it cannot differentiate:
+    # prefer the named charts, which derive the frame, metric, scale factors
+    # and connection from the embedding.  Kept for the basis-level tests.
+
     def cylindrical(self):
         return _basis.cylindrical(self.ctx)
 

@@ -31,8 +31,7 @@ def _setup():
     I = t.identity(ws.ctx)
     lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
     mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
-    x, y, z = ws.coords("x", "y", "z")
-    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    cart, (x, y, z) = ws.cartesian_chart()
     return ws, u, nabla, I, lam, mu, cart
 
 

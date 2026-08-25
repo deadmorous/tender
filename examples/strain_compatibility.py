@@ -157,8 +157,7 @@ def main():
     ws = t.Workspace()
     eps = ws.field(r"\varepsilon", 2, symmetric=True)
     nabla = t.nabla(ctx=ws.ctx)
-    x, y, z = ws.coords("x", "y", "z")
-    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    cart, (x, y, z) = ws.cartesian_chart()
 
     # ---- 1. chart-free, ε abstract ------------------------------------------
     inc = nabla % (nabla % eps).transpose()
@@ -241,8 +240,7 @@ def main():
     verify(cart, eps, "Cartesian")
     ws2 = t.Workspace()
     eps2 = ws2.field(r"\varepsilon", 2, symmetric=True)
-    r, th, zc = ws2.coords("r", r"\theta", "z", nonneg=("r",))
-    cyl = ws2.chart(ws2.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+    cyl, (r, th, zc) = ws2.cylindrical_chart()
     verify(cyl, eps2, "Cylindrical")
     report.append(
         (

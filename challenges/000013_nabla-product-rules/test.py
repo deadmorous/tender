@@ -23,8 +23,7 @@ CHALLENGE = harness.declare(
 
 def _setup():
     ws = t.Workspace()
-    x, y, z = ws.coords("x", "y", "z")
-    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    cart, (x, y, z) = ws.cartesian_chart()
     return ws, cart
 
 

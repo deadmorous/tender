@@ -123,8 +123,7 @@ def main():
     I = t.identity(ws.ctx)
     lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
     mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
-    x, y, z = ws.coords("x", "y", "z")
-    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    cart, (x, y, z) = ws.cartesian_chart()
 
     # ---- 1. chart-free, u abstract ------------------------------------------
     T = lam * (nabla @ u) * I + mu * (nabla * u + (nabla * u).transpose())
@@ -205,8 +204,7 @@ def main():
     lam2 = t.tensor(r"\lambda", 0, ctx=ws2.ctx)
     mu2 = t.tensor(r"\mu", 0, ctx=ws2.ctx)
     I2 = t.identity(ws2.ctx)
-    r, th, zc = ws2.coords("r", r"\theta", "z", nonneg=("r",))
-    cyl = ws2.chart(ws2.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+    cyl, (r, th, zc) = ws2.cylindrical_chart()
     verify(cyl, u2, lam2, mu2, I2, "Cylindrical")
     report.append(
         (
