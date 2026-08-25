@@ -13,6 +13,7 @@
 #include <tender/identity.hpp>
 #include <tender/nf_egraph.hpp>
 
+#include <string>
 #include <vector>
 
 namespace tender::engine
@@ -37,12 +38,21 @@ enum class ProofStatus : std::uint8_t
     Refuted,   // components differ: the statement is false
     Exhausted, // rules ran out and components could not decide either
     Budget,    // stopped on the pass/node budget: nothing is concluded
+    // The engine could not process the expression at all — a shape
+    // canonicalization does not yet handle.  A statement about *tender*, not
+    // about the mathematics, and the one case where `detail` is set.
+    Unsupported,
 };
 
 struct ProofResult final
 {
     ProofStatus status = ProofStatus::Exhausted;
     SaturateReport report = {};
+
+    // Why the engine could not process the input, when `status` is
+    // `Unsupported`.  Phrased for the caller: what tender cannot do, not
+    // which internal function said so.
+    std::string detail = {};
 
     // Set when the component check ran and found the two sides *agree*, yet
     // saturation could not prove it: the statement looks true and the rule
@@ -99,6 +109,10 @@ struct SimplifyResult final
 {
     Expr const* expr = nullptr; // cheapest extraction (never null)
     SaturateReport report = {};
+
+    // Non-empty when the engine could not process the input at all: `expr` is
+    // then the untouched input, and this says what tender cannot do.
+    std::string unsupported = {};
 
     // True when the rule set reached a fixed point, so `expr` is the best
     // this rule set can do.  False means the budget cut the search short and

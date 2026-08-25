@@ -12,6 +12,8 @@
 namespace tender::engine
 {
 
+using nf::EClassId;
+
 namespace
 {
 
@@ -102,9 +104,28 @@ auto prove_equal(
     std::vector<Identity> const& rules,
     SaturateBudget budget) -> ProofResult
 {
+    // Canonicalization can reject a shape it does not yet handle.  That is a
+    // fact about tender, not about the claim, so report it as such instead of
+    // letting an internal message escape as an exception (vibe 000098).
     nf::NfEGraph g{ctx};
-    auto const l = g.add(lhs);
-    auto const r = g.add(rhs);
+    EClassId l = 0;
+    EClassId r = 0;
+    try
+    {
+        l = g.add(lhs);
+        r = g.add(rhs);
+    }
+    catch (std::exception const& err)
+    {
+        ProofResult bad;
+        bad.status = ProofStatus::Unsupported;
+        bad.detail =
+            std::string{
+                "tender cannot yet put this expression in "
+                "canonical form: "}
+            + err.what();
+        return bad;
+    }
 
     // Both sides live in one graph, so a rule rewriting either side toward the
     // other closes the gap — the sides meet in the middle rather than one
@@ -168,9 +189,25 @@ auto simplify(
     CostModel const& cost) -> SimplifyResult
 {
     nf::NfEGraph g{ctx};
-    auto const root = g.add(e);
-
     SimplifyResult out;
+    EClassId root = 0;
+    try
+    {
+        root = g.add(e);
+    }
+    catch (std::exception const& err)
+    {
+        // Nothing can be simplified, but the caller still gets their
+        // expression back rather than an exception from canon's internals.
+        out.expr = e;
+        out.unsupported =
+            std::string{
+                "tender cannot yet put this expression "
+                "in canonical form: "}
+            + err.what();
+        return out;
+    }
+
     out.report = g.saturate(rules, budget);
 
     // Extract the cheapest member of the root's class and raise it back to the

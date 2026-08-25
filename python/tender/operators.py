@@ -1,4 +1,24 @@
-"""tender.operators — first-class ∇ and ∂_q (vibe 000070 P8).
+"""tender.operators — a deferred-evaluation ∇ / ∂ DSL.
+
+.. note::
+
+   **Superseded.**  This module builds a Python-side expression tree that is
+   *not* a :class:`tender.Expr`: it cannot be canonicalized, mixed into sums,
+   handed to the engine verbs, or matched by a rule — only ``.evaluate(chart)``
+   turns it into an expression.  The core route does the same job with real
+   expressions:
+
+       nabla = ws.nabla()          # a tender.Expr
+       T     = nabla * u           # gradient; @ is divergence, % is rotor
+       comps = chart.evaluate(T)   # …when you want components
+
+   Prefer that, or a chart's own ``grad`` / ``div`` / ``rot`` / ``laplacian``
+   when you already have the chart.  This module is kept for its existing
+   users and will move to the attic once they are migrated (vibe 000098).
+
+Original description follows.
+
+tender.operators — first-class ∇ and ∂_q (vibe 000070 P8).
 
 ``∇`` (nabla) and ``∂_q`` are made composable expression objects, so the
 differential operators are built rather than called, and users can write their

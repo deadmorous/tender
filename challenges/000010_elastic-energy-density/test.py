@@ -78,9 +78,10 @@ def test_performed_invariantly():
     fires.  What fails is stating the problem at all: `T = λ tr(ε) I + 2με`
     puts a ⊗-product (`λ ⊗ tr(ε) ⊗ I`) inside the double-dot's operand, and
     `encapsulate` rejects a nested ⊗ there with "awaits fence distribution".
-    So `prove_equal` does not return a negative — it raises, which is also a
-    verb-surface defect worth fixing in M3: a goal-directed call should never
-    surface a canon-internal error message.
+    Since M3 the verb reports this rather than raising: the result comes back
+    with status `"unsupported"` and a `detail` saying what tender cannot do,
+    so the caller learns about the tool's limit instead of catching a
+    canon-internal exception.
 
     Promote this by teaching canon to distribute that fence; the identity
     side of it is already done.
@@ -98,4 +99,7 @@ def test_performed_invariantly():
         lam * t.tr(eps) * t.tr(eps) + 2 * mu * (eps // eps),
         td.rules("double_dot", "dyadic", ctx=ctx),
     )
+    # Reported, not raised — but still not a proof, so the xfail stands.
+    assert result.status == "unsupported", result.status
+    assert "canonical form" in result.detail
     assert result.proved

@@ -82,6 +82,25 @@ class Workspace:
             self._wcs = _basis.wcs(self.ctx)
         return self._wcs
 
+    def nabla(self):
+        """The coordinate-free ∇ operator, bound to this workspace's context.
+
+        A real :class:`~tender.Expr`, so it composes with everything: build
+        the physics without choosing coordinates —
+
+            nabla = ws.nabla()
+            T = lam * (nabla @ u) * I + mu * (nabla * u + (nabla * u).transpose())
+
+        — then hand it to a chart with :meth:`chart.evaluate` when you want
+        components.  ``nabla * T`` is the gradient, ``nabla @ T`` the
+        divergence, ``nabla % T`` the rotor.
+
+        Use this when the *statement* should be coordinate-free.  When you
+        simply want a derivative in a chart you already have, the chart's own
+        ``grad`` / ``div`` / ``rot`` / ``laplacian`` say so more directly.
+        """
+        return _core.nabla(ctx=self.ctx)
+
     # ---- named charts (vibe 000098) -------------------------------------
     #
     # The standard coordinate systems, by name.  Each mints its own

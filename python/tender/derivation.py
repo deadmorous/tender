@@ -655,6 +655,10 @@ class ProofResult:
         different problem from a false claim.
     ``"budget"``
         Stopped early; nothing at all is concluded.
+    ``"unsupported"``
+        tender could not put the expression in canonical form at all — a
+        shape it does not yet handle.  ``detail`` says which; nothing is
+        claimed about the mathematics.
 
     ``fired`` maps rule name → firing count, ``skipped`` lists rules the
     engine could not compile, and ``passes``/``nodes`` size the search.
@@ -664,6 +668,9 @@ class ProofResult:
         self.proved = report["proved"]
         self.status = report["status"]
         self.refuted = report["status"] == "refuted"
+        #: When ``status`` is ``"unsupported"``: what tender could not do with
+        #: the expression.  A statement about the tool, not about the claim.
+        self.detail = report.get("detail", "")
         self.components_agree = report.get("components_agree", False)
         self.passes = report["passes"]
         self.nodes = report["nodes"]
@@ -680,6 +687,8 @@ class ProofResult:
 
     def __repr__(self):
         detail = f", fired={self.fired}" if self.fired else ""
+        if self.status == "unsupported":
+            return f"ProofResult(status='unsupported', detail={self.detail!r})"
         if self.components_agree:
             detail += ", components_agree=True (claim looks true; rules "
             detail += "incomplete)"
@@ -801,6 +810,14 @@ def engine_simplify(
     report = dict(report)
     report["fired"] = dict(report["fired"])
     report["skipped"] = list(report["skipped"])
+    if report.get("unsupported"):
+        warnings.warn(
+            f"engine_simplify could not process this expression: "
+            f"{report['unsupported']} — returning it unchanged",
+            UserWarning,
+            stacklevel=2,
+        )
+        return out, report
     _warn_skipped(report["skipped"], "engine_simplify")
     if not report["complete"]:
         warnings.warn(

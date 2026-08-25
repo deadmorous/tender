@@ -1488,3 +1488,43 @@ def test_legacy_kwargs_still_work():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         assert td.prove_equal(lhs, rhs, rules, max_passes=0).status == "budget"
+
+
+# ---- unsupported input is reported, not raised (vibe 000098) ---------------
+
+
+def _unsupported_expr():
+    ws = tender.Workspace()
+    lam = tender.tensor(r"\lambda", 0, ctx=ws.ctx)
+    I = tender.identity(ws.ctx)
+    eps = ws.field(r"\varepsilon", 2, symmetric=True)
+    return ws, (lam * tender.tr(eps) * I) // eps
+
+
+def test_prove_equal_reports_unsupported_instead_of_raising():
+    """A verb must never surface a canonicalization-internal message.
+
+    A shape canon cannot handle is a fact about *tender*, not about the
+    claim, so it comes back as a result the caller can inspect.
+    """
+    ws, bad = _unsupported_expr()
+    result = td.prove_equal(bad, tender.scalar(0, ctx=ws.ctx), [])
+    assert result.status == "unsupported"
+    assert not result.proved and not result.refuted
+    assert "canonical form" in result.detail
+    assert "unsupported" in repr(result)
+
+
+def test_engine_simplify_returns_the_input_when_unsupported():
+    import warnings
+
+    ws, bad = _unsupported_expr()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out, report = td.engine_simplify(bad, [])
+    assert report["unsupported"]
+    assert report["complete"] is False
+    # Returned untouched, never a partial result.  (Identity is by value:
+    # the binding wraps the same underlying expression in a fresh object.)
+    assert td.structural_eq(out, bad)
+    assert any("could not process" in str(c.message) for c in caught)

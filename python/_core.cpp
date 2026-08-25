@@ -1132,11 +1132,13 @@ NB_MODULE(_core, m)
             nb::dict d;
             d["proved"] = res.proved();
             d["status"] =
-                res.status == engine::ProofStatus::Proved    ? "proved" :
-                res.status == engine::ProofStatus::Refuted   ? "refuted" :
-                res.status == engine::ProofStatus::Exhausted ? "exhausted" :
-                                                               "budget";
+                res.status == engine::ProofStatus::Proved      ? "proved" :
+                res.status == engine::ProofStatus::Refuted     ? "refuted" :
+                res.status == engine::ProofStatus::Exhausted   ? "exhausted" :
+                res.status == engine::ProofStatus::Unsupported ? "unsupported" :
+                                                                 "budget";
             d["refuted"] = res.refuted();
+            d["detail"] = res.detail;
             d["components_agree"] = res.components_agree;
             d["passes"] = res.report.passes;
             d["nodes"] = res.report.nodes;
@@ -1226,7 +1228,8 @@ NB_MODULE(_core, m)
                 cost);
 
             nb::dict d;
-            d["complete"] = res.complete();
+            d["complete"] = res.complete() && res.unsupported.empty();
+            d["unsupported"] = res.unsupported;
             d["passes"] = res.report.passes;
             d["nodes"] = res.report.nodes;
             d["stopped_by"] =
