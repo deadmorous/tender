@@ -298,12 +298,15 @@ def test_groups_are_named_and_populated():
     ctx = t.Context()
     # Groups are a labelling over the DAG, so their order follows the
     # registration (dependency) order of the nodes carrying each tag.
-    assert set(ti.group_names()) == {"eps_delta", "cross", "dyadic", "double_dot"}
+    assert set(ti.group_names()) == {
+        "eps_delta", "cross", "dyadic", "double_dot", "leibniz",
+    }
     assert len(ti.group(ctx, "eps_delta")) == 4
     assert len(ti.group(ctx, "cross")) == 4
     assert len(ti.group(ctx, "double_dot")) == 1
+    assert len(ti.group(ctx, "leibniz")) == 3
     assert len(ti.group(ctx, "dyadic")) == 2
-    assert len(ti.all_rules(ctx)) == 11
+    assert len(ti.all_rules(ctx)) == 14
 
 
 def test_unknown_group_raises_with_the_available_names():
@@ -421,3 +424,69 @@ def test_a_user_identity_joins_the_dag_with_dependencies():
 
 def test_the_graph_stays_acyclic():
     ti.check_acyclic()
+
+
+# ---- leibniz group (vibe 000101) ------------------------------------------
+
+
+def _ws_fields():
+    ws = t.Workspace()
+    return ws, ws.nabla(), ws.field("f", 0), ws.field("g", 0), ws.field(
+        "u", 1
+    ), ws.field("v", 1)
+
+
+def test_grad_product_fires():
+    ws, nab, f, g, u, v = _ws_fields()
+    _proves(
+        ws.ctx,
+        nab * (f * g),
+        f * (nab * g) + g * (nab * f),
+        [ti.grad_product(ws.ctx)],
+        "∇(fg) = f∇g + g∇f",
+    )
+
+
+def test_div_cross_fires():
+    ws, nab, f, g, u, v = _ws_fields()
+    _proves(
+        ws.ctx,
+        nab @ (u % v),
+        v @ (nab % u) - u @ (nab % v),
+        [ti.div_cross(ws.ctx)],
+        "∇·(u×v)",
+    )
+
+
+def test_curl_curl_fires():
+    ws, nab, f, g, u, v = _ws_fields()
+    _proves(
+        ws.ctx,
+        nab % (nab % u),
+        nab * (nab @ u) - nab @ (nab * u),
+        [ti.curl_curl(ws.ctx)],
+        "∇×(∇×u) = ∇(∇·u) − Δu",
+    )
+
+
+def test_the_blocked_leibniz_forms_are_absent_and_why():
+    """∇·(f u) and ∇×(f u) are deliberately not in the group.
+
+    Canon cannot *state* them — a ⊗-product inside a contraction operand is
+    rejected — so a rule for them could not be written, let alone fire.  This
+    pins the reason, so the absence reads as a known gap rather than an
+    oversight (vibe 000101).
+    """
+    import pytest as _pytest
+
+    ws, nab, f, g, u, v = _ws_fields()
+    with _pytest.raises(ValueError, match="fence distribution"):
+        td.canonicalize(nab @ (f * u))
+    with _pytest.raises(ValueError, match="fence distribution"):
+        td.canonicalize(nab % (f * u))
+
+    assert {r.name for r in ti.group(ws.ctx, "leibniz")} == {
+        "grad-product",
+        "div-cross",
+        "curl-curl",
+    }

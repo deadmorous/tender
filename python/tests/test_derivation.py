@@ -1187,7 +1187,9 @@ def test_uncompilable_rule_is_reported_not_silently_inert():
 
 
 def test_rule_groups_are_named_and_populated():
-    assert set(td.rule_groups()) == {"eps_delta", "cross", "double_dot", "dyadic"}
+    assert set(td.rule_groups()) == {
+        "eps_delta", "cross", "double_dot", "dyadic", "leibniz",
+    }
     ctx = tender.Context()
     assert sorted(r.name for r in td.rules("cross", ctx=ctx)) == [
         "bac-cab",

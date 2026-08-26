@@ -72,6 +72,10 @@ __all__ = [
     "identity_dot",
     # double_dot
     "ddot_identity",
+    # leibniz
+    "grad_product",
+    "div_cross",
+    "curl_curl",
 ]
 
 _U = _t.Level.Upper
@@ -238,6 +242,45 @@ def identity_dot(ctx):
     """I · a = a."""
     u = _var(ctx, "u", 1)
     return Identity("identity-dot", _t.identity(ctx=ctx) @ u, u)
+
+
+# ---- leibniz group: ∇ acting on a product ---------------------------------
+#
+# These need a *workspace-bound* ∇, so unlike the algebraic rules they build
+# their operator from the context.  Only the forms canon can state are here:
+# a ⊗-product inside a contraction operand (`∇·(f u)`, `∇×(f u)`) is rejected
+# with "awaits fence distribution", which is the same gap that blocks
+# challenge 000010 — see vibe 000101.
+
+
+def _nabla(ctx):
+    return _t.nabla(ctx=ctx)
+
+
+def _field(ctx, name, rank):
+    """A field pattern variable: slot-less, so it binds any whole factor."""
+    return _t.field(name, rank, ctx=ctx)
+
+
+def grad_product(ctx):
+    """∇(f g) = f ∇g + g ∇f — Leibniz for the gradient of a scalar product."""
+    nab = _nabla(ctx)
+    f, g = (_field(ctx, n, 0) for n in "FG")
+    return Identity("grad-product", nab * (f * g), f * (nab * g) + g * (nab * f))
+
+
+def div_cross(ctx):
+    """∇·(u×v) = v·(∇×u) − u·(∇×v)."""
+    nab = _nabla(ctx)
+    u, v = (_field(ctx, n, 1) for n in "UV")
+    return Identity("div-cross", nab @ (u % v), v @ (nab % u) - u @ (nab % v))
+
+
+def curl_curl(ctx):
+    """∇×(∇×u) = ∇(∇·u) − Δu — the double-curl identity."""
+    nab = _nabla(ctx)
+    u = _field(ctx, "U", 1)
+    return Identity("curl-curl", nab % (nab % u), nab * (nab @ u) - nab @ (nab * u))
 
 
 # ---- the identity DAG -----------------------------------------------------
@@ -492,6 +535,18 @@ register(
 register(
     "trace-cyclic", trace_cyclic, tags=("dyadic",), proof="000016",
     summary="tr(A · B) = tr(B · A)",
+)
+register(
+    "grad-product", grad_product, tags=("leibniz",), proof="000013",
+    summary="∇(f g) = f ∇g + g ∇f",
+)
+register(
+    "div-cross", div_cross, tags=("leibniz",), proof="000013",
+    summary="∇·(u×v) = v·(∇×u) − u·(∇×v)",
+)
+register(
+    "curl-curl", curl_curl, tags=("leibniz",), proof="000012",
+    summary="∇×(∇×u) = ∇(∇·u) − Δu",
 )
 register(
     # No challenge derives this one yet — the DAG says so rather than hiding

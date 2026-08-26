@@ -1,13 +1,14 @@
 """The curl-curl identity: ∇×(∇×u) = ∇(∇·u) − Δu.
 
-L1 verifies component-by-component in a Cartesian chart.  L2 (future) is the
-invariant derivation via the ε-δ engine — the differential cousin of bac-cab.
+L1 verifies component-by-component in a Cartesian chart.  L2 proves it
+*invariantly*, with ∇ abstract and no coordinate system chosen.
 """
 
 import tender as t
 import tender.derivation as td
 
 from challenges import harness
+from challenges.harness import show
 
 CHALLENGE = harness.declare(
     title="∇×(∇×u) = ∇(∇·u) − Δu",
@@ -27,6 +28,25 @@ def test_verified_in_cartesian_components():
     harness.assert_components_equal(cart, lhs, rhs, "curl-curl")
 
 
-@harness.level("L2", expected=False, reason="needs the invariant Leibniz rule group — rules for ∇ over a product, which the identity library does not have (M5 material: they need the ∇-fence to survive rewriting). Same blocker as challenges 000013 and 000019, plus the ε-δ identity behind ∇×(∇×u)")
+@harness.level("L2")
 def test_performed_invariantly():
-    harness.todo("derive ∇×(∇×u) = ∇(∇·u) − Δu by the ε-pair route with ∇ abstract")
+    """One goal-directed call, with ∇ abstract and no chart in sight.
+
+    The L1 test above verifies this by expanding into Cartesian components;
+    here it is proved *invariantly* — the statement never leaves direct
+    notation and no coordinate system is chosen.  That is what the Leibniz
+    rule group buys (vibe 000101), and it is why the xfail this replaces was
+    worth keeping honest rather than quietly verifying in components twice.
+    """
+    ws = t.Workspace()
+    nabla = ws.nabla()
+    u = ws.field("u", 1)
+
+    result = td.prove_equal(
+        nabla % (nabla % u),
+        nabla * (nabla @ u) - nabla @ (nabla * u),
+        td.rules("leibniz", ctx=ws.ctx),
+    )
+    show("prove_equal(∇×(∇×u), ∇(∇·u) − Δu)", repr(result))
+    assert result.proved
+    assert result.fired.get("curl-curl") == 1

@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**23 challenges** — 16 at L2, 6 at L1, 1 at L0.
+**23 challenges** — 17 at L2, 5 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -23,6 +23,9 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | `cross-identity` | derived | 0 | — | challenge 000005 |
 | `cross-removal` | derived | 0 | — | challenge 000015 |
 | `trace-cyclic` | derived | 0 | — | challenge 000016 |
+| `grad-product` | derived | 0 | — | challenge 000013 |
+| `div-cross` | derived | 0 | — | challenge 000013 |
+| `curl-curl` | derived | 0 | — | challenge 000012 |
 | `ddot-identity` | derived | 0 | — | **not yet derived** |
 
 ## Tier A — Algebra (chart-free)
@@ -51,7 +54,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | # | Challenge | Level | Source |
 |---|---|---|---|
 | 000011 | ∇×∇f = 0 and ∇·(∇×u) = 0, any chart | **L2 performed** | Borisenko–Tarapov §vector calculus identities |
-| 000012 | ∇×(∇×u) = ∇(∇·u) − Δu | L1 verified | Lurie, Theory of Elasticity, tensor-calculus appendix |
+| 000012 | ∇×(∇×u) = ∇(∇·u) − Δu | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix |
 | 000013 | ∇ product rules: ∇(fg), ∇·(fu), ∇×(fu), ∇·(a×b) | L1 verified | Borisenko–Tarapov §differential identities |
 | 000019 | (u·∇)u = ∇(u²/2) − u×(∇×u) | L1 verified | Kochin, Vector Calculus §applications |
 
