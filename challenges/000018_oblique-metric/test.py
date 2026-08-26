@@ -95,9 +95,10 @@ def test_mixed_variance_folds_the_metric_into_delta():
 @harness.level(
     "L2",
     expected=False,
-    reason="the three component forms are not yet shown mutually equal: "
-    "relating g_ij a^i b^j to g^ij a_i b_j needs index raising/lowering "
-    "(g_ij g^jk = δ_i^k), which tender has no step for",
+    reason="needs, in order: the metric exposed to Python at all (no "
+    "tender.metric), the axiom g^ij g_jk = δ^i_k, and lowering a_i = g_ij a^j. "
+    "The round-trip alternative (reassemble to a·b, re-expand) is separately "
+    "blocked and would be a weaker proof — see meta/l2-route.md",
 )
 def test_the_three_forms_are_mutually_equal():
     """All three expansions are the same scalar — but tender cannot yet say so.
