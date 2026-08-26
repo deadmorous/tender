@@ -207,6 +207,48 @@ identity-group entries + render + challenge, in the same increment.
 Challenge sourcing for both arcs: derivations lifted directly from the user's
 Russian PDFs of the section-5 books; each challenge file cites book + section.
 
+## Status — the spine is complete (2026-08-25)
+
+**M0–M4 are done.**  Briefs and outcomes: M0 vibe 000094, M1 000095, M2 000096,
+M3 000098, M4 000099.  Scoreboard **16 L2 / 6 L1 / 1 L0** of 23 challenges,
+from a starting point where the suite did not exist.
+
+Three places the audits **declined** what this plan sketched, each recorded
+where it happened:
+
+- **M1**: the flattened IR already existed (`nf::Nf`); the defect was that
+  steps re-peeled the *raised* tree.  M1 became "close the gap", not "build
+  the IR".
+- **M2**: the e-graph was already Nf-native with subtree pattern variables.
+  M2 became "put the engine to work", not "port it".
+- **M3**: "make `chart.grad` internal" would have deleted a good API used by
+  six challenges.  Declined; the redundant route was `tender.operators`.
+
+Carried forward, in rough order of value:
+
+1. **An invariant Leibniz rule group** (∇ over a product).  Blocks challenges
+   000012, 000013, 000019 — the gateway to tier C, and the continuum arc will
+   need it immediately.  The most valuable single next thing.
+2. **The context-blocking problem** — vibe 000100.  Not a feature but a design
+   question, and the one most likely to keep costing us: seven instances so
+   far.  Its resolution touches ε-reassembly (000017), the metric fold
+   (000018) and probably more.
+3. **Fence distribution inside a contraction operand** — blocks 000010.
+4. **Inverse chart embeddings** (vibe 000090 approach B) — blocks 000021, the
+   last L0.
+5. **Deferred from M3**: atticing `tender.operators` (982-line test file to
+   migrate); Context-scoped budget defaults (needs Context-aware verbs).
+6. **Open from M1**: `fold_equal_addends` may be canon + implicitize.
+7. **`ddot-identity` has no derivation** — the one open proof obligation in
+   the identity DAG.
+
+**M5 has not started.**  Both arcs stand as written below.  Worth noting
+before it does: M5B's first item (cross-section resultants → Saint-Venant)
+needs no new engine capability, while everything in M5A's item 1
+(time & variation) and much of tier C needs the Leibniz group — so (1) above
+is on the critical path for the applied-mechanics arc but not for the
+continuum one.
+
 ## Execution notes (for whichever model implements this)
 
 This plan is strategy, not a work order. The protocol for executing it:
