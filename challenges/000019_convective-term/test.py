@@ -50,8 +50,10 @@ def test_verified_in_components():
 @harness.level(
     "L2",
     expected=False,
-    reason="needs the invariant Leibniz rule group (∇ of a product), which the "
-    "engine does not have — same blocker as challenges 000012 and 000013",
+    reason="the leibniz group now exists (vibe 000101) but does not reach this: "
+    "(u·∇)u needs ∇ contracted against a gradient, and ∇(u·v) expands to terms "
+    "with u×(∇×v), so it wants the ε-δ identity *and* Leibniz together — a "
+    "combined-group proof nobody has attempted yet",
 )
 def test_performed_invariantly():
     harness.todo(

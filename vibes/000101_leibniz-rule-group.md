@@ -68,6 +68,33 @@ updated to name the fence gap rather than "the Leibniz group".
 **Step 3 — record what the fence gap now blocks**, with three challenges
 pointing at it, as the argument for doing it next.
 
+## Outcome
+
+Shipped: `leibniz` group with `grad-product`, `div-cross`, `curl-curl`, each
+fire-tested, plus a guard test pinning *why* `∇·(fu)` and `∇×(fu)` are absent
+(canon cannot state them) so the absence reads as a known gap.
+
+Scoreboard **16 → 17 L2**:
+
+- **000012 curl-curl → L2.**  Now proved *invariantly*, ∇ abstract, no
+  coordinate system chosen — where its L1 must expand into Cartesian
+  components to check the same claim.
+- **000013 split honestly.**  Its L2 now proves the two statable product
+  rules invariantly and passes; a *second*, xfailed test carries the two
+  blocked ones with the capability named.  Splitting was the right call: a
+  single all-or-nothing test would have hidden that half the challenge is
+  already reachable.
+- **000019 not promoted**, and its reason sharpened.  The group exists now, so
+  "needs Leibniz" was no longer true: `(u·∇)u` wants the ε-δ identity *and*
+  Leibniz together, which nobody has attempted.  A different, smaller gap
+  than the one it claimed.
+
+`grad-dot` (`∇(u·v)`) was dropped from the plan: its right-hand side is
+`u×(∇×v) + v×(∇×u) + (u·∇)v + (v·∇)u`, whose last two terms are the very
+directional derivatives challenge 000019 cannot state — so the rule would be
+unusable even though the left side canonicalizes.  Noted rather than shipped
+inert (the vibe-000096 discipline).
+
 ## Risk
 
 `grad-product` fired **three times** on a one-line proof: its right-hand side
