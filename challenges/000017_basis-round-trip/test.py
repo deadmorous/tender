@@ -40,9 +40,15 @@ def _setup():
 def _round_trip(frame, expr):
     """Expand into the frame, reduce the index algebra, and fold back.
 
-    The reduction is not optional decoration: expanding a contraction leaves a
-    δ (or an ε) joining the component indices, and reassembly only recognises
-    an invariant once those are contracted away.
+    The reduction is not optional decoration, and the reason is sharper than
+    it looks: `reassemble` only ever folds a *whole term* of the form
+    (coordinate tensor) × (polyad of basis vectors) — it never descends into a
+    contraction operand, so `(a_i e_i)·(b_j e_j)` is not folded even here in
+    an orthonormal frame.  What makes the dot round-trip is that
+    `simplify_basis_dot` + `contract_delta` **remove the basis vectors
+    altogether**, leaving `a_i b_i`, which is recognisable.  (Challenge
+    000018's meta/l2-route.md follows this through: in an oblique basis the
+    metric is not δ, nothing contracts away, and the fold never happens.)
     """
     x = tb.expand_in_basis(expr, frame, tb.Variance.Covariant)
     for _ in range(2):  # one pass per nesting level of contraction

@@ -62,6 +62,42 @@ contract the inverse metric, contract δ — in the style of challenge 000014.
 - `metric-lower` — **derived**, cites nothing (proved from the definition of
   components, like the other component-level nodes), proof = this challenge.
 
+## Correction: why reassembly really fails (and what would fix it)
+
+The note above blamed the metric absorbing the basis vectors.  Measurement
+says the cause is more basic, and the metric is only half of it:
+
+| expression | reassembles? |
+|---|---|
+| `a_i e^i` | **yes** → `a` |
+| `(a_i e^i) · b` | no — *even with the other side already invariant* |
+| `(a_i e^i) · (b_j e^j)` | no |
+| the same shape in an **orthonormal** basis | no |
+
+So `reassemble` never folds *inside a contraction operand*.  It recognises a
+whole term of the form (coordinate tensor) × (polyad of basis vectors), and
+nothing else.  The WCS round-trip of challenge 000017 works only because
+`simplify_basis_dot` + `contract_delta` **eliminate the basis vectors
+altogether**, leaving `a_i b_i` — recognisable by a different path.  In an
+oblique basis `g^ij` is not δ, so nothing contracts away and the term never
+reaches that shape.
+
+The fix is therefore two independent pieces:
+
+**(a) `g^ij = e^i·e^j`** — the definition of the metric, and the exact inverse
+of what `simplify_basis_dot` does.  Reintroduces the basis vectors:
+`a_i b_j g^ij  →  a_i b_j (e^i·e^j)`.
+
+**(b) reassembly that descends into a contraction**, folding each operand
+independently: `(a_i e^i)·(b_j e^j) → a·b`.
+
+Both are needed for the oblique case, and (b) is worth having on its own —
+it would let the orthonormal round-trip succeed *without* the δ detour,
+which is a simplification of the bridge rather than another special case.
+Together they are exactly the derivation
+
+    g^ij a_i b_j = (e^i·e^j) a_i b_j = (a_i e^i)·(b_j e^j) = a·b .
+
 ## Separately: the reassembly gap
 
 `reassemble` not recognising the metric-contracted form is worth recording on
