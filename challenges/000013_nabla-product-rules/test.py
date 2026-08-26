@@ -19,7 +19,7 @@ CHALLENGE = harness.declare(
     title="∇ product rules: ∇(fg), ∇·(fu), ∇×(fu), ∇·(a×b)",
     tier="C",
     source="Borisenko–Tarapov §differential identities",
-    proves=["grad-product", "div-cross"],
+    proves=["grad-product", "div-cross", "div-scaled", "curl-scaled"],
 )
 
 
@@ -99,23 +99,30 @@ def test_the_statable_product_rules_performed_invariantly():
     assert div_cross.proved
 
 
-@harness.level(
-    "L2",
-    expected=False,
-    reason="∇·(fu) and ∇×(fu) cannot be STATED: canon rejects a ⊗-product "
-    "inside a contraction operand ('awaits fence distribution'). Not a missing "
-    "rule — the same capability gap that blocks challenge 000010 (vibe 000101)",
-)
+@harness.level("L2")
 def test_all_four_product_rules_performed_invariantly():
-    """The two scaled-vector rules, which need fence distribution first."""
+    """The two scaled-vector rules — blocked until the fence fix.
+
+    `∇·(fu)` and `∇×(fu)` could not be *stated* before vibe 000101: the
+    operand `f⊗u` holds no ∇ itself, so canon's fence condition missed that
+    an operator sat beside it, and rejected the expression outright.  Now
+    both are provable invariantly, and this challenge's four product rules
+    are complete.
+    """
     ws = t_.Workspace()
     nabla = ws.nabla()
     f = ws.field("f", 0)
     u = ws.field("u", 1)
     rules = td.rules("leibniz", ctx=ws.ctx)
 
-    # Raises today: the expression cannot be canonicalized.
-    result = td.prove_equal(
+    div = td.prove_equal(
         nabla @ (f * u), f * (nabla @ u) + u @ (nabla * f), rules
     )
-    assert result.proved
+    show("∇·(fu) = f(∇·u) + u·∇f", repr(div))
+    assert div.proved
+
+    curl = td.prove_equal(
+        nabla % (f * u), f * (nabla % u) - u % (nabla * f), rules
+    )
+    show("∇×(fu) = f(∇×u) − u×∇f", repr(curl))
+    assert curl.proved

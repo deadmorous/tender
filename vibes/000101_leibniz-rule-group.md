@@ -95,6 +95,44 @@ directional derivatives challenge 000019 cannot state — so the rule would be
 unusable even though the left side canonicalizes.  Noted rather than shipped
 inert (the vibe-000096 discipline).
 
+## Fence distribution — the prerequisite, and what it unlocked
+
+The gap turned out to be **two** distinct defects wearing one error message.
+
+**1. The fence condition asked about the wrong thing.**  `encapsulate` fenced
+a ⊗ operand when *that operand* contained ∇.  But in `∇·(f u)` the ∇ is the
+operand's **sibling**: `f⊗u` holds no operator, yet floating the scalar out —
+`∇·(f u) → f(∇·u)` — is precisely the Leibniz error.  The barrier in
+`distribute_contraction` is about the whole contraction; the fence condition
+was about one operand.  Fixed by passing `sibling_operator` down from the
+chain site, which knows.  The same fix was needed in the `Cross` arm.
+
+**2. `distribute_contraction` never handled double dots.**  It covered `·`
+and `×` only, so `(λ tr(ε) I)··ε` never had its scalars floated out, and canon
+then met a ⊗ inside a contraction operand and threw.  This was challenge
+000010's blocker all along — *not* the identity, which has been in the library
+and firing since M2.
+
+**Scoreboard 17 → 19 L2**, and every one of these had been red for milestones:
+
+- **000010 → L2.**  `T··ε = λ(tr ε)² + 2μ ε··ε` proved invariantly.
+- **000013 → L2 (complete).**  Its blocked half — `∇·(fu)`, `∇×(fu)` — became
+  statable, so all four product rules are now proved with ∇ abstract.
+- **`div-scaled` and `curl-scaled`** joined the `leibniz` group (5 rules).
+- **The identity DAG has no open proof obligations left**: `ddot-identity`,
+  the one unproven node, is discharged by challenge 000010.
+
+Six tests failed on the fix — every one of them a test asserting the *old*
+blocked behaviour, which is what a removed blocker should look like.  Two
+needed genuine reframing: the `Unsupported` verb path had no reachable case
+left, so it is now exercised through an ill-formed implicit summation (an
+Oblique index repeated at the same level), which canon still rightly refuses.
+
+One meta-test gap surfaced and was closed: a challenge could claim
+`proves="x"` while node `x` still said `proof=None`, and nothing caught the
+one-way declaration.  `test_every_claim_is_acknowledged_by_the_identity` now
+walks that direction too.
+
 ## Risk
 
 `grad-product` fired **three times** on a one-line proof: its right-hand side

@@ -1496,11 +1496,25 @@ def test_legacy_kwargs_still_work():
 
 
 def _unsupported_expr():
+    """An expression canon genuinely cannot process.
+
+    Was `T··ε` with a ⊗-product in the operand, until vibe 000101 taught canon
+    to distribute that fence.  Now an ill-formed implicit summation: an
+    Oblique index repeated at the *same* level contracts nothing, so no
+    canonical form exists.
+    """
     ws = tender.Workspace()
-    lam = tender.tensor(r"\lambda", 0, ctx=ws.ctx)
-    I = tender.identity(ws.ctx)
-    eps = ws.field(r"\varepsilon", 2, symmetric=True)
-    return ws, (lam * tender.tr(eps) * I) // eps
+    i = ws.ctx.alloc_index()
+    bad = tender.delta(
+        tender.Realm.Oblique,
+        tender.space_3d,
+        tender.Level.Upper,
+        tender.Level.Upper,
+        i,
+        i,
+        ctx=ws.ctx,
+    )
+    return ws, bad
 
 
 def test_prove_equal_reports_unsupported_instead_of_raising():

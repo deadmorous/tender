@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**23 challenges** — 17 at L2, 5 at L1, 1 at L0.
+**23 challenges** — 19 at L2, 3 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -25,8 +25,10 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | `trace-cyclic` | derived | 0 | — | challenge 000016 |
 | `grad-product` | derived | 0 | — | challenge 000013 |
 | `div-cross` | derived | 0 | — | challenge 000013 |
+| `div-scaled` | derived | 0 | — | challenge 000013 |
+| `curl-scaled` | derived | 0 | — | challenge 000013 |
 | `curl-curl` | derived | 0 | — | challenge 000012 |
-| `ddot-identity` | derived | 0 | — | **not yet derived** |
+| `ddot-identity` | derived | 0 | — | challenge 000010 |
 
 ## Tier A — Algebra (chart-free)
 
@@ -36,7 +38,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000002 | δ-contractions: δ^i_i = 3, δ^i_j δ^i_j = 3 | **L2 performed** | Borisenko–Tarapov §Kronecker delta; examples/delta_trace.py |
 | 000003 | ε-pairs: Σ_i ε^ijk ε_iml = δδ−δδ, Σ_ij ε^ijk ε_ijl = 2δ | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix; examples/eps_delta.py |
 | 000005 | a×I = I×a | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors; examples/cross_identity.py |
-| 000010 | T··ε = λ(tr ε)² + 2μ ε··ε (energy density) | L1 verified | Lurie, Theory of Elasticity §elastic energy; vibe 000091 |
+| 000010 | T··ε = λ(tr ε)² + 2μ ε··ε (energy density) | **L2 performed** | Lurie, Theory of Elasticity §elastic energy; vibe 000091 |
 | 000014 | (a×b)·(c×d) = (a·c)(b·d) − (a·d)(b·c) | **L2 performed** | Gibbs–Wilson, Vector Analysis |
 | 000015 | a×(b×I) = b⊗a − (a·b)I | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors; vibe 000056 |
 | 000016 | tr(A·B) = tr(B·A) | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors |
@@ -55,7 +57,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 |---|---|---|---|
 | 000011 | ∇×∇f = 0 and ∇·(∇×u) = 0, any chart | **L2 performed** | Borisenko–Tarapov §vector calculus identities |
 | 000012 | ∇×(∇×u) = ∇(∇·u) − Δu | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix |
-| 000013 | ∇ product rules: ∇(fg), ∇·(fu), ∇×(fu), ∇·(a×b) | L1 verified | Borisenko–Tarapov §differential identities |
+| 000013 | ∇ product rules: ∇(fg), ∇·(fu), ∇×(fu), ∇·(a×b) | **L2 performed** | Borisenko–Tarapov §differential identities |
 | 000019 | (u·∇)u = ∇(u²/2) − u×(∇×u) | L1 verified | Kochin, Vector Calculus §applications |
 
 ## Tier D — Curvilinear

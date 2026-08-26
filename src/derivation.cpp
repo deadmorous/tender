@@ -1348,6 +1348,16 @@ auto distribute_contraction(Context& ctx, Expr const* e) -> Expr const*
                     return distribute(c, node, d->left, d->right, &make_dot);
                 if (auto const* cr = std::get_if<Cross>(&node->node))
                     return distribute(c, node, cr->left, cr->right, &make_cross);
+                // Double contractions distribute the same way (vibe 000101).
+                // Without these, a scalar-weighted operand such as
+                // `(λ tr(ε) I) ·· ε` never has its scalars floated out, and
+                // canon then meets a ⊗ inside a contraction operand and
+                // throws — which is what blocked challenge 000010.
+                if (auto const* dd = std::get_if<DDot>(&node->node))
+                    return distribute(c, node, dd->left, dd->right, &make_ddot);
+                if (auto const* dd = std::get_if<DDotAlt>(&node->node))
+                    return distribute(
+                        c, node, dd->left, dd->right, &make_ddot_alt);
                 return node;
             });
     };

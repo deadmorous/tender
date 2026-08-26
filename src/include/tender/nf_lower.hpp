@@ -87,7 +87,13 @@ struct SignedFactor final
 // Deferred to later commits (encapsulate throws `std::invalid_argument` until
 // then): sums → `Paren` and a `⊗` nested inside an operand — these await the
 // recursive `lower` / fence distribution assembled around C10.
-[[nodiscard]] auto encapsulate(Context&, Expr const* factor) -> SignedFactor;
+// `sibling_operator`: an abstract ∇ sits beside `factor` in the same
+// contraction chain, so a ⊗ operand must be fenced even when it holds no ∇
+// itself (vibe 000101 — `∇·(f u)`).
+[[nodiscard]] auto encapsulate(
+    Context&,
+    Expr const* factor,
+    bool sibling_operator = false) -> SignedFactor;
 
 // ---- pass 4: region placement (C5) -------------------------------------
 

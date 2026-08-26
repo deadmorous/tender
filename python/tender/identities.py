@@ -76,6 +76,8 @@ __all__ = [
     "grad_product",
     "div_cross",
     "curl_curl",
+    "div_scaled",
+    "curl_scaled",
 ]
 
 _U = _t.Level.Upper
@@ -274,6 +276,27 @@ def div_cross(ctx):
     nab = _nabla(ctx)
     u, v = (_field(ctx, n, 1) for n in "UV")
     return Identity("div-cross", nab @ (u % v), v @ (nab % u) - u @ (nab % v))
+
+
+def div_scaled(ctx):
+    """∇·(f u) = f (∇·u) + u·∇f — Leibniz for the divergence of a scaled vector.
+
+    Statable only since the fence fix (vibe 000101): the operand `f⊗u` holds
+    no ∇ itself, so canon used to reject it, even though floating the scalar
+    out is precisely the error this rule exists to correct.
+    """
+    nab = _nabla(ctx)
+    f = _field(ctx, "F", 0)
+    u = _field(ctx, "U", 1)
+    return Identity("div-scaled", nab @ (f * u), f * (nab @ u) + u @ (nab * f))
+
+
+def curl_scaled(ctx):
+    """∇×(f u) = f (∇×u) − u×∇f."""
+    nab = _nabla(ctx)
+    f = _field(ctx, "F", 0)
+    u = _field(ctx, "U", 1)
+    return Identity("curl-scaled", nab % (f * u), f * (nab % u) - u % (nab * f))
 
 
 def curl_curl(ctx):
@@ -545,13 +568,19 @@ register(
     summary="∇·(u×v) = v·(∇×u) − u·(∇×v)",
 )
 register(
+    "div-scaled", div_scaled, tags=("leibniz",), proof="000013",
+    summary="∇·(f u) = f (∇·u) + u·∇f",
+)
+register(
+    "curl-scaled", curl_scaled, tags=("leibniz",), proof="000013",
+    summary="∇×(f u) = f (∇×u) − u×∇f",
+)
+register(
     "curl-curl", curl_curl, tags=("leibniz",), proof="000012",
     summary="∇×(∇×u) = ∇(∇·u) − Δu",
 )
 register(
-    # No challenge derives this one yet — the DAG says so rather than hiding
-    # it, and the harness reports it as an open proof obligation.
-    "ddot-identity", ddot_identity, tags=("double_dot",), proof=None,
+    "ddot-identity", ddot_identity, tags=("double_dot",), proof="000010",
     summary="A ·· I = tr A",
 )
 

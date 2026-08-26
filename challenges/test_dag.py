@@ -129,7 +129,23 @@ def test_declared_proof_matches_the_challenge_that_claims_it():
         )
 
 
-UNPROVEN = {"ddot-identity"}
+def test_every_claim_is_acknowledged_by_the_identity():
+    """The other direction of the correspondence.
+
+    `test_declared_proof_matches…` walks nodes that name a proof.  This walks
+    challenges that claim one, so a challenge asserting `proves="x"` while
+    node `x` still says `proof=None` is caught — a one-way declaration that
+    would otherwise pass silently and leave the obligation looking open.
+    """
+    for number, proves in _declared().items():
+        for name in proves:
+            assert ti.node(name).proof == number, (
+                f"challenge {number} claims to prove {name!r}, but that "
+                f"identity names {ti.node(name).proof!r} as its proof"
+            )
+
+
+UNPROVEN = set()  # every derived identity now has a derivation
 
 
 def test_open_proof_obligations_are_exactly_the_known_ones():
@@ -150,10 +166,6 @@ def test_open_proof_obligations_are_exactly_the_known_ones():
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ddot-identity (A··I = tr A) has no challenge deriving it yet",
-)
 def test_every_derived_identity_is_proven():
     for name in ti.names():
         n = ti.node(name)

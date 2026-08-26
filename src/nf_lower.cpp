@@ -359,7 +359,14 @@ auto reassociate_cross_fence(Context& ctx, Expr const* l, Expr const* r)
 
 } // namespace
 
-auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
+// `sibling_operator` says an abstract ∇ sits *beside* `factor` in the same
+// contraction chain (vibe 000101).  It matters because the operator barrier in
+// `distribute_contraction` is about the whole contraction, not about one
+// operand: in `∇·(f u)` the ⊗-product `f⊗u` holds no ∇ itself, yet floating
+// the scalar out — `∇·(f u) → f (∇·u)` — is exactly the Leibniz error.  So
+// such an operand must be carried opaquely too, and only the caller knows.
+auto encapsulate(Context& ctx, Expr const* factor, bool sibling_operator)
+    -> SignedFactor
 {
     if (auto const* t = std::get_if<TensorObject>(&factor->node))
     {
@@ -383,10 +390,16 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
         flatten_contraction(ctx, factor, operands, ops);
         std::vector<Factor const*> encapsulated;
         encapsulated.reserve(operands.size());
+        // Does an abstract ∇ sit anywhere in this chain?  If so, every ⊗
+        // operand of it is fenced — see `encapsulate`'s `sibling_operator`.
+        bool const chain_has_operator = std::any_of(
+            operands.begin(),
+            operands.end(),
+            [&ctx](Expr const* o) { return contains_nabla(ctx, o); });
         int sign = +1;
         for (auto const* o: operands)
         {
-            auto sf = encapsulate(ctx, o);
+            auto sf = encapsulate(ctx, o, chain_has_operator);
             sign *= sf.sign;
             encapsulated.push_back(sf.factor);
         }
@@ -485,8 +498,13 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
         if (auto const* ra = reassociate_cross_fence(ctx, c->left, c->right))
             return encapsulate(ctx, ra);
         // General binary cross (e.g. a nested cross operand): structural.
-        auto sl = encapsulate(ctx, c->left);
-        auto sr = encapsulate(ctx, c->right);
+        // An operator anywhere in the pair fences *both* operands, exactly as
+        // in a contraction chain — `∇×(f u)` must not float its scalar out
+        // (vibe 000101).
+        bool const cross_has_operator =
+            contains_nabla(ctx, c->left) || contains_nabla(ctx, c->right);
+        auto sl = encapsulate(ctx, c->left, cross_has_operator);
+        auto sr = encapsulate(ctx, c->right, cross_has_operator);
         return {sl.sign * sr.sign, make_cross(ctx, {sl.factor, sr.factor})};
     }
 
@@ -549,7 +567,7 @@ auto encapsulate(Context& ctx, Expr const* factor) -> SignedFactor
     // `ParenKind::OperatorFence` — never re-inferred from the body
     // (vibe 000095 increment 4).
     if (std::holds_alternative<TensorProduct>(factor->node)
-        && contains_nabla(ctx, factor))
+        && (contains_nabla(ctx, factor) || sibling_operator))
         return {
             +1,
             make_paren(

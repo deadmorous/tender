@@ -31,6 +31,7 @@ from challenges.harness import show
 CHALLENGE = harness.declare(
     title="T··ε = λ(tr ε)² + 2μ ε··ε (energy density)",
     tier="A",
+    proves="ddot-identity",
     source="Lurie, Theory of Elasticity §elastic energy; vibe 000091",
 )
 
@@ -65,26 +66,20 @@ def test_reduces_to_the_textbook_quadratic_form():
     assert r"\varepsilon_{ii} \, \varepsilon_{jj}" in lhs.latex()
 
 
-@harness.level(
-    "L2",
-    expected=False,
-    reason="canon cannot state T··ε: a ⊗-product inside a double-dot operand "
-    "throws 'awaits fence distribution' (vibe 000096 increment 3, open)",
-)
+@harness.level("L2")
 def test_performed_invariantly():
-    """Blocked on a canonicalization limit, not on a missing identity.
+    """T··ε = λ(tr ε)² + 2μ ε··ε, with ε abstract and no frame in sight.
 
-    The rule this needs — `A··I = tr A`, the `double_dot` group — exists and
-    fires.  What fails is stating the problem at all: `T = λ tr(ε) I + 2με`
-    puts a ⊗-product (`λ ⊗ tr(ε) ⊗ I`) inside the double-dot's operand, and
-    `encapsulate` rejects a nested ⊗ there with "awaits fence distribution".
-    Since M3 the verb reports this rather than raising: the result comes back
-    with status `"unsupported"` and a `detail` saying what tender cannot do,
-    so the caller learns about the tool's limit instead of catching a
-    canon-internal exception.
+    This was blocked for two milestones, and the blocker was never the
+    identity — `A··I = tr A` has been in the library since M2 and fires.
+    What failed was *stating* the problem: `T = λ tr(ε) I + 2με` puts a
+    ⊗-product inside a double-dot operand, and `distribute_contraction`
+    covered `·` and `×` but not the double dots, so the scalars were never
+    floated out and canon met a ⊗ it could not encapsulate (vibe 000101).
 
-    Promote this by teaching canon to distribute that fence; the identity
-    side of it is already done.
+    With that gap closed the proof is one call — and the L1 test below, which
+    has to expand into a frame and reduce the double dots by hand, shows what
+    it replaces.
     """
     ws = t.Workspace()
     ctx = ws.ctx
@@ -99,7 +94,6 @@ def test_performed_invariantly():
         lam * t.tr(eps) * t.tr(eps) + 2 * mu * (eps // eps),
         td.rules("double_dot", "dyadic", ctx=ctx),
     )
-    # Reported, not raised — but still not a proof, so the xfail stands.
-    assert result.status == "unsupported", result.status
-    assert "canonical form" in result.detail
+    show("prove_equal(T··ε, λ(tr ε)² + 2μ ε··ε)", repr(result))
     assert result.proved
+    assert result.fired.get("ddot-identity") == 1

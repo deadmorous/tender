@@ -304,9 +304,9 @@ def test_groups_are_named_and_populated():
     assert len(ti.group(ctx, "eps_delta")) == 4
     assert len(ti.group(ctx, "cross")) == 4
     assert len(ti.group(ctx, "double_dot")) == 1
-    assert len(ti.group(ctx, "leibniz")) == 3
+    assert len(ti.group(ctx, "leibniz")) == 5
     assert len(ti.group(ctx, "dyadic")) == 2
-    assert len(ti.all_rules(ctx)) == 14
+    assert len(ti.all_rules(ctx)) == 16
 
 
 def test_unknown_group_raises_with_the_available_names():
@@ -469,24 +469,39 @@ def test_curl_curl_fires():
     )
 
 
-def test_the_blocked_leibniz_forms_are_absent_and_why():
-    """∇·(f u) and ∇×(f u) are deliberately not in the group.
+def test_the_formerly_blocked_leibniz_forms_now_work():
+    """∇·(f u) and ∇×(f u) — blocked until the fence fix, now in the group.
 
-    Canon cannot *state* them — a ⊗-product inside a contraction operand is
-    rejected — so a rule for them could not be written, let alone fire.  This
-    pins the reason, so the absence reads as a known gap rather than an
-    oversight (vibe 000101).
+    Canon used to reject them: the operand `f⊗u` holds no ∇ itself, so the
+    fence condition (which asked only about the factor) missed that an
+    operator sat *beside* it and that floating the scalar out would be the
+    Leibniz error.  Vibe 000101 made the condition ask about the whole
+    contraction, and both forms became statable — and provable.
     """
-    import pytest as _pytest
-
     ws, nab, f, g, u, v = _ws_fields()
-    with _pytest.raises(ValueError, match="fence distribution"):
-        td.canonicalize(nab @ (f * u))
-    with _pytest.raises(ValueError, match="fence distribution"):
-        td.canonicalize(nab % (f * u))
+
+    td.canonicalize(nab @ (f * u))  # must not raise
+    td.canonicalize(nab % (f * u))
+
+    _proves(
+        ws.ctx,
+        nab @ (f * u),
+        f * (nab @ u) + u @ (nab * f),
+        [ti.div_scaled(ws.ctx)],
+        "∇·(f u) = f(∇·u) + u·∇f",
+    )
+    _proves(
+        ws.ctx,
+        nab % (f * u),
+        f * (nab % u) - u % (nab * f),
+        [ti.curl_scaled(ws.ctx)],
+        "∇×(f u) = f(∇×u) − u×∇f",
+    )
 
     assert {r.name for r in ti.group(ws.ctx, "leibniz")} == {
         "grad-product",
         "div-cross",
         "curl-curl",
+        "div-scaled",
+        "curl-scaled",
     }
