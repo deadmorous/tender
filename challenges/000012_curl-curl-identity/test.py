@@ -14,6 +14,7 @@ CHALLENGE = harness.declare(
     title="∇×(∇×u) = ∇(∇·u) − Δu",
     tier="C",
     source="Lurie, Theory of Elasticity, tensor-calculus appendix",
+    proves="curl-curl",
 )
 
 

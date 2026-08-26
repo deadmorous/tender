@@ -19,6 +19,7 @@ CHALLENGE = harness.declare(
     title="∇ product rules: ∇(fg), ∇·(fu), ∇×(fu), ∇·(a×b)",
     tier="C",
     source="Borisenko–Tarapov §differential identities",
+    proves=["grad-product", "div-cross"],
 )
 
 
