@@ -54,6 +54,67 @@ keeps operators positional, so no ordinary variable reaches that position.
 
 That rules out the cheapest fix and shapes everything below.
 
+## What the rod split actually looks like
+
+Eliseev, *Mechanics of Deformable Bodies* §5.5, eq. (5.2)
+(`vibes/images/nabla_split_for_curved_rods.png`):
+
+```
+∇  =  R^i ∂/∂q^i  =  ∇⊥ + v⁻¹ t (∂_s − Ω_t D)
+
+∇⊥ ≡ e_α ∂/∂x_α          D ≡ t · x × ∇⊥
+v  ≡ R₁×R₂·R₃ = λ⁻¹ + t·Ω×x
+```
+
+with `R(x_α, s) = λ⁻¹ r(s) + x`, `x ≡ x_α e_α(s)` (5.1).
+
+Reading it closely settles more than the earlier sketch did:
+
+1. **`∇ = R^i ∂/∂q^i` is stated as the definition** — cobasis times partial.
+   The user's claim is not an analogy; it is how the source defines it.
+2. **`∇⊥ = e_α ∂/∂x_α` is the *same shape*, summed over fewer indices.**  Not a
+   different kind of object — a partial frame expansion (α ranges over the
+   cross-section only).
+3. **`D ≡ t·x×∇⊥` is a *scalar* operator built from another operator.**
+   Expanded, `D = (t·x×e_α) ∂_α` — a scalar derivation whose coefficients are
+   scalar *fields*.  Operators compose.
+4. **The coefficients are fields, not constants.**  `v⁻¹ = (λ⁻¹ + t·Ω×x)⁻¹`
+   varies with `x` and `s`.  This matters and it is benign: scaling a
+   derivation by a field keeps it a derivation, since `f∂(ab) = f((∂a)b +
+   a(∂b)) = (f∂a)b + a(f∂b)`.  The coefficient rides along; only `∂` acts.
+5. **The whole second term is (scalar field)·(vector)·(scalar derivation)**:
+   coefficient `v⁻¹`, direction `t`, derivation `(∂_s − Ω_t D)` — itself a
+   field-weighted combination of partials.
+
+So every operator here fits one shape:
+
+> **Op = Σ_k  c_k ⊗ D_k**, where `c_k` is a vector-valued field and `D_k` is a
+> **scalar derivation** — itself `Σ_i f_i ∂_i` with scalar-field `f_i`.
+
+∇, ∇⊥, `D`, and `v⁻¹t(∂_s − Ω_t D)` are all instances, differing only in their
+coefficients and in which partials they sum over.
+
+## Can Leibniz rules be derived at all?  Yes — and the derivation is short
+
+For `Op = Σ_k c_k ⊗ D_k` and any bilinear product `⊙`:
+
+```
+Op ⊙ (a b)  =  Σ_k c_k ⊙ D_k(a b)                     linearity of ⊙ in Op
+            =  Σ_k c_k ⊙ ( (D_k a) b + a (D_k b) )    D_k is a derivation
+            =  Σ_k [ c_k ⊙ (D_k a) b  +  c_k ⊙ a (D_k b) ]   distribute
+```
+
+Three ingredients, and tender now has all three: **∂-Leibniz** (`apply_operators`,
+vibe 000077), **linearity**, and **distribution of a contraction over the
+resulting sums and products** — which is exactly what the fence work of vibe
+000101 delivered.  Nothing further is required *in principle*; what is missing
+is a representation in which `Op` can be written as `Σ c_k ⊗ D_k` in the first
+place, and a way to say "`D_k` is a derivation".
+
+That is the honest answer to "are we able to derive any Leibniz rules at all":
+**yes, and by one script rather than per operator** — once the representation
+exists.
+
 ## Options
 
 **(A) Parameterize the rule factories by operator.**  `ti.leibniz(op)` builds
@@ -84,15 +145,120 @@ product rules are properties of that kind, proved once.  The most principled,
 the most work, and it is what the rod expansion `∇ = ∇_⊥ + λ t ∂_s` wants
 anyway — that expansion is an equation between frame-expanded derivations.
 
+## The three designs, as interfaces
+
+### (B) A `derivation` trait, and pattern variables that bind operators
+
+*What the user writes:*
+
+```python
+ws = t.Workspace()
+
+# Declare an operator and assert the property that licenses Leibniz.
+grad_perp = ws.operator(r"\nabla_\perp", rank=1, derivation=True)
+delta     = ws.operator(r"\delta",       rank=0, derivation=True)   # variation
+
+# ONE schema replaces the five ∇ rules — it binds any derivation-tagged operator.
+rules = td.rules("leibniz")        # now operator-generic
+td.prove_equal(grad_perp @ (f * u),
+               f * (grad_perp @ u) + u @ (grad_perp * f), rules)   # fires
+td.prove_equal(delta * (a * b), delta(a) * b + a * delta(b), rules)  # also fires
+```
+
+*How it works:* a new pattern-variable kind, `derivation_var("D")`, matches an
+operator node carrying the trait — the matcher work the measurement above shows
+is unavoidable, since ordinary subtree variables cannot reach an operator slot.
+The rule library then holds `product-rule`, `div-product`, `curl-product` as
+*schemas*, not ∇ instances.
+
+*What it does not do:* nothing checks that the trait is deserved.  `derivation=True`
+is the user's assertion, and a wrong one silently produces wrong mathematics.
+That is (B)'s real cost, and it is why (C) matters.
+
+### (C) Derive the rules, generically, per operator
+
+*What the user writes:*
+
+```python
+cyl, (r, th, z) = ws.cylindrical_chart()
+
+# One script, any operator: expand in the frame, apply ∂-Leibniz, reassemble.
+rules, proof = td.derive_leibniz(ws.nabla(), chart=cyl)
+
+proof                     # a Derivation — renders as the table of steps
+rules                     # [Identity('grad-product'), Identity('div-scaled'), …]
+```
+
+*How it works:* exactly the route `examples/navier_lame.py` already performs by
+hand, parameterized by the operator instead of hardcoding ∇.  The returned
+identities carry their derivation, so they enter the DAG as **derived nodes
+with real proofs** rather than as asserted axioms — which is what the current
+five are, their "proof" being a challenge that checks them in components.
+
+*What it does not do:* it produces rules *for one operator at a time*, and it
+needs a chart.  It makes the rules honest; it does not make them general.
+
+### (D) Represent the expansion, not the operator
+
+*What the user writes:*
+
+```python
+# An operator IS its expansion: vector coefficients ⊗ scalar derivations.
+e, x, tng, s = ...                                   # frame, position, tangent, arc
+d_alpha = ws.partials(x_1, x_2)                      # ∂/∂x_α
+d_s     = ws.partial(s)
+
+grad_perp = ws.vector_derivation(coeffs=e[:2], parts=d_alpha)   # e_α ∂_α
+D         = ws.scalar_derivation(coeffs=[tng @ (x % e[a]) for a in (0, 1)],
+                                 parts=d_alpha)                 # t·x×∇⊥
+nabla     = grad_perp + (1/v) * tng * (d_s - Omega_t * D)       # Eliseev (5.2)
+```
+
+and then **no Leibniz rules exist at all** — the product rule is a property of
+the *kind* `Σ c_k ⊗ D_k`, proved once, and every operator built this way
+inherits it.  `∇`, `∇⊥`, `D`, `δ`, `D/Dt` are one kind of thing.
+
+*How it works:* the six-line derivation above becomes the engine's own
+knowledge.  A product rule is not matched, it is *computed* from the operator's
+coefficients.
+
+*Why it fits this problem specifically:* the rod equation `∇ = ∇⊥ + v⁻¹t(∂_s −
+Ω_t D)` is an **equation between operators**.  Under (B) or (C) it is a fact the
+user asserts and the library cannot check or use.  Under (D) it is an ordinary
+expression — operators add, scale by fields, and compose — so the asymptotic
+substitution the rod theory performs *is* algebra tender can do, rather than
+something done on paper before tender sees it.
+
+*What it costs:* a new node kind with its own canonical form, matcher support,
+rendering, and the rank bookkeeping (a vector derivation applied via `·`
+lowers rank; via `⊗` raises it).  By the CLAUDE.md rule it ships with ANF +
+identities + render + a challenge in one increment.  It is the largest of the
+three by a wide margin.
+
 ## A view
 
-(B) and (C) are complementary rather than alternatives: **(C) supplies the
-proofs, (B) supplies the reach.**  (C) can be done now, with no engine work,
-and would immediately make the ∇ rules honest — today they are asserted
-identities whose "proof" is a challenge that verifies them in components, when
-they are really corollaries of ∂-Leibniz.  (B) is the piece that makes one rule
-serve every operator, and it needs matcher work that should not be started
-without a second consumer to shape it.
+Having read (5.2), I would revise the earlier framing.  (B) and (C) are still
+complementary — **(C) supplies the proofs, (B) supplies the reach** — and (C)
+is still the step available with no engine work.  But the rod split makes
+**(D) the destination**, not an over-engineered alternative:
+
+- Every operator in (5.2) is already of the form `Σ c_k ⊗ D_k`.  The
+  representation is not a generalisation we are inventing; it is what the
+  source writes down.
+- `∇ = ∇⊥ + v⁻¹t(∂_s − Ω_t D)` is an **equation between operators**.  (B) and
+  (C) can only take it as given.  (D) makes it manipulable — and the whole
+  asymptotic method consists of substituting it and collecting orders in λ, so
+  under (B)/(C) the interesting half of rod theory happens outside tender.
+- Under (D) the product rules stop being library content, which removes the
+  question this vibe is about rather than answering it per operator.
+
+So: **(C) now** — it is small, it makes the existing rules honest, and its
+script is the same expansion (D) would internalise, so the work is not thrown
+away.  **(D) when the rod arc starts**, designed against (5.2) directly.  **(B)
+only if a consumer appears that needs a *declared* derivation with no
+expansion behind it** — the variation δ may be exactly that case, since δ is
+not `Σ c_k ∂_k` in any coordinate sense, and that is worth checking before
+committing to (D) as the single mechanism.
 
 The rod expansion is that second consumer, and there is a third worth noting
 now: **the variation δ and the material derivative D/Dt are also derivations**.
@@ -103,10 +269,13 @@ argues for designing it once, with all three consumers in view.
 
 ## Open questions
 
-1. Is `∇_⊥` a derivation in the same sense?  It is a *projected* operator —
-   `P·∇` — so it satisfies Leibniz, but its interaction with the frame is not
-   the plain `e^i ∂_i`.  Does (D)'s representation cover it, or does projection
-   need its own treatment?
+1. ~~Is `∇_⊥` a derivation in the same sense?~~  **Settled by (5.2)**: `∇⊥ ≡
+   e_α ∂/∂x_α` is the same shape as `∇ = R^i ∂/∂q^i`, summed over the
+   cross-section indices only.  No projection machinery needed.
+1b. Is the **variation δ** representable as `Σ c_k ⊗ D_k`?  It is a derivation,
+   but not obviously a coefficient-weighted sum of coordinate partials — which
+   is the one place (D) might not reach, and therefore the argument for keeping
+   (B)'s trait available.
 2. Where does the **formal small parameter** λ live?  `∇ = ∇_⊥ + λ t ∂_s` is
    an expansion in λ, and collecting orders in λ is separately on the roadmap
    (vibe 000093 M5B).  Are these one feature or two?
