@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**23 challenges** — 19 at L2, 3 at L1, 1 at L0.
+**24 challenges** — 19 at L2, 4 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -59,6 +59,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000012 | ∇×(∇×u) = ∇(∇·u) − Δu | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix |
 | 000013 | ∇ product rules: ∇(fg), ∇·(fu), ∇×(fu), ∇·(a×b) | **L2 performed** | Borisenko–Tarapov §differential identities |
 | 000019 | (u·∇)u = ∇(u²/2) − u×(∇×u) | L1 verified | Kochin, Vector Calculus §applications |
+| 000024 | Leibniz holds for any derivation Σ c_k ⊗ ∂_k, not just ∇ | L1 verified | Eliseev, Mechanics of Deformable Bodies §5.5 eq. (5.2); vibe 000102 |
 
 ## Tier D — Curvilinear
 

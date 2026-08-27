@@ -388,6 +388,26 @@ records what to expect when the scale factors come out as surds.
 
 ---
 
+## Building your own differential operator
+
+Every operator tender knows is `Σ_k c_k ⊗ ∂_k` — coefficients paired with
+partials.  ∇ is the instance whose coefficients are a cobasis; nothing stops
+you building others:
+
+```python
+d = td.deriv                       # the unapplied ∂/∂q
+e = chart.physical_frame()
+grad_perp = e.direction(0)*d(x) + e.direction(1)*d(y)      # ∇⊥
+td.apply_operators(grad_perp * (f*g))                      # Leibniz, applied
+```
+
+Anything of that form is a **derivation**: it obeys the product rule by
+construction, over any number of factors, with no rule to register and no
+chart required.  `chart.nabla()` returns ∇ in exactly this form when you want
+to see or manipulate the expansion (challenge 000024, vibe 000102).
+
+---
+
 ## Differential-operator DSL (`tender.operators`) — superseded
 
 > **Prefer the core route.** `ws.nabla()` is a real `Expr`, so it composes with

@@ -14,8 +14,6 @@ instead of                    prefer
 ``implicitize``               ``simplify`` (which finishes in implicit form)
 ``distribute_contraction``    ``canonicalize``, which self-prepares
 ``fold_equal_addends_st…``    ``fold_equal_addends`` (self-preparing)
-``deriv`` / ``apply_oper…``   a chart's ``grad`` / ``div`` / ``rot``, or
-                              ``ws.nabla()`` with ``chart.evaluate``
 ============================  ==================================================
 
 They were demoted by measurement, not taste (vibe 000098): across every
@@ -23,8 +21,6 @@ example and challenge in the repository, none of them is called.
 """
 
 from .derivation import (  # noqa: F401
-    apply_operators,
-    deriv,
     distribute_contraction,
     fold_equal_addends_structural,
     implicitize,
@@ -32,8 +28,6 @@ from .derivation import (  # noqa: F401
 )
 
 __all__ = [
-    "apply_operators",
-    "deriv",
     "distribute_contraction",
     "fold_equal_addends_structural",
     "implicitize",

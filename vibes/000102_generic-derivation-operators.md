@@ -340,6 +340,52 @@ Two related cases fall out of the same framing:
   decision procedure that backs `Refuted` (vibe 000097).  So the challenge
   proving an operator identity has a mechanical route, not a bespoke one.
 
+## Implementation: (D) was largely already built
+
+Measured before planning any of it, and it reframes the cost entirely.
+**(D)'s representation already exists**, in nodes tender has had since vibe
+000077:
+
+```
+Op = Σ_k c_k ⊗ ∂_k     is   TensorProduct(coefficient, Deriv(coord)), summed
+```
+
+- `chart.nabla()` returns exactly that — `Σ_i (1/h_i) e_i ∂_i` as an ordinary,
+  composable `Expr`.
+- `apply_operators` applies the product rule to it, **generically**: it walks
+  the term's factors, so it never mentions ∇.
+- A **custom** operator works with no registration whatever.  Measured:
+  `grad_perp = e₀ ∂_x + e₁ ∂_y`, hand-built, and `apply_operators` applies
+  Leibniz to it correctly.
+- **n-ary is free**: `∇(f g h)` produces its three terms per component in one
+  pass, confirming the Q1 analysis.
+
+So (D) is not a new node kind with its own canon, matcher and renderer.  It is
+**a public surface over machinery that exists** — plus the reassembly gap
+(below).  The estimate in "The three designs" above was wrong by a wide margin,
+and wrong in the direction that matters: the principled option is also the
+cheap one.
+
+**Shipped now:**
+
+- `td.deriv` and `td.apply_operators` **restored to the public surface**.  M3
+  demoted them to `tender.steps` on the measurement that no example called
+  them — correct at the time, but they are (D)'s building blocks, and that
+  demotion would have hidden the mechanism this whole design rests on.
+- Challenge **000024**: Leibniz certified for an operator the library has never
+  heard of, over four factors, and — discharging the (C) debt — the shipped
+  `∇(fg)` rule *derived* from the expansion rather than asserted.
+- Cheatsheet section: operators are **built, not named**.
+
+**What is still missing**, and it is one thing: the derived form stays in
+components.  `Σ_i c_i ⊗ ∂_i(fg)` cannot be folded back into `f ∇g + g ∇f`
+because `reassemble` does not descend into a contraction — **vibe 000100's
+problem**, arriving for the ninth time.  Challenge 000024's L2 records it.
+Until it is fixed, a derived Leibniz rule cannot be *restated* as the invariant
+identity the library ships, which is why those five rules stay asserted for now.
+
+That makes vibe 000100 the blocker for finishing (D), not a parallel concern.
+
 ## Open questions
 
 1. ~~Is `∇_⊥` a derivation in the same sense?~~  **Settled by (5.2)**: `∇⊥ ≡

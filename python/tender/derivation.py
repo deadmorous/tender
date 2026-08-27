@@ -50,6 +50,8 @@ __all__ = [
     "collect_terms",
     "canonicalize",
     "partial",
+    "deriv",
+    "apply_operators",
     "simplify_scalars",
     "simplify",
     "Identity",
@@ -380,7 +382,20 @@ def partial(expr, coord):
 
 
 def deriv(coord):
-    """The first-class unapplied ∂/∂coord operator (vibe 000077).
+    """The unapplied ∂/∂coord operator — the building block of every
+    differential operator tender knows (vibes 000077, 000102).
+
+    A first-class :class:`~tender.Expr`, so operators are *built* rather than
+    named: pair partials with coefficient vectors and add them up.
+
+        d = td.deriv
+        e = chart.physical_frame()
+        grad_perp = e.direction(0) * d(x) + e.direction(1) * d(y)   # ∇⊥
+
+    Anything of the form ``Σ_k c_k ⊗ ∂_k`` is a *derivation*: it obeys the
+    Leibniz rule by construction, and :func:`apply_operators` will carry that
+    out — over any number of factors, for any coefficients, with no rule to
+    register and no chart required.
 
     A ``Deriv`` node — a composable operator that acts on everything to its
     right when multiplied.  ``deriv(x) * f`` builds the (unapplied) product
