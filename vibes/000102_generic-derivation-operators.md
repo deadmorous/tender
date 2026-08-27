@@ -267,6 +267,79 @@ vibe 000093 puts at the head of the applied-mechanics arc.  So the trait in (B)
 is not a rod-specific accommodation — it is the same mechanism M5A needs, which
 argues for designing it once, with all three consumers in view.
 
+## Q1: does n-ary Leibniz — `D(a·b·c·d)` — come for free?
+
+Not uniformly, and the answer separates the options more sharply than anything
+else so far.
+
+**(D): free — and for a reason worth naming.**  Under `Op = Σ_k c_k ⊗ D_k`, the
+product rule is *computed*: apply `D_k` to a term, which in the `Nf` model is
+already an **n-ary** product `coeff · [scalars] · [tensors]`.  "Differentiate a
+term" is then "sum over its factors, differentiating one and leaving the rest",
+which has no arity built in.  Two, three, ten factors are the same code path.
+
+This is a direct dividend of the M1 flattening: because a term is n-ary in the
+IR rather than a binary tree, poly-linearity is structural rather than
+something to implement.
+
+**(B): not free — and the gap is not small.**  A rule is a *pattern*, and a
+pattern with two variables matches two factors.  The obvious escape is a "rest"
+variable, `D(F * REST) = D(F)*REST + F*D(REST)`, applied repeatedly — but that
+requires the pattern to **name** the remaining factors so the right-hand side
+can put them back inside a fresh `D`.  Measured: `NfBinding::subtrees` binds one
+`Factor const*` per name.  Sub-product matching *carries* the unmatched factors
+through unchanged; it cannot hand them to the RHS as a group.
+
+Nor does the recursive route the question suggests work as written:
+`D(a·b·c) = D(a·(b·c))` needs a *re-association* that the flat term model has
+deliberately normalized away — there is no `(b·c)` grouping to match.  So (B)
+would need **variadic (associative) pattern matching**, a real matcher
+extension, before n-ary Leibniz is expressible at all.
+
+**(C): depends on what it produces.**  As a *rule factory* it inherits (B)'s
+limitation — the identities it emits are ordinary patterns of fixed arity.  As a
+*transformation* applied directly to the user's expression (expand the operator,
+apply ∂-Leibniz to the term, reassemble) it is n-ary-native for exactly (D)'s
+reason.  Worth deciding deliberately: **(C) should be a transformation, not a
+rule factory**, and the rules it registers should be understood as *citable
+records* of what it proved, not as the mechanism.
+
+This is the strongest argument yet for (D), and against (B) as the primary
+mechanism.
+
+## Q2: who says a given expansion really *is* ∇?
+
+The proposal — user-declared equivalence classes, at their own risk — is close,
+but tender already has the machinery to do better, and to make the risk
+*visible* where declaration is genuinely needed.
+
+**An operator equality is an identity like any other.**  A chart defines ∇
+canonically: `∇ = R^i ∂/∂q^i`, from the embedding, with nothing to assert.  Any
+other expansion — Eliseev's `∇ = ∇⊥ + v⁻¹t(∂_s − Ω_t D)` — is then a *claim*
+about two operators, and claims are what the identity DAG is for:
+
+- Register it as a **derived** node, whose proof obligation is a challenge:
+  expand both sides on the chart's own frame and compare.  Same shape as every
+  other derived identity, same machinery, same scoreboard.
+- Or register it as an **axiom** — the "on your own risk" case — which is
+  legitimate but *recorded*: the DAG prints it as an axiom, so an unchecked
+  equivalence is visible in the scoreboard rather than living in a user's head.
+
+That is better than a separate equivalence-class mechanism on two counts: there
+is nothing new to build, and the honest-vs-asserted distinction is the one the
+DAG already draws.
+
+Two related cases fall out of the same framing:
+
+- **The same ∇ in different charts** (WCS vs cylindrical) is not an identity to
+  prove but the *cross-chart* question of vibe 000090 — one operator, two
+  expansions, related by coordinate reprojection.  Approach A already handles
+  the forward direction.
+- **Checking is decidable where it matters.**  Two expansions over the same
+  chart can be compared by expanding both and reducing — the same component
+  decision procedure that backs `Refuted` (vibe 000097).  So the challenge
+  proving an operator identity has a mechanical route, not a bespoke one.
+
 ## Open questions
 
 1. ~~Is `∇_⊥` a derivation in the same sense?~~  **Settled by (5.2)**: `∇⊥ ≡
@@ -276,15 +349,37 @@ argues for designing it once, with all three consumers in view.
    but not obviously a coefficient-weighted sum of coordinate partials — which
    is the one place (D) might not reach, and therefore the argument for keeping
    (B)'s trait available.
-2. Where does the **formal small parameter** λ live?  `∇ = ∇_⊥ + λ t ∂_s` is
-   an expansion in λ, and collecting orders in λ is separately on the roadmap
-   (vibe 000093 M5B).  Are these one feature or two?
-3. Should the five existing ∇ rules survive (B), as a specialization the engine
-   can use directly, or be deleted in favour of the schema?  Specializations
-   fire faster; two representations of one fact is how drift starts.
-4. Does the trait belong on the *node* or on a registry keyed by symbol?  The
-   identity library lives in Python; a trait that users can set on their own
-   operators probably should too.
+2. ~~Where does the formal small parameter λ live?~~  **Settled (user)**: λ and
+   the collection of terms by powers of λ are a **separate work item**, already
+   on the M5B roadmap.  Not part of the operator design.
+3. ~~Should the five existing ∇ rules survive?~~  **Settled (user)**: they are
+   likely to be **removed** unless they end up constituting (B); the direction
+   is (D).  Whether or not they survive, **they must all be derived** — (C) —
+   rather than asserted.  So (C) is not optional: it is the debt owed on what
+   vibe 000101 shipped.
+4. **Where a "this is a derivation" mark would live** — elaborated, since the
+   question was too terse.  The mark says an operator obeys Leibniz *by
+   assertion*, and there are two homes:
+
+   - **On the node**, as a trait beside `WellKnownKind`.  The matcher can then
+     test it directly, and it travels with the expression.  But it is C++ (a
+     new operator needs a rebuild — exactly what moving the identity library to
+     Python was meant to avoid), and being part of a node makes it part of
+     *structural identity*: two operators differing only in the flag would
+     compare unequal and hash differently, which is a real consequence for
+     canon.
+   - **In a Python registry keyed by symbol**, beside the identity library.
+     Users add operators without rebuilding; structural identity is untouched.
+     The cost is that the C++ matcher cannot see it, so "this rule applies only
+     to derivations" must be enforced when the rule set is *built*, in Python,
+     rather than during matching.
+
+   Given the library-in-Python decision, the registry is the consistent choice.
+   But the question mostly **dissolves under (D)**: an operator constructed as
+   `Σ c_k ⊗ D_k` is a derivation *by construction*, with nothing to assert.  A
+   mark is needed only for operators declared *without* an expansion — which is
+   the δ case in 1b.  So: defer it until δ forces the issue, and if it is ever
+   needed, put it in the Python registry.
 
 ## Status
 
