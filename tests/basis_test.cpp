@@ -1018,6 +1018,323 @@ TEST(Reassemble, ContractedCoordsFoldToDot)
     EXPECT_TRUE(algebraic_eq(ctx, back, make_dot(ctx, u, v)));
 }
 
+// ---- index-directed folding (vibe 000103) ---------------------------------
+//
+// A fold is driven by what a summed index *connects*, not by the silhouette of
+// the whole term, so an unrelated neighbouring factor no longer defeats it.
+// Every case below stalled before that change.
+
+TEST(Reassemble, FoldsInsideADot)
+{
+    // Σ_i a_i (e_i·y): the partner of a_i sits inside a contraction operand,
+    // which no factor position can name — the measured failure on (a_i e^i)·b.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* y = make_tensor_object(ctx, make_tensor_name("y"), {}, 1);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, make_dot(ctx, expand_in_basis(ctx, a, b, Variance::Covariant), y));
+    EXPECT_TRUE(
+        structural_eq(reassemble(ctx, expanded, b), make_dot(ctx, a, y)));
+}
+
+TEST(Reassemble, FoldsOnEitherSideOfADot)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* y = make_tensor_object(ctx, make_tensor_name("y"), {}, 1);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, make_dot(ctx, y, expand_in_basis(ctx, a, b, Variance::Covariant)));
+    EXPECT_TRUE(
+        structural_eq(reassemble(ctx, expanded, b), make_dot(ctx, y, a)));
+}
+
+TEST(Reassemble, FoldsBothSidesOfADot)
+{
+    // Σ_i Σ_j a_i y_j (e_i·e_j) → a·y: two independent folds, one contraction.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* y = make_tensor_object(ctx, make_tensor_name("y"), {}, 1);
+
+    auto const* expanded = steps::canonicalize(
+        ctx,
+        make_dot(
+            ctx,
+            expand_in_basis(ctx, a, b, Variance::Covariant),
+            expand_in_basis(ctx, y, b, Variance::Covariant)));
+    EXPECT_TRUE(
+        structural_eq(reassemble(ctx, expanded, b), make_dot(ctx, a, y)));
+}
+
+TEST(Reassemble, FoldsInsideACross)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* y = make_tensor_object(ctx, make_tensor_name("y"), {}, 1);
+
+    auto const* expanded = steps::canonicalize(
+        ctx,
+        make_cross(ctx, expand_in_basis(ctx, a, b, Variance::Covariant), y));
+    EXPECT_TRUE(
+        structural_eq(reassemble(ctx, expanded, b), make_cross(ctx, a, y)));
+}
+
+TEST(Reassemble, FoldsIntoARank2Operand)
+{
+    // The nested basis vector may sit against a higher-rank invariant:
+    // Σ_i a_i (e_i·B) → a·B.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, make_dot(ctx, expand_in_basis(ctx, a, b, Variance::Covariant), B));
+    EXPECT_TRUE(
+        structural_eq(reassemble(ctx, expanded, b), make_dot(ctx, a, B)));
+}
+
+TEST(Reassemble, SurvivesAnUnrelatedScalarFactor)
+{
+    // The "pollution" that used to defeat the fold: a neighbouring factor that
+    // has nothing to do with the summed index.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* y = make_tensor_object(ctx, make_tensor_name("y"), {}, 1);
+    auto const* s = make_tensor_object(ctx, make_tensor_name("s"), {}, 0);
+
+    auto const* expanded = steps::canonicalize(
+        ctx,
+        make_tensor_product(
+            ctx,
+            s,
+            make_dot(ctx, expand_in_basis(ctx, a, b, Variance::Covariant), y)));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        reassemble(ctx, expanded, b),
+        make_tensor_product(ctx, s, make_dot(ctx, a, y))));
+}
+
+TEST(Reassemble, ASecondCarrierInTheSameOperandStillBlocks)
+{
+    // The relaxed block test must not go too far: when the summed index occurs
+    // in the contraction operand *besides* the basis vector — here c_i beside
+    // e_i — the term is not a clean fold and is left alone.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_tensor_product(
+            ctx,
+            coord(ctx, b, "a", {i}),
+            make_dot(
+                ctx,
+                make_tensor_product(
+                    ctx, coord(ctx, b, "c", {i}), b.covariant_vector(ctx, i)),
+                make_tensor_object(ctx, make_tensor_name("y"), {}, 1))));
+    // canonicalize floats c_i up beside a_i, so the settled shape is
+    // Σ_i a_i c_i (e_i·y): one basis site, but *two* carriers on i.  Realizing
+    // either would drop the other, so the fold must decline.
+    auto const* canon = steps::canonicalize(ctx, term);
+    EXPECT_TRUE(structural_eq(reassemble(ctx, canon, b), canon));
+}
+
+TEST(Reassemble, TwoCarriersOnOneIndexDoNotFold)
+{
+    // The same hazard with nothing nested: Σ_i a_i c_i e_i has one basis vector
+    // and two coordinate carriers on i.  Neither may claim the site — folding
+    // to `a` or `c` would silently discard the other factor.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = steps::canonicalize(
+        ctx,
+        make_explicit_sum(
+            ctx,
+            i,
+            make_tensor_product(
+                ctx,
+                make_tensor_product(
+                    ctx, coord(ctx, b, "a", {i}), coord(ctx, b, "c", {i})),
+                b.covariant_vector(ctx, i))));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), term));
+}
+
+TEST(Reassemble, RefusesRank2AtANestedSite)
+{
+    // A rank-2 realization drops one basis site and places the invariant at the
+    // other; inside a contraction neither move is safe, and a wrong slot
+    // orientation would be silent (e_i's position says "first slot", but a Dot
+    // contracts the last).  Refusing is the correct failure.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* y = make_tensor_object(ctx, make_tensor_name("y"), {}, 1);
+
+    auto const* expanded = steps::canonicalize(
+        ctx, make_dot(ctx, expand_in_basis(ctx, A, b, Variance::Covariant), y));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), expanded));
+}
+
+TEST(Reassemble, IndexOrderPicksTheDoubleDot)
+{
+    // The counted fold: a pair of carriers sharing two indices contracts in one
+    // move, and the *order* of those indices picks which double dot.  A_ij B_ij
+    // is A:B; A_ji B_ij is A··B.  They are different tensors, so the pairing is
+    // read off the indices rather than assumed.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* B = make_tensor_object(ctx, make_tensor_name("B"), {}, 2);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+
+    auto term = [&](std::vector<CountableIndex> const& a_ids)
+    {
+        return make_explicit_sum(
+            ctx,
+            i,
+            make_explicit_sum(
+                ctx,
+                j,
+                make_tensor_product(
+                    ctx,
+                    coord(ctx, b, "A", a_ids),
+                    coord(ctx, b, "B", {i, j}))));
+    };
+
+    EXPECT_TRUE(
+        structural_eq(reassemble(ctx, term({i, j}), b), make_ddot(ctx, A, B)));
+    EXPECT_TRUE(structural_eq(
+        reassemble(ctx, term({j, i}), b), make_ddot_alt(ctx, A, B)));
+}
+
+TEST(Reassemble, DoubleDotLeavesTheUncontractedLegs)
+{
+    // The stiffness fold: C_{ijkl} e_{lk} → C··e, a rank-4 carrier keeping its
+    // first two legs.  Nothing upstream can *produce* this form yet —
+    // expand_double_dot handles only 2-leg dyads — so it is built directly.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto l = CountableIndex{ctx.alloc_index_id()};
+
+    // Σ_k Σ_l C_{ijkl} e_{lk} e_i e_j, with i and j realized against the frame.
+    auto const* body = make_tensor_product(
+        ctx,
+        make_tensor_product(
+            ctx, coord(ctx, b, "C", {i, j, k, l}), coord(ctx, b, "e", {l, k})),
+        make_tensor_product(
+            ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j)));
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_explicit_sum(
+            ctx, j, make_explicit_sum(ctx, k, make_explicit_sum(ctx, l, body))));
+
+    auto const* C = make_tensor_object(ctx, make_tensor_name("C"), {}, 4);
+    auto const* e = make_tensor_object(ctx, make_tensor_name("e"), {}, 2);
+    EXPECT_TRUE(
+        structural_eq(reassemble(ctx, term, b), make_ddot_alt(ctx, C, e)));
+}
+
+TEST(Reassemble, ThreeSharedIndicesAreRefused)
+{
+    // A pair sharing three indices has no surface operator — there is no
+    // triple dot — so the fold declines rather than inventing one.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+
+    auto const* term = steps::canonicalize(
+        ctx,
+        make_explicit_sum(
+            ctx,
+            i,
+            make_explicit_sum(
+                ctx,
+                j,
+                make_explicit_sum(
+                    ctx,
+                    k,
+                    make_tensor_product(
+                        ctx,
+                        coord(ctx, b, "A", {i, j, k}),
+                        coord(ctx, b, "B", {i, j, k}))))));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), term));
+}
+
+TEST(Reassemble, MiddleSlotContractionIsRefused)
+{
+    // C_{ikjl} e_{lk}: the shared ids k and l do not sit on C's trailing slots,
+    // so no double dot expresses this pairing — it would need an interposed
+    // transpose.  A wrong pairing is undetectable downstream, so the fold
+    // declines (vibe 000103).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto l = CountableIndex{ctx.alloc_index_id()};
+
+    auto const* body = make_tensor_product(
+        ctx,
+        make_tensor_product(
+            ctx, coord(ctx, b, "C", {i, k, j, l}), coord(ctx, b, "e", {l, k})),
+        make_tensor_product(
+            ctx, b.covariant_vector(ctx, i), b.covariant_vector(ctx, j)));
+    auto const* term = steps::canonicalize(
+        ctx,
+        make_explicit_sum(
+            ctx,
+            i,
+            make_explicit_sum(
+                ctx,
+                j,
+                make_explicit_sum(ctx, k, make_explicit_sum(ctx, l, body)))));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), term));
+}
+
+TEST(Reassemble, DoubleDotKeepsTheRightCarriersLegs)
+{
+    // A_{ij} C_{ijkl} e_k e_l → (A:C), the surviving legs coming from the
+    // *right* carrier this time — the mirror of the stiffness fold above.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto l = CountableIndex{ctx.alloc_index_id()};
+
+    auto const* body = make_tensor_product(
+        ctx,
+        make_tensor_product(
+            ctx, coord(ctx, b, "A", {i, j}), coord(ctx, b, "C", {i, j, k, l})),
+        make_tensor_product(
+            ctx, b.covariant_vector(ctx, k), b.covariant_vector(ctx, l)));
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_explicit_sum(
+            ctx, j, make_explicit_sum(ctx, k, make_explicit_sum(ctx, l, body))));
+
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* C = make_tensor_object(ctx, make_tensor_name("C"), {}, 4);
+    EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), make_ddot(ctx, A, C)));
+}
+
 TEST(Reassemble, TraceFold)
 {
     // Σ_k B_{kk} (a coordinate component with a repeated summed index) → tr(B),

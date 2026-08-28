@@ -1553,6 +1553,18 @@ auto fold_reassembly_groups(
             }
             else if (c.legs.size() == 1) // vector leg → place at its basis vec
             {
+                // Honour the classifier's verdict.  It is the only place that
+                // knows an id carries a *second* carrier or a foreign factor;
+                // realizing such an id anyway would place this carrier at the
+                // basis site and silently drop the other one (Σ_i a_i c_i
+                // (e_i·y) folding to c·y).  Before nested sites existed this
+                // was masked by in_basis being empty for anything but a bare
+                // basis vector — masked, not decided.
+                if (kind[c.legs[0]] != Kind::Leg)
+                {
+                    ok = false;
+                    break;
+                }
                 auto const& bp = in_basis[c.legs[0]];
                 if (bp.size() != 1)
                 {
@@ -1570,6 +1582,12 @@ auto fold_reassembly_groups(
             }
             else if (c.legs.size() == 2) // tensor → place at the leftmost basis
             {
+                if (kind[c.legs[0]] != Kind::Leg
+                    || kind[c.legs[1]] != Kind::Leg)
+                {
+                    ok = false; // see the rank-1 branch
+                    break;
+                }
                 auto const& b0 = in_basis[c.legs[0]];
                 auto const& b1 = in_basis[c.legs[1]];
                 if (b0.size() != 1 || b1.size() != 1)
