@@ -112,6 +112,78 @@ contract" (vibe 000078).  The index-as-pointer idea is therefore already
 That is a good sign for the design: it was arrived at once before, under
 pressure, for one case.
 
+## Correction from the user's examples: the unit is a *cluster*, and the fold is *counted*
+
+The table above was written with one shape in mind — a component slot against
+its basis vector.  The user's two examples are a different class, and they
+break the "pair of factors, look up a pattern" framing in a way that improves
+it.
+
+### (a) The five dot-product spellings are *one* row, not five
+
+```
+    a_i b_i             (orthonormal)
+    a_i b^i   a^i b_i   (mixed variance)
+    a_i b_j g^{ij}      a^i b^j g_{ij}
+```
+
+All five are the same cluster: **two coordinate slots joined through a metric**,
+where the orthonormal and mixed-variance spellings are the degenerate cases in
+which the metric is δ and has been elided.  Writing them as five rows would be
+the vibe-000100 treadmill in miniature; writing them as one row with a guard is
+the point of the design.  The guard is already available — `Basis::is_orthonormal()`
+and the basis `Realm` — so the pass can *check* rather than assume, which
+matters because `a_i b_i = a·b` is simply false in an oblique basis.
+
+Note this row has no basis vector in it at all.  The existing rows fold a
+component against `e^i` and yield an **invariant tensor**; this one folds a
+component against another component and yields a **contraction of invariants**.
+Two different outputs, same mechanism.
+
+### (b) `C_{ijkl} e_{lk}` shows the fold is decided by *count and order*
+
+```
+    C_{ijkl} e_{kl}  =  C : e        [DDot,    (a⊗b):(c⊗d) → (a·c)(b·d)]
+    C_{ijkl} e_{lk}  =  C ·· e       [DDotAlt, (a⊗b)··(c⊗d) → (a·d)(b·c)]
+```
+
+Both are well-formed, both fold, and they are **different tensors**.  So the
+fold is not selected by a stored pattern at all — it is computed from two facts
+the incidence structure already carries:
+
+- **how many indices the two clusters share** — one gives `·`, two give a
+  double dot, and in general *n* gives an *n*-fold contraction;
+- **in what order** — the permutation matching the shared index sequence
+  against slot order picks `:` from `··`.
+
+That is *more* mechanical than a pattern table, and it subsumes rows rather
+than adding them: `a_i b_i` is the n=1 case of the same rule that gives
+`C·· e` at n=2.  The dot-product row and the stiffness row are one row.
+
+### The hazard this creates, and the rule for it
+
+A wrong permutation is **silent** — it yields a well-formed expression that is
+simply not equal to the input.  So the pass must **refuse rather than guess**:
+when the shared indices sit in an order the surface language cannot name
+(`C_{ikjl} e_{lk}`, which needs a transpose interposed), the fold does not
+fire.  Declining to fold leaves the expression correct; folding to the wrong
+pairing does not.  This is the one place in the design where an extra
+capability is worse than a missing one.
+
+### Revised table
+
+| what the index cluster connects | folds to | today |
+|---|---|---|
+| coordinate slot ↔ basis vector `e^i` | the invariant | `reassemble`, whole-term only |
+| `δ` ↔ any slot | index substitution | ✓ `contract_delta` |
+| `ε` ↔ `ε` | δδ − δδ | ✓ `contract_eps_pair` |
+| `ε` ↔ two vector slots | a cross product | gap — 000017 |
+| *n* coordinate slots ↔ *n* coordinate slots, through a metric | an *n*-fold contraction, pairing fixed by the index order | gap — 000018 (n=1), stiffness (n=2) |
+| coefficient `c_i` ↔ `∂_i` mark | the operator | gap — 000024 |
+
+Six rows, of which the fifth is now a *family* parameterised by n and a
+permutation — which is where most of the reach is.
+
 ## Status
 
 Design proposal, unscheduled.  It supersedes vibe 000100's option (A) by
