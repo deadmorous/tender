@@ -1030,6 +1030,16 @@ NB_MODULE(_core, m)
         "each unapplied Deriv acts on everything to its right in its term.");
 
     md.def(
+        "_fold_operator",
+        [](PyExpr const& e, PyExpr const& op) -> PyExpr
+        { return derive(e, steps::fold_operator(*e.ctx, e.expr, op.expr)); },
+        "expr"_a,
+        "op"_a,
+        "Fold a derivation operator's expansion back into the operator (vibe "
+        "000103): a complete group of addends that applying op produced "
+        "collapses to op left unapplied.");
+
+    md.def(
         "_simplify_scalars",
         [](PyExpr const& e) -> PyExpr
         { return derive(e, steps::simplify_scalars(*e.ctx, e.expr)); },

@@ -135,31 +135,89 @@ def test_the_nabla_leibniz_rules_are_derived_not_asserted():
     )
 
 
-@harness.level(
-    "L2",
-    expected=False,
-    reason="the derived form stays in components: here the summed index joins "
-    "a coefficient c_i to a ∂_i mark rather than to a basis vector, and no "
-    "fold reads that pairing yet (vibe 000103's operator row) — the "
-    "contraction-descending reassembly it was blamed on is now in place",
-)
+@harness.level("L2")
 def test_the_derivation_returns_to_invariant_form():
-    """What is still missing: the trip home.
+    """The trip home: from components back to direct notation.
 
-    Everything above ends in components — `f ∂_x g i + …` — and cannot be
-    folded back into `∇`.  Vibe 000103 removed one suspected cause: `reassemble`
-    *does* now descend into a contraction operand, so a coordinate paired with a
-    basis vector nested inside a dot folds fine.  That is not what blocks this.
+    Everything above ends in components — `f ∂ₓg i + …` — because that is what
+    applying the operator produces.  Stating the *result* as an identity needs
+    the return trip, and `apply_operators` had no inverse.
 
-    What blocks it is a different row of the same fold table: the summed index
-    here connects a coefficient `c_i` to a **∂_i mark**, not to a basis vector,
-    and nothing reads that pairing yet.  The `link` tying a free-index ∂ to its
-    frame vector already exists in the representation (vibe 000078) — what is
-    missing is a pass that acts on it.  Until then a *derived* Leibniz rule
-    cannot be restated as the invariant identity the library ships, which is why
-    those rules remain asserted.
+    `fold_operator` is that inverse, and it is the operator row of vibe 000103's
+    fold table: the summed direction joins a coefficient `c_k` to a `∂_k` mark,
+    and reading that pairing back is what folds the group into the operator.
+    Where the other rows fold one index cluster, this one folds a *complete
+    group of addends* — every direction present, all agreeing on the operand,
+    the sign, and the company — which is the same completeness argument
+    `fold_resolution_of_identity` makes for `Σ_k e_k⊗e_k = I`.
+
+    The caller passes the operator, and with it the claim that this expansion
+    *is* that operator.  That is deliberate: nothing in the library knows that
+    `i∂ₓ + j∂_y` deserves to be read back as one thing, and ∇⊥ has no name here
+    — it was assembled in the test.  This is vibe 000102's Q2 answered the way
+    it was posed: the user declares the equivalence and owns it.
     """
-    harness.todo(
-        "fold Σ_i c_i ⊗ ∂_i(f g) back to f ∇g + g ∇f in direct notation "
-        "(needs the coefficient↔∂-mark row of vibe 000103's fold table)"
+    ws, cart, (x, y, z), e = _setup()
+    f, g, h = (cart.field(n, 0) for n in "fgh")
+    grad_perp = e.direction(0) * td.deriv(x) + e.direction(1) * td.deriv(y)
+
+    applied = td.simplify_scalars(td.apply_operators(grad_perp * (f * g)))
+    folded = td.fold_operator(applied, grad_perp)
+    show("∇⊥(fg), folded back", folded)
+    harness.assert_algebraic_eq(
+        folded,
+        f * (grad_perp * g) + g * (grad_perp * f),
+        "∇⊥(fg) = f ∇⊥g + g ∇⊥f, in direct notation",
     )
+    # No derivative marks survive: the ∂'s are back inside the operator.
+    assert "partial_{x} f" not in folded.latex()
+
+    # n-ary, likewise — the rule the L1 test above derives, now statable.
+    ternary = td.fold_operator(
+        td.simplify_scalars(td.apply_operators(grad_perp * (f * g * h))),
+        grad_perp,
+    )
+    show("∇⊥(fgh), folded back", ternary)
+    harness.assert_algebraic_eq(
+        ternary,
+        f * g * (grad_perp * h)
+        + f * h * (grad_perp * g)
+        + g * h * (grad_perp * f),
+        "∇⊥(fgh), the three-factor rule in direct notation",
+    )
+
+    # An incomplete group is not this operator: one direction alone stays put
+    # rather than being folded into something it is not.
+    partial = td.simplify_scalars(
+        td.apply_operators(e.direction(0) * td.deriv(x) * f)
+    )
+    assert td.structural_eq(td.fold_operator(partial, grad_perp), partial)
+
+
+@harness.level("L2")
+def test_the_library_operator_returns_to_its_own_name():
+    """The same round trip for ∇, which the library *does* name.
+
+    ∇⊥ folds back to its expansion because it has no name.  ∇ does have one, so
+    its trip home ends in the symbol itself: expand it into the frame, let
+    Leibniz act, and `reassemble_nabla` reads the frame-vector/∂-mark pairing
+    back into a chart-free ∇.  The shipped `leibniz` rules state this identity;
+    here it is obtained.
+    """
+    ws, cart, (x, y, z), e = _setup()
+    # expand_nabla needs a uniform ∂_i, so the fields depend on every
+    # coordinate rather than on a named subset.
+    f, g = ws.field("f", 0), ws.field("g", 0)
+
+    expanded = cart.expand_nabla(ws.nabla() * (f * g))
+    show("∇(fg) in the frame", expanded)
+    derived = td.simplify_scalars(td.apply_operators(expanded))
+    back = cart.reassemble_nabla(derived)
+    show("∇(fg), folded back", back)
+
+    harness.assert_algebraic_eq(
+        back,
+        f * (ws.nabla() * g) + g * (ws.nabla() * f),
+        "∇(fg) = f∇g + g∇f, derived and restated invariantly",
+    )
+    assert "partial" not in back.latex()

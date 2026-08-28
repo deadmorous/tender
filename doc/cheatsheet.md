@@ -247,6 +247,7 @@ Any of these can be passed to `.step()` or called directly.
 | `partial(expr, coord)` | ∂expr/∂coord: linearity + Leibniz + quotient + chain rules; only the matching coord →1, all else constant; result canonical | Differentiate w.r.t. a non-coordinate |
 | `deriv(coord)` | The unapplied ∂/∂coord operator (a `Deriv` node); build `deriv(x)*f` then `apply_operators` | Differentiate immediately (use `partial`) |
 | `apply_operators` | Carry out the first-class ∂ operators by Leibniz, rightmost-first | — |
+| `fold_operator(expr, op)` | The inverse: fold a *complete* group of addends that applying `op = Σ_k c_k ⊗ ∂_{q_k}` produced back into `op` left unapplied (`f ∂ₓg i + f ∂_y g j → f ⊗ (op ⊗ g)`). You supply `op`, and with it the claim that this expansion is that operator | Fold an incomplete group, members disagreeing on operand/sign/company, or a non-scalar factor alongside — each is left as written |
 | `sym(A)` / `skew(A)` | `(A±Aᵀ)/2` builders (`A=sym+skew`) | Recognise the *result* as (anti)symmetric |
 | `structural_eq(a, b)` | `bool` — deep structural tree equality | Algebraic equality |
 | `algebraic_eq(a, b)` | `bool` — T0-canonical equality, falling back to `simplify_scalars(a−b)==0` (so `x/r+y/r == (x+y)/r`) | — |

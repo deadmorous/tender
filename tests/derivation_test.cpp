@@ -4387,6 +4387,153 @@ TEST(Nabla, GradDivRotAreProductsWithNablaLeft)
 
 // The elementary rules fire through application: ∂_x x = 1, ∂_x y = 0 (distinct
 // coordinates independent), ∂_x f is the formal derivative field.
+// ---- folding an operator back out of its expansion (vibe 000103) ---------
+
+namespace
+{
+
+// A hand-built ∇⊥ = i ∂_x + j ∂_y, plus the pieces to state what it does.
+struct PerpOperator final
+{
+    Expr const* op;
+    Expr const* i;
+    Expr const* j;
+    Expr const* x;
+    Expr const* y;
+};
+
+auto make_perp(Context& ctx) -> PerpOperator
+{
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0, false);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 7, 1, false);
+    auto* i = make_tensor_object(ctx, make_tensor_name("i"), {}, 1);
+    auto* j = make_tensor_object(ctx, make_tensor_name("j"), {}, 1);
+    auto* op = make_sum(
+        ctx,
+        make_tensor_product(ctx, i, make_deriv(ctx, x)),
+        make_tensor_product(ctx, j, make_deriv(ctx, y)));
+    return {op, i, j, x, y};
+}
+
+} // namespace
+
+TEST(FoldOperator, ProductRuleReturnsToDirectNotation)
+{
+    // ∇⊥(fg) applied gives four component terms; folding returns the product
+    // rule as a statement, with no ∂-marks left standing.
+    Context ctx;
+    auto p = make_perp(ctx);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* g = make_field(ctx, make_tensor_name("g"), 0, {});
+
+    auto* applied = steps::apply_operators(
+        ctx, make_tensor_product(ctx, p.op, make_tensor_product(ctx, f, g)));
+    auto* folded = steps::fold_operator(ctx, applied, p.op);
+
+    auto* expected = make_sum(
+        ctx,
+        make_tensor_product(ctx, f, make_tensor_product(ctx, p.op, g)),
+        make_tensor_product(ctx, g, make_tensor_product(ctx, p.op, f)));
+    EXPECT_TRUE(algebraic_eq(ctx, folded, expected));
+}
+
+TEST(FoldOperator, RoundTripsASingleApplication)
+{
+    // The plain inverse of apply_operators: ∇⊥f expanded and folded back.
+    Context ctx;
+    auto p = make_perp(ctx);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* applied =
+        steps::apply_operators(ctx, make_tensor_product(ctx, p.op, f));
+
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::fold_operator(ctx, applied, p.op),
+        make_tensor_product(ctx, p.op, f)));
+}
+
+TEST(FoldOperator, IncompleteGroupIsLeftAlone)
+{
+    // One direction on its own is not this operator.  Folding it would claim a
+    // j-term that was never there.
+    Context ctx;
+    auto p = make_perp(ctx);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* only_x = steps::apply_operators(
+        ctx,
+        make_tensor_product(
+            ctx, make_tensor_product(ctx, p.i, make_deriv(ctx, p.x)), f));
+
+    EXPECT_TRUE(structural_eq(steps::fold_operator(ctx, only_x, p.op), only_x));
+}
+
+TEST(FoldOperator, MembersMustAgreeOnTheOperand)
+{
+    // i ∂_x f + j ∂_y g has both directions, but they differentiate different
+    // fields — it is not the operator applied to anything.
+    Context ctx;
+    auto p = make_perp(ctx);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* g = make_field(ctx, make_tensor_name("g"), 0, {});
+    auto* mixed = steps::apply_operators(
+        ctx,
+        make_sum(
+            ctx,
+            make_tensor_product(
+                ctx, make_tensor_product(ctx, p.i, make_deriv(ctx, p.x)), f),
+            make_tensor_product(
+                ctx, make_tensor_product(ctx, p.j, make_deriv(ctx, p.y)), g)));
+
+    EXPECT_TRUE(structural_eq(steps::fold_operator(ctx, mixed, p.op), mixed));
+}
+
+TEST(FoldOperator, SignsMustAgree)
+{
+    // i ∂_x f − j ∂_y f is not ∇⊥f; the group must share one sign.
+    Context ctx;
+    auto p = make_perp(ctx);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* opposed = steps::apply_operators(
+        ctx,
+        make_difference(
+            ctx,
+            make_tensor_product(
+                ctx, make_tensor_product(ctx, p.i, make_deriv(ctx, p.x)), f),
+            make_tensor_product(
+                ctx, make_tensor_product(ctx, p.j, make_deriv(ctx, p.y)), f)));
+
+    EXPECT_TRUE(
+        structural_eq(steps::fold_operator(ctx, opposed, p.op), opposed));
+}
+
+TEST(FoldOperator, RejectsAnOperatorItCannotRead)
+{
+    // Not a sum of at least two distinct concrete directions: nothing to
+    // complete, so the step is a no-op rather than a guess.
+    Context ctx;
+    auto p = make_perp(ctx);
+    auto* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto* applied =
+        steps::apply_operators(ctx, make_tensor_product(ctx, p.op, f));
+
+    // A single-direction "operator".
+    auto* one = make_tensor_product(ctx, p.i, make_deriv(ctx, p.x));
+    EXPECT_TRUE(
+        structural_eq(steps::fold_operator(ctx, applied, one), applied));
+    // The same direction twice.
+    auto* twice = make_sum(
+        ctx,
+        make_tensor_product(ctx, p.i, make_deriv(ctx, p.x)),
+        make_tensor_product(ctx, p.j, make_deriv(ctx, p.x)));
+    EXPECT_TRUE(
+        structural_eq(steps::fold_operator(ctx, applied, twice), applied));
+    // An addend with no ∂ at all.
+    auto* bare =
+        make_sum(ctx, p.i, make_tensor_product(ctx, p.j, make_deriv(ctx, p.y)));
+    EXPECT_TRUE(
+        structural_eq(steps::fold_operator(ctx, applied, bare), applied));
+}
+
 TEST(ApplyOperators, ElementaryRules)
 {
     Context ctx;

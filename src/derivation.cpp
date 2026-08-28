@@ -3885,6 +3885,84 @@ auto abstract_nabla_over_expanded_basis(Context& ctx, Expr const* e) -> bool
     return nabla && frame_vector;
 }
 
+// ---- folding an operator back out of its expansion (vibe 000103) ---------
+//
+// One term of a derivation operator: the coefficient standing beside ∂, and the
+// coordinate ∂ differentiates.
+struct OpTerm final
+{
+    Expr const* coeff;
+    TensorName coord_name;
+    CoordinateRef wrt;
+};
+
+// Read an operator expression Σ_k c_k ⊗ ∂_{q_k} into its terms.  nullopt if an
+// addend is not exactly one concrete ∂ beside a non-empty coefficient, if a
+// direction repeats, or if there is only one direction (nothing to complete).
+auto parse_operator(Context& ctx, Expr const* op)
+    -> std::optional<std::vector<OpTerm>>
+{
+    std::vector<Expr const*> addends;
+    collect_addends(op, addends);
+    std::vector<OpTerm> terms;
+    for (auto const* addend: addends)
+    {
+        std::vector<Expr const*> factors;
+        flatten_factors(addend, factors);
+        Expr const* wrt = nullptr;
+        std::vector<Expr const*> coeff;
+        for (auto const* f: factors)
+        {
+            if (auto const* d = std::get_if<Deriv>(&f->node))
+            {
+                if (wrt)
+                    return std::nullopt; // two ∂'s in one term
+                wrt = d->wrt;
+                continue;
+            }
+            coeff.push_back(f);
+        }
+        if (!wrt || coeff.empty())
+            return std::nullopt;
+        auto const* q = std::get_if<TensorObject>(&wrt->node);
+        if (!q || !q->traits || !q->traits->coordinate)
+            return std::nullopt;
+        OpTerm t{product_of(ctx, coeff), q->name, *q->traits->coordinate};
+        for (auto const& prev: terms)
+            if (prev.wrt.chart_id == t.wrt.chart_id
+                && prev.wrt.slot == t.wrt.slot)
+                return std::nullopt; // a direction twice
+        terms.push_back(t);
+    }
+    if (terms.size() < 2)
+        return std::nullopt;
+    return terms;
+}
+
+// If `e` is a field carrying a concrete ∂-mark for `t`'s coordinate, return the
+// field with that one mark removed — the operand the operator was applied to.
+// Marks are kept sorted because mixed partials commute, so *which* matching
+// mark is dropped cannot matter.
+auto strip_deriv_mark(Context& ctx, Expr const* e, OpTerm const& t)
+    -> std::optional<Expr const*>
+{
+    auto const* f = std::get_if<TensorObject>(&e->node);
+    if (!f || f->deriv_marks.empty())
+        return std::nullopt;
+    for (std::size_t m = 0; m < f->deriv_marks.size(); ++m)
+    {
+        auto const& mark = f->deriv_marks[m];
+        if (mark.free || mark.coord_name != t.coord_name
+            || mark.wrt.chart_id != t.wrt.chart_id
+            || mark.wrt.slot != t.wrt.slot)
+            continue;
+        TensorObject o = *f;
+        o.deriv_marks.erase(o.deriv_marks.begin() + static_cast<long>(m));
+        return ctx.make<Expr>(std::move(o));
+    }
+    return std::nullopt;
+}
+
 // Scan the tree for the two operator node kinds that matter to
 // `apply_operators`: the concrete `Deriv` (a frame ∂ that `expand_nabla` emits
 // and that this step actually applies) and the abstract `Nabla` (a bare ∇ that
@@ -4584,6 +4662,125 @@ auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*
         cur = next;
     }
     return implicitize(ctx, cur);
+}
+
+auto fold_operator(Context& ctx, Expr const* e, Expr const* op) -> Expr const*
+{
+    auto const terms = parse_operator(ctx, op);
+    if (!terms)
+        return e;
+    auto const k_count = terms->size();
+
+    // What one addend contributes: which direction it carries, the field the
+    // operator was applied to, and the factors standing alongside.
+    struct Hit final
+    {
+        std::size_t k;
+        Expr const* base;
+        std::vector<Expr const*> rest;
+    };
+    auto match = [&](Expr const* addend) -> std::optional<Hit>
+    {
+        std::vector<Expr const*> factors;
+        flatten_factors(addend, factors);
+        for (std::size_t k = 0; k < k_count; ++k)
+        {
+            auto const& t = (*terms)[k];
+            int ci = -1;
+            for (std::size_t p = 0; p < factors.size(); ++p)
+                if (ci < 0 && structural_eq(factors[p], t.coeff))
+                    ci = static_cast<int>(p);
+            if (ci < 0)
+                continue;
+            for (std::size_t p = 0; p < factors.size(); ++p)
+            {
+                if (static_cast<int>(p) == ci)
+                    continue;
+                auto base = strip_deriv_mark(ctx, factors[p], t);
+                if (!base)
+                    continue;
+                Hit h{k, *base, {}};
+                for (std::size_t r = 0; r < factors.size(); ++r)
+                    if (static_cast<int>(r) != ci && r != p)
+                    {
+                        // Only scalar company: with a tensor factor alongside,
+                        // where the folded operator belongs in the product
+                        // order would be a guess.
+                        if (infer_rank(factors[r]).value_or(1) != 0)
+                            return std::nullopt;
+                        h.rest.push_back(factors[r]);
+                    }
+                return h;
+            }
+        }
+        return std::nullopt;
+    };
+
+    return rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* node) -> Expr const*
+        {
+            auto const addends = view::signed_addends(node);
+            if (addends.size() < k_count)
+                return node;
+
+            std::vector<std::optional<Hit>> hits;
+            hits.reserve(addends.size());
+            for (auto const& a: addends)
+                hits.push_back(match(a.body));
+
+            std::vector<bool> used(addends.size(), false);
+            std::map<std::size_t, Expr const*> folded;
+            for (std::size_t a = 0; a < addends.size(); ++a)
+            {
+                if (used[a] || !hits[a])
+                    continue;
+                // Collect one partner per remaining direction, agreeing on the
+                // field, the company, and the sign.  A group that stays
+                // incomplete is not this operator and is left as written.
+                std::vector<std::size_t> members{a};
+                std::set<std::size_t> seen{hits[a]->k};
+                for (std::size_t b = a + 1;
+                     b < addends.size() && seen.size() < k_count;
+                     ++b)
+                {
+                    if (used[b] || !hits[b] || seen.count(hits[b]->k)
+                        || addends[b].sign != addends[a].sign
+                        || !structural_eq(hits[b]->base, hits[a]->base)
+                        || hits[b]->rest.size() != hits[a]->rest.size())
+                        continue;
+                    bool same = true;
+                    for (std::size_t r = 0; r < hits[a]->rest.size(); ++r)
+                        same =
+                            same
+                            && structural_eq(hits[b]->rest[r], hits[a]->rest[r]);
+                    if (!same)
+                        continue;
+                    members.push_back(b);
+                    seen.insert(hits[b]->k);
+                }
+                if (seen.size() != k_count)
+                    continue;
+                for (auto m: members)
+                    used[m] = true;
+                std::vector<Expr const*> out = hits[a]->rest;
+                out.push_back(make_tensor_product(c, op, hits[a]->base));
+                folded[a] = product_of(c, out);
+            }
+            if (folded.empty())
+                return node;
+
+            std::vector<nf::SignedExpr> rebuilt;
+            for (std::size_t a = 0; a < addends.size(); ++a)
+            {
+                if (auto it = folded.find(a); it != folded.end())
+                    rebuilt.push_back({addends[a].sign, it->second});
+                else if (!used[a])
+                    rebuilt.push_back(addends[a]);
+            }
+            return view::sum_of(c, rebuilt);
+        });
 }
 
 } // namespace steps

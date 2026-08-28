@@ -270,6 +270,31 @@ auto partial(Context& ctx, Expr const* e, Expr const* coord, bool canon = true)
 // result canonicalized.
 auto apply_operators(Context& ctx, Expr const* e) -> Expr const*;
 
+// Fold a derivation operator's own expansion back into the operator — the
+// operator row of vibe 000103's fold table, and the return trip that
+// `apply_operators` has no inverse for.
+//
+// `op` is any expression of the shape Σ_k c_k ⊗ ∂_{q_k}: what a frame vector
+// and `deriv` build by hand, and what a Cartesian chart's ∇ expands to.
+// Wherever `e` holds the *complete* group of addends that applying `op` to some
+// operand T produced — every direction present, all agreeing on T, on their
+// sign, and on the scalar factors standing alongside — the group collapses back
+// to those factors times `op ⊗ T`:
+//
+//   f (∂ₓg) i + f (∂_y g) j  →  f ⊗ ((i∂ₓ + j∂_y) ⊗ g)
+//
+// The caller supplies `op`, and with it the claim that this expansion *is* that
+// operator: the library cannot know that i∂ₓ + j∂_y deserves to be read back as
+// one thing rather than left as four terms (vibe 000102 Q2 — the user declares
+// the equivalence, and owns it).
+//
+// Refusals, each leaving the expression exactly as written: an incomplete group
+// (a direction missing), members disagreeing on the operand or their company, a
+// non-scalar factor alongside (where the folded operator belongs in the product
+// order would be a guess), and an `op` that is not a sum of at least two
+// distinct concrete directions.  Walks the whole tree.
+auto fold_operator(Context& ctx, Expr const* e, Expr const* op) -> Expr const*;
+
 // vibe 000081: an abstract surface ∇ (a `Nabla` node) cannot be canonicalized
 // once the basis has been expanded into concrete frame vectors.  Canon has no
 // normal form for ∇ nested in a ⊗-fence: it either silently drops the gradient

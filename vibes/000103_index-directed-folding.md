@@ -177,9 +177,9 @@ capability is worse than a missing one.
 | coordinate slot ↔ basis vector `e^i` | the invariant | `reassemble`, whole-term only |
 | `δ` ↔ any slot | index substitution | ✓ `contract_delta` |
 | `ε` ↔ `ε` | δδ − δδ | ✓ `contract_eps_pair` |
-| `ε` ↔ two vector slots | a cross product | gap — 000017 |
-| *n* coordinate slots ↔ *n* coordinate slots, through a metric | an *n*-fold contraction, pairing fixed by the index order | gap — 000018 (n=1), stiffness (n=2) |
-| coefficient `c_i` ↔ `∂_i` mark | the operator | gap — 000024 |
+| `ε` ↔ two vector slots (+ a leg, or a third) | a cross, or the triple product | ✓ challenge 000017 |
+| *n* coordinate slots ↔ *n* coordinate slots, through a metric | an *n*-fold contraction, pairing fixed by the index order | ✓ orthonormal; the metric variant is still open (000018) |
+| coefficient `c_k` ↔ `∂_k` mark | the operator | ✓ `fold_operator`, challenge 000024 |
 
 Six rows, of which the fifth is now a *family* parameterised by n and a
 permutation — which is where most of the reach is.
@@ -257,8 +257,55 @@ a separate, upstream gap.
   component forms were built from `a·b`, so folding one back proves nothing
   about the metric.  It still needs `tender.metric` and the inverse-metric axiom.
 
-Four of the six table rows now work.  The two gaps left are ε→cross and
-coefficient→∂.
+## The remaining two rows, since built
+
+**ε (challenge 000017 → L2).**  ε is well-known, so it is not a coordinate
+carrier and the classifier used to let it block its own three indices.  It is
+now set aside and matched against what those indices connect: two on rank-1
+carriers plus one on a basis vector is a cross realized at that leg; all three
+on carriers is the scalar triple product.  The slot *order* fixes the result, as
+it did for the double dots — ε is totally antisymmetric, so rotating the leg
+index to the front is sign-free (ε_abc = ε_bca = ε_cab), and the remaining two
+in that rotated order are the operands.
+
+It refuses rather than guesses in four places: non-orthonormal or left-handed
+frames (where the ε weight would have to come back too), an index shared by
+*two* ε's (that is the ε-pair contraction's business, so `(a×b)×c` is left
+alone), a repeated index inside one ε, and a carrier of rank ≥ 2 (ε does not say
+which slot would be the operand).
+
+`Carrier` gained a `folds` field — ids it has absorbed that no later step will
+see.  They are released, their Σ binders dropped, only if the carrier is
+actually realized, so a blob that fails still leaves them bound.
+
+**The operator row (challenge 000024 → L2).**  This one folds differently from
+the rest, and the difference is the interesting part.  The other rows fold *one
+index cluster* inside a term.  Here the summed direction is spread across a
+whole **group of addends** — `f ∂ₓg i + f ∂_y g j` is one operator application
+wearing two terms — so the unit is a complete group, and the argument for
+folding it is completeness, exactly as in `fold_resolution_of_identity`
+(`Σ_k e_k⊗e_k = I`).  `steps::fold_operator(e, op)` is the inverse
+`apply_operators` never had.
+
+The caller supplies `op`.  That is not a shortcut: nothing in the library knows
+that `i∂ₓ + j∂_y` deserves to be read back as one thing, and in challenge 000024
+the operator has no name at all — it is assembled in the test.  This is
+vibe 000102's Q2 answered the way it was posed, with the user declaring the
+equivalence and owning it.  ∇, which the library *does* name, keeps its own
+route: `reassemble_nabla` folds the frame-vector/∂-mark pairing back to the
+symbol.
+
+Refusals again: an incomplete group, members disagreeing on the operand, sign,
+or company, a non-scalar factor alongside (where the folded operator belongs in
+the product order would be a guess), and an `op` that is not a sum of at least
+two distinct concrete directions.
+
+## What is left
+
+Five of the six rows work.  The one gap is the **metric** variant of the
+contraction row — `a_i b_j g^{ij}` in an oblique basis — which is challenge
+000018, and which needs `tender.metric` on the Python surface and the
+inverse-metric axiom before the fold has anything to read.
 
 ## Status
 

@@ -52,6 +52,7 @@ __all__ = [
     "partial",
     "deriv",
     "apply_operators",
+    "fold_operator",
     "simplify_scalars",
     "simplify",
     "Identity",
@@ -414,6 +415,30 @@ def apply_operators(expr):
     ``apply_operators(deriv(x) * f)`` is the derivative ``∂_x f``.
     """
     return _d._apply_operators(expr)
+
+
+def fold_operator(expr, op):
+    """Fold a derivation operator's expansion back into the operator.
+
+    The return trip :func:`apply_operators` has no inverse for (vibe 000103's
+    operator row).  ``op`` is any expression of the shape ``Σ_k c_k ⊗ ∂_{q_k}``
+    — what a frame vector and :func:`deriv` build by hand, and what a Cartesian
+    chart's ``∇`` expands to.  Wherever ``expr`` holds the *complete* group of
+    addends that applying ``op`` to some operand produced, the group collapses
+    back to ``op`` left unapplied::
+
+        f (∂ₓg) i + f (∂_y g) j   →   f ⊗ ((i∂ₓ + j∂_y) ⊗ g)
+
+    You supply ``op``, and with it the claim that this expansion *is* that
+    operator: the library cannot know that ``i∂ₓ + j∂_y`` deserves to be read
+    back as one thing rather than left as four terms.
+
+    An incomplete group, members disagreeing on the operand or on the factors
+    beside them, or a non-scalar factor alongside (where the folded operator
+    belongs in the product order would be a guess) all leave the expression
+    exactly as written.
+    """
+    return _d._fold_operator(expr, op)
 
 
 def simplify_scalars(expr):
