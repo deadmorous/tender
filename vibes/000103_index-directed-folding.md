@@ -178,7 +178,7 @@ capability is worse than a missing one.
 | `δ` ↔ any slot | index substitution | ✓ `contract_delta` |
 | `ε` ↔ `ε` | δδ − δδ | ✓ `contract_eps_pair` |
 | `ε` ↔ two vector slots (+ a leg, or a third) | a cross, or the triple product | ✓ challenge 000017 |
-| *n* coordinate slots ↔ *n* coordinate slots, through a metric | an *n*-fold contraction, pairing fixed by the index order | ✓ orthonormal; the metric variant is still open (000018) |
+| *n* coordinate slots ↔ *n* coordinate slots, through a metric | an *n*-fold contraction, pairing fixed by the index order | ✓ orthonormal (`reassemble`); oblique via `contract_metric`, challenge 000018 |
 | coefficient `c_k` ↔ `∂_k` mark | the operator | ✓ `fold_operator`, challenge 000024 |
 
 Six rows, of which the fifth is now a *family* parameterised by n and a
@@ -300,12 +300,31 @@ or company, a non-scalar factor alongside (where the folded operator belongs in
 the product order would be a guess), and an `op` that is not a sum of at least
 two distinct concrete directions.
 
+**The metric row (challenge 000018 → L2).**  This one did not become a
+`reassemble` fold at all, and the reason is worth recording: the round-trip it
+would have enabled — fold `g^{ij} a_i b_j` back to `a·b`, re-expand covariantly
+— is the one the challenge's own route doc rejects as evasion.  Both component
+forms were *produced* from `a·b`, so folding one back proves nothing about the
+metric.  The content of the claim is the index gymnastics, so the derivation had
+to stay in components.
+
+What it needed was `tender.metric` on the surface (now bound beside `delta`) and
+one operation, not the two planned: `contract_metric` spends a metric to move an
+index — the survivor is g's *other* index at g's *other* level.  Read three ways
+that is raising, lowering, and the inverse pair, since raising `g_{pk}`'s lower
+index gives `g^i{}_k`, and a g whose slots straddle the divide *is* δ
+(`g^i{}_j = e^i·e_j`).  So `metric-inverse` never needed postulating as a
+separate axiom; it falls out of what raising does.  `insert_metric(level)` runs
+it backwards, paying a metric to move an index the other way.
+
+Modelled on `contract_delta`, which is the precedent: a step for a derivation to
+use, with a DAG node reserved for a rule the e-graph fires.  Extracting the
+shared mechanics — the distributed-sum guard, the factor drop, the partner
+search — made `contract_delta` shorter rather than longer.
+
 ## What is left
 
-Five of the six rows work.  The one gap is the **metric** variant of the
-contraction row — `a_i b_j g^{ij}` in an oblique basis — which is challenge
-000018, and which needs `tender.metric` on the Python surface and the
-inverse-metric axiom before the fold has anything to read.
+All six rows work.
 
 ## Status
 

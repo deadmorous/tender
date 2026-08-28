@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**24 challenges** — 21 at L2, 2 at L1, 1 at L0.
+**24 challenges** — 22 at L2, 1 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -49,7 +49,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 |---|---|---|---|
 | 000004 | a·b = b·a through the basis | **L2 performed** | Gibbs–Wilson, Vector Analysis; examples/basis_dot_product.py |
 | 000017 | reassemble ∘ expand_in_basis = id (shape battery) | **L2 performed** | vibes 000053/000061/000063 (reassembly engine) |
-| 000018 | a·b = g_ij a^i b^j in an oblique basis | L1 verified | Lurie, Theory of Elasticity, tensor-calculus appendix |
+| 000018 | a·b = g_ij a^i b^j in an oblique basis | **L2 performed** | Lurie, Theory of Elasticity, tensor-calculus appendix |
 
 ## Tier C — Vector calculus (invariant ∇)
 

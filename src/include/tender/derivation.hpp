@@ -122,6 +122,42 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*;
 // a genuine no-op returns the original expression untouched.
 auto contract_delta(Context& ctx, Expr const* e) -> Expr const*;
 
+// Contract a metric against a summed index — raising, lowering, and the
+// inverse-metric pair, which are one operation read three ways (vibe 000103's
+// metric row).  Where δ merely identifies its two indices, g also moves the
+// survivor across the upper/lower divide: the surviving index is g's *other*
+// index, at g's *other* level.
+//
+//   Σ_p g^{ip} a_p    → a^i          raise
+//   Σ_p g_{ip} a^p    → a_i          lower
+//   Σ_p g^{ip} g_{pk} → δ^i{}_k      the inverse pair, since a g whose slots
+//                                    straddle the divide *is* the Kronecker δ
+//                                    (g^i{}_j = e^i·e_j) — normalized here so
+//                                    `contract_delta` can finish the job
+//
+// The partner index must sit at the level opposite g's, which is what Einstein
+// summation in an Oblique realm demands anyway; a same-level pair is not a
+// contraction and is left alone, as is a g with no partner occurrence.
+// Self-prepares (expand_products + canonicalize) like `contract_delta`, and is
+// a no-op — returning the input untouched — when nothing contracts.
+// The companion to `contract_metric`, moving a coordinate's index the other
+// way by *introducing* the metric that pays for it — the "lower both indices"
+// step a textbook raising/lowering derivation opens with:
+//
+//   Σ_m a^m b_m , target Upper  →  Σ_m Σ_n g_{mn} a^m b^n
+//   Σ_m a^m b_m , target Lower  →  Σ_m Σ_n g^{mn} a_n b_m
+//
+// Every summed coordinate slot sitting at the level opposite `target` moves to
+// a fresh index at `target`, and a metric carrying the old and new indices at
+// the opposite level restores the balance.  Well-known objects (δ, ε, and g
+// itself) are skipped — they are the currency the move is paid in, not what is
+// being moved, which is also what makes the step terminate.  Orthonormal slots
+// are left alone, the distinction being empty there.  A no-op when nothing
+// converts.
+auto insert_metric(Context& ctx, Expr const* e, Level target) -> Expr const*;
+
+auto contract_metric(Context& ctx, Expr const* e) -> Expr const*;
+
 // Contract the identity tensor against a dot product: I · x → x and x · I → x
 // (the identity tensor acts as the identity under ·).  Walks the whole tree;
 // dots not involving the identity are left unchanged.

@@ -175,6 +175,7 @@ methods above). These take an explicit `ctx=` when used directly:
 | `sin/cos/tan/exp/log/sqrt(x)` | `Expr` | Elementary scalar functions of a scalar field |
 | `tr(A)` / `vec(A)` / `transpose(A)` | `Expr` | Free-function forms of the `Expr` methods |
 | `delta(realm, space, level0, level1, idx0, idx1, ctx=)` | `Expr` | Kronecker delta (indexed) |
+| `metric(realm, space, level0, level1, idx0, idx1, ctx=)` | `Expr` | Metric tensor `g` (indexed): `g_ij = eᵢ·eⱼ`, `g^ij = eⁱ·eʲ`, and mixed levels are δ |
 | `levi_civita(realm, space, levels, indices, ctx=)` | `Expr` | Levi-Civita symbol (indexed) |
 | `explicit_sum(index, body, ctx=)` | `Expr` | Annotate `body` with an explicit Σ over `index` |
 | `no_sum(index, body, ctx=)` | `Expr` | Suppress implicit summation over `index` |
@@ -234,6 +235,8 @@ Any of these can be passed to `.step()` or called directly.
 | `eval_eps_concrete` | Levi-Civita with concrete indices → its permutation sign / 0 | Touch symbolic-index ε |
 | `expand_eps` | Every rank-3 ε → its 6-term δ cofactor expansion | — |
 | `contract_delta` | `Σ_m δᵐ_a·δᵐ_b → δ_{ab}` | — |
+| `contract_metric` | Spend a metric to move an index: `g^{ip} a_p → a^i` (raise), `g_{ip} a^p → a_i` (lower), `g^{ip} g_{pk} → δ^i_k`. The survivor is `g`'s *other* index at `g`'s *other* level | Fire on a same-level pair (not an Einstein contraction) or a `g` with no partner |
+| `insert_metric(expr, level)` | The inverse: move summed coordinate slots to `level`, introducing the metric that pays for it (`a^m b_m → g_{mn} a^m b^n`) | Touch δ/ε/`g` (the currency, not the cargo — this is also what makes it terminate) or orthonormal slots |
 | `contract_identity` | `I·x→x`, `x·I→x` | — |
 | `contract_eps_pair` | `Σ ε·ε` sharing summed indices → generalized δ (3D, exactly two rank-3 ε's) | Any other shape |
 | `distribute_contraction` | `op(L, A⊗B)→op(L,A)⊗B` (·/× over the adjacent ⊗ leg), one pass | Cross a ∇-fence (barrier) |

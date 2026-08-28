@@ -155,6 +155,44 @@ auto substitute(Context& ctx, Expr const* e, int idx_id, ConcreteIndex val)
 // throughout the tensor-object slots of `e`.  The index→index sibling of
 // `substitute` (which maps an index to a concrete value); used by
 // `contract_delta` to identify a Kronecker δ's two indices.
+// Substitute index `from_id` with `to`, and set the *level* of every slot that
+// carried it.  This is where raising and lowering differ from a δ contraction:
+// δ merely identifies two indices, while g moves the survivor across the
+// upper/lower divide (g^{ip} a_p = a^i, not a_i).
+auto substitute_index_leveled(
+    Context& ctx, Expr const* e, int from_id, IndexAssoc to, Level to_level)
+    -> Expr const*
+{
+    return rewrite_tree(
+        ctx,
+        e,
+        [from_id, &to, to_level](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&e->node);
+            if (!t)
+                return e;
+            auto slots = t->slots;
+            bool changed = false;
+            for (auto& sb: slots)
+            {
+                if (!sb.index)
+                    continue;
+                if (auto const* ci = std::get_if<CountableIndex>(&*sb.index);
+                    ci && ci->id == from_id)
+                {
+                    sb.index = to;
+                    sb.slot.level = to_level;
+                    changed = true;
+                }
+            }
+            if (!changed)
+                return e;
+            TensorObject obj = *t;
+            obj.slots = std::move(slots);
+            return ctx.make<Expr>(std::move(obj));
+        });
+}
+
 auto substitute_index(Context& ctx, Expr const* e, int from_id, IndexAssoc to)
     -> Expr const*
 {
@@ -2191,6 +2229,120 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*
         });
 }
 
+// ---- shared mechanics of the index-contraction steps --------------------
+//
+// δ and g contract the same way — find the object carrying the summed index,
+// drop it, and rewrite that index in what remains.  They differ only in what
+// they do to the survivor: δ merely identifies two indices, while g also moves
+// the survivor across the upper/lower divide.  These three helpers are the part
+// that does not differ.
+
+// Whether a term's multiplicative core holds a distributed sum.  Substituting
+// the summed index across a ± would wrongly identify one addend's indices in
+// another, so such a term is left for `expand_products` to split first.
+auto core_is_distributed(Expr const* body) -> bool
+{
+    Expr const* core = body;
+    for (bool peeled = true; peeled;)
+    {
+        peeled = false;
+        if (auto const* es = std::get_if<ExplicitSum>(&core->node);
+            es && !es->bound)
+            core = es->body, peeled = true;
+        else if (auto const* ns = std::get_if<NoSum>(&core->node))
+            core = ns->body, peeled = true;
+        else if (auto const* ng = std::get_if<Negate>(&core->node))
+            core = ng->operand, peeled = true;
+    }
+    std::vector<Expr const*> facs;
+    flatten_factors(core, facs);
+    for (auto const* f: facs)
+        if (std::holds_alternative<Sum>(f->node)
+            || std::holds_alternative<Difference>(f->node))
+            return true;
+    return false;
+}
+
+// Remove `target` from a multiplicative position (δ and g are rank 0, so the
+// surrounding tensor product closes over the hole).  nullptr when the target
+// was the sole factor — a degenerate term left for another step.
+auto drop_factor(Context& ctx, Expr const* body, Expr const* target)
+    -> Expr const*
+{
+    std::function<Expr const*(Expr const*)> go =
+        [&](Expr const* node) -> Expr const*
+    {
+        if (node == target)
+            return nullptr; // signal: this leg was the object
+        if (auto const* p = std::get_if<TensorProduct>(&node->node))
+        {
+            auto const* l = go(p->left);
+            auto const* r = go(p->right);
+            if (l == p->left && r == p->right)
+                return node;
+            if (!l)
+                return r;
+            if (!r)
+                return l;
+            return make_tensor_product(ctx, l, r);
+        }
+        if (auto const* es = std::get_if<ExplicitSum>(&node->node))
+        {
+            auto const* b = go(es->body);
+            return b == es->body ?
+                       node :
+                       make_explicit_sum(ctx, es->index, b, es->bound);
+        }
+        if (auto const* ns = std::get_if<NoSum>(&node->node))
+        {
+            auto const* b = go(ns->body);
+            return b == ns->body ? node : make_no_sum(ctx, ns->index, b);
+        }
+        if (auto const* ng = std::get_if<Negate>(&node->node))
+        {
+            auto const* b = go(ng->operand);
+            if (b == ng->operand)
+                return node;
+            return b ? make_negate(ctx, b) : nullptr;
+        }
+        return node;
+    };
+    return go(body);
+}
+
+// The slot of the first occurrence of index `m` in `e` — the partner the
+// contraction acts on.  nullopt when nothing else carries it (Σ_m δ^m_k with no
+// partner is a plain 1, not ours to collapse).
+auto find_partner_slot(Context& ctx, Expr const* e, int m)
+    -> std::optional<IndexSlot>
+{
+    std::optional<IndexSlot> found;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* node) -> Expr const*
+        {
+            if (found)
+                return node;
+            auto const* t = std::get_if<TensorObject>(&node->node);
+            if (!t)
+                return node;
+            for (auto const& sb: t->slots)
+            {
+                if (!sb.index)
+                    continue;
+                if (auto const* ci = std::get_if<CountableIndex>(&*sb.index);
+                    ci && ci->id == m)
+                {
+                    found = sb.slot;
+                    return node;
+                }
+            }
+            return node;
+        });
+    return found;
+}
+
 auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
 {
     // Self-prepare so the caller never has to: distribute products over sums
@@ -2239,26 +2391,8 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             // the remaining binders and sign to the multiplicative core and
             // bail on a distributed sum; let expand_products split the term
             // first.
-            {
-                Expr const* core = s->body;
-                for (bool peeled = true; peeled;)
-                {
-                    peeled = false;
-                    if (auto const* es = std::get_if<ExplicitSum>(&core->node);
-                        es && !es->bound)
-                        core = es->body, peeled = true;
-                    else if (auto const* ns = std::get_if<NoSum>(&core->node))
-                        core = ns->body, peeled = true;
-                    else if (auto const* ng = std::get_if<Negate>(&core->node))
-                        core = ng->operand, peeled = true;
-                }
-                std::vector<Expr const*> facs;
-                flatten_factors(core, facs);
-                for (auto const* f: facs)
-                    if (std::holds_alternative<Sum>(f->node)
-                        || std::holds_alternative<Difference>(f->node))
-                        return e;
-            }
+            if (core_is_distributed(s->body))
+                return e;
 
             // Locate the first δ in the body that carries index m, returning
             // the δ node and the partner index n in its other slot (n must
@@ -2311,49 +2445,7 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             if (!delta)
                 return e;
 
-            // Drop the located δ from a multiplicative position (it is rank 0,
-            // so removing it leaves the surrounding tensor product intact).
-            std::function<Expr const*(Expr const*)> drop =
-                [&](Expr const* node) -> Expr const*
-            {
-                if (node == delta)
-                    return nullptr; // signal: this leg was the δ
-                auto const* p = std::get_if<TensorProduct>(&node->node);
-                if (p)
-                {
-                    auto const* l = drop(p->left);
-                    auto const* r = drop(p->right);
-                    if (l == p->left && r == p->right)
-                        return node;
-                    if (!l)
-                        return r;
-                    if (!r)
-                        return l;
-                    return make_tensor_product(ctx, l, r);
-                }
-                if (auto const* es = std::get_if<ExplicitSum>(&node->node))
-                {
-                    auto const* b = drop(es->body);
-                    return b == es->body ?
-                               node :
-                               make_explicit_sum(ctx, es->index, b, es->bound);
-                }
-                if (auto const* ns = std::get_if<NoSum>(&node->node))
-                {
-                    auto const* b = drop(ns->body);
-                    return b == ns->body ? node :
-                                           make_no_sum(ctx, ns->index, b);
-                }
-                if (auto const* ng = std::get_if<Negate>(&node->node))
-                {
-                    auto const* b = drop(ng->operand);
-                    if (b == ng->operand)
-                        return node;
-                    return b ? make_negate(ctx, b) : nullptr;
-                }
-                return node;
-            };
-            auto const* without = drop(s->body);
+            auto const* without = drop_factor(ctx, s->body, delta);
             // The δ was the sole factor (e.g. Σ_m δ_mn with n free) —
             // degenerate; leave it for another step.
             if (!without)
@@ -2364,35 +2456,9 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             // partner, and contractions across mismatched realms, are not ours
             // to collapse).  Levels need not match — δ identifies its indices
             // regardless of which slot is up or down.
-            IndexSlot partner_slot{};
-            bool partner_found = false;
-            rewrite_tree(
-                ctx,
-                without,
-                [&](Context&, Expr const* node) -> Expr const*
-                {
-                    if (partner_found)
-                        return node;
-                    auto const* t = std::get_if<TensorObject>(&node->node);
-                    if (!t)
-                        return node;
-                    for (auto const& sb: t->slots)
-                    {
-                        if (!sb.index)
-                            continue;
-                        auto const* ci =
-                            std::get_if<CountableIndex>(&*sb.index);
-                        if (ci && ci->id == m)
-                        {
-                            partner_slot = sb.slot;
-                            partner_found = true;
-                            return node;
-                        }
-                    }
-                    return node;
-                });
-            if (!partner_found || partner_slot.realm != m_slot.realm
-                || partner_slot.space != m_slot.space)
+            auto const partner_slot = find_partner_slot(ctx, without, m);
+            if (!partner_slot || partner_slot->realm != m_slot.realm
+                || partner_slot->space != m_slot.space)
                 return e;
 
             fired = true;
@@ -2404,6 +2470,236 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
     // left behind, so the result stays in implicit form (e.g. δ_ij δ_ij → δ_ii,
     // not Σ_i δ_ii).
     return fired ? implicitize(ctx, out) : e;
+}
+
+auto insert_metric(Context& ctx, Expr const* e, Level target) -> Expr const*
+{
+    bool fired = false;
+    Expr const* prepped = e;
+    try
+    {
+        prepped = canonicalize(ctx, expand_products(ctx, e));
+    }
+    catch (std::invalid_argument const&)
+    {
+        return e;
+    }
+    Level const paid = target == Level::Upper ? Level::Lower : Level::Upper;
+
+    auto const* out = rewrite_tree(
+        ctx,
+        prepped,
+        [&fired, target, paid](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* s = std::get_if<ExplicitSum>(&e->node);
+            if (!s || s->bound)
+                return e;
+            int const m = s->index.id;
+            if (core_is_distributed(s->body))
+                return e;
+
+            // Find the coordinate carrying m at the *wrong* level — the one
+            // this step converts.  Well-known objects (δ, ε, g itself) are
+            // skipped: they are the currency the conversion is paid in, not
+            // what is being converted, and rewriting them would not terminate.
+            Expr const* victim = nullptr;
+            IndexSlot victim_slot{};
+            rewrite_tree(
+                ctx,
+                s->body,
+                [&](Context&, Expr const* node) -> Expr const*
+                {
+                    if (victim)
+                        return node;
+                    auto const* t = std::get_if<TensorObject>(&node->node);
+                    if (!t || (t->traits && t->traits->well_known))
+                        return node;
+                    for (auto const& sb: t->slots)
+                    {
+                        if (!sb.index || sb.slot.level == target
+                            || sb.slot.realm == Realm::Orthonormal)
+                            continue;
+                        auto const* ci =
+                            std::get_if<CountableIndex>(&*sb.index);
+                        if (ci && ci->id == m)
+                        {
+                            victim = node;
+                            victim_slot = sb.slot;
+                            return node;
+                        }
+                    }
+                    return node;
+                });
+            if (!victim)
+                return e;
+
+            // b_m → g_{mn} b^n: the coordinate's slot moves to a fresh index at
+            // the target level, and the metric that pays for the move carries
+            // both the old and the new index at the opposite level.
+            CountableIndex const fresh{ctx.alloc_index_id()};
+            auto const* moved = rewrite_tree(
+                ctx,
+                s->body,
+                [&](Context& c, Expr const* node) -> Expr const*
+                {
+                    if (node != victim)
+                        return node;
+                    auto const* t = std::get_if<TensorObject>(&node->node);
+                    auto slots = t->slots;
+                    for (auto& sb: slots)
+                    {
+                        if (!sb.index)
+                            continue;
+                        auto const* ci =
+                            std::get_if<CountableIndex>(&*sb.index);
+                        if (ci && ci->id == m)
+                        {
+                            sb.index = IndexAssoc{fresh};
+                            sb.slot.level = target;
+                        }
+                    }
+                    TensorObject obj = *t;
+                    obj.slots = std::move(slots);
+                    return c.make<Expr>(std::move(obj));
+                });
+
+            fired = true;
+            auto const* g = make_metric(
+                ctx,
+                victim_slot.realm,
+                victim_slot.space,
+                paid,
+                paid,
+                IndexAssoc{CountableIndex{m}},
+                IndexAssoc{fresh});
+            return make_explicit_sum(
+                ctx,
+                s->index,
+                make_explicit_sum(
+                    ctx, fresh, make_tensor_product(ctx, g, moved), nullptr),
+                nullptr);
+        });
+    return fired ? implicitize(ctx, out) : e;
+}
+
+auto contract_metric(Context& ctx, Expr const* e) -> Expr const*
+{
+    // Self-prepares exactly as contract_delta does, and for the same reasons.
+    bool fired = false;
+    Expr const* prepped = e;
+    try
+    {
+        prepped = canonicalize(ctx, expand_products(ctx, e));
+    }
+    catch (std::invalid_argument const&)
+    {
+        return e;
+    }
+    auto const* out = rewrite_tree(
+        ctx,
+        prepped,
+        [&fired](Context& ctx, Expr const* e) -> Expr const*
+        {
+            auto const* s = std::get_if<ExplicitSum>(&e->node);
+            if (!s || s->bound)
+                return e;
+            int const m = s->index.id;
+            if (core_is_distributed(s->body))
+                return e;
+
+            // Find a metric carrying m, and read off what the survivor becomes:
+            // g's *other* index, at g's *other* level.  That single rule is
+            // raising, lowering, and the inverse pair at once —
+            //   g^{ip} a_p → a^i,  g_{ip} a^p → a_i,  g^{ip} g_{pk} → g^i{}_k.
+            Expr const* g = nullptr;
+            IndexAssoc partner;
+            IndexSlot m_slot{}; // g's slot carrying m
+            Level survivor_level = Level::Lower;
+            rewrite_tree(
+                ctx,
+                s->body,
+                [&](Context&, Expr const* node) -> Expr const*
+                {
+                    if (g)
+                        return node;
+                    auto const* t = std::get_if<TensorObject>(&node->node);
+                    if (!t || !t->traits
+                        || t->traits->well_known != WellKnownKind::Metric
+                        || t->slots.size() != 2)
+                        return node;
+                    auto const& s0 = t->slots[0];
+                    auto const& s1 = t->slots[1];
+                    if (!s0.index || !s1.index)
+                        return node;
+                    if (s0.slot.realm != s1.slot.realm
+                        || s0.slot.space != s1.slot.space)
+                        return node;
+                    auto carries = [&](IndexAssoc const& a)
+                    {
+                        auto const* ci = std::get_if<CountableIndex>(&a);
+                        return ci && ci->id == m;
+                    };
+                    if (carries(*s0.index) && !carries(*s1.index))
+                        g = node, partner = *s1.index, m_slot = s0.slot,
+                        survivor_level = s1.slot.level;
+                    else if (carries(*s1.index) && !carries(*s0.index))
+                        g = node, partner = *s0.index, m_slot = s1.slot,
+                        survivor_level = s0.slot.level;
+                    return node;
+                });
+            if (!g)
+                return e;
+
+            auto const* without = drop_factor(ctx, s->body, g);
+            if (!without)
+                return e; // Σ_m g^{mn} alone — nothing to raise
+
+            auto const partner_slot = find_partner_slot(ctx, without, m);
+            if (!partner_slot || partner_slot->realm != m_slot.realm
+                || partner_slot->space != m_slot.space)
+                return e;
+            // A genuine raise or lower straddles the divide: g's index and the
+            // partner's must sit at opposite levels, which is what Einstein
+            // summation in an Oblique realm demands anyway.  Same-level pairs
+            // are not a contraction and are left alone.
+            if (partner_slot->realm != Realm::Orthonormal
+                && partner_slot->level == m_slot.level)
+                return e;
+
+            fired = true;
+            return substitute_index_leveled(
+                ctx, without, m, partner, survivor_level);
+        });
+    if (!fired)
+        return e;
+    // g whose slots straddle the divide *is* the Kronecker δ — that is what the
+    // reciprocal basis means (g^i{}_j = e^i·e_j = δ^i_j), and it is how the
+    // inverse-metric pair g^{ip} g_{pk} arrives here.  Normalizing it lets the
+    // δ machinery finish the job.
+    out = rewrite_tree(
+        ctx,
+        out,
+        [](Context& ctx, Expr const* node) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&node->node);
+            if (!t || !t->traits
+                || t->traits->well_known != WellKnownKind::Metric
+                || t->slots.size() != 2)
+                return node;
+            auto const& s0 = t->slots[0];
+            auto const& s1 = t->slots[1];
+            if (!s0.index || !s1.index || s0.slot.level == s1.slot.level)
+                return node;
+            return make_delta(
+                ctx,
+                s0.slot.realm,
+                s0.slot.space,
+                s0.slot.level,
+                s1.slot.level,
+                *s0.index,
+                *s1.index);
+        });
+    return implicitize(ctx, out);
 }
 
 namespace

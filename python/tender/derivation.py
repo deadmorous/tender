@@ -52,6 +52,8 @@ __all__ = [
     "partial",
     "deriv",
     "apply_operators",
+    "contract_metric",
+    "insert_metric",
     "fold_operator",
     "simplify_scalars",
     "simplify",
@@ -415,6 +417,48 @@ def apply_operators(expr):
     ``apply_operators(deriv(x) * f)`` is the derivative ``∂_x f``.
     """
     return _d._apply_operators(expr)
+
+
+def insert_metric(expr, target):
+    """Move summed coordinate indices to ``target`` level, introducing the metric.
+
+    The companion to :func:`contract_metric`, and the "lower both indices" move
+    a textbook raising/lowering derivation opens with::
+
+        Σ_m a^m b_m,  target=Level.Upper  →  Σ_m Σ_n g_{mn} a^m b^n
+        Σ_m a^m b_m,  target=Level.Lower  →  Σ_m Σ_n g^{mn} a_n b_m
+
+    Every summed coordinate slot at the level opposite ``target`` moves to a
+    fresh index at ``target``, and a metric carrying the old and new indices at
+    the opposite level restores the balance.  Well-known objects (δ, ε, and
+    ``g`` itself) are skipped — they are the currency the move is paid in, not
+    what is being moved, which is also what makes the step terminate.
+    Orthonormal slots are left alone; the distinction is empty there.
+    """
+    return _d._insert_metric(expr, target)
+
+
+def contract_metric(expr):
+    """Contract a metric against a summed index — raise, lower, or the inverse pair.
+
+    Where :func:`contract_delta` merely identifies its two indices, ``g`` also
+    moves the survivor across the upper/lower divide: the surviving index is
+    ``g``'s *other* index, at ``g``'s *other* level.  One operation, read three
+    ways::
+
+        Σ_p g^{ip} a_p     →  a^i           raise
+        Σ_p g_{ip} a^p     →  a_i           lower
+        Σ_p g^{ip} g_{pk}  →  δ^i_k         the inverse pair
+
+    The last falls out of the first two: a ``g`` whose slots straddle the divide
+    *is* the Kronecker δ (``g^i_j = e^i·e_j``), so it is normalized to one and
+    :func:`contract_delta` can finish.
+
+    The partner index must sit at the level opposite ``g``'s — what Einstein
+    summation in an oblique realm demands anyway.  A same-level pair, or a ``g``
+    with no partner occurrence, is left exactly as written.
+    """
+    return _d._contract_metric(expr)
 
 
 def fold_operator(expr, op):

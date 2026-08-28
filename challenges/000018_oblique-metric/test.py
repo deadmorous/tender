@@ -92,24 +92,84 @@ def test_mixed_variance_folds_the_metric_into_delta():
     assert "a^{i}" in contracted.latex() and "b_{i}" in contracted.latex()
 
 
-@harness.level(
-    "L2",
-    expected=False,
-    reason="needs, in order: the metric exposed to Python at all (no "
-    "tender.metric), the axiom g^ij g_jk = δ^i_k, and lowering a_i = g_ij a^j. "
-    "The round-trip alternative (reassemble to a·b, re-expand) is separately "
-    "blocked and would be a weaker proof — see meta/l2-route.md",
-)
+@harness.level("L2")
 def test_the_three_forms_are_mutually_equal():
-    """All three expansions are the same scalar — but tender cannot yet say so.
+    """All three forms converted into one another, inside the index algebra.
 
-    Each form above is correct, and each comes from the *same* invariant a·b,
-    so they are equal by construction.  Showing it *within* the component
-    algebra is a different matter: it needs the raising/lowering identity
-    g_ij g^jk = δ_i^k to convert one form into another, and there is no step
-    or rule for that.  That is the concrete gap this challenge names.
+    Each form above is correct, and each came from the *same* invariant a·b —
+    which is exactly why folding one back to a·b and re-expanding would prove
+    nothing.  The content of this claim is the index gymnastics itself: that
+    g_ij and g^ij are mutually inverse, and that raising and lowering are
+    consistent.  So the derivation below never leaves component form.
+
+    Two steps do it, and they are one operation read in both directions.
+    `contract_metric` spends a metric to move an index — the surviving index is
+    g's *other* index at g's *other* level — and `insert_metric` pays one to
+    move it back:
+
+        g^ij a_i b_j   →   a^i b_i   →   g_ij a^i b^j
+                     raise a       lower b
+
+    The mixed form in the middle is the one that needs no metric at all, which
+    is the whole point of the level convention.
     """
-    harness.todo(
-        "raise/lower indices with g_ij g^jk = δ_i^k so the covariant, "
-        "contravariant and mixed forms of a·b can be converted into one another"
+    ctx, frame, a, b = _setup()
+    co, contra = tb.Variance.Covariant, tb.Variance.Contravariant
+
+    contravariant = _reduce(frame, tb.expand_in_basis(a @ b, frame, contra))
+    covariant = _reduce(frame, tb.expand_in_basis(a @ b, frame, co))
+    show("start:  g^ij a_i b_j", contravariant)
+
+    mixed = td.contract_metric(contravariant)
+    show("raise a → a^i b_i", mixed)
+    assert "g" not in mixed.latex(), mixed.latex()
+    assert "a^{i}" in mixed.latex() and "b_{i}" in mixed.latex()
+
+    lowered = td.insert_metric(mixed, tender.Level.Upper)
+    show("lower b → g_ij a^i b^j", lowered)
+    harness.assert_algebraic_eq(
+        lowered, covariant, "g^ij a_i b_j converted into g_ij a^i b^j"
     )
+
+    # And the round the other way, so neither direction is privileged.
+    raised = td.insert_metric(mixed, tender.Level.Lower)
+    show("raise b → g^ij a_i b_j", raised)
+    harness.assert_algebraic_eq(
+        raised, contravariant, "the mixed form converted back to g^ij a_i b_j"
+    )
+
+
+@harness.level("L2")
+def test_the_metric_and_its_inverse_are_inverse():
+    """g^ij g_jk = δ^i_k — the fact the conversions above rest on.
+
+    Contracting the inverse metric against the metric is the same single
+    operation: raising the lower index of g_jk gives g^i_k, and a g whose slots
+    straddle the upper/lower divide *is* the Kronecker δ — that is what the
+    reciprocal basis means (g^i_j = e^i·e_j).  So the axiom is not a separate
+    rule to be postulated; it falls out of what raising does.
+    """
+    ctx, frame, a, b = _setup()
+    i, j, k = (ctx.alloc_index() for _ in range(3))
+    U, L = tender.Level.Upper, tender.Level.Lower
+
+    def g(level0, level1, x, y):
+        return tender.metric(
+            tender.Realm.Oblique, tender.space_3d, level0, level1, x, y, ctx=ctx
+        )
+
+    pair = g(U, U, i, j) * g(L, L, j, k)
+    show("g^ij g_jk", pair)
+    contracted = td.contract_metric(pair)
+    show("contracted", contracted)
+    assert "delta" in contracted.latex(), contracted.latex()
+    assert "g" not in contracted.latex(), contracted.latex()
+
+    # And it then contracts like any δ, so the derivation can carry on:
+    # δ^i_k g^kl = g^il.  (The partner's k must sit at the opposite level —
+    # a same-level pair is not an Einstein contraction, and nothing fires.)
+    l = ctx.alloc_index()
+    onto = td.contract_delta(contracted * g(U, U, k, l))
+    show("δ^i_k g^kl", onto)
+    assert "delta" not in onto.latex(), onto.latex()
+    assert "g" in onto.latex(), onto.latex()

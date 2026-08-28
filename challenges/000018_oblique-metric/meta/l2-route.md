@@ -62,6 +62,40 @@ contract the inverse metric, contract δ — in the style of challenge 000014.
 - `metric-lower` — **derived**, cites nothing (proved from the definition of
   components, like the other component-level nodes), proof = this challenge.
 
+## Resolved (vibe 000103)
+
+The plan below was followed, with one change of shape worth recording.
+
+Blocker zero — no `tender.metric` — is fixed; `metric(realm, space, level0,
+level1, idx0, idx1)` is now bound alongside `delta`.
+
+The other two turned out to be **one operation**, not two, and it belongs as a
+*step* rather than as DAG rules.  `contract_metric` spends a metric to move an
+index: the surviving index is `g`'s other index, at `g`'s other level.  Read
+three ways that is raising (`g^{ip} a_p → a^i`), lowering (`g_{ip} a^p → a_i`),
+and the inverse pair — because raising `g_{pk}`'s lower index gives `g^i{}_k`,
+and a `g` whose slots straddle the divide *is* the Kronecker δ (`g^i{}_j =
+e^i·e_j`).  So `metric-inverse` never needed postulating as a separate axiom; it
+falls out of what raising does, which is a better outcome than the planned
+axiom.  `insert_metric(level)` is the same operation run backwards, paying a
+metric to move an index the other way — the "lower both indices" move the
+textbook derivation opens with.
+
+Modelled on `contract_delta`, which is the precedent: a step for the derivation
+to use, with the DAG node reserved for a rule the e-graph fires.  No rule was
+added, so no node was.
+
+The derivation is then three lines and never leaves component form:
+
+    g^ij a_i b_j  →  a^i b_i  →  g_ij a^i b^j
+              raise a      lower b
+
+One caveat found while testing: contracting moves whichever factor the step
+reaches first, so `a^m b_m` and `a_m b^m` are both "the mixed form" and are not
+structurally equal.  Converting between *those two* also needs the metric —
+which is the fact this challenge is about, so it is fitting rather than
+awkward.
+
 ## Correction: why reassembly really fails (and what would fix it)
 
 The note above blamed the metric absorbing the basis vectors.  Measurement
@@ -82,7 +116,9 @@ altogether**, leaving `a_i b_i` — recognisable by a different path.  In an
 oblique basis `g^ij` is not δ, so nothing contracts away and the term never
 reaches that shape.
 
-The fix is therefore two independent pieces:
+The fix is therefore two independent pieces (**both since built** — (b) in
+vibe 000103's first commit, (a) as `contract_metric`/`insert_metric` — though
+the L2 uses the direct route below, not this one):
 
 **(a) `g^ij = e^i·e^j`** — the definition of the metric, and the exact inverse
 of what `simplify_basis_dot` does.  Reintroduces the basis vectors:

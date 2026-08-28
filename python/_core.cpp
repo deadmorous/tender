@@ -742,6 +742,39 @@ NB_MODULE(_core, m)
         "Create a Kronecker delta.");
 
     m.def(
+        "metric",
+        [](Realm realm,
+           IndexSpace const* space,
+           Level level0,
+           Level level1,
+           nb::object const& idx0,
+           nb::object const& idx1,
+           nb::object ctx_arg) -> PyExpr
+        {
+            auto [ctx, keep] = resolve_ctx(ctx_arg);
+            return PyExpr{
+                keep,
+                ctx,
+                make_metric(
+                    *ctx,
+                    realm,
+                    space,
+                    level0,
+                    level1,
+                    to_index_assoc(idx0),
+                    to_index_assoc(idx1))};
+        },
+        "realm"_a,
+        "space"_a,
+        "level0"_a,
+        "level1"_a,
+        "idx0"_a,
+        "idx1"_a,
+        "ctx"_a = nb::none(),
+        "Create a metric tensor g: g_ij = e_i·e_j (both lower), g^ij = e^i·e^j "
+        "(both upper), g^i_j = δ (mixed).");
+
+    m.def(
         "levi_civita",
         [](Realm realm,
            IndexSpace const* space,
@@ -1028,6 +1061,23 @@ NB_MODULE(_core, m)
         "expr"_a,
         "Apply the first-class ∂ operators in expr by Leibniz (vibe 000077): "
         "each unapplied Deriv acts on everything to its right in its term.");
+
+    md.def(
+        "_insert_metric",
+        [](PyExpr const& e, Level target) -> PyExpr
+        { return derive(e, steps::insert_metric(*e.ctx, e.expr, target)); },
+        "expr"_a,
+        "target"_a,
+        "Move summed coordinate slots to `target` level, introducing the "
+        "metric that pays for the move (the inverse of contract_metric).");
+
+    md.def(
+        "_contract_metric",
+        [](PyExpr const& e) -> PyExpr
+        { return derive(e, steps::contract_metric(*e.ctx, e.expr)); },
+        "expr"_a,
+        "Contract a metric against a summed index: raising, lowering, and the "
+        "inverse pair g^ip g_pk = δ^i_k (vibe 000103's metric row).");
 
     md.def(
         "_fold_operator",

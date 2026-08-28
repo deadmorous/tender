@@ -3,6 +3,7 @@
 #include <tender/expr.hpp>
 #include <tender/index_space.hpp>
 #include <tender/render.hpp>
+#include <tender/rewrite.hpp>
 
 #include <string>
 #include <utility>
@@ -4387,6 +4388,209 @@ TEST(Nabla, GradDivRotAreProductsWithNablaLeft)
 
 // The elementary rules fire through application: ∂_x x = 1, ∂_x y = 0 (distinct
 // coordinates independent), ∂_x f is the formal derivative field.
+// ---- raising and lowering with the metric (vibe 000103's metric row) ------
+
+namespace
+{
+
+auto obl_metric(
+    Context& ctx, Level l0, Level l1, CountableIndex a, CountableIndex b)
+    -> Expr const*
+{
+    return make_metric(
+        ctx, Realm::Oblique, space_3d(), l0, l1, IndexAssoc{a}, IndexAssoc{b});
+}
+
+// Whether `e` holds a well-known object of `kind` anywhere.
+auto holds_well_known(Context& ctx, Expr const* e, WellKnownKind kind) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            auto const* t = std::get_if<TensorObject>(&n->node);
+            if (t && t->traits && t->traits->well_known == kind)
+                found = true;
+            return n;
+        });
+    return found;
+}
+
+// A single-slot coordinate component, e.g. a^k.
+auto obl_coord(Context& ctx, char const* name, Level level, CountableIndex idx)
+    -> Expr const*
+{
+    return make_tensor_object(
+        ctx,
+        make_tensor_name(name),
+        {SlotBinding{
+            IndexSlot{level, Realm::Oblique, space_3d()}, IndexAssoc{idx}}},
+        0);
+}
+
+} // namespace
+
+TEST(ContractMetric, RaisesACoordinateIndex)
+{
+    // Σ_p g^{ip} a_p → a^i: the survivor is g's other index, at g's other
+    // level.
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto p = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_tensor_product(
+        ctx,
+        obl_metric(ctx, Level::Upper, Level::Upper, i, p),
+        obl_coord(ctx, "a", Level::Lower, p));
+
+    EXPECT_TRUE(structural_eq(
+        steps::contract_metric(ctx, term),
+        obl_coord(ctx, "a", Level::Upper, i)));
+}
+
+TEST(ContractMetric, LowersACoordinateIndex)
+{
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto p = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_tensor_product(
+        ctx,
+        obl_metric(ctx, Level::Lower, Level::Lower, i, p),
+        obl_coord(ctx, "a", Level::Upper, p));
+
+    EXPECT_TRUE(structural_eq(
+        steps::contract_metric(ctx, term),
+        obl_coord(ctx, "a", Level::Lower, i)));
+}
+
+TEST(ContractMetric, TheInversePairBecomesADelta)
+{
+    // g^{ip} g_{pk} → δ^i_k, and not as a separate postulate: raising g_{pk}'s
+    // lower index gives g^i{}_k, and a g straddling the divide *is* δ.
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto p = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto const* pair = make_tensor_product(
+        ctx,
+        obl_metric(ctx, Level::Upper, Level::Upper, i, p),
+        obl_metric(ctx, Level::Lower, Level::Lower, p, k));
+
+    auto const* got = steps::contract_metric(ctx, pair);
+    auto const* t = std::get_if<TensorObject>(&got->node);
+    ASSERT_NE(t, nullptr);
+    ASSERT_TRUE(t->traits.has_value());
+    EXPECT_EQ(t->traits->well_known, WellKnownKind::Delta);
+}
+
+TEST(ContractMetric, SameLevelPairIsNotAContraction)
+{
+    // g^{ip} a^p is not an Einstein contraction (both slots upper), so nothing
+    // is raised and the term is left exactly as written.
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto p = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_tensor_product(
+        ctx,
+        obl_metric(ctx, Level::Upper, Level::Upper, i, p),
+        obl_coord(ctx, "a", Level::Upper, p));
+
+    EXPECT_TRUE(structural_eq(steps::contract_metric(ctx, term), term));
+}
+
+TEST(ContractMetric, AMetricWithNoPartnerIsLeftAlone)
+{
+    // Σ_p g^{ip} on its own has nothing to raise.
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto p = CountableIndex{ctx.alloc_index_id()};
+    auto const* lone = make_explicit_sum(
+        ctx, p, obl_metric(ctx, Level::Upper, Level::Upper, i, p), nullptr);
+
+    EXPECT_TRUE(structural_eq(steps::contract_metric(ctx, lone), lone));
+}
+
+TEST(InsertMetric, PaysToMoveAnIndexBack)
+{
+    // a^m b_m, target Upper → g_{mn} a^m b^n: b's index moves up and the
+    // covariant metric pays for it.  Contracting it again undoes the move.
+    Context ctx;
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto const* mixed = make_tensor_product(
+        ctx,
+        obl_coord(ctx, "a", Level::Upper, m),
+        obl_coord(ctx, "b", Level::Lower, m));
+
+    auto const* paid = steps::insert_metric(ctx, mixed, Level::Upper);
+    EXPECT_FALSE(structural_eq(paid, mixed));
+    EXPECT_TRUE(holds_well_known(ctx, paid, WellKnownKind::Metric));
+    // Contracting spends the metric again.  The result is a mixed form, though
+    // not necessarily the *same* one: contracting may move whichever factor it
+    // reaches first, so a^m b_m can come back as a_n b^n — the same scalar,
+    // mirrored.  What the round trip guarantees is that the metric is gone.
+    auto const* back = steps::contract_metric(ctx, paid);
+    EXPECT_FALSE(holds_well_known(ctx, back, WellKnownKind::Metric));
+}
+
+TEST(InsertMetric, GoesEitherWay)
+{
+    // The same mixed form converts to the fully-contravariant one too.
+    Context ctx;
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto const* mixed = make_tensor_product(
+        ctx,
+        obl_coord(ctx, "a", Level::Upper, m),
+        obl_coord(ctx, "b", Level::Lower, m));
+
+    auto const* down = steps::insert_metric(ctx, mixed, Level::Lower);
+    EXPECT_FALSE(structural_eq(down, mixed));
+    EXPECT_TRUE(holds_well_known(ctx, down, WellKnownKind::Metric));
+    EXPECT_FALSE(holds_well_known(
+        ctx, steps::contract_metric(ctx, down), WellKnownKind::Metric));
+}
+
+TEST(InsertMetric, LeavesWellKnownObjectsAlone)
+{
+    // δ, ε and g are the currency the move is paid in, not what is moved.
+    // Without that rule the step would insert metrics into its own metrics and
+    // never terminate; here there is no coordinate at all, so it is a no-op.
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto p = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+    auto const* pair = make_tensor_product(
+        ctx,
+        obl_metric(ctx, Level::Upper, Level::Upper, i, p),
+        obl_metric(ctx, Level::Lower, Level::Lower, p, k));
+
+    EXPECT_TRUE(
+        structural_eq(steps::insert_metric(ctx, pair, Level::Upper), pair));
+}
+
+TEST(InsertMetric, OrthonormalSlotsAreLeftAlone)
+{
+    // The level distinction is empty in an orthonormal realm, so there is
+    // nothing to pay for.
+    Context ctx;
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto orth = [&](char const* name, Level level)
+    {
+        return make_tensor_object(
+            ctx,
+            make_tensor_name(name),
+            {SlotBinding{
+                IndexSlot{level, Realm::Orthonormal, space_3d()},
+                IndexAssoc{m}}},
+            0);
+    };
+    auto const* term = make_tensor_product(
+        ctx, orth("a", Level::Upper), orth("b", Level::Lower));
+
+    EXPECT_TRUE(
+        structural_eq(steps::insert_metric(ctx, term, Level::Upper), term));
+}
+
 // ---- folding an operator back out of its expansion (vibe 000103) ---------
 
 namespace
