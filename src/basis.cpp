@@ -1063,6 +1063,27 @@ auto as_coord_component(Expr const* e, Basis const& basis)
     return std::pair{t, std::move(ids)};
 }
 
+// The summed-index ids of a Levi-Civita factor, in slot order; nullopt if this
+// is not an ε or any slot carries something other than a dummy index.
+auto as_levi_civita_ids(Expr const* e) -> std::optional<std::vector<int>>
+{
+    auto const* t = std::get_if<TensorObject>(&e->node);
+    if (!t || !t->traits || t->traits->well_known != WellKnownKind::LeviCivita)
+        return std::nullopt;
+    std::vector<int> ids;
+    ids.reserve(t->slots.size());
+    for (auto const& sb: t->slots)
+    {
+        if (!sb.index)
+            return std::nullopt;
+        auto const* ci = std::get_if<CountableIndex>(&*sb.index);
+        if (!ci)
+            return std::nullopt;
+        ids.push_back(ci->id);
+    }
+    return ids;
+}
+
 // A coordinate carrier: an invariant value (the named tensor itself, or a
 // contraction/trace of several) and the summed-index id riding on each of its
 // slots, in slot order.  `origins` remembers which coordinate-component factor
@@ -1075,6 +1096,11 @@ struct Carrier final
     Expr const* value;
     std::vector<int> legs;
     std::vector<int> origins;
+    // Summed ids this carrier has already absorbed and that no later step will
+    // see — the two vector indices an ε fold consumed, say.  They are only
+    // released (their Σ binders dropped) if the carrier is realized, so a blob
+    // that fails still leaves them bound.
+    std::vector<int> folds;
 };
 
 auto slot_of(std::vector<int> const& legs, int id) -> int
@@ -1138,6 +1164,8 @@ auto contract_carriers(Context& ctx, Carrier X, Carrier Y, int id)
         r.legs.push_back(Y.legs[s]);
     r.origins = std::move(X.origins);
     r.origins.insert(r.origins.end(), Y.origins.begin(), Y.origins.end());
+    r.folds = std::move(X.folds);
+    r.folds.insert(r.folds.end(), Y.folds.begin(), Y.folds.end());
     return r;
 }
 
@@ -1197,6 +1225,8 @@ auto contract_carriers_n(
         r.legs.push_back(Y.legs[k]);
     r.origins = std::move(X.origins);
     r.origins.insert(r.origins.end(), Y.origins.begin(), Y.origins.end());
+    r.folds = std::move(X.folds);
+    r.folds.insert(r.folds.end(), Y.folds.begin(), Y.folds.end());
     return r;
 }
 
@@ -1210,6 +1240,7 @@ auto trace_carrier(Context& ctx, Carrier c, int id) -> std::optional<Carrier>
     Carrier r;
     r.value = make_trace(ctx, c.value);
     r.origins = std::move(c.origins);
+    r.folds = std::move(c.folds);
     return r;
 }
 
@@ -1355,6 +1386,7 @@ auto fold_reassembly_groups(
     std::map<int, std::vector<Site>> in_basis; // id→[basis sites]
     std::set<int> const summed_set(summed.begin(), summed.end());
     std::set<int> blocked;
+    std::vector<std::pair<std::size_t, std::vector<int>>> eps_factors;
     for (std::size_t p = 0; p < factors.size(); ++p)
     {
         if (auto bv = as_basis_vector(factors[p], basis);
@@ -1374,6 +1406,13 @@ auto fold_reassembly_groups(
             for (int s = 0; s < static_cast<int>(cc->second.size()); ++s)
                 in_carrier[cc->second[s]].push_back({ci, s});
             carriers.push_back(std::move(c));
+            continue;
+        }
+        // An ε is well-known, so it is not a coordinate carrier; set it aside
+        // for the fold below rather than letting it block its own indices.
+        if (auto eids = as_levi_civita_ids(factors[p]))
+        {
+            eps_factors.push_back({p, std::move(*eids)});
             continue;
         }
         // Neither a bare basis vector nor a coordinate — but it may still
@@ -1402,6 +1441,137 @@ auto fold_reassembly_groups(
         for (auto const& [site, id]: sites)
             if (summed_set.count(id))
                 in_basis[id].push_back(site);
+    }
+
+    // ---- ε folds: read a cross, or a triple product, off the indices ------
+    //
+    // ε is the fold table's third row (vibe 000103).  Its three indices say
+    // exactly what it is doing, so nothing needs to match the term's shape:
+    //
+    //   ε_{ikj} a_k b_j e_i  →  (a×b) realized at e_i   two carriers + a leg
+    //   ε_{ijk} a_i b_j c_k  →  a·(b×c)                 three carriers
+    //
+    // The slot *order* fixes the result, as it did for the double dots.  ε is
+    // totally antisymmetric, so rotating the leg index to the front is
+    // sign-free (ε_{abc} = ε_{bca} = ε_{cab}); the remaining two, read in the
+    // rotated order, are the cross's operands.  Getting that order wrong would
+    // silently flip a sign, so it is computed, never assumed.
+    //
+    // Only an orthonormal right-handed frame qualifies: there ε_{ijk} is the
+    // plain permutation symbol and √g = 1, which is what `simplify_basis_cross`
+    // emitted on the way in.  Elsewhere the weight would have to come back too.
+    if (!eps_factors.empty() && basis.is_orthonormal()
+        && is_scalar_one(basis.volume()))
+    {
+        // An index shared by two ε's is the ε-pair contraction's business, not
+        // this fold's; count them so such an index is left alone.
+        std::map<int, int> in_eps;
+        for (auto const& [pos, ids]: eps_factors)
+            for (int id: ids)
+                ++in_eps[id];
+
+        std::vector<bool> consumed(carriers.size(), false);
+        std::vector<Carrier> made;
+        for (auto const& [pos, ids]: eps_factors)
+        {
+            std::set<int> const distinct(ids.begin(), ids.end());
+            if (ids.size() != 3 || distinct.size() != 3)
+                continue; // a repeated index makes ε vanish — not our fold
+
+            std::vector<int> carrier_of(3, -1);
+            int leg_slot = -1;
+            bool usable = true;
+            for (int k = 0; k < 3 && usable; ++k)
+            {
+                int const id = ids[k];
+                if (blocked.count(id) || !summed_set.count(id)
+                    || in_eps[id] != 1)
+                {
+                    usable = false;
+                    break;
+                }
+                auto const nc = in_carrier[id].size();
+                auto const nb = in_basis[id].size();
+                if (nc == 1 && nb == 0)
+                {
+                    auto const [ci, slot] = in_carrier[id][0];
+                    // Only a rank-1 carrier is a cross operand; a higher-rank
+                    // one would need a slot chosen, which ε does not say.
+                    if (consumed[ci] || carriers[ci].legs.size() != 1)
+                        usable = false;
+                    else
+                        carrier_of[k] = ci;
+                }
+                else if (nc == 0 && nb == 1 && leg_slot < 0)
+                    leg_slot = k;
+                else
+                    usable = false;
+            }
+            if (!usable)
+                continue;
+
+            Carrier c;
+            c.origins = {static_cast<int>(pos)};
+            if (leg_slot < 0)
+            {
+                // Three carriers, nothing left over: the scalar triple product,
+                // read straight off the slot order.
+                for (int k = 0; k < 3; ++k)
+                {
+                    Carrier const& m = carriers[carrier_of[k]];
+                    c.origins.insert(
+                        c.origins.end(), m.origins.begin(), m.origins.end());
+                }
+                c.value = make_dot(
+                    ctx,
+                    carriers[carrier_of[0]].value,
+                    make_cross(
+                        ctx,
+                        carriers[carrier_of[1]].value,
+                        carriers[carrier_of[2]].value));
+                c.folds = ids;
+            }
+            else
+            {
+                // Rotate the leg index to the front — cyclic, so no sign — and
+                // the other two, in the rotated order, are the cross.
+                int const u = (leg_slot + 1) % 3;
+                int const v = (leg_slot + 2) % 3;
+                for (int k: {u, v})
+                {
+                    Carrier const& m = carriers[carrier_of[k]];
+                    c.origins.insert(
+                        c.origins.end(), m.origins.begin(), m.origins.end());
+                }
+                c.value = make_cross(
+                    ctx,
+                    carriers[carrier_of[u]].value,
+                    carriers[carrier_of[v]].value);
+                c.legs = {ids[leg_slot]};
+                c.folds = {ids[u], ids[v]};
+            }
+            for (int k = 0; k < 3; ++k)
+                if (carrier_of[k] >= 0)
+                    consumed[carrier_of[k]] = true;
+            made.push_back(std::move(c));
+        }
+
+        if (!made.empty())
+        {
+            std::vector<Carrier> kept;
+            for (std::size_t c = 0; c < carriers.size(); ++c)
+                if (!consumed[c])
+                    kept.push_back(std::move(carriers[c]));
+            for (auto& c: made)
+                kept.push_back(std::move(c));
+            carriers = std::move(kept);
+            // The carrier indices moved, so the id→carrier map is rebuilt.
+            in_carrier.clear();
+            for (int c = 0; c < static_cast<int>(carriers.size()); ++c)
+                for (int s = 0; s < static_cast<int>(carriers[c].legs.size());
+                     ++s)
+                    in_carrier[carriers[c].legs[s]].push_back({c, s});
+        }
     }
 
     // Per summed id: internal (carrier↔carrier or self), leg (carrier↔basis),
@@ -1545,6 +1715,7 @@ auto fold_reassembly_groups(
         {
             if (!ok)
                 break;
+            lfolded.insert(c.folds.begin(), c.folds.end());
             if (c.legs.empty()) // scalar invariant (dot / trace / bilinear)
             {
                 lscalars.push_back(c.value);

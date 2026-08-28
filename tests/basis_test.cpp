@@ -1335,6 +1335,130 @@ TEST(Reassemble, DoubleDotKeepsTheRightCarriersLegs)
     EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), make_ddot(ctx, A, C)));
 }
 
+TEST(Reassemble, EpsilonFoldsBackIntoACross)
+{
+    // The ε row: ε_{ikj} a_k b_j e_i → (a×b), realized at the e_i leg.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+
+    auto const* expanded =
+        expand_in_basis(ctx, make_cross(ctx, u, v), b, Variance::Covariant);
+    expanded = simplify_basis_cross(ctx, expanded, b);
+    expanded = simplify_basis_dot(ctx, expanded, b);
+    expanded = steps::contract_delta(ctx, steps::canonicalize(ctx, expanded));
+
+    EXPECT_TRUE(
+        algebraic_eq(ctx, reassemble(ctx, expanded, b), make_cross(ctx, u, v)));
+}
+
+TEST(Reassemble, EpsilonFoldsBackIntoATripleProduct)
+{
+    // All three indices on carriers, nothing left over: the scalar a·(b×c).
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto const* w = make_tensor_object(ctx, make_tensor_name("w"), {}, 1);
+    auto const* triple = make_dot(ctx, u, make_cross(ctx, v, w));
+
+    auto const* x = expand_in_basis(ctx, triple, b, Variance::Covariant);
+    for (int i = 0; i < 2; ++i)
+    {
+        x = simplify_basis_cross(ctx, x, b);
+        x = simplify_basis_dot(ctx, x, b);
+        x = steps::contract_delta(ctx, steps::canonicalize(ctx, x));
+    }
+    EXPECT_TRUE(algebraic_eq(ctx, reassemble(ctx, x, b), triple));
+}
+
+TEST(Reassemble, EpsilonSlotOrderFixesTheCrossSign)
+{
+    // ε is antisymmetric, so the operand order is read off the slots, never
+    // assumed: swapping two of ε's indices must produce the opposite cross.
+    // ε_{ikj} u_k v_j e_i is u×v; ε_{ijk} u_k v_j e_i is v×u.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto k = CountableIndex{ctx.alloc_index_id()};
+
+    auto term = [&](std::vector<CountableIndex> const& eps_ids)
+    {
+        auto const* body = make_tensor_product(
+            ctx,
+            make_tensor_product(
+                ctx,
+                make_levi_civita(
+                    ctx,
+                    Realm::Orthonormal,
+                    space_3d(),
+                    {Level::Lower, Level::Lower, Level::Lower},
+                    {IndexAssoc{eps_ids[0]},
+                     IndexAssoc{eps_ids[1]},
+                     IndexAssoc{eps_ids[2]}}),
+                make_tensor_product(
+                    ctx, coord(ctx, b, "u", {k}), coord(ctx, b, "v", {j}))),
+            b.covariant_vector(ctx, i));
+        return make_explicit_sum(
+            ctx, i, make_explicit_sum(ctx, j, make_explicit_sum(ctx, k, body)));
+    };
+
+    EXPECT_TRUE(structural_eq(
+        reassemble(ctx, term({i, k, j}), b), make_cross(ctx, u, v)));
+    // Swapping two of ε's slots must flip the result.  canonicalize normalizes
+    // ε_{ijk} to −ε_{ikj}, carrying the sign outside the symbol, so the fold
+    // reads the normalized order and the negation lands on the cross.
+    EXPECT_TRUE(structural_eq(
+        reassemble(ctx, term({i, j, k}), b),
+        make_negate(ctx, make_cross(ctx, u, v))));
+}
+
+TEST(Reassemble, EpsilonFoldSurvivesUnrelatedFactors)
+{
+    // The point of an index-directed fold: company does not defeat it.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto const* w = make_tensor_object(ctx, make_tensor_name("w"), {}, 1);
+    auto const* expr = make_tensor_product(ctx, make_cross(ctx, u, v), w);
+
+    auto const* x = expand_in_basis(ctx, expr, b, Variance::Covariant);
+    for (int i = 0; i < 2; ++i)
+    {
+        x = simplify_basis_cross(ctx, x, b);
+        x = simplify_basis_dot(ctx, x, b);
+        x = steps::contract_delta(ctx, steps::canonicalize(ctx, x));
+    }
+    EXPECT_TRUE(algebraic_eq(ctx, reassemble(ctx, x, b), expr));
+}
+
+TEST(Reassemble, EpsilonSharedBetweenTwoIsLeftToTheEpsPair)
+{
+    // An index shared by two ε's is the ε-pair contraction's business; this
+    // fold must not claim it.  (a×b)×c expands to ε ε and stays put.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto const* w = make_tensor_object(ctx, make_tensor_name("w"), {}, 1);
+
+    auto const* x = expand_in_basis(
+        ctx, make_cross(ctx, make_cross(ctx, u, v), w), b, Variance::Covariant);
+    for (int i = 0; i < 2; ++i)
+    {
+        x = simplify_basis_cross(ctx, x, b);
+        x = simplify_basis_dot(ctx, x, b);
+        x = steps::contract_delta(ctx, steps::canonicalize(ctx, x));
+    }
+    // Two ε's remain, so nothing folds — but it must not fold *wrongly*.
+    EXPECT_TRUE(structural_eq(reassemble(ctx, x, b), x));
+}
+
 TEST(Reassemble, TraceFold)
 {
     // Σ_k B_{kk} (a coordinate component with a repeated summed index) → tr(B),
