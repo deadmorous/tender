@@ -184,6 +184,82 @@ capability is worse than a missing one.
 Six rows, of which the fifth is now a *family* parameterised by n and a
 permutation — which is where most of the reach is.
 
+## Implemented
+
+Two increments, both inside `fold_reassembly_groups` (`src/basis.cpp`) — which
+turned out to *already be* the index-directed engine this note argues for:
+union-find over shared summed indices, each blob folded independently.  What was
+missing was not the mechanism but its reach.
+
+### 1. Basis sites are addressed by path, not by factor position
+
+The engine keyed every basis vector by its position in the flattened factor
+list, so `Σ_i a_i (e_i·b)` hid `e_i` inside a `Dot` operand where no position
+could name it, and the fold stalled.  A `Site` is now `{factor, path}`, paths
+are built from `children` (the same accessor `replace_at` navigates), and a
+realized invariant is spliced in at its path with the rest of the contraction
+left alone.
+
+The `blocked` test sharpened with it: it used to be "does any non-basis factor
+mention this id", a blanket veto.  It is now "does the id occur in this factor
+more times than the basis vectors we collected from it" — which admits the
+foldable leg and still rejects a second carrier hiding in the same operand.
+
+Placement is restricted to **rank-1** invariants, and that restriction is
+principled rather than provisional: a vector occupies exactly the one slot the
+basis vector did, so every enclosing contraction keeps its meaning.  A rank-2
+value spliced at a nested site would silently take the wrong slot orientation —
+`e_i`'s position says "first slot", but a `Dot` contracts the last — so rank ≥ 2
+with any nested site refuses and leaves the blob untouched.
+
+Measured, against the boundary table in vibe 000100:
+
+| expression | before | after |
+|---|---|---|
+| `a_i e_i` | `a` | `a` |
+| `(a_i e_i)·b` | *stalls* | `a·b` |
+| `b·(a_i e_i)` | *stalls* | `b·a` |
+| `(a_i e_i)·(b_j e_j)` | *stalls* | `a·b` |
+| `(a_i e_i)×b` | *stalls* | `a×b` |
+| `(a_i e_i)·B` | *stalls* | `a·B` |
+| `s (a_i e_i)·b` | *stalls* | `s (a·b)` |
+| `(A_ij e_i e_j)·b` | *stalls* | *refuses* (rank 2, nested) |
+
+### 2. Carrier contraction is counted and ordered
+
+`contract_carriers` contracted over one shared index at a time and gave up above
+rank 2, so a pair sharing *two* indices could never fold — taking them one at a
+time asks for an intermediate rank the notation cannot express.
+`contract_carriers_n` contracts all the shared ids in one move, and reads the
+result off the index structure rather than a stored pattern: the ids on the left
+carrier's last two slots, matched against the right carrier's first two, give
+`:` in order and `··` reversed.
+
+Verified both ways round, through the full component pipeline:
+`A_ij B_ij → A:B` and `A_ji B_ij → A··B` — different tensors, told apart by
+index order alone.
+
+The rank-4 case that motivated this (`C_ijkl e_lk → C··e`) folds by the same
+code, but cannot yet be *reached*: `expand_double_dot` handles only 2-leg dyads,
+so a rank-4 double dot never reduces to components in the first place.  That is
+a separate, upstream gap.
+
+### What this did and did not unblock
+
+- **Challenge 000024** (operator round-trip) stays red, and the change tells us
+  why with more precision than before: the blame on "reassemble does not descend
+  into a contraction" was wrong.  It descends now.  The real blocker is the
+  table's *operator row* — the index there joins a coefficient `c_i` to a `∂_i`
+  mark, and nothing reads that pairing.  The test's stated reason was corrected.
+- **Challenge 000017** (ε → cross) stays red: a different row, untouched.
+- **Challenge 000018** stays red *by choice*.  The round-trip route this work
+  would have opened is the one `meta/l2-route.md` rejects as evasion — both
+  component forms were built from `a·b`, so folding one back proves nothing
+  about the metric.  It still needs `tender.metric` and the inverse-metric axiom.
+
+Four of the six table rows now work.  The two gaps left are ε→cross and
+coefficient→∂.
+
 ## Status
 
 Design proposal, unscheduled.  It supersedes vibe 000100's option (A) by

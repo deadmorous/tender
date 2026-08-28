@@ -226,6 +226,105 @@ class TestBasisSteps:
         reduced = tb.simplify_basis_dot(td.contract_identity(coord), basis)
         assert "g" in reduced.latex()
 
+    # ---- index-directed folding (vibe 000103) ----------------------------
+    #
+    # A fold is driven by what a summed index *connects*, not by the silhouette
+    # of the whole term, so an unrelated neighbouring factor no longer defeats
+    # it.  Each case below stalled before the change.
+
+    def test_reassemble_folds_inside_a_dot(self):
+        # (a_i e_i)·b: the partner of a_i sits inside a contraction operand.
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        y = tender.tensor("y", rank=1, ctx=ctx)
+        expanded = td.canonicalize(
+            tb.expand_in_basis(a, b, tb.Variance.Covariant) @ y
+        )
+        assert td.structural_eq(tb.reassemble(expanded, b), a @ y)
+
+    def test_reassemble_folds_on_either_side_of_a_dot(self):
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        y = tender.tensor("y", rank=1, ctx=ctx)
+        expanded = td.canonicalize(
+            y @ tb.expand_in_basis(a, b, tb.Variance.Covariant)
+        )
+        assert td.structural_eq(tb.reassemble(expanded, b), y @ a)
+
+    def test_reassemble_folds_both_sides_of_a_dot(self):
+        # a_i b_j (e_i·e_j) → a·b: two independent folds in one contraction.
+        ctx = tender.Context()
+        base = tb.wcs(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        y = tender.tensor("y", rank=1, ctx=ctx)
+        expanded = td.canonicalize(
+            tb.expand_in_basis(a, base, tb.Variance.Covariant)
+            @ tb.expand_in_basis(y, base, tb.Variance.Covariant)
+        )
+        assert td.structural_eq(tb.reassemble(expanded, base), a @ y)
+
+    def test_reassemble_folds_inside_a_cross(self):
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        y = tender.tensor("y", rank=1, ctx=ctx)
+        expanded = td.canonicalize(
+            tb.expand_in_basis(a, b, tb.Variance.Covariant) % y
+        )
+        assert td.structural_eq(tb.reassemble(expanded, b), a % y)
+
+    def test_reassemble_survives_an_unrelated_scalar_factor(self):
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        y = tender.tensor("y", rank=1, ctx=ctx)
+        s = tender.tensor("s", rank=0, ctx=ctx)
+        expanded = td.canonicalize(
+            s * (tb.expand_in_basis(a, b, tb.Variance.Covariant) @ y)
+        )
+        assert td.structural_eq(tb.reassemble(expanded, b), s * (a @ y))
+
+    def test_reassemble_refuses_rank2_inside_a_contraction(self):
+        # A rank-2 realization must drop one basis site and place the invariant
+        # at the other; inside a contraction neither move is safe, and a wrong
+        # slot orientation would be silent.  Refusing is the correct failure.
+        ctx = tender.Context()
+        b = tb.wcs(ctx)
+        A = tender.tensor("A", rank=2, ctx=ctx)
+        y = tender.tensor("y", rank=1, ctx=ctx)
+        expanded = td.canonicalize(
+            tb.expand_in_basis(A, b, tb.Variance.Covariant) @ y
+        )
+        assert td.structural_eq(tb.reassemble(expanded, b), expanded)
+
+    def test_reassemble_reads_index_order_to_pick_the_double_dot(self):
+        # The counted fold: two carriers sharing two indices give a double dot,
+        # and the *order* of those indices picks which one.  A_ij B_ij is A:B;
+        # A_ji B_ij is A··B.  They are different tensors, so this is read off
+        # the indices rather than assumed.
+        def components(expr, frame):
+            e = tb.expand_in_basis(expr, frame, tb.Variance.Covariant)
+            e = td.expand_double_dot(e)
+            e = tb.simplify_basis_dot(e, frame)
+            e = td.canonicalize(e)
+            e = tb.simplify_basis_dot(e, frame)
+            return td.contract_delta(td.canonicalize(e))
+
+        ctx = tender.Context()
+        frame = tb.wcs(ctx)
+        A = tender.tensor("A", rank=2, ctx=ctx)
+        B = tender.tensor("B", rank=2, ctx=ctx)
+
+        straight = components(A.ddot(B), frame)
+        assert "A_{ij} \\, B_{ij}" in straight.latex()
+        assert td.structural_eq(tb.reassemble(straight, frame), A.ddot(B))
+
+        crossed = components(A // B, frame)
+        assert "A_{ji} \\, B_{ij}" in crossed.latex()
+        assert td.structural_eq(tb.reassemble(crossed, frame), A // B)
+
     def test_reassemble_no_op_on_foreign(self):
         ctx = tender.Context()
         b = tb.wcs(ctx)

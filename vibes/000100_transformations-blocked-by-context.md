@@ -20,7 +20,7 @@ are *naturally* applicable, rather than blocked by small obstacles each time.
 | M1 (vibe 000095) | every additive step | *six* shapes (`Sum`/`Difference`/`Negate`/`ScalarDiv`/scaled-sum/binder) each step re-peeled by hand |
 | M2 (vibe 000096) | `X··I = tr X` | canon sorts symmetric chains by name, so the rule matched only some targets |
 | M4 (vibe 000099) | ε-reassembly | an expanded cross cannot fold back |
-| **here** | `reassemble` | never descends into a contraction operand |
+| **here** | `reassemble` | never descends into a contraction operand — **fixed**, vibe 000103 |
 
 Seven instances, one shape.  Each was individually reasonable to fix, and the
 fixes were real improvements — `distribute_bilinear` consolidated the additive

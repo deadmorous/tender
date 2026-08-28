@@ -138,21 +138,28 @@ def test_the_nabla_leibniz_rules_are_derived_not_asserted():
 @harness.level(
     "L2",
     expected=False,
-    reason="the derived form stays in components: reassembling Σ c_i ⊗ ∂_i(…) "
-    "back to an invariant ∇-expression needs the contraction-descending "
-    "reassembly of vibe 000100, so the result cannot yet be stated in direct "
-    "notation",
+    reason="the derived form stays in components: here the summed index joins "
+    "a coefficient c_i to a ∂_i mark rather than to a basis vector, and no "
+    "fold reads that pairing yet (vibe 000103's operator row) — the "
+    "contraction-descending reassembly it was blamed on is now in place",
 )
 def test_the_derivation_returns_to_invariant_form():
     """What is still missing: the trip home.
 
-    Everything above ends in components — `f ∂_x g i + …` — because
-    `reassemble` does not descend into a contraction, so the expanded operator
-    cannot be folded back into `∇`.  Until it can, a *derived* Leibniz rule
-    cannot be restated as the invariant identity the library ships, which is
-    why those rules remain asserted for now.
+    Everything above ends in components — `f ∂_x g i + …` — and cannot be
+    folded back into `∇`.  Vibe 000103 removed one suspected cause: `reassemble`
+    *does* now descend into a contraction operand, so a coordinate paired with a
+    basis vector nested inside a dot folds fine.  That is not what blocks this.
+
+    What blocks it is a different row of the same fold table: the summed index
+    here connects a coefficient `c_i` to a **∂_i mark**, not to a basis vector,
+    and nothing reads that pairing yet.  The `link` tying a free-index ∂ to its
+    frame vector already exists in the representation (vibe 000078) — what is
+    missing is a pass that acts on it.  Until then a *derived* Leibniz rule
+    cannot be restated as the invariant identity the library ships, which is why
+    those rules remain asserted.
     """
     harness.todo(
         "fold Σ_i c_i ⊗ ∂_i(f g) back to f ∇g + g ∇f in direct notation "
-        "(needs vibe 000100's contraction-descending reassembly)"
+        "(needs the coefficient↔∂-mark row of vibe 000103's fold table)"
     )

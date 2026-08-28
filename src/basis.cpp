@@ -1141,6 +1141,65 @@ auto contract_carriers(Context& ctx, Carrier X, Carrier Y, int id)
     return r;
 }
 
+// Contract two carriers over *several* shared summed ids at once — the
+// "counted" fold of vibe 000103.  Which contraction results is not a stored
+// pattern but a computation from two facts the index structure already holds:
+// how many indices the pair shares, and in what order they sit.
+//
+//   n = 1                        →  X·Y            (handled by
+//   contract_carriers) n = 2, Y's first two = (p,q) →  X : Y          [DDot,
+//   (a⊗b):(c⊗d) = (a·c)(b·d)] n = 2, Y's first two = (q,p) →  X ·· Y [DDotAlt,
+//   (a⊗b)··(c⊗d) = (a·d)(b·c)]
+//
+// where (p,q) are the ids on X's last two slots.  So C_{ijkl} e_{kl} folds to
+// C:e while C_{ijkl} e_{lk} folds to C··e — both well-formed, and *different
+// tensors*, which is why the order is read rather than assumed.
+//
+// The shared ids must occupy exactly X's trailing slots and Y's leading ones:
+// no transpose can re-orient a rank ≥ 3 carrier, and a middle-slot contraction
+// has no direct notation.  Anything else returns nullopt and the blob is left
+// unfolded — a wrong pairing would be silent, so refusing is the safe failure
+// (vibe 000103).  n ≥ 3 has no surface operator and is refused likewise.
+auto contract_carriers_n(
+    Context& ctx,
+    Carrier X,
+    Carrier Y,
+    std::set<int> const& ids) -> std::optional<Carrier>
+{
+    auto const n = ids.size();
+    if (n != 2)
+        return std::nullopt; // n == 1 goes to contract_carriers; n ≥ 3
+                             // unwritable
+    auto const rx = X.legs.size();
+    auto const ry = Y.legs.size();
+    if (rx < n || ry < n)
+        return std::nullopt;
+    // The shared ids must be exactly X's last n and Y's first n.
+    for (std::size_t k = 0; k < n; ++k)
+        if (!ids.count(X.legs[rx - n + k]) || !ids.count(Y.legs[k]))
+            return std::nullopt;
+    int const p = X.legs[rx - 2];
+    int const q = X.legs[rx - 1];
+    if (p == q)
+        return std::nullopt; // a self-trace, not a pair contraction
+    Expr const* value = nullptr;
+    if (Y.legs[0] == p && Y.legs[1] == q)
+        value = make_ddot(ctx, X.value, Y.value);
+    else if (Y.legs[0] == q && Y.legs[1] == p)
+        value = make_ddot_alt(ctx, X.value, Y.value);
+    else
+        return std::nullopt;
+    Carrier r;
+    r.value = value;
+    for (std::size_t k = 0; k + n < rx; ++k)
+        r.legs.push_back(X.legs[k]);
+    for (std::size_t k = n; k < ry; ++k)
+        r.legs.push_back(Y.legs[k]);
+    r.origins = std::move(X.origins);
+    r.origins.insert(r.origins.end(), Y.origins.begin(), Y.origins.end());
+    return r;
+}
+
 // Self-contract a carrier over a summed `id` appearing on two of its slots (a
 // trace).  Only the full rank-2 trace tr(B) is expressible here; a partial
 // trace of a rank ≥ 3 tensor is left unfolded (nullopt).
@@ -1177,6 +1236,89 @@ struct UnionFind final
     }
 };
 
+// A basis-vector occurrence within a term's factor list: which factor, and
+// where inside it (an empty path means the factor *is* the basis vector).
+//
+// The nested case is what lets a fold survive "pollution" (vibe 000103).  In
+// Σ_i a_i (e_i·b) the partner of a_i sits inside a contraction operand, so a
+// site named by factor position alone cannot address it and the fold stalls —
+// the measured failure of `reassemble` on (a_i e^i)·b.  A path names it.
+struct Site final
+{
+    std::size_t factor;
+    Path path;
+
+    [[nodiscard]] auto nested() const -> bool
+    {
+        return !path.empty();
+    }
+    auto operator<(Site const& o) const -> bool
+    {
+        return factor != o.factor ? factor < o.factor : path < o.path;
+    }
+};
+
+// How many slots in `e` carry the summed index `id`.  Paired with the number of
+// basis sites found for `id` in the same factor, this answers the only question
+// the classifier needs: does anything *besides* those basis vectors mention the
+// index?  (mentions_index gives a weaker yes/no that cannot tell "the e_i we
+// are about to fold" from "a second, foreign carrier of i".)
+auto count_index(Context& ctx, Expr const* e, int id) -> int
+{
+    int n = 0;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* node) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&node->node))
+                for (auto const& sb: t->slots)
+                    if (sb.index)
+                        if (auto const* ci =
+                                std::get_if<CountableIndex>(&*sb.index);
+                            ci && ci->id == id)
+                            ++n;
+            return node;
+        });
+    return n;
+}
+
+// Collect the basis vectors of `basis` reachable from `e` through contraction
+// and tensor-product structure alone, recording the path to each along with the
+// summed id it carries.  Paths are built from `children`, the same accessor
+// `replace_at` navigates, so a collected path is directly spliceable.
+//
+// Every other node kind stops the walk: descending through an ExplicitSum would
+// cross a binding boundary, and a basis vector under (say) a Deriv is not a
+// free-standing leg the fold may replace.
+void collect_basis_sites(
+    Expr const* e,
+    Basis const& basis,
+    std::size_t factor,
+    Path& path,
+    std::vector<std::pair<Site, int>>& out)
+{
+    if (auto bv = as_basis_vector(e, basis))
+    {
+        out.push_back({Site{factor, path}, bv->first.id});
+        return;
+    }
+    bool const descend = std::holds_alternative<Dot>(e->node)
+                         || std::holds_alternative<Cross>(e->node)
+                         || std::holds_alternative<DDot>(e->node)
+                         || std::holds_alternative<DDotAlt>(e->node)
+                         || std::holds_alternative<TensorProduct>(e->node);
+    if (!descend)
+        return;
+    auto const kids = children(e);
+    for (std::size_t k = 0; k < kids.size(); ++k)
+    {
+        path.push_back(static_cast<int>(k));
+        collect_basis_sites(kids[k], basis, factor, path, out);
+        path.pop_back();
+    }
+}
+
 // Reassemble the recognizable invariants buried in one basis-expanded product
 // term, folding each *independently* and leaving every unrelated factor in
 // place — so the folds apply even as parts of a larger term.  Coordinate
@@ -1210,7 +1352,7 @@ auto fold_reassembly_groups(
     // and the summed ids blocked by some other (foreign) factor.
     std::vector<Carrier> carriers;
     std::map<int, std::vector<std::pair<int, int>>> in_carrier; // id→[(car,slot)]
-    std::map<int, std::vector<std::size_t>> in_basis; // id→[positions]
+    std::map<int, std::vector<Site>> in_basis; // id→[basis sites]
     std::set<int> const summed_set(summed.begin(), summed.end());
     std::set<int> blocked;
     for (std::size_t p = 0; p < factors.size(); ++p)
@@ -1218,7 +1360,7 @@ auto fold_reassembly_groups(
         if (auto bv = as_basis_vector(factors[p], basis);
             bv && summed_set.count(bv->first.id))
         {
-            in_basis[bv->first.id].push_back(p);
+            in_basis[bv->first.id].push_back(Site{p, {}});
             continue;
         }
         if (auto cc = as_coord_component(factors[p], basis))
@@ -1234,9 +1376,32 @@ auto fold_reassembly_groups(
             carriers.push_back(std::move(c));
             continue;
         }
+        // Neither a bare basis vector nor a coordinate — but it may still
+        // *contain* basis vectors, reachable through contraction structure
+        // (vibe 000103).  Those are foldable legs; anything else carrying a
+        // summed id still blocks it.
+        std::vector<std::pair<Site, int>> sites;
+        Path path;
+        collect_basis_sites(factors[p], basis, p, path, sites);
+        std::map<int, int> found;
+        for (auto const& [site, id]: sites)
+            ++found[id];
         for (int id: summed)
-            if (mentions_index(ctx, factors[p], id))
+        {
+            int const occ = count_index(ctx, factors[p], id);
+            if (occ == 0)
+                continue;
+            // Foldable only when *every* occurrence of the id in this factor is
+            // one of the basis vectors we just collected; a second carrier of
+            // the same index (e.g. c_i inside the same dot) blocks it, exactly
+            // as the blanket mentions_index test used to.
+            auto const it = found.find(id);
+            if (it == found.end() || it->second != occ)
                 blocked.insert(id);
+        }
+        for (auto const& [site, id]: sites)
+            if (summed_set.count(id))
+                in_basis[id].push_back(site);
     }
 
     // Per summed id: internal (carrier↔carrier or self), leg (carrier↔basis),
@@ -1275,9 +1440,9 @@ auto fold_reassembly_groups(
                 uf.unite(occ[0].first, occ[1].first);
         }
 
-    std::set<std::size_t> drop;                 // factor positions removed
-    std::map<std::size_t, Expr const*> replace; // basis position → invariant
-    std::vector<Expr const*> scalars;           // scalar folds, emitted first
+    std::set<Site> drop;                 // sites removed
+    std::map<Site, Expr const*> replace; // basis site → realized invariant
+    std::vector<Expr const*> scalars;    // scalar folds, emitted first
     std::set<int> folded;
 
     // ---- carrier blobs: contract internally, then realize remaining legs ----
@@ -1329,12 +1494,39 @@ auto fold_reassembly_groups(
             {
                 int const a = occ[0].first;
                 int const b = occ[1].first;
-                auto m = contract_carriers(ctx, active[a], active[b], id);
+                // Every id this pair shares must be contracted in one move: a
+                // pair sharing two indices is a double dot, and taking them one
+                // at a time would ask for an intermediate rank the notation
+                // cannot express (vibe 000103).
+                std::set<int> shared{id};
+                for (int other: internal)
+                {
+                    auto const& oc = in_carrier[other];
+                    if (oc.size() != 2)
+                        continue;
+                    bool const on_a = active[a].legs.size()
+                                      && slot_of(active[a].legs, other) >= 0;
+                    bool const on_b = active[b].legs.size()
+                                      && slot_of(active[b].legs, other) >= 0;
+                    if (on_a && on_b)
+                        shared.insert(other);
+                }
+                // Either carrier may be the left operand; only the ordering
+                // whose shared ids sit on X's trailing and Y's leading slots is
+                // expressible, so try both and let the slot test pick.
+                auto m =
+                    shared.size() == 1 ?
+                        contract_carriers(ctx, active[a], active[b], id) :
+                        contract_carriers_n(ctx, active[a], active[b], shared);
+                if (!m && shared.size() > 1)
+                    m = contract_carriers_n(ctx, active[b], active[a], shared);
                 if (!m)
                 {
                     ok = false;
                     break;
                 }
+                for (int done: shared)
+                    internal.erase(done);
                 int const hi = std::max(a, b);
                 int const lo = std::min(a, b);
                 active.erase(active.begin() + hi);
@@ -1345,8 +1537,8 @@ auto fold_reassembly_groups(
 
         // Realize each surviving carrier; accumulate into blob-local changes so
         // a failure leaves the whole blob untouched.
-        std::set<std::size_t> ldrop;
-        std::map<std::size_t, Expr const*> lreplace;
+        std::set<Site> ldrop;
+        std::map<Site, Expr const*> lreplace;
         std::vector<Expr const*> lscalars;
         std::set<int> lfolded;
         for (Carrier& c: active)
@@ -1357,7 +1549,7 @@ auto fold_reassembly_groups(
             {
                 lscalars.push_back(c.value);
                 for (int o: c.origins)
-                    ldrop.insert(static_cast<std::size_t>(o));
+                    ldrop.insert(Site{static_cast<std::size_t>(o), {}});
             }
             else if (c.legs.size() == 1) // vector leg → place at its basis vec
             {
@@ -1367,10 +1559,14 @@ auto fold_reassembly_groups(
                     ok = false;
                     break;
                 }
+                // A rank-1 invariant may be spliced in at a *nested* site
+                // safely: a vector occupies exactly the one slot the basis
+                // vector did, so every enclosing contraction keeps its meaning
+                // (a_i (e_i·b) → a·b, a_i (e_i×b) → a×b, a_i (B·e_i) → B·a).
                 lreplace[bp[0]] = c.value;
                 lfolded.insert(c.legs[0]);
                 for (int o: c.origins)
-                    ldrop.insert(static_cast<std::size_t>(o));
+                    ldrop.insert(Site{static_cast<std::size_t>(o), {}});
             }
             else if (c.legs.size() == 2) // tensor → place at the leftmost basis
             {
@@ -1381,8 +1577,20 @@ auto fold_reassembly_groups(
                     ok = false;
                     break;
                 }
-                std::size_t const p0 = b0[0];
-                std::size_t const p1 = b1[0];
+                Site const p0 = b0[0];
+                Site const p1 = b1[0];
+                if (p0.nested() || p1.nested())
+                {
+                    // Rank ≥ 2 realization drops one basis site and places the
+                    // invariant at the other, and inside a contraction neither
+                    // move is safe: an operand cannot be dropped, and a rank-2
+                    // value spliced at a nested site would silently take the
+                    // wrong slot orientation (e_i's position says "first slot",
+                    // but a Dot contracts the last).  A wrong pairing is not
+                    // detectable downstream, so refuse (vibe 000103).
+                    ok = false;
+                    break;
+                }
                 // The leftmost basis vector fixes the first tensor slot: in
                 // slot order → value; reversed → its transpose.
                 Expr const* tens =
@@ -1392,7 +1600,7 @@ auto fold_reassembly_groups(
                 lfolded.insert(c.legs[0]);
                 lfolded.insert(c.legs[1]);
                 for (int o: c.origins)
-                    ldrop.insert(static_cast<std::size_t>(o));
+                    ldrop.insert(Site{static_cast<std::size_t>(o), {}});
             }
             else // rank ≥ 3 leg realization: ordering not expressible here
             {
@@ -1419,6 +1627,8 @@ auto fold_reassembly_groups(
         if (kind[id] == Kind::Identity)
         {
             auto const& bp = in_basis[id];
+            if (bp[0].nested() || bp[1].nested())
+                continue; // would drop a contraction operand — see above
             replace[bp[0]] = make_identity(ctx, basis.space()); // vibe 000082
             drop.insert(bp[1]);
             folded.insert(id);
@@ -1430,10 +1640,23 @@ auto fold_reassembly_groups(
     std::vector<Expr const*> out = scalars;
     for (std::size_t p = 0; p < factors.size(); ++p)
     {
-        if (drop.count(p))
+        Site const whole{p, {}};
+        if (drop.count(whole))
             continue;
-        auto it = replace.find(p);
-        out.push_back(it != replace.end() ? it->second : factors[p]);
+        if (auto it = replace.find(whole); it != replace.end())
+        {
+            out.push_back(it->second);
+            continue;
+        }
+        // Splice each realized invariant into this factor at its own path,
+        // leaving the rest of the contraction untouched.  Substituting a rank-1
+        // value for a basis vector preserves the tree's shape, so the remaining
+        // paths stay valid across the updates.
+        Expr const* f = factors[p];
+        for (auto const& [site, value]: replace)
+            if (site.factor == p && site.nested())
+                f = replace_at(ctx, f, site.path, value);
+        out.push_back(f);
     }
     std::vector<int> rest;
     for (int id: summed)
