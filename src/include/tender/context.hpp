@@ -137,6 +137,15 @@ public:
     {
         int reference_basis_id = 0;
         bool is_identity = false;
+        // The cross-chart Jacobian ∂q^a/∂x^b of this chart's coordinates
+        // against the reference Cartesian ones (vibe 000090 approach B):
+        // jacobian[a][b], empty for an identity chart or one whose frame could
+        // not be read.  It is what lets ∂/∂x differentiate a *foreign*
+        // curvilinear coordinate instead of treating it as an independent
+        // variable — the inverse embedding never has to be written down, since
+        // for an orthogonal chart ∂q^a/∂x^b is (e_a·i_b)/h_a, which the chart
+        // already knows.
+        std::vector<std::vector<Expr const*>> jacobian = {};
     };
 
     void register_chart_embedding(int chart_id, ChartEmbedding info)

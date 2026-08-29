@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**24 challenges** — 23 at L2, 0 at L1, 1 at L0.
+**24 challenges** — 24 at L2, 0 at L1, 0 at L0.
 
 ## Identity DAG
 
@@ -67,7 +67,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 |---|---|---|---|
 | 000006 | chart-derived operators: cyl and sph endpoints | **L2 performed** | Borisenko–Tarapov, ch. on curvilinear coordinates; examples/curvilinear_operators.py |
 | 000020 | grad/div/Δ tables in cylindrical and spherical charts | **L2 performed** | Borisenko–Tarapov, appendix of curvilinear formulas |
-| 000021 | ∇ ⊗ R across charts sharing a world frame | L0 failing | vibe 000090 (cross-chart coordinate dependencies) |
+| 000021 | ∇ ⊗ R across charts sharing a world frame | **L2 performed** | vibe 000090 (cross-chart coordinate dependencies) |
 
 ## Tier E — Mechanics endpoints
 

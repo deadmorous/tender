@@ -376,7 +376,7 @@ records what to expect when the scale factors come out as surds.
 
 | Method | Returns | Does |
 |---|---|---|
-| `evaluate(e)` | `Expr` | **Lower a coordinate-free core-∇ expression onto this chart**: `Dot(∇,X)→div`, `⊗→grad`, `Cross(∇,X)→rot`, `∇·(∇⊗X)→Δ`, inner-first; sums/coeffs/transpose/`I` pass through. Reprojects a sibling chart's WCS coords (`cyl.evaluate(∇⊗cart.position())=I`). Returns an invariant in this chart's frame |
+| `evaluate(e)` | `Expr` | **Lower a coordinate-free core-∇ expression onto this chart**: `Dot(∇,X)→div`, `⊗→grad`, `Cross(∇,X)→rot`, `∇·(∇⊗X)→Δ`, inner-first; sums/coeffs/transpose/`I` pass through. Relates a sibling chart's coordinates both ways: forward by reprojecting its WCS coords (`cyl.evaluate(∇⊗cart.position())=I`), reverse through a cross-chart Jacobian `∂q^a/∂x^b = (e_a·i_b)/h_a` (`cart.evaluate(∇⊗cyl.position())=I`) — no inverse embedding needed. A chart with no square physical frame (a planar one over a 3-D reference) has no Jacobian and is refused by name. Returns an invariant in this chart's frame |
 | `expand_nabla(e)` | `Expr` | Expand every `t.nabla()` into the free-index frame form `eᵢ∂ᵢ` and apply (constant unit-scale frames only) |
 | `componentize_nabla(e)` | `Expr` | Lower a free-index expansion to concrete components (`eᵢ→e_d`, `∂ᵢ→∂_{qᵈ}`) |
 | `reassemble_nabla(e)` | `Expr` | Fold a reduced free-index expression back into chart-free ∇ operators |

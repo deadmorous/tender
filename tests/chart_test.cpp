@@ -1480,10 +1480,13 @@ TEST(Chart, EvaluateReprojectsForeignWcsCoordinates)
     EXPECT_TRUE(eq(ctx, evaluate(ctx, cart, gradR), I)); // native
     EXPECT_TRUE(eq(ctx, evaluate(ctx, cyl, gradR), I));  // reprojected + folded
 
-    // reverse: a cylindrical position in the Cartesian chart needs cyl's
-    // inverse.
+    // Reverse (vibe 000090 approach B): a cylindrical position evaluated in the
+    // Cartesian chart.  The inverse embedding is never written down — only its
+    // derivatives are needed, and those are the registered cross-chart
+    // Jacobian, ∂q^a/∂x^b = (e_a·i_b)/h_a.  ∇R = I is chart-independent, so
+    // both directions must agree.
     auto* gradRc = make_tensor_product(ctx, nab, position(ctx, cyl));
-    EXPECT_THROW((void)evaluate(ctx, cart, gradRc), std::invalid_argument);
+    EXPECT_TRUE(eq(ctx, evaluate(ctx, cart, gradRc), I));
 }
 
 TEST(Chart, ReassembleNablaRoundTripsSingleOperators)
@@ -1600,6 +1603,165 @@ TEST(Chart, ReassembleNablaFoldsBilinearCrossTerm)
 // the structural path (vibe 000088): the δ-pair Laplacian must scope to the
 // mark-carrying sub-field (u·Δv, (Δu)·v) and the cross term must become the
 // double contraction ∇u:∇v, not the old 4·Δ(u·v) monolithic mis-fold.
+// ---- cross-chart Jacobian (vibe 000090 approach B) -----------------------
+
+namespace
+{
+
+// A Cartesian and a cylindrical chart over one world frame, both registered.
+struct SiblingCharts final
+{
+    Basis ref;
+    CoordinateChart cart;
+    CoordinateChart cyl;
+};
+
+auto sibling_charts(Context& ctx) -> SiblingCharts
+{
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 1, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 1, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 1, 2);
+    CoordinateChart cart{ref, {x, y, z}, {x, y, z}};
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 2, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 2, 1);
+    auto* zc = make_coordinate(ctx, make_tensor_name("z"), 2, 2);
+    CoordinateChart cyl{
+        ref,
+        {r, th, zc},
+        {mul(ctx, r, cos_(ctx, th)), mul(ctx, r, sin_(ctx, th)), zc}};
+    register_chart(ctx, cart);
+    register_chart(ctx, cyl);
+    return {ref, std::move(cart), std::move(cyl)};
+}
+
+} // namespace
+
+TEST(CrossChartJacobian, DifferentiatesASiblingsCoordinate)
+{
+    // ∂r/∂x = cos θ and ∂θ/∂x = −sin θ / r — the contravariant basis vectors,
+    // read off the chart rather than off an inverse embedding that tender could
+    // not write down (there is no arctangent).
+    Context ctx;
+    auto sc = sibling_charts(ctx);
+    auto* x = sc.cart.coords[0];
+    auto* r = sc.cyl.coords[0];
+    auto* th = sc.cyl.coords[1];
+
+    auto* dr = steps::simplify_scalars(ctx, steps::partial(ctx, r, x));
+    EXPECT_TRUE(structural_eq(dr, cos_(ctx, th)));
+
+    auto* dth = steps::simplify_scalars(ctx, steps::partial(ctx, th, x));
+    EXPECT_TRUE(structural_eq(
+        dth, make_scalar_div(ctx, make_negate(ctx, sin_(ctx, th)), r)));
+}
+
+TEST(CrossChartJacobian, TheChainRuleClosesOnTheEmbedding)
+{
+    // ∂ₓ(r cos θ) = ∂ₓx = 1: cos²θ + sin²θ, which is the whole point — the
+    // Jacobian entries are consistent with the forward embedding.
+    Context ctx;
+    auto sc = sibling_charts(ctx);
+    auto* x = sc.cart.coords[0];
+    auto* y = sc.cart.coords[1];
+    auto* r = sc.cyl.coords[0];
+    auto* th = sc.cyl.coords[1];
+
+    auto* dx = steps::simplify_scalars(
+        ctx, steps::partial(ctx, mul(ctx, r, cos_(ctx, th)), x));
+    EXPECT_TRUE(structural_eq(dx, make_scalar(ctx, Rational{1})));
+    // …and the off-diagonal vanishes: ∂_y(r cos θ) = ∂_y x = 0.
+    auto* dy = steps::simplify_scalars(
+        ctx, steps::partial(ctx, mul(ctx, r, cos_(ctx, th)), y));
+    EXPECT_TRUE(structural_eq(dy, make_scalar(ctx, Rational{0})));
+}
+
+TEST(CrossChartJacobian, ACoordinateOfTheSameChartIsStillIndependent)
+{
+    // The Jacobian must not make *siblings within one chart* dependent:
+    // ∂x/∂y is still 0.
+    Context ctx;
+    auto sc = sibling_charts(ctx);
+    EXPECT_TRUE(structural_eq(
+        steps::partial(ctx, sc.cart.coords[0], sc.cart.coords[1]),
+        make_scalar(ctx, Rational{0})));
+    EXPECT_TRUE(structural_eq(
+        steps::partial(ctx, sc.cyl.coords[0], sc.cyl.coords[1]),
+        make_scalar(ctx, Rational{0})));
+}
+
+TEST(CrossChartJacobian, ChartsOverDifferentFramesStayIndependent)
+{
+    // Two charts over *different* reference frames describe different spaces;
+    // relating their coordinates would be meaningless, so ∂ stays 0.
+    Context ctx;
+    auto sc = sibling_charts(ctx);
+    auto named = [&](char const* n)
+    { return make_tensor_object(ctx, make_tensor_name(n), {}, 1); };
+    auto other = make_orthonormal_basis(
+        ctx, space_3d(), {named("p"), named("q"), named("s")});
+    auto* u = make_coordinate(ctx, make_tensor_name("u"), 7, 0, true);
+    auto* v = make_coordinate(ctx, make_tensor_name("v"), 7, 1);
+    auto* w = make_coordinate(ctx, make_tensor_name("w"), 7, 2);
+    CoordinateChart far{
+        other,
+        {u, v, w},
+        {mul(ctx, u, cos_(ctx, v)), mul(ctx, u, sin_(ctx, v)), w}};
+    register_chart(ctx, far);
+
+    EXPECT_TRUE(structural_eq(
+        steps::partial(ctx, u, sc.cart.coords[0]),
+        make_scalar(ctx, Rational{0})));
+}
+
+TEST(CrossChartJacobian, AChartWithoutASquareFrameIsRefused)
+{
+    // A planar chart over a 3-D reference has no physical frame, so no
+    // Jacobian.  Registration must not throw (it happens at construction), and
+    // evaluating one of its quantities elsewhere must say so rather than
+    // silently return 0.
+    Context ctx;
+    auto sc = sibling_charts(ctx);
+    auto* pr = make_coordinate(ctx, make_tensor_name("\\rho"), 5, 0, true);
+    auto* pth = make_coordinate(ctx, make_tensor_name("\\varphi"), 5, 1);
+    CoordinateChart planar{
+        sc.ref,
+        {pr, pth},
+        {mul(ctx, pr, cos_(ctx, pth)), mul(ctx, pr, sin_(ctx, pth))}};
+    EXPECT_NO_THROW(register_chart(ctx, planar));
+
+    auto* nab = make_nabla(ctx);
+    auto* q = make_tensor_product(ctx, nab, mul(ctx, pr, cos_(ctx, pth)));
+    EXPECT_THROW((void)evaluate(ctx, sc.cart, q), std::invalid_argument);
+}
+
+TEST(CrossChartJacobian, SphericalReverseGradientIsIdentity)
+{
+    // The mechanism is not cylindrical-specific.
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto* x = make_coordinate(ctx, make_tensor_name("x"), 1, 0);
+    auto* y = make_coordinate(ctx, make_tensor_name("y"), 1, 1);
+    auto* z = make_coordinate(ctx, make_tensor_name("z"), 1, 2);
+    CoordinateChart cart{ref, {x, y, z}, {x, y, z}};
+    // x = r sinθ cosφ, y = r sinθ sinφ, z = r cosθ
+    auto* r = make_coordinate(ctx, make_tensor_name("r"), 3, 0, true);
+    auto* th = make_coordinate(ctx, make_tensor_name("\\theta"), 3, 1);
+    auto* ph = make_coordinate(ctx, make_tensor_name("\\varphi"), 3, 2);
+    CoordinateChart sph{
+        ref,
+        {r, th, ph},
+        {mul(ctx, mul(ctx, r, sin_(ctx, th)), cos_(ctx, ph)),
+         mul(ctx, mul(ctx, r, sin_(ctx, th)), sin_(ctx, ph)),
+         mul(ctx, r, cos_(ctx, th))}};
+    register_chart(ctx, cart);
+    register_chart(ctx, sph);
+
+    auto* nab = make_nabla(ctx);
+    auto* gradR = make_tensor_product(ctx, nab, position(ctx, sph));
+    EXPECT_TRUE(eq(ctx, evaluate(ctx, cart, gradR), make_identity(ctx)));
+}
+
 TEST(Chart, ReassembleNablaDeclinesTheDirectionalDerivative)
 {
     // (u·∇)u expands to Σ_i (u·e_i) ⊗ ∂_i u, a term with *two* field-carrying

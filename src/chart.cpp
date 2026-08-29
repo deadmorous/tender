@@ -1563,6 +1563,55 @@ auto chart_coord_id(CoordinateChart const& chart) -> std::optional<int>
     return std::nullopt;
 }
 
+// Does `e` carry a coordinate of a *curvilinear* sibling chart — one over the
+// same reference frame, with a cross-chart Jacobian registered?  That is the
+// reverse direction (vibe 000090 approach B), which needs the expression
+// brought to the reference frame before the operators act.
+auto holds_foreign_curvilinear_coord(
+    Context& ctx, CoordinateChart const& chart, Expr const* e) -> bool
+{
+    auto const my_id = chart_coord_id(chart);
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* n) -> Expr const*
+        {
+            auto cr = coord_ref(n);
+            if (!cr || (my_id && cr->chart_id == *my_id))
+                return n;
+            auto const* emb = c.chart_embedding(cr->chart_id);
+            if (emb && !emb->is_identity && !emb->jacobian.empty()
+                && emb->reference_basis_id == chart.reference.basis_id())
+                found = true;
+            return n;
+        });
+    return found;
+}
+
+// Bring every ∇-free operand into the reference frame, leaving the operator
+// structure untouched.
+//
+// `to_reference` must NOT be applied to a ∇-bearing expression: it distributes,
+// and distribution floats a scalar out of the operator's scope — `∇⊗(r cos θ
+// i)` comes back as `cos θ ∇⊗(r i)`, which is a different quantity whenever the
+// scalar varies (and `cos θ` certainly does).  Descending to the ∇-free
+// subtrees first keeps the fence intact.
+auto reference_operands(Context& ctx, Expr const* e) -> Expr const*
+{
+    if (!contains_nabla(ctx, e))
+        return to_reference(ctx, e);
+    auto kids = children(e);
+    bool changed = false;
+    for (auto& k: kids)
+    {
+        Expr const* const n = reference_operands(ctx, k);
+        changed = changed || n != k;
+        k = n;
+    }
+    return changed ? with_children(ctx, e, kids) : e;
+}
+
 // Reproject foreign WCS coordinates into the evaluating chart (vibe 000090).
 // A coordinate belonging to another *identity* chart over the same reference is
 // a reference Cartesian (WCS) coordinate `x_a`; rewrite it by this chart's
@@ -1591,12 +1640,24 @@ auto reproject_coords(Context& ctx, CoordinateChart const& chart, Expr const* e)
                     "chart.evaluate: a coordinate from a chart over a *different* "
                     "reference frame — the two charts are genuinely independent.");
             if (!emb->is_identity)
+            {
+                // The reverse direction (vibe 000090 approach B).  A
+                // curvilinear coordinate is *not* substituted — writing r in
+                // terms of x, y would need the inverse embedding and an
+                // arctangent.  It is left standing, and `diff` differentiates
+                // it through the registered cross-chart Jacobian instead.  The
+                // caller brings the expression to the reference frame first, so
+                // the only thing left varying is the coordinates.
+                if (!emb->jacobian.empty())
+                    return n;
                 throw std::invalid_argument(
-                    "chart.evaluate: cannot reproject a *curvilinear* chart's "
-                    "coordinate forward — that needs its inverse embedding "
-                    "(q = C⁻¹(x), e.g. r = √(x²+y²)), not yet supported (vibe "
-                    "000090 approach B).  Re-express the quantity in this chart, "
-                    "or evaluate it in its own chart.");
+                    "chart.evaluate: cannot relate a *curvilinear* chart's "
+                    "coordinate to this chart — that chart has no cross-chart "
+                    "Jacobian registered (vibe 000090 approach B), which a "
+                    "square chart over a shared reference frame would have.  "
+                    "Re-express the quantity in this chart, or evaluate it in "
+                    "its own chart.");
+            }
             if (cr->slot < 0
                 || cr->slot >= static_cast<int>(chart.embedding.size()))
                 throw std::invalid_argument(
@@ -1609,6 +1670,62 @@ auto reproject_coords(Context& ctx, CoordinateChart const& chart, Expr const* e)
 auto evaluate_lowered(Context& ctx, CoordinateChart const& chart, Expr const* e)
     -> Expr const*;
 
+// The cross-chart Jacobian ∂q^a/∂x^b of a curvilinear chart against the
+// reference Cartesian coordinates (vibe 000090 approach B).
+//
+// The inverse embedding q = C⁻¹(x) never has to be written down, which is the
+// point: for cylindrical it would need `θ = atan2(y, x)` and then a
+// simplification of `cos(atan2(y, x))`, and tender has no arctangent.  But only
+// the *derivatives* of the inverse are ever needed, and for an orthogonal chart
+// those are the contravariant basis vectors:
+//
+//     ∂q^a/∂x^b  =  (∇q^a)_b  =  (e_a · i_b) / h_a
+//
+// which the chart already knows — `e_r = cos θ i + sin θ j` and `h_r = 1` give
+// `∂r/∂x = cos θ`, while `h_θ = r` gives `∂θ/∂x = −sin θ / r`.  Both are
+// written in the *curvilinear* coordinates, which is exactly where the rest of
+// the expression already lives, so nothing needs inverting or re-simplifying.
+auto cross_chart_jacobian(Context& ctx, CoordinateChart const& chart)
+    -> std::vector<std::vector<Expr const*>>
+{
+    std::vector<std::vector<Expr const*>> jac;
+    auto const n = static_cast<int>(chart.coords.size());
+    // Only a *square* chart has a Jacobian against the reference coordinates.
+    // Check that before touching the frame: a planar chart over a 3-D
+    // reference (`polar_chart` builds one) has no physical frame at all, and
+    // asking for it throws — which, since this runs at chart *construction*,
+    // would make such a chart impossible to build.
+    if (n == 0 || chart.reference.dim() != n)
+        return jac;
+    Basis const fb = physical_frame(ctx, chart);
+    if (fb.dim() != n)
+        return jac;
+    for (int a = 0; a < n; ++a)
+    {
+        Expr const* const h = scale_factor(ctx, chart, a);
+        std::vector<Expr const*> row;
+        for (int b = 0; b < n; ++b)
+        {
+            // The frame vectors are stored in their reference expansion, so the
+            // component is a plain dot against the reference vector.
+            Expr const* comp =
+                make_dot(ctx, fb.basis(a), chart.reference.basis(b));
+            comp = simplify_basis_dot(ctx, comp, chart.reference);
+            // simplify_basis_dot leaves the frame dots as *concrete* deltas
+            // (δ_{11}, δ_{12}); evaluate them, or every Jacobian entry carries
+            // an unreduced δ and the chain rule never closes.
+            comp =
+                steps::eval_delta_concrete(ctx, steps::canonicalize(ctx, comp));
+            comp = steps::fold_arithmetic(ctx, comp);
+            comp = steps::simplify_scalars(ctx, steps::canonicalize(ctx, comp));
+            row.push_back(steps::simplify_scalars(
+                ctx, steps::canonicalize(ctx, make_scalar_div(ctx, comp, h))));
+        }
+        jac.push_back(std::move(row));
+    }
+    return jac;
+}
+
 auto register_chart(Context& ctx, CoordinateChart const& chart) -> void
 {
     auto const id = chart_coord_id(chart);
@@ -1619,8 +1736,18 @@ auto register_chart(Context& ctx, CoordinateChart const& chart) -> void
     bool identity = chart.coords.size() == chart.embedding.size();
     for (std::size_t a = 0; identity && a < chart.coords.size(); ++a)
         identity = structural_eq(chart.embedding[a], chart.coords[a]);
+    // Registration is idempotent and happens on every evaluate, so do not
+    // recompute a Jacobian that is already stored.
+    if (auto const* prev = ctx.chart_embedding(*id);
+        prev && !prev->jacobian.empty())
+        return;
     ctx.register_chart_embedding(
-        *id, Context::ChartEmbedding{chart.reference.basis_id(), identity});
+        *id,
+        Context::ChartEmbedding{
+            chart.reference.basis_id(),
+            identity,
+            identity ? std::vector<std::vector<Expr const*>>{} :
+                       cross_chart_jacobian(ctx, chart)});
 }
 
 auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
@@ -1633,7 +1760,15 @@ auto evaluate(Context& ctx, CoordinateChart const& chart, Expr const* e)
     // Reproject any WCS coordinate written in another chart into this chart's
     // coordinates (vibe 000090), so `∂` sees only this chart's coords, then
     // lower.
-    Expr const* const rp = reproject_coords(ctx, chart, e);
+    // Approach B: a quantity written in a *curvilinear* sibling chart keeps
+    // its own coordinates (see reproject_coords), but its frame vectors must
+    // come home first — `r e_r + z e_z` differentiates cleanly only once e_r is
+    // the constant combination `cos θ i + sin θ j`, leaving the θ-dependence
+    // where the Jacobian can reach it.
+    Expr const* src = e;
+    if (holds_foreign_curvilinear_coord(ctx, chart, e))
+        src = reference_operands(ctx, e);
+    Expr const* const rp = reproject_coords(ctx, chart, src);
     Expr const* out = evaluate_lowered(ctx, chart, rp);
     // A reprojected (foreign, Cartesian) quantity brings its WCS frame vectors
     // i,j,k in as operand legs; re-express the result in this chart's physical

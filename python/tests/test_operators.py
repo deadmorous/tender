@@ -747,20 +747,39 @@ def test_chart_evaluate_cross_chart_position_gradient():
     assert cyl.evaluate(b).latex() == r"\mathbf{I}"  # native
 
 
-def test_chart_evaluate_cross_chart_reverse_direction_errors():
+def test_chart_evaluate_cross_chart_reverse_direction():
     # The reverse direction (a curvilinear-expressed quantity evaluated in a
-    # different chart) needs the source chart's inverse embedding — not yet
-    # supported (approach B).  It must error clearly, not silently return 0.
+    # different chart), vibe 000090 approach B.  The inverse embedding is never
+    # written down — r = √(x²+y²) and θ = atan2(y, x) would need an arctangent
+    # tender does not have — because only the *derivatives* of the inverse are
+    # ever needed, and for an orthogonal chart those are ∂q^a/∂x^b = (e_a·i_b)/h_a,
+    # which the chart already knows.  ∇R = I is chart-independent, so both
+    # directions must agree.
     ws = t.Workspace()
     nab = t.nabla(ctx=ws.ctx)
     x, y, z = ws.coords("x", "y", "z")
     cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
     r, th, zc = ws.coords("r", r"\theta", "z", nonneg=("r",))
     cyl = ws.chart(ws.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
+
+    assert td.algebraic_eq(
+        cart.evaluate(nab * cyl.position()), t.identity(ws.ctx)
+    )
+
+
+def test_chart_without_a_square_frame_has_no_cross_chart_jacobian():
+    # A planar chart over a 3-D reference has no physical frame, so no
+    # Jacobian — and evaluating a quantity of one in a sibling must say so
+    # rather than silently returning 0.
+    ws = t.Workspace()
+    nab = t.nabla(ctx=ws.ctx)
+    x, y, z = ws.coords("x", "y", "z")
+    cart = ws.chart(ws.wcs(), [x, y, z], [x, y, z])
+    pol, (pr, pth) = ws.polar_chart()
     import pytest
 
-    with pytest.raises(ValueError, match="curvilinear"):
-        cart.evaluate(nab * cyl.position())
+    with pytest.raises(ValueError, match="Jacobian"):
+        cart.evaluate(nab * (pr * t.cos(pth)))
 
 
 def test_workspace_wcs_is_memoised():

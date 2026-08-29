@@ -3614,6 +3614,31 @@ auto as_diff_coord(Expr const* e) -> std::optional<DiffCoord>
 // the chart slot (chart_id, slot) plus the display name — distinct coordinates
 // of a chart differ in slot, and unbound (chart_id 0) coordinates differ in
 // name.
+// ∂q^a/∂x^b for a coordinate `t` belonging to a *different* chart than the one
+// `q` differentiates by (vibe 000090 approach B).  Non-null only when `t`'s
+// chart is curvilinear with a registered Jacobian, `q`'s chart is the identity
+// (reference Cartesian) chart, and both sit over the same reference frame —
+// exactly the case where the two coordinate sets describe one manifold and
+// treating them as independent is wrong.
+auto cross_chart_derivative(
+    Context& ctx, TensorObject const& t, DiffCoord const& q) -> Expr const*
+{
+    auto const& c = *t.traits->coordinate;
+    if (c.chart_id == q.ref.chart_id)
+        return nullptr; // same chart, different coordinate: genuinely 0
+    auto const* from = ctx.chart_embedding(c.chart_id);
+    auto const* wrt = ctx.chart_embedding(q.ref.chart_id);
+    if (!from || !wrt || from->jacobian.empty() || !wrt->is_identity
+        || from->reference_basis_id != wrt->reference_basis_id)
+        return nullptr;
+    auto const a = static_cast<std::size_t>(c.slot);
+    auto const b = static_cast<std::size_t>(q.ref.slot);
+    if (c.slot < 0 || q.ref.slot < 0 || a >= from->jacobian.size()
+        || b >= from->jacobian[a].size())
+        return nullptr;
+    return from->jacobian[a][b];
+}
+
 auto is_same_coord(TensorObject const& t, DiffCoord const& q) -> bool
 {
     if (!t.traits || !t.traits->coordinate)
@@ -3717,8 +3742,19 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
                 // A coordinate atom: ∂_q q = 1 for the matching coordinate, 0
                 // for any other (sibling coordinate, unbound symbol).
                 if (t.traits && t.traits->coordinate)
-                    return is_same_coord(t, q) ? make_scalar(ctx, Rational{1}) :
-                                                 zero();
+                {
+                    if (is_same_coord(t, q))
+                        return make_scalar(ctx, Rational{1});
+                    // A coordinate of *another* chart over the same reference
+                    // frame is not an independent variable — that was vibe
+                    // 000090's whole complaint.  When that chart has a
+                    // registered cross-chart Jacobian (approach B), ∂x of r is
+                    // the entry ∂r/∂x rather than 0.  Without one, charts stay
+                    // independent as before.
+                    if (auto const* j = cross_chart_derivative(ctx, t, q))
+                        return j;
+                    return zero();
+                }
                 // A tensor field (vibe 000070 P7): if it depends on q, the
                 // derivative is the opaque derivative field ∂_q T (a fresh
                 // field of the same rank, so it can be differentiated again);

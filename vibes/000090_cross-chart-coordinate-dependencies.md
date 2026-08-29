@@ -34,13 +34,44 @@ cart.evaluate(∇⊗cyl.position())  = clear error (reverse — approach B)
 `test_chart_evaluate_cross_chart_reverse_direction_errors`,
 `test_workspace_wcs_is_memoised` (Python).
 
-## Deferred (approach B — the reverse direction)
+## Approach B — DONE, and without an inverse embedding
 
-Curvilinear-quantity → other chart needs the **inverse embedding** `q_C =
-C⁻¹(WCS)`; **derive for the built-in charts** (cyl/spherical/polar; inverses are
-standard), custom charts user-supplied or forward-only. Until then `evaluate`
-errors clearly instead of returning `0`. `expand`/`components` could route through
-the same reproject later.
+The plan below assumed the reverse direction needed `q_C = C⁻¹(WCS)`: `r =
+√(x²+y²)`, `θ = atan2(y, x)`.  tender cannot even write that — there is no
+arctangent — and `cos(atan2(y,x))` would then have to simplify back to
+`x/√(x²+y²)`.
+
+None of it is necessary, because **the inverse embedding is never used — only
+its derivatives are**, and for an orthogonal chart those are the contravariant
+basis vectors the chart already carries:
+
+    ∂q^a/∂x^b  =  (∇q^a)_b  =  (e_a · i_b) / h_a
+
+giving `∂r/∂x = cos θ` and `∂θ/∂x = −sin θ / r`.  Both are written in the
+*curvilinear* coordinates, which is where the rest of the expression already
+lives, so nothing needs inverting or re-simplifying.  It is computed once per
+chart at registration and stored on `ChartEmbedding`.
+
+Three pieces:
+
+- **`diff` consults the Jacobian.**  A coordinate of another chart over the same
+  reference frame stops being an independent variable — which was this vibe's
+  whole complaint.  Without a registered Jacobian, charts stay independent
+  exactly as before.
+- **`evaluate` brings ∇-free operands home** before lowering, so `r e_r + z e_z`
+  becomes `r cos θ i + …` and the θ-dependence sits where the Jacobian can reach
+  it.  The coordinates themselves are *not* substituted.
+- **Square charts only.**  A planar chart over a 3-D reference (`polar_chart`)
+  has no physical frame and so no Jacobian; it registers cleanly and `evaluate`
+  names the reason instead of returning `0`.
+
+One hazard found on the way and worth recording: **`to_reference` must not be
+applied to a ∇-bearing expression.**  It distributes, and distribution floats a
+scalar out of the operator's scope — `∇⊗(r cos θ i)` came back as
+`cos θ ∇⊗(r i)`, a different quantity whenever the scalar varies.  The fix
+descends to the ∇-free subtrees first (`reference_operands`), leaving the fence
+intact.  The symptom was subtle: `∇⊗R_cyl` evaluated to `e_r⊗e_r + e_z⊗e_z`,
+i.e. `I` minus exactly the `e_θ⊗e_θ` term.
 
 ---
 
