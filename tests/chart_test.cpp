@@ -11,6 +11,7 @@
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/render.hpp>
+#include <tender/rewrite.hpp>
 
 #include <gtest/gtest.h>
 
@@ -1599,6 +1600,43 @@ TEST(Chart, ReassembleNablaFoldsBilinearCrossTerm)
 // the structural path (vibe 000088): the δ-pair Laplacian must scope to the
 // mark-carrying sub-field (u·Δv, (Δu)·v) and the cross term must become the
 // double contraction ∇u:∇v, not the old 4·Δ(u·v) monolithic mis-fold.
+TEST(Chart, ReassembleNablaDeclinesTheDirectionalDerivative)
+{
+    // (u·∇)u expands to Σ_i (u·e_i) ⊗ ∂_i u, a term with *two* field-carrying
+    // factors: the frame vector is contracted into a `u` that does not own its
+    // ∂-mark.  The single-operand classifier used to overwrite its operand and
+    // silently drop the first factor, reassembling the whole thing to a bare
+    // `u` — the derivative gone.  It now leaves the term alone.
+    //
+    // Folding this properly (to u·(∇⊗u)) needs a leg rule that path does not
+    // have; declining is correct-if-unfolded, and a confident wrong answer is
+    // the one outcome that is not recoverable downstream.
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto* nab = make_nabla(ctx);
+
+    auto* conv = make_dot(ctx, u, make_tensor_product(ctx, nab, u));
+    auto* free = steps::canonicalize(ctx, expand_nabla(ctx, chart, conv));
+    auto* reass = reassemble_nabla(ctx, chart, free);
+
+    EXPECT_FALSE(structural_eq(reass, u));
+    // The ∂-mark survives: nothing was dropped.
+    bool marked = false;
+    rewrite_tree(
+        ctx,
+        reass,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node);
+                t && !t->deriv_marks.empty())
+                marked = true;
+            return n;
+        });
+    EXPECT_TRUE(marked);
+}
+
 TEST(Chart, ReassembleNablaFoldsContractedDotProduct)
 {
     Context ctx;

@@ -1314,6 +1314,21 @@ auto reassemble_term(
             coefficients.push_back({i, f});
             continue;
         }
+        // A second field-carrying factor: this term is not the single-operand
+        // shape this path handles.  `operand` used to be overwritten here,
+        // which silently *dropped* the earlier factor — `(u·e_i) ⊗ ∂_i u`
+        // reassembled to `u`, losing the derivative entirely.  The structured
+        // shapes (two marked operands, a contracted pair) have their own path
+        // above; anything left over is not ours, so leave the term alone rather
+        // than return a confident wrong answer.
+        //
+        // The case this refuses on is the directional derivative
+        // `(a·e_ℓ) ⊗ ∂_ℓ T = a·(∇⊗T)`, where the frame vector is contracted
+        // into a factor that does *not* own its mark.  That is a real shape
+        // worth folding — see vibe 000105 — but folding it needs a leg rule
+        // this path does not have, and guessing is worse than declining.
+        if (operand)
+            return term;
         operand = f;
         operand_pos = i;
     }

@@ -97,6 +97,25 @@ steps should refuse — rather than silently emit `Σ_?`.  Producing an expressi
 with a binder over nothing is worse than doing nothing, and it is what happens
 today.
 
+## Postscript: a neighbouring bug, found the same way
+
+Challenge 000019's derivation wanted the same trip home, and `reassemble_nabla`
+answered it with a silently wrong result: `Σ_i (u·e_i) ⊗ ∂_i u` — which is
+`(u·∇)u` — came back as a bare **`u`**, the derivative gone.
+
+The cause is a cousin of the addressing problem.  That term has *two*
+field-carrying factors, because the frame vector is contracted into a `u` that
+does not own its ∂-mark.  The single-operand classifier assigned `operand = f`
+in a loop, so the second factor overwrote the first and the first was dropped
+without trace.  There is already a safety valve for terms with ≥2 ∂-*marked*
+factors; this shape has only one mark, so it slipped past.
+
+It now leaves the term alone.  Folding it properly — to `u·(∇⊗u)` — needs a leg
+rule for the directional derivative, where the frame vector belongs to a ∂ on a
+*different* factor than the one it is contracted with.  That is worth building,
+and it is the same "which factor does this index belong to" question this vibe
+is about.
+
 ## Status
 
 Design proposal, unscheduled.  The `Σ_?` stranding is a live (if latent) bug
