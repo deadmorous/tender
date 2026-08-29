@@ -116,6 +116,59 @@ rule for the directional derivative, where the frame vector belongs to a ∂ on 
 and it is the same "which factor does this index belong to" question this vibe
 is about.
 
+## Resolved
+
+Both halves, and the split turned out to matter: one was a correctness bug, the
+other the feature.
+
+**The stranded binder was a bug, and a quiet one.**  `td.at` now compares which
+of the *enclosing* binders' indices the addressed part carried before the step
+against after.  An index it used and no longer does was summed away — δ
+contracted it, a metric spent it — so that binder is dropped along with it.  A
+binder that was *already* vacuous is left alone: `Σ_m X` with X free of m is
+dim·X, not X, so dropping one the step did not consume would change the value.
+That distinction is the whole of the fix.
+
+There is one case it refuses: the consumed index is still carried *outside* the
+addressed part.  Then the binder is still doing work for that occurrence — and
+worse, if the step *summed* over the index (which the contractions do), the
+result is already wrong, because the outside occurrence was not summed with it.
+No splice can repair that, so `at` raises and says to widen the address.
+
+Measured, on the case this vibe opened with:
+
+| addressed at | before | after |
+|---|---|---|
+| `[0,0]` | `Σ_j Σ_? a_j b_j c_i e_i` | `Σ_j a_j b_j c_i e_i` ✓ |
+| `[0,0,0]` | `Σ_j Σ_? Σ_i …` | ✓ |
+| `[0,0,0,0]` | (stranded) | ✓ |
+
+— and each now equals the whole-expression result, so the answer no longer
+depends on where the caller happened to point.
+
+**The targeting was the feature, and a path could not carry it.**  `raise the
+*other* one` is an ordinary thing to want, and this vibe's measurement showed
+why no path expresses it: the factors sharing an index are scattered across a
+product, and no subtree holds just `b` and `g`.  So the metric steps take an
+optional `target` naming the tensor whose index is to move:
+
+```python
+td.contract_metric(x, target="a")   # g^ij a_i b_j → a^i b_i
+td.contract_metric(x, target="b")   #              → a_i b^i
+td.insert_metric(m, Level.Upper, target="a")
+```
+
+A **name**, not a path, and deliberately: a name survives canonicalization,
+which these steps perform internally (they self-prepare), while a path does
+not.  It also reads the way the mathematics is spoken.  A target that is not
+present, or names a factor already at the level asked for, is a no-op rather
+than a wrong move.
+
+What is *not* done: the general "point by index" surface.  It was not needed —
+naming the factor answers the question a person actually asks — and an index has
+no stable handle across canonicalization to name it by.  The larger addressing
+design in this vibe stands unbuilt, and now without a motivating case.
+
 ## Status
 
 Design proposal, unscheduled.  The `Σ_?` stranding is a live (if latent) bug

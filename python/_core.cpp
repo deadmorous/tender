@@ -424,7 +424,7 @@ NB_MODULE(_core, m)
             "rewrite_at",
             [](PyExpr const& e, Path const& path, nb::callable fn) -> PyExpr
             {
-                auto* out = rewrite_at(
+                auto* out = steps::at(
                     *e.ctx,
                     e.expr,
                     path,
@@ -439,7 +439,10 @@ NB_MODULE(_core, m)
             "fn"_a,
             "Apply `fn` (an (Expr)->Expr callable) to the subexpression at "
             "`path`, splicing the result back — selectively apply any step to "
-            "one occurrence.  See also tender.derivation.at.")
+            "one occurrence.  An enclosing Σ whose index the step summed away "
+            "is dropped with it (vibe 000104); if that index is still carried "
+            "outside the addressed part, the call raises.  See also "
+            "tender.derivation.at.")
         .def(
             "find",
             [](PyExpr const& e,
@@ -1064,18 +1067,39 @@ NB_MODULE(_core, m)
 
     md.def(
         "_insert_metric",
-        [](PyExpr const& e, Level target) -> PyExpr
-        { return derive(e, steps::insert_metric(*e.ctx, e.expr, target)); },
+        [](PyExpr const& e,
+           Level level,
+           std::optional<std::string> target) -> PyExpr
+        {
+            return derive(
+                e,
+                steps::insert_metric(
+                    *e.ctx,
+                    e.expr,
+                    level,
+                    target ? std::optional{make_tensor_name(*target)} :
+                             std::nullopt));
+        },
         "expr"_a,
-        "target"_a,
+        "level"_a,
+        "target"_a = nb::none(),
         "Move summed coordinate slots to `target` level, introducing the "
         "metric that pays for the move (the inverse of contract_metric).");
 
     md.def(
         "_contract_metric",
-        [](PyExpr const& e) -> PyExpr
-        { return derive(e, steps::contract_metric(*e.ctx, e.expr)); },
+        [](PyExpr const& e, std::optional<std::string> target) -> PyExpr
+        {
+            return derive(
+                e,
+                steps::contract_metric(
+                    *e.ctx,
+                    e.expr,
+                    target ? std::optional{make_tensor_name(*target)} :
+                             std::nullopt));
+        },
         "expr"_a,
+        "target"_a = nb::none(),
         "Contract a metric against a summed index: raising, lowering, and the "
         "inverse pair g^ip g_pk = δ^i_k (vibe 000103's metric row).");
 

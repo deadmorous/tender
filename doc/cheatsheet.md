@@ -134,7 +134,7 @@ or extract, just that part instead of the whole tree.
 | `.paths(which="all")` | `list[list[int]]` | Paths (pre-order) to nodes by policy: `"all"`, `"atoms"` (leaves), `"tensors"`, `"wellknown"` | feeds the labeled view below |
 | `.at(path)` | `Expr` | The subexpression at `path` — **extract** a part as a first-class expression | `IndexError` if out of range |
 | `.replace_at(path, sub)` | `Expr` | Copy with the part at `path` replaced by `sub` — **splice** back | off-path nodes are shared (cheap) |
-| `.rewrite_at(path, fn)` | `Expr` | Apply `fn` (an `Expr→Expr` step) at `path` only — **selective application** | see `td.at` below |
+| `.rewrite_at(path, fn)` | `Expr` | Apply `fn` (an `Expr→Expr` step) at `path` only — **selective application**. An enclosing `Σ` whose index the step summed away is dropped with it | Raises if that index is still carried outside the addressed part (its binder is still doing work) |
 
 `td.at(expr, path, step)` is the free-function form of `.rewrite_at` — it
 retargets *any* step to one occurrence: e.g. expand only one `I` in `a × I × b`,
@@ -235,8 +235,8 @@ Any of these can be passed to `.step()` or called directly.
 | `eval_eps_concrete` | Levi-Civita with concrete indices → its permutation sign / 0 | Touch symbolic-index ε |
 | `expand_eps` | Every rank-3 ε → its 6-term δ cofactor expansion | — |
 | `contract_delta` | `Σ_m δᵐ_a·δᵐ_b → δ_{ab}` | — |
-| `contract_metric` | Spend a metric to move an index: `g^{ip} a_p → a^i` (raise), `g_{ip} a^p → a_i` (lower), `g^{ip} g_{pk} → δ^i_k`. The survivor is `g`'s *other* index at `g`'s *other* level | Fire on a same-level pair (not an Einstein contraction) or a `g` with no partner |
-| `insert_metric(expr, level)` | The inverse: move summed coordinate slots to `level`, introducing the metric that pays for it (`a^m b_m → g_{mn} a^m b^n`) | Touch δ/ε/`g` (the currency, not the cargo — this is also what makes it terminate) or orthonormal slots |
+| `contract_metric(expr, target=None)` | Spend a metric to move an index: `g^{ip} a_p → a^i` (raise), `g_{ip} a^p → a_i` (lower), `g^{ip} g_{pk} → δ^i_k`. The survivor is `g`'s *other* index at `g`'s *other* level. `target="b"` names *which* factor moves — the metric carries two indices and either may be spent | Fire on a same-level pair (not an Einstein contraction) or a `g` with no partner |
+| `insert_metric(expr, level, target=None)` | The inverse: move summed coordinate slots to `level`, introducing the metric that pays for it (`a^m b_m → g_{mn} a^m b^n`) | Touch δ/ε/`g` (the currency, not the cargo — this is also what makes it terminate) or orthonormal slots |
 | `contract_identity` | `I·x→x`, `x·I→x` | — |
 | `contract_eps_pair` | `Σ ε·ε` sharing summed indices → generalized δ (3D, exactly two rank-3 ε's) | Any other shape |
 | `distribute_contraction` | `op(L, A⊗B)→op(L,A)⊗B` (·/× over the adjacent ⊗ leg), one pass | Cross a ∇-fence (barrier) |

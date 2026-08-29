@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace tender
@@ -154,9 +155,44 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*;
 // being moved, which is also what makes the step terminate.  Orthonormal slots
 // are left alone, the distinction being empty there.  A no-op when nothing
 // converts.
-auto insert_metric(Context& ctx, Expr const* e, Level target) -> Expr const*;
+// `target`, when given, names the tensor whose index is to move — the answer
+// to "which one?" that a path cannot give, because the factors sharing an index
+// are scattered across a product and no subtree holds just the ones meant
+// (vibe 000104).  A name survives canonicalization, where a path does not.
+auto insert_metric(
+    Context& ctx,
+    Expr const* e,
+    Level level,
+    std::optional<TensorName> target = std::nullopt) -> Expr const*;
 
-auto contract_metric(Context& ctx, Expr const* e) -> Expr const*;
+// `target` names which factor is to move; see `insert_metric`.  A metric
+// carries two indices and either may be spent, so without it the step takes
+// whichever binder it reaches first.
+auto contract_metric(
+    Context& ctx,
+    Expr const* e,
+    std::optional<TensorName> target = std::nullopt) -> Expr const*;
+
+// Apply `f` to the subexpression at `path` and splice the result back — the
+// selective-application primitive behind `tender.derivation.at` (vibe 000054),
+// made safe for the index-algebra steps (vibe 000104).
+//
+// The addressed part is a *subtree*, but an index contraction acts on an index
+// *cluster* — factors scattered across a product, plus the binder standing
+// above them.  So a step run under `at` can sum an index away while its Σ stays
+// behind, and a leftover binder is not harmless: `Σ_m X` with X free of m is
+// dim·X.  (That is the stranded `Σ_?` this fixes.)
+//
+// Any enclosing binder whose index the target carried *before* the step and not
+// after is therefore dropped along with it.  A binder that was already vacuous
+// is left alone — not this step's doing.  If the consumed index is still
+// carried *outside* the addressed part, the binder is still working for that
+// occurrence: the call throws rather than silently changing its meaning.
+auto at(
+    Context& ctx,
+    Expr const* e,
+    std::vector<int> const& path,
+    std::function<Expr const*(Context&, Expr const*)> const& f) -> Expr const*;
 
 // Contract the identity tensor against a dot product: I · x → x and x · I → x
 // (the identity tensor acts as the identity under ·).  Walks the whole tree;

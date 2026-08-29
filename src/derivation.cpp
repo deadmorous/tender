@@ -159,6 +159,27 @@ auto substitute(Context& ctx, Expr const* e, int idx_id, ConcreteIndex val)
 // carried it.  This is where raising and lowering differ from a δ contraction:
 // δ merely identifies two indices, while g moves the survivor across the
 // upper/lower divide (g^{ip} a_p = a^i, not a_i).
+// Does any slot in `e` carry the dummy index `id`?
+auto carries_index(Context& ctx, Expr const* e, int id) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node))
+                for (auto const& sb: t->slots)
+                    if (sb.index)
+                        if (auto const* ci =
+                                std::get_if<CountableIndex>(&*sb.index);
+                            ci && ci->id == id)
+                            found = true;
+            return n;
+        });
+    return found;
+}
+
 auto substitute_index_leveled(
     Context& ctx, Expr const* e, int from_id, IndexAssoc to, Level to_level)
     -> Expr const*
@@ -2313,10 +2334,16 @@ auto drop_factor(Context& ctx, Expr const* body, Expr const* target)
 // The slot of the first occurrence of index `m` in `e` — the partner the
 // contraction acts on.  nullopt when nothing else carries it (Σ_m δ^m_k with no
 // partner is a plain 1, not ours to collapse).
-auto find_partner_slot(Context& ctx, Expr const* e, int m)
-    -> std::optional<IndexSlot>
+struct PartnerOccurrence final
 {
-    std::optional<IndexSlot> found;
+    IndexSlot slot;
+    TensorName name;
+};
+
+auto find_partner(Context& ctx, Expr const* e, int m)
+    -> std::optional<PartnerOccurrence>
+{
+    std::optional<PartnerOccurrence> found;
     rewrite_tree(
         ctx,
         e,
@@ -2334,7 +2361,7 @@ auto find_partner_slot(Context& ctx, Expr const* e, int m)
                 if (auto const* ci = std::get_if<CountableIndex>(&*sb.index);
                     ci && ci->id == m)
                 {
-                    found = sb.slot;
+                    found = PartnerOccurrence{sb.slot, t->name};
                     return node;
                 }
             }
@@ -2456,9 +2483,9 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             // partner, and contractions across mismatched realms, are not ours
             // to collapse).  Levels need not match — δ identifies its indices
             // regardless of which slot is up or down.
-            auto const partner_slot = find_partner_slot(ctx, without, m);
-            if (!partner_slot || partner_slot->realm != m_slot.realm
-                || partner_slot->space != m_slot.space)
+            auto const partner_at = find_partner(ctx, without, m);
+            if (!partner_at || partner_at->slot.realm != m_slot.realm
+                || partner_at->slot.space != m_slot.space)
                 return e;
 
             fired = true;
@@ -2472,7 +2499,11 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
     return fired ? implicitize(ctx, out) : e;
 }
 
-auto insert_metric(Context& ctx, Expr const* e, Level target) -> Expr const*
+auto insert_metric(
+    Context& ctx,
+    Expr const* e,
+    Level level,
+    std::optional<TensorName> target) -> Expr const*
 {
     bool fired = false;
     Expr const* prepped = e;
@@ -2484,12 +2515,13 @@ auto insert_metric(Context& ctx, Expr const* e, Level target) -> Expr const*
     {
         return e;
     }
-    Level const paid = target == Level::Upper ? Level::Lower : Level::Upper;
+    Level const paid = level == Level::Upper ? Level::Lower : Level::Upper;
 
     auto const* out = rewrite_tree(
         ctx,
         prepped,
-        [&fired, target, paid](Context& ctx, Expr const* e) -> Expr const*
+        [&fired, level, paid, &target](Context& ctx, Expr const* e)
+            -> Expr const*
         {
             auto const* s = std::get_if<ExplicitSum>(&e->node);
             if (!s || s->bound)
@@ -2514,9 +2546,14 @@ auto insert_metric(Context& ctx, Expr const* e, Level target) -> Expr const*
                     auto const* t = std::get_if<TensorObject>(&node->node);
                     if (!t || (t->traits && t->traits->well_known))
                         return node;
+                    // `target` names which factor is to move (vibe 000104);
+                    // without it the step takes the first candidate, which is
+                    // no answer when the caller meant the other one.
+                    if (target && t->name != *target)
+                        return node;
                     for (auto const& sb: t->slots)
                     {
-                        if (!sb.index || sb.slot.level == target
+                        if (!sb.index || sb.slot.level == level
                             || sb.slot.realm == Realm::Orthonormal)
                             continue;
                         auto const* ci =
@@ -2555,7 +2592,7 @@ auto insert_metric(Context& ctx, Expr const* e, Level target) -> Expr const*
                         if (ci && ci->id == m)
                         {
                             sb.index = IndexAssoc{fresh};
-                            sb.slot.level = target;
+                            sb.slot.level = level;
                         }
                     }
                     TensorObject obj = *t;
@@ -2582,7 +2619,10 @@ auto insert_metric(Context& ctx, Expr const* e, Level target) -> Expr const*
     return fired ? implicitize(ctx, out) : e;
 }
 
-auto contract_metric(Context& ctx, Expr const* e) -> Expr const*
+auto contract_metric(
+    Context& ctx,
+    Expr const* e,
+    std::optional<TensorName> target) -> Expr const*
 {
     // Self-prepares exactly as contract_delta does, and for the same reasons.
     bool fired = false;
@@ -2598,7 +2638,7 @@ auto contract_metric(Context& ctx, Expr const* e) -> Expr const*
     auto const* out = rewrite_tree(
         ctx,
         prepped,
-        [&fired](Context& ctx, Expr const* e) -> Expr const*
+        [&fired, &target](Context& ctx, Expr const* e) -> Expr const*
         {
             auto const* s = std::get_if<ExplicitSum>(&e->node);
             if (!s || s->bound)
@@ -2654,16 +2694,24 @@ auto contract_metric(Context& ctx, Expr const* e) -> Expr const*
             if (!without)
                 return e; // Σ_m g^{mn} alone — nothing to raise
 
-            auto const partner_slot = find_partner_slot(ctx, without, m);
-            if (!partner_slot || partner_slot->realm != m_slot.realm
-                || partner_slot->space != m_slot.space)
+            auto const partner_at = find_partner(ctx, without, m);
+            if (!partner_at || partner_at->slot.realm != m_slot.realm
+                || partner_at->slot.space != m_slot.space)
                 return e;
             // A genuine raise or lower straddles the divide: g's index and the
             // partner's must sit at opposite levels, which is what Einstein
             // summation in an Oblique realm demands anyway.  Same-level pairs
             // are not a contraction and are left alone.
-            if (partner_slot->realm != Realm::Orthonormal
-                && partner_slot->level == m_slot.level)
+            if (partner_at->slot.realm != Realm::Orthonormal
+                && partner_at->slot.level == m_slot.level)
+                return e;
+            // `target` names *which* factor is to move (vibe 000104).  The
+            // metric carries two indices and either may be spent; without a
+            // target the step takes whichever binder it reaches first, which is
+            // no answer at all when the caller wanted the other one.  A binder
+            // whose partner is not the named tensor is skipped, so the sibling
+            // binder gets its turn.
+            if (target && partner_at->name != *target)
                 return e;
 
             fired = true;
@@ -5113,6 +5161,103 @@ auto fold_operator(Context& ctx, Expr const* e, Expr const* op) -> Expr const*
             }
             return view::sum_of(c, rebuilt);
         });
+}
+
+namespace
+{
+
+// Rebuild the spine above `path`, splicing `leaf` in and dropping any binder on
+// the way whose index the step consumed.
+auto splice_dropping_binders(
+    Context& ctx,
+    Expr const* node,
+    std::vector<int> const& path,
+    std::size_t depth,
+    std::set<int> const& consumed,
+    Expr const* leaf) -> Expr const*
+{
+    if (depth == path.size())
+        return leaf;
+    auto kids = children(node);
+    auto const idx = static_cast<std::size_t>(path[depth]);
+    if (path[depth] < 0 || idx >= kids.size())
+        throw std::out_of_range("at: selector out of range");
+    Expr const* const nc =
+        splice_dropping_binders(ctx, kids[idx], path, depth + 1, consumed, leaf);
+    if (auto const* es = std::get_if<ExplicitSum>(&node->node);
+        es && !es->bound && consumed.count(es->index.id))
+        return nc; // the step summed this index away; its binder goes with it
+    if (nc == kids[idx])
+        return node;
+    kids[idx] = nc;
+    return with_children(ctx, node, kids);
+}
+
+} // namespace
+
+auto at(
+    Context& ctx,
+    Expr const* e,
+    std::vector<int> const& path,
+    std::function<Expr const*(Context&, Expr const*)> const& f) -> Expr const*
+{
+    // The binders standing above the target, and whether the target uses them.
+    std::vector<int> enclosing;
+    {
+        Expr const* cur = e;
+        for (std::size_t d = 0; d < path.size(); ++d)
+        {
+            if (auto const* es = std::get_if<ExplicitSum>(&cur->node);
+                es && !es->bound)
+                enclosing.push_back(es->index.id);
+            auto kids = children(cur);
+            auto const idx = static_cast<std::size_t>(path[d]);
+            if (path[d] < 0 || idx >= kids.size())
+                throw std::out_of_range("at: selector out of range");
+            cur = kids[idx];
+        }
+    }
+    Expr const* const sub = subexpr_at(e, path);
+    std::set<int> before;
+    for (int id: enclosing)
+        if (carries_index(ctx, sub, id))
+            before.insert(id);
+
+    Expr const* const out = f(ctx, sub);
+    if (out == sub)
+        return e; // a genuine no-op leaves the whole expression untouched
+
+    // An index the target used and no longer does was *summed away* by the
+    // step — δ contracted it, a metric spent it.  Its binder above is now
+    // vacuous, and a vacuous binder is not harmless: Σ_m X with X free of m is
+    // dim·X, so leaving it multiplies the result by the dimension.  (This is
+    // what produced the stranded `Σ_?` of vibe 000104.)  A binder that was
+    // *already* vacuous is left alone — it was not this step's doing, and its
+    // meaning is unchanged.
+    std::set<int> consumed;
+    for (int id: before)
+        if (!carries_index(ctx, out, id))
+            consumed.insert(id);
+
+    // Dropping is only safe when nothing *outside* the target still uses the
+    // index; otherwise the binder is still doing work for that occurrence and
+    // the rewrite has quietly changed what it means.  Refuse rather than guess.
+    if (!consumed.empty())
+    {
+        Expr const* const rest =
+            replace_at(ctx, e, path, make_scalar(ctx, Rational{1}));
+        for (int id: consumed)
+            if (carries_index(ctx, rest, id))
+                throw std::invalid_argument(
+                    "at: the step removed an index that the rest of the term "
+                    "still carries.  Its binder cannot be dropped (it is still "
+                    "doing work), and if the step *summed* over that index — "
+                    "as the contractions do — the result is wrong anyway, "
+                    "because the outside occurrence was not summed with it.  "
+                    "Address a part holding every occurrence of the index, or "
+                    "apply the step to the whole expression.");
+    }
+    return splice_dropping_binders(ctx, e, path, 0, consumed, out);
 }
 
 } // namespace steps

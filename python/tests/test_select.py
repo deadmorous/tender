@@ -196,3 +196,74 @@ def test_selective_reassembly_folds_only_the_targeted_term():
     out = td.at(e, e.addends()[0], _reassemble_term(frame))
     # One term reassembled to an invariant; the other is untouched.
     assert out.latex().count(r"\sum") == 1
+
+
+# ---------------------------------------------------------------------------
+# Index-algebra steps under `at` (vibe 000104)
+#
+# The addressed part is a *subtree*; an index contraction acts on an index
+# *cluster* — factors scattered across a product, plus the binder above them.
+# A step run under `at` can therefore sum an index away while its Σ stays
+# behind, and a leftover binder is not harmless: `Σ_m X` with X free of m is
+# dim·X, not X.  Every case below produced a stranded `Σ_?` before the fix.
+# ---------------------------------------------------------------------------
+
+
+def _delta_term(ctx):
+    """`Σ_j Σ_k Σ_i δ_kj a_k b_j c_i e_i` — a δ cluster with company."""
+    frame = tb.wcs(ctx)
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    x = tb.expand_in_basis((a @ b) * c, frame, tb.Variance.Covariant)
+    return frame, td.canonicalize(tb.simplify_basis_dot(x, frame))
+
+
+def test_at_drops_the_binder_a_contraction_consumed():
+    ctx = tender.Context()
+    _, e = _delta_term(ctx)
+    whole = td.contract_delta(e)
+
+    # The smallest subtree holding the whole δ cluster; its binder sits above.
+    out = td.implicitize(td.at(e, [0, 0], td.contract_delta))
+    assert "?" not in out.latex()
+    assert td.algebraic_eq(out, whole)
+
+
+def test_at_agrees_with_the_whole_expression_at_every_enclosing_depth():
+    # Addressing further down means more binders above, and each one that the
+    # contraction consumed has to go.  The answer must not depend on where the
+    # caller happened to point.
+    ctx = tender.Context()
+    _, e = _delta_term(ctx)
+    whole = td.contract_delta(e)
+    for path in ([0, 0], [0, 0, 0], [0, 0, 0, 0]):
+        out = td.implicitize(td.at(e, path, td.contract_delta))
+        assert "?" not in out.latex(), (path, out.latex())
+        assert td.algebraic_eq(out, whole), (path, out.latex())
+
+
+def test_at_leaves_an_already_vacuous_binder_alone():
+    # A binder that was vacuous *before* the step is not this step's doing, and
+    # `Σ_m X` with X free of m means dim·X — dropping it would change the value.
+    ctx = tender.Context()
+    i = ctx.alloc_index()
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    e = tender.explicit_sum(i, a, ctx=ctx)
+    out = td.at(e, [0], lambda s: s + s)
+    assert out.latex().count(r"\sum") == 1
+
+
+def test_at_refuses_when_the_index_is_still_carried_outside():
+    # Removing an index the rest of the term still uses: the binder is still
+    # doing work for that occurrence, and if the step *summed* over the index
+    # the result is wrong regardless.  Refuse rather than guess.
+    ctx = tender.Context()
+    _, e = _delta_term(ctx)
+    path = e.find(name="a")[0]
+    with pytest.raises(ValueError, match="still carries"):
+        td.at(e, path, lambda s: tender.scalar(1, ctx=ctx))
+
+
+def test_at_is_a_no_op_when_the_step_is():
+    ctx = tender.Context()
+    _, e = _delta_term(ctx)
+    assert td.structural_eq(td.at(e, [0, 0], lambda s: s), e)

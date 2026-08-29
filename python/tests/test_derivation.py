@@ -1586,3 +1586,72 @@ def test_proof_result_display_explains_an_incomplete_rule_set():
     )
     html = result._repr_html_()
     assert "looks" in html and "incomplete" in html
+
+
+# ---------------------------------------------------------------------------
+# Naming which factor an index move applies to (vibe 000104)
+#
+# A metric carries two indices and either may be spent, so `contract_metric`
+# alone takes whichever binder it reaches first.  "Raise the other one" is an
+# ordinary thing to want, and a *path* cannot express it: the factors sharing
+# an index are scattered across a product, and no subtree holds just the ones
+# meant.  A name can, and survives canonicalization where a path does not.
+# ---------------------------------------------------------------------------
+
+
+def _oblique_dots(ctx):
+    """a·b expanded on one oblique frame, contravariant and covariant."""
+    import tender.basis as tb
+
+    frame = tb.make_oblique_basis(
+        [tender.tensor(n, rank=1, ctx=ctx) for n in ("p", "q", "s")],
+        tender.space_3d,
+    )
+    a = tender.tensor("a", rank=1, ctx=ctx)
+    b = tender.tensor("b", rank=1, ctx=ctx)
+
+    def on(variance):
+        x = tb.expand_in_basis(a @ b, frame, variance)
+        return td.canonicalize(tb.simplify_basis_dot(x, frame))
+
+    return on(tb.Variance.Contravariant), on(tb.Variance.Covariant)
+
+
+def test_contract_metric_target_picks_which_index_moves():
+    ctx = tender.Context()
+    x, _ = _oblique_dots(ctx)  # g^ij a_i b_j
+
+    raised_a = td.contract_metric(x, target="a")
+    raised_b = td.contract_metric(x, target="b")
+    assert "a^{i}" in raised_a.latex() and "b_{i}" in raised_a.latex()
+    assert "a_{i}" in raised_b.latex() and "b^{i}" in raised_b.latex()
+    # Different expressions — that is the whole point — but the same scalar.
+    assert not td.structural_eq(raised_a, raised_b)
+
+
+def test_contract_metric_untargeted_still_moves_something():
+    ctx = tender.Context()
+    x, _ = _oblique_dots(ctx)
+    out = td.contract_metric(x)
+    assert "g" not in out.latex(), out.latex()
+
+
+def test_contract_metric_target_that_is_not_there_is_a_no_op():
+    ctx = tender.Context()
+    x, _ = _oblique_dots(ctx)
+    assert td.structural_eq(td.contract_metric(x, target="c"), x)
+
+
+def test_insert_metric_target_picks_which_index_moves_back():
+    ctx = tender.Context()
+    x, covariant = _oblique_dots(ctx)
+
+    mixed = td.contract_metric(x, target="b")  # a_i b^i
+    # Moving `a` up pays a covariant metric and lands on the covariant form.
+    assert td.algebraic_eq(
+        td.insert_metric(mixed, tender.Level.Upper, target="a"), covariant
+    )
+    # `b` is already upper, so naming it is a no-op rather than a wrong move.
+    assert td.structural_eq(
+        td.insert_metric(mixed, tender.Level.Upper, target="b"), mixed
+    )

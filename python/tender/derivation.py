@@ -419,7 +419,7 @@ def apply_operators(expr):
     return _d._apply_operators(expr)
 
 
-def insert_metric(expr, target):
+def insert_metric(expr, level, target=None):
     """Move summed coordinate indices to ``target`` level, introducing the metric.
 
     The companion to :func:`contract_metric`, and the "lower both indices" move
@@ -435,10 +435,10 @@ def insert_metric(expr, target):
     what is being moved, which is also what makes the step terminate.
     Orthonormal slots are left alone; the distinction is empty there.
     """
-    return _d._insert_metric(expr, target)
+    return _d._insert_metric(expr, level, target)
 
 
-def contract_metric(expr):
+def contract_metric(expr, target=None):
     """Contract a metric against a summed index — raise, lower, or the inverse pair.
 
     Where :func:`contract_delta` merely identifies its two indices, ``g`` also
@@ -458,7 +458,7 @@ def contract_metric(expr):
     summation in an oblique realm demands anyway.  A same-level pair, or a ``g``
     with no partner occurrence, is left exactly as written.
     """
-    return _d._contract_metric(expr)
+    return _d._contract_metric(expr, target)
 
 
 def fold_operator(expr, op):

@@ -4388,6 +4388,155 @@ TEST(Nabla, GradDivRotAreProductsWithNablaLeft)
 
 // The elementary rules fire through application: ∂_x x = 1, ∂_x y = 0 (distinct
 // coordinates independent), ∂_x f is the formal derivative field.
+namespace
+{
+
+// Does any slot in `e` carry the dummy index `id`?
+auto carries(Context& ctx, Expr const* e, int id) -> bool
+{
+    bool found = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const* t = std::get_if<TensorObject>(&n->node))
+                for (auto const& sb: t->slots)
+                    if (sb.index)
+                        if (auto const* ci =
+                                std::get_if<CountableIndex>(&*sb.index);
+                            ci && ci->id == id)
+                            found = true;
+            return n;
+        });
+    return found;
+}
+
+} // namespace
+
+// ---- selective application over an index cluster (vibe 000104) -----------
+//
+// `at` addresses a *subtree*, but an index contraction acts on an index
+// *cluster* — factors scattered across a product, plus the binder above them.
+// A step run under `at` can sum an index away while its Σ stays behind, and a
+// leftover binder is not harmless: Σ_m X with X free of m is dim·X.
+
+TEST(At, DropsTheBinderTheStepConsumed)
+{
+    // Σ_m Σ_n δ_mn a_m b_n, addressed at the product under both binders: the
+    // contraction spends one index, and that binder must go with it.
+    Context ctx;
+    auto sp = space_3d();
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto n = CountableIndex{ctx.alloc_index_id()};
+    auto coord = [&](char const* nm, CountableIndex i)
+    {
+        return make_tensor_object(
+            ctx,
+            make_tensor_name(nm),
+            {SlotBinding{
+                IndexSlot{Level::Lower, Realm::Orthonormal, sp},
+                IndexAssoc{i}}},
+            0);
+    };
+    auto const* body = make_tensor_product(
+        ctx,
+        make_delta(
+            ctx,
+            Realm::Orthonormal,
+            sp,
+            Level::Lower,
+            Level::Lower,
+            IndexAssoc{m},
+            IndexAssoc{n}),
+        make_tensor_product(ctx, coord("a", m), coord("b", n)));
+    auto const* e = make_explicit_sum(
+        ctx, m, make_explicit_sum(ctx, n, body, nullptr), nullptr);
+
+    auto const* whole = steps::contract_delta(ctx, e);
+    auto const* via_at = steps::implicitize(
+        ctx,
+        steps::at(
+            ctx,
+            e,
+            {0, 0},
+            [](Context& c, Expr const* sub)
+            { return steps::contract_delta(c, sub); }));
+    EXPECT_TRUE(algebraic_eq(ctx, via_at, whole));
+
+    // No binder may survive over an index nothing carries.
+    int binders = 0;
+    rewrite_tree(
+        ctx,
+        via_at,
+        [&](Context&, Expr const* x) -> Expr const*
+        {
+            if (auto const* es = std::get_if<ExplicitSum>(&x->node);
+                es && !es->bound && !carries(ctx, es->body, es->index.id))
+                ++binders;
+            return x;
+        });
+    EXPECT_EQ(binders, 0);
+}
+
+TEST(At, LeavesAnAlreadyVacuousBinderAlone)
+{
+    // A binder vacuous *before* the step is not this step's doing, and Σ_m X
+    // with X free of m means dim·X — dropping it would change the value.
+    Context ctx;
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* e = make_explicit_sum(ctx, m, a, nullptr);
+
+    auto const* out = steps::at(
+        ctx,
+        e,
+        {0},
+        [](Context& c, Expr const* sub) { return make_sum(c, sub, sub); });
+    EXPECT_TRUE(std::holds_alternative<ExplicitSum>(out->node));
+}
+
+TEST(At, RefusesWhenTheIndexIsStillCarriedOutside)
+{
+    // Removing an index the rest of the term still uses: the binder is still
+    // doing work, and if the step *summed* over the index the result is wrong
+    // regardless.  Refuse rather than guess.
+    Context ctx;
+    auto sp = space_3d();
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto coord = [&](char const* nm)
+    {
+        return make_tensor_object(
+            ctx,
+            make_tensor_name(nm),
+            {SlotBinding{
+                IndexSlot{Level::Lower, Realm::Orthonormal, sp},
+                IndexAssoc{m}}},
+            0);
+    };
+    auto const* e = make_explicit_sum(
+        ctx, m, make_tensor_product(ctx, coord("a"), coord("b")), nullptr);
+
+    EXPECT_THROW(
+        (void)steps::at(
+            ctx,
+            e,
+            {0, 0},
+            [](Context& c, Expr const*)
+            { return make_scalar(c, Rational{1}); }),
+        std::invalid_argument);
+}
+
+TEST(At, ANoOpStepLeavesTheExpressionAlone)
+{
+    Context ctx;
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto const* a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto const* e = make_explicit_sum(ctx, m, a, nullptr);
+    EXPECT_TRUE(structural_eq(
+        steps::at(ctx, e, {0}, [](Context&, Expr const* s) { return s; }), e));
+}
+
 // ---- raising and lowering with the metric (vibe 000103's metric row) ------
 
 namespace
@@ -4482,6 +4631,79 @@ TEST(ContractMetric, TheInversePairBecomesADelta)
     ASSERT_NE(t, nullptr);
     ASSERT_TRUE(t->traits.has_value());
     EXPECT_EQ(t->traits->well_known, WellKnownKind::Delta);
+}
+
+TEST(ContractMetric, TargetPicksWhichIndexMoves)
+{
+    // g^{ij} a_i b_j: the metric carries two indices and either may be spent.
+    // Without a target the step takes whichever binder it reaches first, which
+    // is no answer when the caller meant the other one (vibe 000104).
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_tensor_product(
+        ctx,
+        obl_metric(ctx, Level::Upper, Level::Upper, i, j),
+        make_tensor_product(
+            ctx,
+            obl_coord(ctx, "a", Level::Lower, i),
+            obl_coord(ctx, "b", Level::Lower, j)));
+
+    auto const* ra = steps::contract_metric(ctx, term, make_tensor_name("a"));
+    auto const* rb = steps::contract_metric(ctx, term, make_tensor_name("b"));
+    EXPECT_FALSE(structural_eq(ra, rb));
+    // `a` raised leaves b lower, and vice versa.
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        ra,
+        make_tensor_product(
+            ctx,
+            obl_coord(ctx, "a", Level::Upper, j),
+            obl_coord(ctx, "b", Level::Lower, j))));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        rb,
+        make_tensor_product(
+            ctx,
+            obl_coord(ctx, "a", Level::Lower, i),
+            obl_coord(ctx, "b", Level::Upper, i))));
+}
+
+TEST(ContractMetric, ATargetThatIsNotThereIsANoOp)
+{
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_tensor_product(
+        ctx,
+        obl_metric(ctx, Level::Upper, Level::Upper, i, j),
+        make_tensor_product(
+            ctx,
+            obl_coord(ctx, "a", Level::Lower, i),
+            obl_coord(ctx, "b", Level::Lower, j)));
+    EXPECT_TRUE(structural_eq(
+        steps::contract_metric(ctx, term, make_tensor_name("c")), term));
+}
+
+TEST(InsertMetric, TargetPicksWhichIndexMovesBack)
+{
+    // a^m b_m: naming `b` moves b, naming `a` moves a — and naming a factor
+    // already at the target level is a no-op, not a wrong move.
+    Context ctx;
+    auto m = CountableIndex{ctx.alloc_index_id()};
+    auto const* mixed = make_tensor_product(
+        ctx,
+        obl_coord(ctx, "a", Level::Upper, m),
+        obl_coord(ctx, "b", Level::Lower, m));
+
+    auto const* moved =
+        steps::insert_metric(ctx, mixed, Level::Upper, make_tensor_name("b"));
+    EXPECT_TRUE(holds_well_known(ctx, moved, WellKnownKind::Metric));
+
+    // `a` is already upper: nothing to pay for.
+    EXPECT_TRUE(structural_eq(
+        steps::insert_metric(ctx, mixed, Level::Upper, make_tensor_name("a")),
+        mixed));
 }
 
 TEST(ContractMetric, SameLevelPairIsNotAContraction)
