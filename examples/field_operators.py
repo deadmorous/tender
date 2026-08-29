@@ -6,14 +6,14 @@ Demonstrates:
   * intrinsic differential operators in the chart's own frame — ∇R = I, and the
     second gradient of a radial field with no trigonometry (vibe 71);
   * abstract tensor *fields* that differentiate instead of vanishing (P7);
-  * first-class, composable ∇ and ∂_q operators (P8).
+  * first-class, composable ∇ and ∂_q operators (P8) — real expressions, not a
+    deferred DSL: build with `t.nabla()`, lower with `chart.evaluate`.
 
 Run:  PYTHONPATH=python python3 examples/field_operators.py
 """
 
 import tender as t
 import tender.derivation as td
-from tender.operators import nabla, d, laplacian
 
 
 def show(title, rows):
@@ -75,27 +75,33 @@ assert not td.algebraic_eq(cart.div(T), t.scalar(0, ctx=ws.ctx))
 assert td.algebraic_eq(td.partial(fx, y), t.scalar(0, ctx=ws.ctx))
 
 # --- P8: first-class, composable ∇ and ∂_q ----------------------------------
+# ∇ is a real Expr — it builds symbolically, mixes into sums and products, and
+# `chart.evaluate` lowers it onto a chart when you want components.
+nabla = t.nabla(ctx=ws.ctx)
 g = cart.field("g", 0)
-lap_expr = nabla @ (nabla * g)  # symbolic ∇·∇g
+lap_expr = nabla @ (nabla * g)  # ∇·∇g — renders as Δg, never ∇²
 show(
     "3. First-class operators (P8)",
     [
         ("∇g            (symbolic)", nabla * g),
         ("∇·∇g          (symbolic)", lap_expr),
-        ("Δg            (symbolic)", laplacian(g)),
-        ("∇·∇g          (evaluated)", lap_expr.evaluate(cart)),
-        ("∂_x g         (built)", (d(x) * g).evaluate(cart)),
+        ("Δg            (invariant)", t.laplacian(g)),
+        ("∇·∇g          (evaluated)", cart.evaluate(lap_expr)),
+        ("∂_x g         (built)", td.apply_operators(td.deriv(x) * g)),
     ],
 )
-# Δ is a citable atom that agrees with ∇·∇ by construction (decision 3).
-assert td.structural_eq(laplacian(g).evaluate(cart), lap_expr.evaluate(cart))
+# The Δ constructor and ∇·∇ agree by construction.
+assert td.structural_eq(
+    cart.evaluate(t.laplacian(g)), cart.evaluate(lap_expr)
+)
+assert td.structural_eq(td.apply_operators(td.deriv(x) * g), td.partial(g, x))
 
 # A custom operator built from ∇: the directional derivative v·∇.  (v·∇)R = v.
 cfb = cart.physical_frame()
 ex, ey, ez = (cfb.direction(i) for i in range(3))
 Rc = x * ex + y * ey + zc * ez  # position vector on the Cartesian frame
 vc = t.scalar(2, ctx=ws.ctx) * ex + t.scalar(3, ctx=ws.ctx) * ey + ez
-dir_R = (nabla.along(vc) * Rc).evaluate(cart)
+dir_R = td.simplify(td.contract_identity(cart.evaluate(vc @ (nabla * Rc))))
 show("4. Custom operator v·∇ (P8)", [("(v·∇)R   (v = 2 e_x + 3 e_y + e_z)", dir_R)])
 assert td.algebraic_eq(dir_R, vc)
 

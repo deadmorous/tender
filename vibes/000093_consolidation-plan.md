@@ -236,8 +236,9 @@ Carried forward, in rough order of value:
 3. **Fence distribution inside a contraction operand** — blocks 000010.
 4. **Inverse chart embeddings** (vibe 000090 approach B) — blocks 000021, the
    last L0.
-5. **Deferred from M3**: atticing `tender.operators` (982-line test file to
-   migrate); Context-scoped budget defaults (needs Context-aware verbs).
+5. **Deferred from M3**: ~~atticing `tender.operators`~~ **done** (2026-08-29,
+   vibe 000098 postscript — the test file was mostly core ∇ tests, not DSL
+   ones); Context-scoped budget defaults (needs Context-aware verbs) remains.
 6. **Open from M1**: `fold_equal_addends` may be canon + implicitize.
 7. **`ddot-identity` has no derivation** — the one open proof obligation in
    the identity DAG.

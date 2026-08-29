@@ -455,10 +455,9 @@ def test_collect_terms_on_second_gradient():
     ctx = t.Context()
     r, th, z, chart = make_cylindrical(ctx)
     fb = chart.physical_frame()
-    from tender.operators import nabla
 
     f = t.field("f", 0, deps=[r], ctx=ctx)
-    x = (nabla * (nabla * (f * t.sin(th)))).evaluate(chart)
+    x = chart.grad(chart.grad(f * t.sin(th)))
     collected = td.collect_terms(x)
     tex = collected.latex()
     # Four distinct dyads, each appearing once.

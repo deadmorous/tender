@@ -158,3 +158,28 @@ surface work, and any promotion is a signal to stop and look.
   shadow AST defers evaluation, and core `Expr` may not express that without
   a chart.  If so, attic it and migrate the three callers, which the ledger
   already permits.
+
+## Postscript: `tender.operators` atticed (2026-08-29)
+
+The last M3 leftover, and it turned out the module was the smaller half of the
+job.  `python/tests/test_operators.py` was 43 tests, but only **7** actually
+touched the DSL — the other 36 were about the ∇ *node* all along (expand_nabla,
+reassemble_nabla, chart.evaluate, the Navier–Lamé and strain-compatibility
+endpoints).  The file was misnamed, which is why it looked like 1001 lines of
+migration debt.
+
+Determined by deleting the import and reading the failures rather than by
+grepping: a first pass by regex misclassified `t.nabla(...)` as DSL use and got
+the count wrong.
+
+- 36 stayed, as `python/tests/test_nabla.py`.
+- 3 of the 7 covered node behaviour the DSL merely wrapped and were **ported**
+  to the core route: parenthesised operands, the directional derivative
+  `(v·∇)R = v`, and `chart.nabla()` reproducing the gradient.
+- 4 asserted the DSL's own surface and went to `attic/operators_dsl/` with the
+  module and a README mapping every DSL form to its core equivalent.
+
+`examples/field_operators.py` was ported, not deleted (CLAUDE.md principle 5),
+and the README's opening snippet with it — it now runs verbatim and still prints
+exactly the divergence it documents.  One nice consequence: the cheatsheet's
+"two ∇/Δ surfaces — don't confuse them" warning is gone, because there is one.

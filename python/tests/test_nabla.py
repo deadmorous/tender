@@ -1,9 +1,14 @@
-"""First-class ∇ / ∂_q operators (vibe 000070 P8)."""
+"""The core ∇ operator: building it, expanding it into a frame, lowering it
+onto a chart, and reassembling the result back into ∇ form.
+
+Named for `tender.operators` once, which was a deferred-evaluation DSL over
+these same capabilities; that module is now in the attic and everything here
+uses the core route — `t.nabla()`, a real `Expr`.
+"""
 
 import tender as t
 import tender.derivation as td
 import tender.basis as tb
-from tender.operators import nabla, d, laplacian, evaluate
 
 
 def _chart(ws):
@@ -68,84 +73,6 @@ def _cross_removal_identities(ctx):
     return id_axBxc, id_inc
 
 
-def test_nabla_builds_symbolically():
-    # Decision 1/2: ∇ is a chart-free symbol; building stays symbolic.
-    ws = t.Workspace()
-    cart, _ = _chart(ws)
-    f = cart.field("f", 0)
-    v = cart.field("v", 1)
-    assert (nabla * f).latex() == "\\nabla f"
-    assert (nabla @ v).latex() == "\\nabla \\cdot \\mathbf{v}"
-    assert (nabla % v).latex() == "\\nabla \\times \\mathbf{v}"
-    assert (nabla @ (nabla * f)).latex() == "\\nabla \\cdot \\nabla f"
-
-
-def test_compound_operands_are_parenthesised():
-    # A compound operand (sum, or another cross) is wrapped in parens so the
-    # rendering is unambiguous (vibe 000071).
-    ws = t.Workspace()
-    cart, _ = _chart(ws)
-    R = cart.radius_vector()
-    I = ws.identity()
-    assert "\\left(" in (nabla % R).latex()  # ∇×(x i + y j + z k)
-    assert "\\left(" in (nabla % (R % I)).latex()  # ∇×((…) × I)
-    # A bare field is not parenthesised.
-    f = cart.field("f", 0)
-    assert "\\left(" not in (nabla * f).latex()
-    assert "\\left(" not in (nabla @ (nabla * f)).latex()
-
-
-def test_nabla_evaluates_to_m6_operators():
-    # The operators are thin wrappers over the chart's M6 operators.
-    ws = t.Workspace()
-    cart, _ = _chart(ws)
-    R = cart.radius_vector()
-    v = cart.field("v", 1)
-    assert td.structural_eq((nabla * R).evaluate(cart), cart.grad(R))
-    assert td.structural_eq((nabla @ R).evaluate(cart), cart.div(R))
-    assert td.structural_eq((nabla % v).evaluate(cart), cart.rot(v))
-    # Free-function form too.
-    assert td.structural_eq(evaluate(nabla * R, cart), cart.grad(R))
-
-
-def test_laplacian_atom_agrees_with_div_grad():
-    # Decision 3: Δ is a citable atom that evaluates through div(grad), so it and
-    # nabla @ (nabla * f) agree by construction.
-    ws = t.Workspace()
-    cart, _ = _chart(ws)
-    f = cart.field("f", 0)
-    assert laplacian(f).latex() == "\\Delta f"
-    assert td.structural_eq(
-        laplacian(f).evaluate(cart), (nabla @ (nabla * f)).evaluate(cart)
-    )
-    assert td.structural_eq(laplacian(f).evaluate(cart), cart.laplacian(f))
-
-
-def test_partial_operator():
-    ws = t.Workspace()
-    cart, (x, y, z) = _chart(ws)
-    f = cart.field("f", 0)
-    assert (d(x) * f).latex() == "\\partial_{x} f"
-    assert td.structural_eq((d(x) * f).evaluate(cart), td.partial(f, x))
-    assert td.structural_eq(d(x)(f).evaluate(cart), td.partial(f, x))
-
-
-def test_directional_derivative_custom_operator():
-    # The flagship payoff: a custom operator v·∇ built from ∇.  (v·∇)R = v.
-    ws = t.Workspace()
-    cart, _ = _chart(ws)
-    R = cart.radius_vector()
-    WCS = ws.wcs()
-    v = (
-        t.scalar(2, ctx=ws.ctx) * WCS.basis(0)
-        + t.scalar(3, ctx=ws.ctx) * WCS.basis(1)
-        + WCS.basis(2)
-    )
-    op = nabla.along(v)
-    assert op.latex().endswith("\\cdot \\nabla)")
-    assert td.algebraic_eq((op * R).evaluate(cart), v)
-
-
 def test_first_class_deriv_and_apply_operators():
     # vibe 000077 steps A/B: td.deriv is the unapplied ∂ operator; apply_operators
     # carries out application (Leibniz = commutation).
@@ -165,21 +92,6 @@ def test_first_class_deriv_and_apply_operators():
     greedy = td.apply_operators(dx * x * f)
     expect = f + x * td.partial(f, x)
     assert td.algebraic_eq(greedy, expect)
-
-
-def test_first_class_nabla_reproduces_grad():
-    # vibe 000077 step C: chart.nabla() is the first-class ∇; applying it with ⊗
-    # equals the gradient.  nabla.at(chart) exposes the same from the ∇ symbol.
-    ws = t.Workspace()
-    cart, _ = _chart(ws)
-    f = cart.field("f", 0)
-
-    nab = cart.nabla()
-    assert "\\partial_{" in nab.latex()          # inspectable, carries ∂ operators
-    assert nab.rank == 1                          # a vector operator
-    assert td.algebraic_eq(td.apply_operators(nab * f), cart.grad(f))
-    # the ∇ symbol's .at bridge gives the same operator.
-    assert td.structural_eq(nabla.at(cart), nab)
 
 
 def test_chart_free_nabla_node():
@@ -999,3 +911,57 @@ def test_navier_lame_endpoint_standard_sym_form():
     r, th, zc = ws2.coords("r", r"\theta", "z", nonneg=("r",))
     cyl = ws2.chart(ws2.wcs(), [r, th, zc], [r * t.cos(th), r * t.sin(th), zc])
     assert _navier_lame_holds(cyl, ws2.ctx, stress=_standard_hooke)
+
+
+# ---------------------------------------------------------------------------
+# Ported from the retired tender.operators DSL, onto the core route.  Each
+# covers behaviour of the ∇ *node*, which the DSL only wrapped.
+# ---------------------------------------------------------------------------
+
+
+def test_compound_operands_are_parenthesised():
+    # A compound operand (a sum, or another cross) is wrapped so the rendering
+    # is unambiguous (vibe 000071); a bare field is not.
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    nab = t.nabla(ctx=ws.ctx)
+    R = cart.position()
+    I = ws.identity()
+
+    assert "(" in (nab % R).latex()  # ∇×(x i + y j + z k)
+    assert "((" in (nab % (R % I)).latex()  # ∇×((…) × I)
+
+    f = cart.field("f", 0)
+    assert "(" not in (nab * f).latex()
+    # ∇·∇f renders as Δf — never ∇², which is not a ring element.
+    assert (nab @ (nab * f)).latex() == "\\Delta f"
+
+
+def test_directional_derivative_of_the_position_vector():
+    # The flagship payoff, on the core route: (v·∇)R = v, for a constant v.
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    nab = t.nabla(ctx=ws.ctx)
+    R = cart.position()
+    wcs = ws.wcs()
+    v = (
+        t.scalar(2, ctx=ws.ctx) * wcs.basis(0)
+        + t.scalar(3, ctx=ws.ctx) * wcs.basis(1)
+        + wcs.basis(2)
+    )
+
+    out = td.simplify(td.contract_identity(cart.evaluate(v @ (nab * R))))
+    assert td.algebraic_eq(out, v)
+
+
+def test_chart_nabla_is_the_gradient_when_applied():
+    # vibe 000077 step C: chart.nabla() is the first-class ∇ — an inspectable
+    # rank-1 operator carrying ∂'s — and applying it with ⊗ is the gradient.
+    ws = t.Workspace()
+    cart, _ = _chart(ws)
+    f = cart.field("f", 0)
+
+    nab = cart.nabla()
+    assert "\\partial_{" in nab.latex()
+    assert nab.rank == 1
+    assert td.algebraic_eq(td.apply_operators(nab * f), cart.grad(f))

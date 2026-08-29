@@ -13,7 +13,6 @@ the way a mechanician would perform it, and every step renders to LaTeX.
 
 ```python
 import tender as t
-from tender.operators import nabla
 
 ws = t.Workspace()
 
@@ -22,7 +21,8 @@ r, th, z = ws.coords("r", "\\theta", "z", nonneg=("r",))
 cyl = ws.chart(ws.wcs(), [r, th, z], [r * t.cos(th), r * t.sin(th), z])
 
 u = cyl.field("u", 1)                 # a vector field u(r, θ, z)
-div_u = (nabla @ u).evaluate(cyl)     # ∇·u, lowered onto the chart
+nabla = t.nabla(ctx=ws.ctx)           # ∇ — an ordinary expression
+div_u = cyl.evaluate(nabla @ u)       # ∇·u, lowered onto the chart
 
 print(div_u.latex())
 # \frac{u_{r} + \partial_{\theta} u_{\theta} + r \, (\partial_{r} u_{r}) + r \, (\partial_{z} u_{z})}{r}
@@ -100,7 +100,7 @@ LaTeX/PDF Makefile.
 | Path | Contents |
 |---|---|
 | `src/` | The C++20 core — expression tree, normal form, e-graph, bases, charts, rendering (headers in `src/include/tender/`). |
-| `python/` | nanobind bindings (`_core.cpp`) and the `tender` Python package (`Workspace`, `derivation`, `basis`, `chart`, `operators`, `render`). |
+| `python/` | nanobind bindings (`_core.cpp`) and the `tender` Python package (`Workspace`, `derivation`, `basis`, `chart`, `render`). |
 | `tests/` | C++ unit and integration tests (GoogleTest). |
 | `python/tests/` | Python test suite (pytest). |
 | `benchmarks/` | Micro-benchmarks for performance-sensitive operations. |

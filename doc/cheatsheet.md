@@ -64,8 +64,6 @@ tender is layered. From the top down:
   differential operators `grad`/`div`/`rot`/`laplacian`, plus `evaluate`
   (lower a coordinate-free ∇ expression onto this chart) and
   `expand`/`components` (surface an invariant into frame components).
-- **`tender.operators`** — a small DSL (`nabla`, `d`, `laplacian`) for writing
-  differential expressions symbolically and `.evaluate(chart)`-ing them later.
 
 A typical session flows: build a `Workspace` → declare fields/coordinates and a
 chart → write an invariant expression (optionally with ∇ operators) → `evaluate`
@@ -185,12 +183,16 @@ methods above). These take an explicit `ctx=` when used directly:
 | `render_latex(expr, map=None)` | `str` | Free-function LaTeX render |
 | `space_2d` / `space_3d` / `space_4d` | `IndexSpace` | Predefined index spaces (values {1,2}, {1,2,3}, {1,2,3,4}) |
 
-> **Two ∇/Δ surfaces — don't confuse them.** `t.nabla(ctx)` / `t.laplacian(e)`
-> build **core `Expr`** ∇-nodes that a chart later lowers (via `chart.evaluate`
-> or the `expand_nabla` pipeline). `tender.operators.nabla` / `.laplacian` build
-> a **deferred `DifferentialExpr`** you `.evaluate(chart)` (see the operators
-> section). `t.laplacian` is always `∇·(∇⊗·)`; bare `nabla @ nabla` with no
-> operand is **not** a Laplacian.
+> **∇ is an ordinary expression.** `t.nabla(ctx)` / `t.laplacian(e)` build core
+> `Expr` ∇-nodes, so they canonicalize, mix into sums, and reach the verbs and
+> rules like anything else; a chart lowers them later (`chart.evaluate`, or the
+> `expand_nabla` pipeline), which is where deferral comes from — nothing is
+> obliged to lower them. `t.laplacian` is always `∇·(∇⊗·)`; bare `nabla @ nabla`
+> with no operand is **not** a Laplacian.
+>
+> (There was a second surface, `tender.operators`, a deferred DSL whose values
+> were not `Expr`s. It is in `attic/operators_dsl/`, with a table mapping each
+> of its forms to the core one.)
 
 ---
 
