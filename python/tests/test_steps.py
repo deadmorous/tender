@@ -146,3 +146,115 @@ def test_describe_covers_every_category():
     for cat in ts.CATEGORIES:
         assert cat in text
     assert "reduce_frame" in text
+
+
+# ---------------------------------------------------------------------------
+# Feedback: applicable / why_not / explain (vibe 000106 §4)
+# ---------------------------------------------------------------------------
+
+
+class TestApplicable:
+    def _setup(self):
+        ctx = tender.Context()
+        frame = tb.wcs(ctx)
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        return ctx, frame, a, b
+
+    def test_it_reports_the_steps_that_change_the_content(self):
+        _, frame, a, b = self._setup()
+        e = tb.expand_in_basis(a @ b, frame)
+        got = {h.step.name for h in ts.applicable(e, basis=frame).changing}
+        # The moves a person would consider here, and no others invented.
+        assert {"reduce_frame", "simplify_basis_dot", "reassemble"} <= got
+
+    def test_reshaping_steps_are_separated_from_the_real_options(self):
+        # The refinement that makes the report usable: "not a no-op" is too weak
+        # a filter, because canonical reordering fires on almost anything.
+        _, frame, a, b = self._setup()
+        e = tb.expand_in_basis(a @ b, frame)
+        report = ts.applicable(e, basis=frame)
+        assert len(report.changing) < len(report)
+        assert all(h.change for h in report.changing)
+        assert all(not h.change for h in report if h.reshapes_only)
+
+    def test_it_reads_the_expression_rather_than_reciting_a_menu(self):
+        # A cross and a dot must get different answers.
+        _, frame, a, b = self._setup()
+        dot = {h.step.name for h in ts.applicable(
+            tb.expand_in_basis(a @ b, frame), basis=frame).changing}
+        cross = {h.step.name for h in ts.applicable(
+            tb.expand_in_basis(a % b, frame), basis=frame).changing}
+        assert "simplify_basis_cross" in cross
+        assert "simplify_basis_cross" not in dot
+
+    def test_each_hit_carries_the_result_it_would_produce(self):
+        _, frame, a, b = self._setup()
+        e = tb.expand_in_basis(a @ b, frame)
+        hit = next(h for h in ts.applicable(e, basis=frame) if h.step.name == "reduce_frame")
+        assert td.structural_eq(hit.result, tb.reduce_frame(e, frame))
+
+    def test_steps_needing_absent_context_are_listed_not_silently_dropped(self):
+        _, frame, a, b = self._setup()
+        report = ts.applicable(tb.expand_in_basis(a @ b, frame), basis=frame)
+        assert "coord" in report.missing
+        assert "rules" in report.missing
+        assert "not tried" in str(report)
+
+    def test_the_report_prints(self):
+        _, frame, a, b = self._setup()
+        text = str(ts.applicable(tb.expand_in_basis(a @ b, frame), basis=frame))
+        assert "reduce_frame" in text and "only reshape" in text
+
+
+class TestWhyNot:
+    def _setup(self):
+        ctx = tender.Context()
+        frame = tb.wcs(ctx)
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        return frame, a @ b, tb.expand_in_basis(a @ b, frame)
+
+    def test_missing_context_is_named(self):
+        frame, inv, exp = self._setup()
+        assert "needs coord" in ts.why_not(exp, "partial")
+
+    def test_a_missing_ingredient_is_named_with_the_count(self):
+        frame, inv, exp = self._setup()
+        msg = ts.why_not(inv, "contract_delta")
+        assert "nothing to act on" in msg and "deltas (needs 1, has 0)" in msg
+
+    def test_a_step_that_would_apply_says_so(self):
+        frame, inv, exp = self._setup()
+        assert "did apply" in ts.why_not(exp, "reduce_frame", basis=frame)
+
+    def test_a_raising_step_reports_what_it_raised(self):
+        frame, inv, exp = self._setup()
+        # unroll_sums on an invariant has indices to want but nothing to unroll.
+        msg = ts.why_not(inv, "reassemble", basis=frame)
+        assert "nothing to act on" in msg or "changed nothing" in msg
+
+    def test_it_accepts_a_step_object_too(self):
+        frame, inv, exp = self._setup()
+        assert ts.why_not(inv, ts.info("contract_delta")) == ts.why_not(
+            inv, "contract_delta"
+        )
+
+
+class TestExplain:
+    def test_it_states_the_change(self):
+        ctx = tender.Context()
+        frame = tb.wcs(ctx)
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        e = tb.expand_in_basis(a @ b, frame)
+        text = ts.explain(e, tb.reduce_frame(e, frame))
+        assert "before" in text and "after" in text
+        assert "basis_vectors-2" in text
+
+    def test_identical_expressions_say_so(self):
+        ctx = tender.Context()
+        a = tender.tensor("a", rank=1, ctx=ctx)
+        assert "none" in ts.explain(a, a)
+
+    def test_a_pure_reordering_is_named_as_such(self):
+        ctx = tender.Context()
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        assert "reshaped only" in ts.explain(b @ a, td.canonicalize(b @ a))

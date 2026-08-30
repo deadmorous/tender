@@ -309,6 +309,20 @@ Constructors / well-known frames:
 
 Bridge steps:
 
+> **Stuck?  Ask the expression.**
+> ```python
+> import tender.steps as ts
+> print(ts.applicable(expr, basis=frame))   # what actually does something here
+> ts.why_not(expr, "contract_delta")        # …and why that one doesn't
+> print(ts.explain(before, after))          # what a step changed
+> ```
+> `applicable` tries every catalogued step and reports the ones that change the
+> expression's **content**, with what they changed — steps that only reorder
+> into canonical form are collapsed to a count, and steps whose `needs` the
+> context does not cover are listed with what they were missing.  `why_not`
+> gives the reason a specific step did nothing: missing context, a missing
+> ingredient (with counts), an exception, or "it ran and changed nothing".
+>
 > **Which step do I need?**  `tender.steps` is the catalogue —
 > `ts.describe()` prints every step by category with what it needs;
 > `ts.in_category("bridge")` narrows it; `ts.primaries()` is the short list a

@@ -434,6 +434,12 @@ auto encapsulate(Context& ctx, Expr const* factor, bool sibling_operator)
         // the nf form and renders as stacked superscripts).
         if (auto const* inner = std::get_if<Transpose>(&u->operand->node))
             return encapsulate(ctx, inner->operand);
+        // A scalar has no slots to swap, so `sᵀ = s`.  Without this a rank-0
+        // operand keeps a transpose it can never shed — `sym(a·b)` stayed as
+        // ½(a·b + (a·b)ᵀ) rather than collapsing to a·b (found by the
+        // "what applies here?" probe, vibe 000106).
+        if (infer_rank(u->operand) == std::optional<int>{0})
+            return encapsulate(ctx, u->operand);
         // A rank-2 tensor symmetric under its slot swap folds `Tᵀ = T`
         // (antisymmetric `Tᵀ = −T`): transpose is exactly that swap.  So
         // `εᵀ = ε`, and — since the swap leaves the ∂-marks untouched —

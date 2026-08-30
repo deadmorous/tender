@@ -73,6 +73,39 @@ private:
 
 // ---- Built-in rewriting steps ------------------------------------------
 
+// A structural fingerprint of an expression (vibe 000106).
+//
+// Used to answer "did this step do anything, or only reshape?" — the question
+// that separates a useful "what applies here?" report from a noisy one.  On a
+// two-vector dot, thirteen steps fire and seven of them only commute factors
+// into canonical order; comparing fingerprints tells them apart.
+//
+// Counted from the IR rather than from rendered LaTeX, and deliberately more
+// than a node count: `basis_vectors` and `coordinates` are what the bridge
+// steps move, `deltas`/`epsilons` are what the index algebra makes and spends,
+// and `rank` catches a step that changed what kind of object this is.
+struct ExpressionShape final
+{
+    int nodes = 0;         // tree size
+    int sums = 0;          // materialized Σ binders
+    int index_slots = 0;   // total indexed slot occurrences
+    int coordinates = 0;   // rank-0 objects carrying basis-tagged indices (a_i)
+    int basis_vectors = 0; // rank ≥ 1 objects carrying a basis tag (e_i)
+    int deltas = 0;
+    int epsilons = 0;
+    int identities = 0;
+    int metrics = 0;
+    int deriv_marks = 0;
+    int nablas = 0;
+    int derivs = 0; // unapplied ∂ operator nodes
+    int rank = -1;
+
+    auto operator==(ExpressionShape const&) const -> bool = default;
+};
+
+[[nodiscard]] auto expression_shape(Context& ctx, Expr const* e)
+    -> ExpressionShape;
+
 namespace steps
 {
 

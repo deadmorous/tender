@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tender/basis.hpp>
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/index_space.hpp>
@@ -4413,6 +4414,125 @@ auto carries(Context& ctx, Expr const* e, int id) -> bool
 }
 
 } // namespace
+
+// ---- the structural fingerprint (vibe 000106) -----------------------------
+//
+// What "did this step change anything, or only reshape it?" is measured by.
+
+TEST(ExpressionShape, CountsWhatTheBridgeStepsMove)
+{
+    Context ctx;
+    auto sp = space_3d();
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto coord = make_tensor_object(
+        ctx,
+        make_tensor_name("a"),
+        {SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, sp, 7}, IndexAssoc{i}}},
+        0);
+    auto vec = make_tensor_object(
+        ctx,
+        make_tensor_name("e"),
+        {SlotBinding{
+            IndexSlot{Level::Lower, Realm::Orthonormal, sp, 7}, IndexAssoc{i}}},
+        1);
+
+    auto const sh = expression_shape(ctx, make_tensor_product(ctx, coord, vec));
+    // A basis-tagged rank-0 object is a coordinate; rank ≥ 1 is a frame vector.
+    // Telling those apart is what makes a bridge step's effect legible.
+    EXPECT_EQ(sh.coordinates, 1);
+    EXPECT_EQ(sh.basis_vectors, 1);
+    EXPECT_EQ(sh.index_slots, 2);
+    EXPECT_EQ(sh.deltas, 0);
+}
+
+TEST(ExpressionShape, CountsTheWellKnownObjects)
+{
+    Context ctx;
+    auto sp = space_3d();
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto j = CountableIndex{ctx.alloc_index_id()};
+    auto const* d = make_delta(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Lower,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto const* g = make_metric(
+        ctx,
+        Realm::Oblique,
+        sp,
+        Level::Upper,
+        Level::Upper,
+        IndexAssoc{i},
+        IndexAssoc{j});
+    auto const* I = make_identity(ctx);
+
+    auto const sh = expression_shape(
+        ctx, make_tensor_product(ctx, make_tensor_product(ctx, d, g), I));
+    EXPECT_EQ(sh.deltas, 1);
+    EXPECT_EQ(sh.metrics, 1);
+    EXPECT_EQ(sh.identities, 1);
+    EXPECT_EQ(sh.epsilons, 0);
+}
+
+TEST(ExpressionShape, CountsOperatorsAndSums)
+{
+    Context ctx;
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* f = make_field(ctx, make_tensor_name("f"), 0, {});
+    auto const* x = make_coordinate(ctx, make_tensor_name("x"), 7, 0);
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_tensor_product(
+            ctx,
+            make_nabla(ctx),
+            make_tensor_product(ctx, make_deriv(ctx, x), f)),
+        nullptr);
+
+    auto const sh = expression_shape(ctx, term);
+    EXPECT_EQ(sh.sums, 1);
+    EXPECT_EQ(sh.nablas, 1);
+    EXPECT_EQ(sh.derivs, 1); // the ∂ is unapplied
+    EXPECT_EQ(sh.deriv_marks, 0);
+
+    // Applying moves the count from `derivs` to `deriv_marks` — which is how a
+    // report says what `apply_operators` did.  (The ∂ must stand alone for it:
+    // `apply_operators` will not act across an abstract ∇, which is why the
+    // count above stays put.)
+    auto const* bare = make_tensor_product(ctx, make_deriv(ctx, x), f);
+    auto const applied =
+        expression_shape(ctx, steps::apply_operators(ctx, bare));
+    EXPECT_EQ(expression_shape(ctx, bare).derivs, 1);
+    EXPECT_EQ(applied.derivs, 0);
+    EXPECT_EQ(applied.deriv_marks, 1);
+}
+
+TEST(ExpressionShape, DistinguishesReshapingFromRealChange)
+{
+    // The distinction the whole report rests on: canonical reordering leaves
+    // the fingerprint alone, a contraction does not.
+    Context ctx;
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto const* dot = make_dot(ctx, v, u);
+
+    auto const before = expression_shape(ctx, dot);
+    auto const reordered = expression_shape(ctx, steps::canonicalize(ctx, dot));
+    EXPECT_EQ(before, reordered);
+
+    auto b = make_orthonormal_basis(
+        ctx,
+        space_3d(),
+        {make_tensor_object(ctx, make_tensor_name("i"), {}, 1),
+         make_tensor_object(ctx, make_tensor_name("j"), {}, 1),
+         make_tensor_object(ctx, make_tensor_name("k"), {}, 1)});
+    auto const* expanded = expand_in_basis(ctx, dot, b, Variance::Covariant);
+    EXPECT_FALSE(expression_shape(ctx, expanded) == before);
+}
 
 // ---- selective application over an index cluster (vibe 000104) -----------
 //

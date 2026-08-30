@@ -34,6 +34,7 @@ alongside the shipped ones — the same choice the identity library makes.
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from . import _core
 from . import basis as _b
 from . import derivation as _d
 
@@ -68,6 +69,10 @@ class Step:
     needs: tuple = ()
     options: tuple = ()
     primary: bool = False
+    # Minimum fingerprint counts for the step to have anything to act on —
+    # {"deltas": 1} means "needs at least one δ".  Data, so `why_not` can say
+    # *why* rather than just "nothing happened" (vibe 000106).
+    wants: dict = field(default_factory=dict)
 
     def __call__(self, expr, **ctx):
         """Apply the step, taking its extra arguments from *ctx* by kind."""
@@ -99,6 +104,7 @@ def register(
     needs=(),
     options=(),
     primary=False,
+    wants=None,
 ):
     """Add a step to the catalogue — yours sit alongside the shipped ones.
 
@@ -117,6 +123,7 @@ def register(
         needs=tuple(needs),
         options=tuple(options),
         primary=primary,
+        wants=dict(wants or {}),
     )
     _STEPS[name] = step
     return step
@@ -189,50 +196,69 @@ _r("expand_in_basis", _b, _B, category="bridge", primary=True,
    needs=("basis",), options=("variance",),
    summary="write an invariant in components on a frame")
 _r("reduce_frame", _b, _B, category="bridge", primary=True, needs=("basis",),
+   wants={"basis_vectors": 1},
    summary="everything the frame licenses, to a fixed point")
 _r("to_concrete", _b, _B, category="bridge", primary=True, needs=("basis",),
+   wants={"index_slots": 1},
    summary="evaluate over the frame's concrete directions")
 _r("reassemble", _b, _B, category="bridge", primary=True,
    needs=("basis",), options=("target",),
+   wants={"coordinates": 1},
    summary="fold components back into direct notation")
 _r("simplify_basis_dot", _b, _B, category="bridge", needs=("basis",),
+   wants={"basis_vectors": 2},
    summary="one pass of eᵢ·eⱼ → δ")
 _r("simplify_basis_cross", _b, _B, category="bridge", needs=("basis",),
+   wants={"basis_vectors": 2},
    summary="one pass of eᵢ×eⱼ → ε")
 _r("reassemble_completeness", _b, _B, category="bridge", needs=("basis",),
+   wants={"basis_vectors": 1},
    summary="Σᵢ (X·eᵢ) eᵢ → X alone")
 _r("fold_resolution_of_identity", _b, _B, category="bridge", needs=("basis",),
+   wants={"basis_vectors": 1},
    summary="a completed Σ eₖ⊗eₖ → I")
 _r("expand_identity", _b, _B, category="bridge", needs=("basis",),
+   wants={"identities": 1},
    summary="I → Σ eₖ⊗eₖ on a frame")
 _r("unroll_sums", _d, _D, category="bridge",
+   wants={"index_slots": 1},
    summary="expand a Σ over the index space's directions")
 _r("eval_delta_concrete", _d, _D, category="bridge",
+   wants={"deltas": 1},
    summary="evaluate δ on concrete indices")
 _r("eval_eps_concrete", _d, _D, category="bridge",
+   wants={"epsilons": 1},
    summary="evaluate ε on concrete indices")
 
 # ---- index algebra --------------------------------------------------------
 _r("contract_delta", _d, _D, category="index", primary=True,
+   wants={"deltas": 1},
    summary="contract a δ against whatever carries its index")
 _r("contract_eps_pair", _d, _D, category="index", primary=True,
+   wants={"epsilons": 2},
    summary="the ε-δ identity: ε ε → δδ − δδ")
 _r("contract_metric", _d, _D, category="index", primary=True, options=("target",),
+   wants={"metrics": 1},
    summary="raise, lower, or contract the inverse metric pair")
 _r("insert_metric", _d, _D, category="index", primary=True,
    needs=("level",), options=("target",),
+   wants={"coordinates": 1},
    summary="move an index the other way, paying a metric")
 _r("contract_identity", _d, _D, category="index", primary=True,
+   wants={"identities": 1},
    summary="I·X → X")
 _r("expand_eps", _d, _D, category="index",
+   wants={"epsilons": 1},
    summary="expand ε into its δ-determinant")
 
 # ---- operators ------------------------------------------------------------
 _r("apply_operators", _d, _D, category="operators", primary=True,
+   wants={"derivs": 1},
    summary="carry out the first-class ∂ operators by Leibniz")
 _r("partial", _d, _D, category="operators", primary=True, needs=("coord",),
    summary="differentiate with respect to a coordinate")
 _r("fold_operator", _d, _D, category="operators", primary=True, needs=("op",),
+   wants={"deriv_marks": 1},
    summary="fold an operator's expansion back into the operator")
 
 # ---- normalise ------------------------------------------------------------
@@ -275,9 +301,193 @@ _r("engine_simplify", _d, _D, category="engine", primary=True, needs=("rules",),
 _r("saturate", _d, _D, category="engine", needs=("rules",),
    summary="the raw saturation pass behind engine_simplify")
 
+# ---------------------------------------------------------------------------
+# What applies here?
+# ---------------------------------------------------------------------------
+
+
+def shape(expr):
+    """The structural fingerprint of *expr* — what a step's effect is measured by."""
+    return _core.derivation._expression_shape(expr)
+
+
+@dataclass(frozen=True)
+class Hit:
+    """One step that does something to an expression, and what it does."""
+
+    step: Step
+    result: Any
+    change: dict  # fingerprint deltas; empty means "reshaped only"
+
+    @property
+    def reshapes_only(self) -> bool:
+        return not self.change
+
+    def __repr__(self):
+        what = (
+            ", ".join(f"{k}{v:+d}" for k, v in sorted(self.change.items()))
+            or "reshaped only"
+        )
+        return f"<{self.step.qualified}  {what}>"
+
+
+class Report(list):
+    """The applicable steps, content-changing first; prints as a table."""
+
+    def __init__(self, hits, missing=()):
+        super().__init__(hits)
+        self.missing = dict(missing)
+
+    @property
+    def changing(self):
+        return [h for h in self if not h.reshapes_only]
+
+    def __str__(self):
+        out = []
+        if not self.changing:
+            out.append("nothing changes the content of this expression.")
+        for h in self.changing:
+            out.append(
+                f"  {h.step.qualified:36s} {', '.join(f'{k}{v:+d}' for k, v in sorted(h.change.items())):32s}"
+                f" {h.result.latex()[:46]}"
+            )
+        quiet = len(self) - len(self.changing)
+        if quiet:
+            out.append(f"  (+{quiet} more that only reshape: canonical reordering)")
+        if self.missing:
+            for kind, names in sorted(self.missing.items()):
+                out.append(
+                    f"  not tried — no {kind} in context: {', '.join(sorted(names))}"
+                )
+        return "\n".join(out)
+
+
+def applicable(expr, **context):
+    """Which steps actually do something to *expr*?
+
+    The answer to "which step do I need?", asked of the expression rather than
+    of memory.  Every catalogued step is tried; the ones that bite are reported
+    with **what they changed** — because "not a no-op" is too weak a filter.  On
+    a two-vector dot thirteen steps fire and seven merely commute factors into
+    canonical order; those are collapsed to a count so the real options stand
+    out.
+
+    Extra arguments are supplied by kind, once, for every step that wants them::
+
+        print(ts.applicable(expr, basis=frame))
+
+    A step whose ``needs`` the context does not cover is not tried, and is
+    listed at the end with what it was missing — so the report also says what
+    you could hand it to see more.
+    """
+    hits, missing = [], {}
+    before = shape(expr)
+    for name in names():
+        st = info(name)
+        lack = [k for k in st.needs if k not in context]
+        if lack:
+            missing.setdefault(lack[0], set()).add(st.qualified)
+            continue
+        try:
+            got = st(expr, **context)
+        except Exception:
+            continue  # a domain error means "not applicable here"
+        if _d.structural_eq(got, expr):
+            continue
+        after = shape(got)
+        change = {k: after[k] - before[k] for k in before if after[k] != before[k]}
+        hits.append(Hit(st, got, change))
+    hits.sort(
+        key=lambda h: (
+            h.reshapes_only,
+            CATEGORIES.index(h.step.category),
+            h.step.name,
+        )
+    )
+    return Report(hits, missing)
+
+
+def why_not(expr, step, **context):
+    """Why did *step* do nothing to *expr*?
+
+    The inverse of :func:`applicable`, and the more useful one when you already
+    have an expectation.  "Nothing happened" is the least informative thing a
+    library can say; this says which of the four possible reasons it was:
+
+    * the context is missing something the step needs (``basis``, ``coord``, …);
+    * the expression has nothing for it to act on — no δ to contract, no basis
+      vector to reduce — reported against the step's recorded precondition;
+    * it raised, and on what;
+    * it ran and genuinely changed nothing.
+
+    *step* may be a name or a :class:`Step`.
+    """
+    st = info(step) if isinstance(step, str) else step
+    lack = [k for k in st.needs if k not in context]
+    if lack:
+        return (
+            f"{st.qualified} was not tried: it needs {', '.join(lack)}, which "
+            f"the context does not have — pass {lack[0]}=… ."
+        )
+    sh = shape(expr)
+    short = {k: (v, sh[k]) for k, v in st.wants.items() if sh.get(k, 0) < v}
+    if short:
+        parts = [
+            f"{k} (needs {need}, has {got})" for k, (need, got) in sorted(short.items())
+        ]
+        return (
+            f"{st.qualified} has nothing to act on here: {', '.join(parts)}."
+        )
+    try:
+        got = st(expr, **context)
+    except Exception as ex:  # noqa: BLE001 - the reason is the answer
+        return f"{st.qualified} raised {type(ex).__name__}: {ex}"
+    if _d.structural_eq(got, expr):
+        note = "" if st.wants else " (no precondition recorded for it)"
+        return (
+            f"{st.qualified} ran and changed nothing{note} — its pattern is not "
+            f"present, even though the ingredients are."
+        )
+    after = shape(got)
+    change = {k: after[k] - sh[k] for k in sh if after[k] != sh[k]}
+    if not change:
+        return f"{st.qualified} only reshaped the expression (canonical reordering)."
+    return (
+        f"{st.qualified} did apply: "
+        + ", ".join(f"{k}{v:+d}" for k, v in sorted(change.items()))
+    )
+
+
+def explain(before, after):
+    """What changed between two expressions — the fingerprint delta, and both forms.
+
+    A step's effect read off the structure rather than by squinting at two
+    LaTeX strings.  `tender.render.labeled` gives the positional view when you
+    need to know *where*.
+    """
+    b, a = shape(before), shape(after)
+    change = {k: a[k] - b[k] for k in b if a[k] != b[k]}
+    lines = [f"  before  {before.latex()}", f"  after   {after.latex()}"]
+    if _d.structural_eq(before, after):
+        lines.append("  change  none — the expressions are identical")
+    elif not change:
+        lines.append("  change  reshaped only (canonical reordering)")
+    else:
+        lines.append(
+            "  change  " + ", ".join(f"{k}{v:+d}" for k, v in sorted(change.items()))
+        )
+    return "\n".join(lines)
+
+
 __all__ = [
     "CATEGORIES",
     "Step",
+    "Hit",
+    "Report",
+    "applicable",
+    "why_not",
+    "explain",
+    "shape",
     "register",
     "names",
     "info",

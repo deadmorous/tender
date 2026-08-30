@@ -299,7 +299,31 @@ A reconciliation test mirrors the identity DAG's: an advertised step that nobody
 catalogued fails the suite, because a step nobody can find is worse than no
 catalogue.
 
-## 4. Other feedback forms
+## 4. Other feedback forms — **all three built (2026-08-30)**
+
+`ts.applicable(expr, **context)`, `ts.why_not(expr, step, **context)`,
+`ts.explain(before, after)`.  Three notes from building them:
+
+**The fingerprint moved to the IR, and grew.**  It counts nodes, Σ binders,
+index slots, δ/ε/I/g, ∂-marks, unapplied ∂s, ∇s, rank — and, following the
+user's suggestion, distinguishes **coordinates** (`a_i`, rank-0 with a basis
+tag) from **basis vectors** (`e_i`, rank ≥ 1 with one).  That last split is what
+makes a bridge step's effect legible: `reduce_frame` reads as
+`basis_vectors−2, index_slots−2, nodes−4`.
+
+**Preconditions are data, which is what makes `why_not` cheap.**  Each step
+records `wants` — minimum fingerprint counts, `{"deltas": 1}` — so the answer is
+"deltas (needs 1, has 0)" rather than silence.  19 of 39 steps carry one; the
+rest fall back to "it ran and changed nothing (no precondition recorded)", which
+is honest and improvable step by step, as the vibe proposed.
+
+**The probe immediately found a bug in the library.**  `sym` and `skew` appeared
+as content-changing options on a *scalar*: `sym(a·b)` produced ½(a·b + (a·b)ᵀ)
+and never collapsed, because transpose had no rank-0 case.  A scalar has no
+slots to swap, so `sᵀ = s`; fixed in `nf_lower`.  A tool that reports what
+applies is also a tool that notices what applies *and should not*.
+
+## 4a. The original list
 
 1. **`applicable(expr, **context)`** — §1.  Content-changing first, "reordered
    only" collapsed to a count.

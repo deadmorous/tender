@@ -1206,6 +1206,58 @@ auto factor_div_tensors(Context& ctx, Expr const* e) -> Expr const*
 
 } // namespace
 
+auto expression_shape(Context& ctx, Expr const* e) -> ExpressionShape
+{
+    ExpressionShape sh;
+    sh.rank = infer_rank(e).value_or(-1);
+    rewrite_tree(
+        ctx,
+        e,
+        [&sh](Context&, Expr const* n) -> Expr const*
+        {
+            ++sh.nodes;
+            if (auto const* es = std::get_if<ExplicitSum>(&n->node);
+                es && !es->bound)
+                ++sh.sums;
+            if (std::holds_alternative<Nabla>(n->node))
+                ++sh.nablas;
+            if (std::holds_alternative<Deriv>(n->node))
+                ++sh.derivs;
+            auto const* t = std::get_if<TensorObject>(&n->node);
+            if (!t)
+                return n;
+            sh.deriv_marks += static_cast<int>(t->deriv_marks.size());
+            bool basis_tagged = false;
+            for (auto const& sb: t->slots)
+            {
+                if (sb.index)
+                    ++sh.index_slots;
+                if (sb.slot.basis_id != 0)
+                    basis_tagged = true;
+            }
+            if (t->traits && t->traits->well_known)
+                switch (*t->traits->well_known)
+                {
+                    case WellKnownKind::Delta: ++sh.deltas; break;
+                    case WellKnownKind::LeviCivita: ++sh.epsilons; break;
+                    case WellKnownKind::Identity: ++sh.identities; break;
+                    case WellKnownKind::Metric: ++sh.metrics; break;
+                }
+            else if (basis_tagged)
+            {
+                // A basis-tagged rank-0 object is a coordinate (a_i); a
+                // basis-tagged object of rank ≥ 1 is a frame vector (e_i).
+                // Telling those apart is what makes the bridge steps legible.
+                if (t->rank.value_or(0) == 0)
+                    ++sh.coordinates;
+                else
+                    ++sh.basis_vectors;
+            }
+            return n;
+        });
+    return sh;
+}
+
 namespace steps
 {
 

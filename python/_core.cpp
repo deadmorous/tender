@@ -1087,6 +1087,31 @@ NB_MODULE(_core, m)
         "metric that pays for the move (the inverse of contract_metric).");
 
     md.def(
+        "_expression_shape",
+        [](PyExpr const& e) -> nb::dict
+        {
+            auto const sh = expression_shape(*e.ctx, e.expr);
+            nb::dict d;
+            d["nodes"] = sh.nodes;
+            d["sums"] = sh.sums;
+            d["index_slots"] = sh.index_slots;
+            d["coordinates"] = sh.coordinates;
+            d["basis_vectors"] = sh.basis_vectors;
+            d["deltas"] = sh.deltas;
+            d["epsilons"] = sh.epsilons;
+            d["identities"] = sh.identities;
+            d["metrics"] = sh.metrics;
+            d["deriv_marks"] = sh.deriv_marks;
+            d["nablas"] = sh.nablas;
+            d["derivs"] = sh.derivs;
+            d["rank"] = sh.rank;
+            return d;
+        },
+        "expr"_a,
+        "A structural fingerprint of the expression — the counts that say "
+        "whether a step changed its content or only reshaped it.");
+
+    md.def(
         "_contract_metric",
         [](PyExpr const& e, std::optional<std::string> target) -> PyExpr
         {
