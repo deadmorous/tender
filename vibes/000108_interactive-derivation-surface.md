@@ -132,18 +132,74 @@ should appear on demand rather than stand permanently.
 
 ## 4. Open questions
 
-1. **Branching.**  The sketch says linear for version 1, and the user has
-   indicated branching is where the exploration model will start.  Those want
-   reconciling: a linear history that *discards* the tail is cheap now but is
-   not a subset of a branching one — the tail is what a branch would have kept.
-   Recording an abandoned tail from day one costs little and may be the more
-   valuable data for vibe 000107.
-2. **What the code panel emits.**  A flat script, or a `Derivation` that can be
+1. **What the code panel emits.**  A flat script, or a `Derivation` that can be
    replayed?  The latter is closer to what the challenges already contain.
-3. **Selecting a target with the mouse** (deferred in the sketch) needs the
+2. **Selecting a target with the mouse** (deferred in the sketch) needs the
    rendered image to carry positions.  `tender.render.labeled` already produces a
    path→part legend; an image does not.  Whichever way that goes, it argues for
    the renderer keeping the path information rather than flattening to a picture.
+
+## 5. Branching, settled
+
+The sketch said "linear, truncate the tail"; the exploration model wanted
+branches.  Resolved as: **record the whole tree, show one path through it.**
+
+**Recording is free** — the abandoned tail is already computed, and throwing it
+away is a deliberate act rather than a saving.  It is also the data vibe 000107
+needs most: what a person *rejected* says more about their intent than the route
+that worked.
+
+**Displaying it costs almost nothing, if it goes in the right place.**  Not a
+tree pane — the chooser at each node already lists the applicable steps, so a
+step tried before from this expression is simply marked:
+
+```
+○ reduce_frame
+○ contract_eps_pair        · tried
+○ to_concrete
+```
+
+No new widget, and the flag appears exactly where the decision is made.
+
+**Keyed on the expression, not the path.**  The memory is a lookup on
+`(canonical form, step name)`, so it fires even when the same state is reached by
+a different route — wander off, come back another way, and it still says you have
+been here.  A path-keyed history cannot do that, and the canonical form is
+already what the search prototype used as its visited-set key.
+
+**Re-selecting a tried step starts fresh**, rather than reinstating the old
+subtree.  The user's reason is the decisive one and is about the display, not
+about cost: *the list is a path through the tree*, so a reinstated subtree would
+have to collapse to a path anyway, and the list would jump forward several items
+at once.  Fresh keeps the list honest; the annotation already carries the
+knowledge that the ground was covered.
+
+**The label says "tried", not "tried, abandoned".**  A tool has no business
+editorialising about how a derivation was arrived at.
+
+**A full view stays available with no GUI at all:** `s.attempts()`, printed in a
+cell.  In-flow guidance is free; whole-tree inspection is a cell away.
+
+## 6. On exit: nothing happens
+
+Because this lives in a kernel, closing the widget is not a lifecycle event:
+
+```python
+s = td.explore(expr)   # the widget mutates s
+s.script()             # the surviving path, as code
+s.tree                 # everything, abandoned branches included
+```
+
+The session is an ordinary Python object and persists as long as the kernel
+does, which is as long as anyone cares.  Nothing is written to disk, there is no
+save prompt, and no decision about what to keep.  Persisting for vibe 000107's
+corpus becomes `td.explore(expr, record=…)` when that vibe resumes; it is not
+version 1's problem.
+
+This is a third dividend of the technology choice, alongside deleting the
+preamble box and inferring the needs: a standalone application would need a
+session lifecycle, a storage location, and a policy on discarding.  Here there is
+nothing to design.
 
 ## Status
 
