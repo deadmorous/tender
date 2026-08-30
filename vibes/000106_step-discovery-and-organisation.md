@@ -323,6 +323,63 @@ and never collapsed, because transpose had no rank-0 case.  A scalar has no
 slots to swap, so `sᵀ = s`; fixed in `nf_lower`.  A tool that reports what
 applies is also a tool that notices what applies *and should not*.
 
+## 4b. Steps report for themselves — the interface change (user's call)
+
+The `wants` preconditions above infer a reason **from outside**, and the user's
+objection is right: that is orthogonal to what the fingerprint is for, and it
+does not scale.  A fingerprint answers "did the expression change, and how",
+after the fact.  It cannot answer *why* a step declined, because the reason is
+internal — `contract_delta` knows it found a δ whose partner index sits in a
+foreign factor, and no amount of counting the result recovers that.  As steps
+grow more capable the gap widens, and each new reason would need its own
+fingerprint extension.
+
+So the step says it itself.
+
+**Shape.**  C++ steps take an optional out-parameter, `StepReport* = nullptr`,
+rather than changing their return type: existing call sites need no change, a
+step with nothing to say needs no change, and the steps that *do* have something
+gain it one at a time — which keeps the tree building at every commit.  The
+Python catalogue carries the real interface, `Step.run(expr, **ctx) ->
+StepResult(expr, fired, reason)`, since the bare `td.*` functions are the
+plain-`Expr` convenience and (the user) "we'll probably not be relying on bare
+steps anyway".  `StepResult` is uniform from day one: a step that explains
+itself supplies the reason, one that does not gets the synthesized `wants`
+message, so `why_not` improves step by step with no flag day.
+
+**What it buys, immediately.**  Same step, same "nothing happened", two causes
+that point at different next moves:
+
+```
+contract_delta on  a·b        → "there is no summation for a δ to contract over"
+contract_delta on  a_j e_j·b_i e_i → "no δ in this term carries a summed index"
+
+reduce_frame on    a·b        → "no frame vectors here — expand_in_basis first"
+reduce_frame on    ε ε a b c e → "the frame has nothing further to say; what
+                                  remains needs a step it cannot justify (an
+                                  ε-pair contraction, a metric move, an identity)"
+```
+
+**And it resolved a tension that had been distorting the steps.**  Before the
+report, `fired` had to be *inferred from the return value*, which forced a step
+either to lie about its output (return the un-normalized input so it looked
+untouched) or to lie about its effect (return the normalized form and be read as
+having worked).  `reduce_frame` was caught in exactly that, and a first attempt
+to fix the report by changing what it returns broke two tests.  With `fired`
+carried separately, both can be honest: **the return value is the normalized
+result; the report says whether any work was done.**
+
+That is the third appearance of one distinction — "did it change?" versus "did
+it do work?" — after composing the self-preparing folds in `reassemble` and
+after `applicable`'s reordering noise.  Three independent encounters make it a
+property of the step contract rather than a local quirk, and the report is where
+it now lives.
+
+**Done so far:** `contract_delta`, `reduce_frame`.  The richest remaining is
+`reassemble` — `fold_reassembly_groups` has roughly eight distinct refusals,
+each already written out as a comment, which is a good sign the reports are
+recovering knowledge the code already has rather than inventing it.
+
 ## 4a. The original list
 
 1. **`applicable(expr, **context)`** — §1.  Content-changing first, "reordered
@@ -448,5 +505,10 @@ Two things the work turned up that were not in the design:
   not.**  `sym`/`skew` surfaced as options on a scalar, because transpose had no
   rank-0 case.  Fixed.
 
-Left for the next milestone: path search and goal specification (§6), and
-`why_not` preconditions for the 20 steps that carry none.
+Left for the next milestone: path search and goal specification (§6).  Also
+open, and now better shaped than "add 20 preconditions": teach the remaining
+steps to report for themselves (§4b), richest first — `reassemble`,
+`contract_metric`/`insert_metric`, `fold_operator`, `apply_operators`.  A
+handful of steps (`simplify`, `canonicalize`, `simplify_scalars`) genuinely have
+no precondition and should keep the fallback; and `sym`/`skew` want fixing
+rather than explaining, since `sym(s) = s` and `skew(s) = 0` for a scalar.

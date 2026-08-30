@@ -2422,7 +2422,8 @@ auto find_partner(Context& ctx, Expr const* e, int m)
     return found;
 }
 
-auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
+auto contract_delta(Context& ctx, Expr const* e, StepReport* report)
+    -> Expr const*
 {
     // Self-prepare so the caller never has to: distribute products over sums
     // (expand_products) and materialize the implicit Einstein sums with
@@ -2445,12 +2446,25 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
     }
     catch (std::invalid_argument const&)
     {
+        report_no_op(
+            report,
+            "the expression has an ill-formed implicit summation, so it cannot "
+            "be put in the form a contraction is read from");
         return e;
     }
+    // Why nothing fired, from the step's own vantage.  The first reason to be
+    // *reached* is kept: a later binder finding no δ is less informative than
+    // an earlier one finding a δ it could not use.
+    std::string why;
+    auto note = [&why](std::string s)
+    {
+        if (why.empty())
+            why = std::move(s);
+    };
     auto const* out = rewrite_tree(
         ctx,
         m,
-        [&fired](Context& ctx, Expr const* e) -> Expr const*
+        [&fired, &note](Context& ctx, Expr const* e) -> Expr const*
         {
             // Fire at a summation binder Σ_m whose body carries a Kronecker δ
             // with m in one slot: δ identifies m with its other index n, so the
@@ -2471,7 +2485,12 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             // bail on a distributed sum; let expand_products split the term
             // first.
             if (core_is_distributed(s->body))
+            {
+                note(
+                    "the term is a distributed sum, so identifying the index "
+                    "across ± would be wrong — expand_products splits it first");
                 return e;
+            }
 
             // Locate the first δ in the body that carries index m, returning
             // the δ node and the partner index n in its other slot (n must
@@ -2522,13 +2541,21 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
                     return node;
                 });
             if (!delta)
+            {
+                note("no δ in this term carries a summed index");
                 return e;
+            }
 
             auto const* without = drop_factor(ctx, s->body, delta);
             // The δ was the sole factor (e.g. Σ_m δ_mn with n free) —
             // degenerate; leave it for another step.
             if (!without)
+            {
+                note(
+                    "the δ is the only factor, so there is nothing to contract "
+                    "it against");
                 return e;
+            }
 
             // The contraction is genuine only if m has a partner occurrence in
             // the rest, at a matching realm and space (Σ_m δ^m_k = 1 with no
@@ -2536,19 +2563,40 @@ auto contract_delta(Context& ctx, Expr const* e) -> Expr const*
             // to collapse).  Levels need not match — δ identifies its indices
             // regardless of which slot is up or down.
             auto const partner_at = find_partner(ctx, without, m);
-            if (!partner_at || partner_at->slot.realm != m_slot.realm
-                || partner_at->slot.space != m_slot.space)
+            if (!partner_at)
+            {
+                note(
+                    "the δ's summed index appears nowhere else, so there is no "
+                    "partner to contract with");
                 return e;
+            }
+            if (partner_at->slot.realm != m_slot.realm
+                || partner_at->slot.space != m_slot.space)
+            {
+                note(
+                    "the δ and its partner sit in different realms or index "
+                    "spaces, which is not a contraction");
+                return e;
+            }
 
             fired = true;
             // Identify m with n in what remains, and shed the now-spent Σ_m.
             return substitute_index(ctx, without, m, partner);
         });
-    // No contraction fired — return the original input, untouched.  When it
-    // did, strip any explicit sums materialization added but the contraction
-    // left behind, so the result stays in implicit form (e.g. δ_ij δ_ij → δ_ii,
-    // not Σ_i δ_ii).
-    return fired ? implicitize(ctx, out) : e;
+    // No contraction fired — return the original input, untouched, and say why
+    // in the step's own terms.  When it did, strip any explicit sums
+    // materialization added but the contraction left behind, so the result
+    // stays in implicit form (e.g. δ_ij δ_ij → δ_ii, not Σ_i δ_ii).
+    if (!fired)
+    {
+        report_no_op(
+            report,
+            why.empty() ? "there is no summation for a δ to contract over" :
+                          why);
+        return e;
+    }
+    report_fired(report);
+    return implicitize(ctx, out);
 }
 
 auto insert_metric(

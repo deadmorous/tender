@@ -58,6 +58,18 @@ _CATEGORY_BLURB = {
 
 
 @dataclass(frozen=True)
+class StepResult:
+    """What a step did: the expression it produced, whether it fired, and why not."""
+
+    expr: Any
+    fired: bool
+    reason: str
+
+    def __repr__(self):
+        return f"<StepResult fired={self.fired} {self.reason[:60]!r}>"
+
+
+@dataclass(frozen=True)
 class Step:
     """One entry in the catalogue."""
 
@@ -73,6 +85,11 @@ class Step:
     # {"deltas": 1} means "needs at least one δ".  Data, so `why_not` can say
     # *why* rather than just "nothing happened" (vibe 000106).
     wants: dict = field(default_factory=dict)
+    # The reporting form, when the step has been taught to explain itself:
+    # (expr, **kw) -> (expr, fired, reason).  A step's own account of why it did
+    # nothing beats anything inferred from the outside, because the reason lives
+    # in its logic (vibe 000106).
+    reported: Any = None
 
     def __call__(self, expr, **ctx):
         """Apply the step, taking its extra arguments from *ctx* by kind."""
@@ -85,6 +102,44 @@ class Step:
         kw = {k: ctx[k] for k in self.needs if k in ctx}
         kw.update({k: ctx[k] for k in self.options if k in ctx})
         return self.fn(expr, **kw)
+
+    def run(self, expr, **ctx):
+        """Apply the step and say what happened — the reporting interface.
+
+        Uniform from the start: a step that explains itself supplies the reason,
+        and one that does not gets a synthesized one, so callers need not know
+        which is which and steps can be taught one at a time.
+        """
+        missing = [k for k in self.needs if k not in ctx]
+        if missing:
+            return StepResult(
+                expr,
+                False,
+                f"not tried: it needs {', '.join(missing)}, which the context "
+                f"does not have",
+            )
+        kw = {k: ctx[k] for k in self.needs if k in ctx}
+        kw.update({k: ctx[k] for k in self.options if k in ctx})
+        if self.reported is not None:
+            got, fired, reason = self.reported(expr, **kw)
+            return StepResult(got, fired, reason)
+        got = self.fn(expr, **kw)
+        fired = not _d.structural_eq(got, expr)
+        return StepResult(got, fired, "" if fired else self._guess(expr))
+
+    def _guess(self, expr):
+        """A reason inferred from outside, for a step that has none of its own."""
+        sh = shape(expr)
+        short = {k: (v, sh[k]) for k, v in self.wants.items() if sh.get(k, 0) < v}
+        if short:
+            return "nothing to act on here: " + ", ".join(
+                f"{k} (needs {need}, has {got})"
+                for k, (need, got) in sorted(short.items())
+            )
+        return (
+            "it ran and changed nothing; its pattern is not present, even though "
+            "the ingredients are (this step does not yet explain itself)"
+        )
 
     @property
     def qualified(self) -> str:
@@ -105,6 +160,7 @@ def register(
     options=(),
     primary=False,
     wants=None,
+    reported=None,
 ):
     """Add a step to the catalogue — yours sit alongside the shipped ones.
 
@@ -124,6 +180,7 @@ def register(
         options=tuple(options),
         primary=primary,
         wants=dict(wants or {}),
+        reported=reported,
     )
     _STEPS[name] = step
     return step
@@ -196,6 +253,7 @@ _r("expand_in_basis", _b, _B, category="bridge", primary=True,
    needs=("basis",), options=("variance",),
    summary="write an invariant in components on a frame")
 _r("reduce_frame", _b, _B, category="bridge", primary=True, needs=("basis",),
+   reported=_core.basis._reduce_frame_reported,
    wants={"basis_vectors": 1},
    summary="everything the frame licenses, to a fixed point")
 _r("to_concrete", _b, _B, category="bridge", primary=True, needs=("basis",),
@@ -232,6 +290,7 @@ _r("eval_eps_concrete", _d, _D, category="bridge",
 
 # ---- index algebra --------------------------------------------------------
 _r("contract_delta", _d, _D, category="index", primary=True,
+   reported=_core.derivation._contract_delta_reported,
    wants={"deltas": 1},
    summary="contract a δ against whatever carries its index")
 _r("contract_eps_pair", _d, _D, category="index", primary=True,
@@ -430,24 +489,13 @@ def why_not(expr, step, **context):
             f"the context does not have — pass {lack[0]}=… ."
         )
     sh = shape(expr)
-    short = {k: (v, sh[k]) for k, v in st.wants.items() if sh.get(k, 0) < v}
-    if short:
-        parts = [
-            f"{k} (needs {need}, has {got})" for k, (need, got) in sorted(short.items())
-        ]
-        return (
-            f"{st.qualified} has nothing to act on here: {', '.join(parts)}."
-        )
     try:
-        got = st(expr, **context)
+        res = st.run(expr, **context)
     except Exception as ex:  # noqa: BLE001 - the reason is the answer
         return f"{st.qualified} raised {type(ex).__name__}: {ex}"
-    if _d.structural_eq(got, expr):
-        note = "" if st.wants else " (no precondition recorded for it)"
-        return (
-            f"{st.qualified} ran and changed nothing{note} — its pattern is not "
-            f"present, even though the ingredients are."
-        )
+    if not res.fired:
+        return f"{st.qualified}: {res.reason}"
+    got = res.expr
     after = shape(got)
     change = {k: after[k] - sh[k] for k in sh if after[k] != sh[k]}
     if not change:
@@ -485,6 +533,7 @@ __all__ = [
     "Hit",
     "Report",
     "applicable",
+    "StepResult",
     "why_not",
     "explain",
     "shape",

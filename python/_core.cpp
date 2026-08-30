@@ -1086,6 +1086,19 @@ NB_MODULE(_core, m)
         "Move summed coordinate slots to `target` level, introducing the "
         "metric that pays for the move (the inverse of contract_metric).");
 
+    // Reporting forms: (expr, fired, reason).  A step that has been taught to
+    // explain itself fills the reason in; the rest keep the plain form only.
+    md.def(
+        "_contract_delta_reported",
+        [](PyExpr const& e) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = steps::contract_delta(*e.ctx, e.expr, &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "expr"_a,
+        "contract_delta, with (expr, fired, reason).");
+
     md.def(
         "_expression_shape",
         [](PyExpr const& e) -> nb::dict
@@ -1640,6 +1653,18 @@ NB_MODULE(_core, m)
         "mathematical steps the frame cannot justify — an ε-pair contraction, "
         "a metric move — those are the caller's choice.  Returns implicit "
         "(Einstein) form.");
+
+    mb.def(
+        "_reduce_frame_reported",
+        [](PyExpr const& e, PyBasis const& b) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = reduce_frame(*e.ctx, e.expr, b.basis, &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "expr"_a,
+        "basis"_a,
+        "reduce_frame, with (expr, fired, reason).");
 
     mb.def(
         "to_concrete",

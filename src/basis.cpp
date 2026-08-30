@@ -1884,7 +1884,11 @@ auto to_fixpoint(Context& ctx, Expr const* e, F const& moves, int cap = 16)
 
 } // namespace
 
-auto reduce_frame(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
+auto reduce_frame(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    StepReport* report) -> Expr const*
 {
     auto const* out = to_fixpoint(
         ctx,
@@ -1907,7 +1911,40 @@ auto reduce_frame(Context& ctx, Expr const* e, Basis const& basis) -> Expr const
             }
             return steps::contract_delta(c, x);
         });
-    return structural_eq(out, e) ? e : steps::implicitize(ctx, out);
+    // "Did it do work?", not "did it change?" — the fixpoint canonicalizes, so
+    // a pass that reduced nothing still returns a reordered expression.
+    // Comparing fingerprints is what tells the two apart (the same distinction
+    // that `applicable` rests on, and that composing self-preparing folds
+    // needed). The *return value* is the normalized result, as it always was;
+    // the report carries whether any work was done.  Separating those is the
+    // point of StepReport: before it, "did it fire?" had to be inferred from
+    // the return, which forced a step either to lie about its output or to lie
+    // about its effect.  Compare against the finished form — the fixpoint
+    // materializes Σ binders internally, so an un-implicitized result always
+    // looks changed.
+    Expr const* const done =
+        structural_eq(out, e) ? e : steps::implicitize(ctx, out);
+    auto const before = expression_shape(ctx, e);
+    if (before == expression_shape(ctx, done))
+    {
+        // Nothing reduced.  Say which of the two reasons it was, since they
+        // point at different next moves: with no frame structure at all the
+        // expression has not been expanded yet, while a frame-bearing term that
+        // will not reduce is one the *frame* cannot say more about — an ε-pair
+        // to contract, a metric to spend, an identity to use.
+        auto const& sh = before;
+        report_no_op(
+            report,
+            sh.basis_vectors == 0 ?
+                "there are no frame vectors here to reduce — expand_in_basis "
+                "puts an invariant into components first" :
+                "the frame has nothing further to say about this term; what "
+                "remains needs a step the frame cannot justify (an ε-pair "
+                "contraction, a metric move, an identity)");
+        return done;
+    }
+    report_fired(report);
+    return done;
 }
 
 auto to_concrete(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*

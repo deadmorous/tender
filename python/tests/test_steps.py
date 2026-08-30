@@ -217,9 +217,17 @@ class TestWhyNot:
         frame, inv, exp = self._setup()
         assert "needs coord" in ts.why_not(exp, "partial")
 
-    def test_a_missing_ingredient_is_named_with_the_count(self):
+    def test_a_step_that_explains_itself_says_more_than_a_count(self):
+        # contract_delta reports in its own terms, and differently for the two
+        # cases — which no external fingerprint could distinguish.
         frame, inv, exp = self._setup()
-        msg = ts.why_not(inv, "contract_delta")
+        assert "no summation" in ts.why_not(inv, "contract_delta")
+        assert "no δ in this term" in ts.why_not(exp, "contract_delta")
+
+    def test_a_step_without_a_report_falls_back_to_the_count(self):
+        # The synthesized reason, for a step not yet taught to explain itself.
+        frame, inv, exp = self._setup()
+        msg = ts.why_not(inv, "eval_delta_concrete")
         assert "nothing to act on" in msg and "deltas (needs 1, has 0)" in msg
 
     def test_a_step_that_would_apply_says_so(self):
@@ -258,3 +266,66 @@ class TestExplain:
         ctx = tender.Context()
         a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
         assert "reshaped only" in ts.explain(b @ a, td.canonicalize(b @ a))
+
+
+class TestStepReport:
+    """A step's own account of what it did (vibe 000106).
+
+    The fingerprint measures the result from outside; it can say *that* nothing
+    changed, never *why*.  The reason lives in the step's logic, so the step
+    reports it.
+    """
+
+    def _setup(self):
+        ctx = tender.Context()
+        frame = tb.wcs(ctx)
+        a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+        return frame, a, b, c
+
+    def test_a_reporting_step_gives_different_reasons_for_different_inputs(self):
+        # The thing no external measure could do: same step, same "nothing
+        # happened", two different causes.
+        frame, a, b, _ = self._setup()
+        bare = ts.info("contract_delta").run(a @ b)
+        expanded = ts.info("contract_delta").run(tb.expand_in_basis(a @ b, frame))
+        assert not bare.fired and not expanded.fired
+        assert bare.reason != expanded.reason
+
+    def test_reduce_frame_distinguishes_not_expanded_from_nothing_further(self):
+        frame, a, b, c = self._setup()
+        never = ts.info("reduce_frame").run(a @ b, basis=frame)
+        assert "expand_in_basis" in never.reason
+
+        stalled = tb.reduce_frame(tb.expand_in_basis(a % (b % c), frame), frame)
+        done = ts.info("reduce_frame").run(stalled, basis=frame)
+        assert not done.fired
+        assert "ε-pair" in done.reason or "cannot justify" in done.reason
+
+    def test_the_return_value_is_normalised_even_when_nothing_fired(self):
+        # The separation StepReport buys: `fired` no longer has to be inferred
+        # from the return, so a step can normalise its output *and* report
+        # honestly that it did no work.
+        frame, a, b, c = self._setup()
+        stalled = tb.reduce_frame(tb.expand_in_basis(a % (b % c), frame), frame)
+        res = ts.info("reduce_frame").run(stalled, basis=frame)
+        assert not res.fired
+        assert td.algebraic_eq(res.expr, stalled)
+
+    def test_a_step_without_a_report_still_returns_a_result(self):
+        # Uniform from the start: callers need not know which steps have been
+        # taught to explain themselves.
+        frame, a, b, _ = self._setup()
+        res = ts.info("fold_sums").run(a @ b)
+        assert isinstance(res, ts.StepResult)
+        assert not res.fired and res.reason
+
+    def test_missing_context_is_reported_not_raised(self):
+        frame, a, b, _ = self._setup()
+        res = ts.info("partial").run(a @ b)
+        assert not res.fired and "needs coord" in res.reason
+
+    def test_a_firing_step_reports_no_reason(self):
+        frame, a, b, _ = self._setup()
+        res = ts.info("reduce_frame").run(tb.expand_in_basis(a @ b, frame), basis=frame)
+        assert res.fired and not res.reason
+        assert td.structural_eq(res.expr, tb.reduce_frame(tb.expand_in_basis(a @ b, frame), frame))

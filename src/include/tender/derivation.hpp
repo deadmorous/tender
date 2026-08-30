@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace tender
@@ -72,6 +73,47 @@ private:
 };
 
 // ---- Built-in rewriting steps ------------------------------------------
+
+// What a step did, in its own terms (vibe 000106).
+//
+// The structural fingerprint below answers "did the expression change, and
+// how" — from the outside, after the fact.  It cannot answer *why* a step did
+// nothing, because that reason lives inside the step: `contract_delta` knows it
+// found a δ whose partner index sits in a foreign factor, and no amount of
+// counting the result recovers that.  So a step says so itself.
+//
+// Passed as an optional out-parameter rather than folded into the return type:
+// a step that has nothing to report needs no change, existing callers need no
+// change, and the steps that *do* have something to say gain it one at a time.
+struct StepReport final
+{
+    bool fired = false;
+    // Why nothing happened, phrased as the step would explain it to a person —
+    // "no δ carries a summed index", never "the expression is unchanged".
+    // Empty when the step fired, or when it has not been taught to explain
+    // itself yet.
+    std::string reason;
+
+    void did_nothing(std::string why)
+    {
+        fired = false;
+        reason = std::move(why);
+    }
+};
+
+// Set `*report` if it is there — the shape every reporting step uses, so the
+// null check is written once.
+inline void report_no_op(StepReport* report, std::string why)
+{
+    if (report)
+        report->did_nothing(std::move(why));
+}
+
+inline void report_fired(StepReport* report)
+{
+    if (report)
+        report->fired = true;
+}
 
 // A structural fingerprint of an expression (vibe 000106).
 //
@@ -154,7 +196,8 @@ auto fold_sums(Context& ctx, Expr const* e) -> Expr const*;
 // factor — a_i δ_{ij} → a_j, δ_{ij} (e_i ⊗ e_j) → e_i ⊗ e_i, etc.  Implicit
 // Einstein sums are materialised first, so it fires on pre-canonical input too;
 // a genuine no-op returns the original expression untouched.
-auto contract_delta(Context& ctx, Expr const* e) -> Expr const*;
+auto contract_delta(Context& ctx, Expr const* e, StepReport* report = nullptr)
+    -> Expr const*;
 
 // Contract a metric against a summed index — raising, lowering, and the
 // inverse-metric pair, which are one operation read three ways (vibe 000103's

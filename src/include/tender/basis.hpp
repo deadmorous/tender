@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/index.hpp>
 #include <tender/index_space.hpp>
@@ -296,8 +297,11 @@ enum class Variance
 //
 // Returns implicit (Einstein) form: the Σ binders it materializes internally,
 // so the contractions can see them, are stripped again on the way out.
-[[nodiscard]] auto reduce_frame(Context& ctx, Expr const* e, Basis const& basis)
-    -> Expr const*;
+[[nodiscard]] auto reduce_frame(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    StepReport* report = nullptr) -> Expr const*;
 
 // Evaluate over the frame's concrete directions, to a fixed point (vibe
 // 000106): unroll each symbolic index into the basis's directions, evaluate the
