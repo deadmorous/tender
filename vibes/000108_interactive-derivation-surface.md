@@ -1,0 +1,152 @@
+# 000108 An interactive derivation surface
+
+A GUI for user-guided derivations, so that choosing the next step is a click
+rather than a recall exercise.  The design is the user's; this note records it,
+settles the technology, and works through the points that came out of the
+discussion.
+
+Two motivations, and the second is easy to miss:
+
+1. **Speed.**  Even with vibe 000106's catalogue and feedback functions, a
+   derivation is typed one call at a time, with the frame re-passed to every one.
+2. **It is the instrument vibe 000107 is waiting for.**  That vibe is postponed
+   for want of data on how a user *states what they want*, and a session that
+   records what was tried, abandoned and aimed at is exactly where that data
+   comes from.  Building this first is what unblocks that.
+
+## 1. The GUI, as specified
+
+- **Preamble** — a multi-line text box for setup code, pasted from a notebook:
+  imports, and the variables the initial expression depends on.  Raw text, no
+  completion, in version 1.  Changing it invalidates the history, which then
+  re-evaluates what it can.
+- **Derivation history** — linear in version 1 (no branch memory):
+  - a line edit for the initial expression;
+  - a vertical list of steps, each showing:
+    - the **expression, rendered** (an image in version 1; selecting a target
+      with the mouse comes later),
+    - a **target** line edit (empty = no target),
+    - a **needs** line edit, usually naming a preamble variable; a new item
+      inherits the previous item's value,
+    - a **chooser of applicable steps** — a drop-down with a "nothing selected"
+      default, or a row of radio-style buttons when the list is short.
+  - Selecting a step drops any history past that item and appends the result.
+- **A panel of Python code** representing the current derivation, copyable.
+
+Rationale for the fixed-panel shape, in the user's words: a long history of
+notebook cells is *"just too much text for a human, and things user wants to
+keep looking at will scroll up."*
+
+## 2. Technology: a Jupyter cell, with `ipywidgets`
+
+Everything needed is already installed — `ipywidgets` 8.1.7, `matplotlib`
+3.10.8, JupyterLab 4.4 — and the project already maintains ten notebooks under
+a CI cleanliness job, so this is the existing surface rather than a new one.
+
+Three findings settled it:
+
+**Rich HTML alone cannot do this.**  An earlier suggestion in the discussion —
+"start with `_repr_html_`, zero dependencies" — is wrong for *this* design.
+Choosing a step must call Python to compute the next expression, and HTML in an
+output cell has **no channel back to the kernel**.  What pandas shows is static
+styled HTML; interactive table libraries sort in JavaScript and never touch the
+kernel.  `ipywidgets` exists precisely for the round trip, so it is required
+from version 1.
+
+**Fixed panels work, and the scrolling complaint is answered.**  A cell's output
+is a bounded box: a `VBox` with `height` and `overflow: auto` scrolls *inside
+itself*, not the notebook.  For a genuinely detached panel, JupyterLab's
+right-click → *Create New View for Output* docks the widget beside the notebook,
+where it never scrolls with the cells.  There is no native modal, and none is
+needed: OK/Cancel is a working copy plus two buttons.
+
+**Rendering to an image needs no LaTeX install.**  Measured: `matplotlib`
+mathtext renders tender's output as-is — `\varepsilon`, `\mathbf`, `\partial`,
+`\frac`, `\mathsf{T}` all included — on four representative expressions from the
+corpus, 4/4.  So version 1's "just an image" is a solved problem with a library
+already present.
+
+*Escape hatch, if the cell ever feels too cramped:* Panel runs the same code both
+as a notebook widget and as a standalone page.  Bigger dependency, not installed,
+but the migration would not be a rewrite.
+
+## 3. What the discussion changed
+
+### The preamble box is redundant when launched from a notebook
+
+If the widget is opened from a cell — `td.explore(expr)` — it inherits the
+kernel's namespace, which already holds the imports and the variables.  There is
+nothing to paste.  The preamble box exists in the sketch because a standalone web
+app would need it; choosing Jupyter deletes it.
+
+That is worth noting as an argument for Jupyter *that only appears after the
+choice is made*: the same decision removes a panel, a text field, and the
+invalidation rule attached to it.  Re-running the launching cell is the
+invalidation.
+
+### Needs should be inferred from the launching scope, not typed
+
+The catalogue records the **kind** of every extra argument (`basis`, `coord`,
+`rules`, `level`, `op`), and the launching scope holds the objects.  So the
+surface can look for a `Basis` in the namespace and fill `basis=` itself:
+zero clicks where there is exactly one candidate, a small chooser where there
+are several.
+
+This serves the user's constraint directly — *"reduce clicking, limiting setup
+to a single copy-pasting… clicking every field creates overhead"* — and it is
+only possible because vibe 000106 made the argument kinds data rather than lore.
+
+### Steps blocked for want of a need are a *third* category
+
+The user's point, and it is right: a step whose needs are unmet has not been
+tried, so nothing is known about it — and the user may want to supply the
+missing thing precisely to find out.  So the chooser wants three groups, not
+two:
+
+| group | shown as |
+|---|---|
+| **fires** — changes the content | the selectable options |
+| **not tried** — a need is unmet | listed with *which* needs are missing, so supplying one is an obvious next move |
+| **did not fire** | available for `why_not` on demand |
+
+`applicable` already returns a `missing` map, but it is keyed by *kind* and
+records only the first unmet kind per step.  For this it should be keyed by
+**step**, carrying the full list — a small change, recorded here so it is not
+forgotten.
+
+### `why_not` needs the whole catalogue in view
+
+Asking "why not *this* step?" presupposes seeing the step.  So the surface needs
+a full list somewhere — which `ts.describe()` already produces, grouped by
+category with each step's needs.  The user asked for exactly that: *"it would be
+nice to see the list of all steps' needs somewhere."*  One panel, collapsed by
+default.
+
+### The click budget
+
+Stating it as a target, since it is the design's real measure: after the
+launching cell, **one click per derivation step** in the common case — the
+chooser, with needs inferred and no target.  Anything that adds a mandatory
+field costs one click on every step of every derivation, so a target selector
+should appear on demand rather than stand permanently.
+
+## 4. Open questions
+
+1. **Branching.**  The sketch says linear for version 1, and the user has
+   indicated branching is where the exploration model will start.  Those want
+   reconciling: a linear history that *discards* the tail is cheap now but is
+   not a subset of a branching one — the tail is what a branch would have kept.
+   Recording an abandoned tail from day one costs little and may be the more
+   valuable data for vibe 000107.
+2. **What the code panel emits.**  A flat script, or a `Derivation` that can be
+   replayed?  The latter is closer to what the challenges already contain.
+3. **Selecting a target with the mouse** (deferred in the sketch) needs the
+   rendered image to carry positions.  `tender.render.labeled` already produces a
+   path→part legend; an image does not.  Whichever way that goes, it argues for
+   the renderer keeping the path information rather than flattening to a picture.
+
+## Status
+
+Design agreed; nothing built.  Technology settled with the evidence in §2.  The
+refinements in §3 are small changes to `tender.steps` (`missing` keyed by step)
+and one new entry point (`td.explore`).
