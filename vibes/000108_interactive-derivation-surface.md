@@ -130,16 +130,60 @@ chooser, with needs inferred and no target.  Anything that adds a mandatory
 field costs one click on every step of every derivation, so a target selector
 should appear on demand rather than stand permanently.
 
-## 4. Open questions
+## 4. What the code panel emits
 
-1. **What the code panel emits.**  A flat script, or a `Derivation` that can be
-   replayed?  The latter is closer to what the challenges already contain.
-2. **Selecting a target with the mouse** (deferred in the sketch) needs the
-   rendered image to carry positions.  `tender.render.labeled` already produces a
-   path→part legend; an image does not.  Whichever way that goes, it argues for
-   the renderer keeping the path information rather than flattening to a picture.
+**Ordinary tender code, referencing the preamble by name.**  The panel's job is
+to be copy-pasted into a script and then edited, so it should look like what a
+person would have written — and like what the challenges already contain:
 
-## 5. Branching, settled
+```python
+e = tb.expand_in_basis(e, frame)
+e = tb.reduce_frame(e, frame)
+e = td.contract_eps_pair(e)
+e = tb.reduce_frame(e, frame)
+e = tb.reassemble(e, frame)
+```
+
+That answers the name-vs-reference question by layer rather than by preference:
+**names are how the GUI and the catalogue talk** (`applicable` and `why_not`
+speak them, and they serialize); **function references are how the emitted code
+reads**, because a pasted script should be navigable, editable, and independent
+of the registry.  Both, at the level each belongs to.
+
+Alongside it, the same derivation stays available as *data* —
+`s.steps → [(name, kwargs), …]` — for programmatic replay and for vibe 000107's
+corpus.  A `Derivation`-style emission (`.step(...)` with the audit trail) is a
+second `style=` on the same call, since a few challenges are written that way.
+
+**A pleasant consequence of §3's needs inference:** to write `frame` rather than
+a repr of the basis, the emitter must know *what the user's namespace calls it*.
+Scanning the launching scope for objects of the right kind gives that name for
+free.  One mechanism serves both filling the needs and emitting code that relies
+on the preamble.
+
+## 5. Rendering the expression
+
+Not an image.  `ipywidgets.HTMLMath` — *"renders the string as HTML, and render
+mathematics"* — takes the LaTeX directly and handles typesetting of
+dynamically-updated content, which was the one thing that made MathJax in a
+widget look risky.
+
+This is the better choice for a reason beyond fidelity: the deferred feature is
+**selecting a target with the mouse**, and that needs the rendered expression to
+carry positions.  A picture has none.  Live DOM can, and `tender.render.labeled`
+already produces the path→part legend that would drive it — so HTML makes the
+deferred feature reachable, where an image would have been a dead end requiring
+the display to be rebuilt.
+
+The image path is not wasted, and stays as the fallback: matplotlib mathtext was
+measured rendering tender's output 4/4, needs no LaTeX install, and works in any
+frontend.  If `HTMLMath` disappoints somewhere, the swap is one function.
+
+## 6. Open questions
+
+None outstanding on the version-1 surface.  What remains is scheduling.
+
+## 7. Branching, settled
 
 The sketch said "linear, truncate the tail"; the exploration model wanted
 branches.  Resolved as: **record the whole tree, show one path through it.**
@@ -180,7 +224,7 @@ editorialising about how a derivation was arrived at.
 **A full view stays available with no GUI at all:** `s.attempts()`, printed in a
 cell.  In-flow guidance is free; whole-tree inspection is a cell away.
 
-## 6. On exit: nothing happens
+## 8. On exit: nothing happens
 
 Because this lives in a kernel, closing the widget is not a lifecycle event:
 
@@ -203,6 +247,21 @@ nothing to design.
 
 ## Status
 
-Design agreed; nothing built.  Technology settled with the evidence in §2.  The
-refinements in §3 are small changes to `tender.steps` (`missing` keyed by step)
-and one new entry point (`td.explore`).
+**Design complete for version 1; nothing built.**
+
+Settled: technology (§2, with the evidence), the three simplifications the
+notebook choice bought (§3), code emission (§4), rendering (§5), branching (§7),
+and session lifetime (§8).
+
+What the build needs from the library, both small:
+
+- `applicable`'s `missing` keyed by **step** with the full list of unmet needs,
+  rather than by kind with only the first (§3);
+- a `td.explore(expr)` entry point returning a session that owns the tree, the
+  current path, and `script()` / `steps` / `attempts()`.
+
+Everything else is assembly of what vibe 000106 already built: the catalogue
+supplies the step list, the need kinds and the summaries; `applicable` supplies
+the chooser; `why_not` supplies the answer to "why not that one"; `explain`
+supplies the per-step change.  That the GUI needs almost no new library surface
+is the clearest evidence that milestone landed in the right place.
