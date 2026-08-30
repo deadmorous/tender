@@ -260,6 +260,7 @@ _r("to_concrete", _b, _B, category="bridge", primary=True, needs=("basis",),
    wants={"index_slots": 1},
    summary="evaluate over the frame's concrete directions")
 _r("reassemble", _b, _B, category="bridge", primary=True,
+   reported=_core.basis._reassemble_reported,
    needs=("basis",), options=("target",),
    wants={"coordinates": 1},
    summary="fold components back into direct notation")

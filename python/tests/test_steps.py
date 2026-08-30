@@ -234,11 +234,13 @@ class TestWhyNot:
         frame, inv, exp = self._setup()
         assert "did apply" in ts.why_not(exp, "reduce_frame", basis=frame)
 
-    def test_a_raising_step_reports_what_it_raised(self):
+    def test_a_step_that_has_learned_to_explain_itself_replaces_the_fallback(self):
+        # This asserted the generic "nothing to act on" wording until
+        # `reassemble` learned to speak; the step's own reason is better and
+        # takes precedence, which is the migration working as intended.
         frame, inv, exp = self._setup()
-        # unroll_sums on an invariant has indices to want but nothing to unroll.
         msg = ts.why_not(inv, "reassemble", basis=frame)
-        assert "nothing to act on" in msg or "changed nothing" in msg
+        assert "nothing here in component form" in msg
 
     def test_it_accepts_a_step_object_too(self):
         frame, inv, exp = self._setup()
@@ -370,3 +372,72 @@ def test_a_reporting_step_must_agree_with_the_fingerprint():
             assert res.fired != bool(res.reason), (
                 f"{name} must give a reason exactly when it did not fire"
             )
+
+
+class TestReassembleExplainsItself:
+    """`reassemble` has the richest refusal set in the library (vibe 000106).
+
+    Its declines were already written out as comments — "a rank ≥ 2 invariant
+    cannot be placed at a frame vector nested inside a contraction", "the shared
+    indices do not sit on one carrier's trailing slots" — so reporting them
+    recovers knowledge the code already had rather than inventing any.
+
+    Each case below is a *different* reason, which is the point: a single
+    "nothing happened" would have covered all of them.
+    """
+
+    def _frame(self):
+        ctx = tender.Context()
+        return ctx, tb.wcs(ctx)
+
+    def _why(self, e, frame, **kw):
+        msg = ts.why_not(e, "reassemble", basis=frame, **kw)
+        return msg[len("tender.basis.reassemble: "):]
+
+    def test_nothing_in_component_form(self):
+        ctx, f = self._frame()
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        assert "nothing here in component form" in self._why(a @ b, f)
+
+    def test_an_epsilon_pair_belongs_to_a_different_step(self):
+        ctx, f = self._frame()
+        a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+        stalled = tb.reduce_frame(tb.expand_in_basis(a % (b % c), f), f)
+        assert "ε-pair contraction's business" in self._why(stalled, f)
+
+    def test_a_rank2_invariant_at_a_nested_frame_vector(self):
+        ctx, f = self._frame()
+        A = tender.tensor("A", rank=2, ctx=ctx)
+        b = tender.tensor("b", rank=1, ctx=ctx)
+        e = td.canonicalize(tb.expand_in_basis(A, f) @ b)
+        assert "unfoldable" in self._why(e, f) or "orientation" in self._why(e, f)
+
+    def test_a_target_that_names_nothing_here(self):
+        ctx, f = self._frame()
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        comps = tb.reduce_frame(tb.expand_in_basis(a * b, f), f)
+        assert "not the one you named" in self._why(comps, f, target="z")
+
+    def test_an_epsilon_needs_an_orthonormal_right_handed_frame(self):
+        ctx = tender.Context()
+        oblique = tb.make_oblique_basis(
+            [tender.tensor(n, rank=1, ctx=ctx) for n in ("p", "q", "s")],
+            tender.space_3d,
+        )
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        e = tb.reduce_frame(tb.expand_in_basis(a % b, oblique), oblique)
+        msg = self._why(e, oblique)
+        assert "orthonormal" in msg or "recognises" in msg or "not read" in msg
+
+    def test_the_reasons_actually_differ(self):
+        # The whole point: one "nothing happened" would cover all of these.
+        ctx, f = self._frame()
+        a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+        A = tender.tensor("A", rank=2, ctx=ctx)
+        comps = tb.reduce_frame(tb.expand_in_basis(a * b, f), f)
+        reasons = {
+            self._why(a @ b, f),
+            self._why(tb.reduce_frame(tb.expand_in_basis(a % (b % c), f), f), f),
+            self._why(comps, f, target="z"),
+        }
+        assert len(reasons) == 3, reasons

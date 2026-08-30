@@ -1655,6 +1655,27 @@ NB_MODULE(_core, m)
         "(Einstein) form.");
 
     mb.def(
+        "_reassemble_reported",
+        [](PyExpr const& e,
+           PyBasis const& b,
+           std::optional<std::string> target) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = reassemble(
+                *e.ctx,
+                e.expr,
+                b.basis,
+                target ? std::optional{make_tensor_name(*target)} :
+                         std::nullopt,
+                &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "expr"_a,
+        "basis"_a,
+        "target"_a = nb::none(),
+        "reassemble, with (expr, fired, reason).");
+
+    mb.def(
         "_reduce_frame_reported",
         [](PyExpr const& e, PyBasis const& b) -> nb::tuple
         {

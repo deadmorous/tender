@@ -1366,13 +1366,32 @@ void collect_basis_sites(
 // A blob that cannot be fully expressed (rank ≥ 3 ordering/partial trace, a
 // middle-slot contraction, or an index also carried by a foreign factor) is
 // left entirely untouched, its indices still bound.  nullptr if nothing folds.
+// Collects the first reason a fold declined.  First rather than last because
+// the earliest refusal is the most specific: a later blob finding nothing is
+// less informative than an earlier one finding something it could not use.
+struct FoldNotes final
+{
+    std::string first;
+    void note(std::string why)
+    {
+        if (first.empty())
+            first = std::move(why);
+    }
+};
+
 auto fold_reassembly_groups(
     Context& ctx,
     std::vector<int> const& summed,
     std::vector<Expr const*> const& factors,
     Basis const& basis,
-    std::optional<TensorName> const& target) -> Expr const*
+    std::optional<TensorName> const& target,
+    FoldNotes* notes) -> Expr const*
 {
+    auto note = [notes](std::string why)
+    {
+        if (notes)
+            notes->note(std::move(why));
+    };
     auto coord_invariant = [&](TensorObject const* c, int rank)
     {
         // Preserve the source invariant's dimension (vibe 000082) so the
@@ -1400,8 +1419,10 @@ auto fold_reassembly_groups(
         // coordinate of any other name is not made into a carrier, so it falls
         // through to the foreign-factor branch below and blocks its own
         // indices — which is exactly right: its structure must be left alone.
-        if (auto cc = as_coord_component(factors[p], basis);
-            cc && (!target || cc->first->name == *target))
+        auto const cc_here = as_coord_component(factors[p], basis);
+        bool const excluded_by_target =
+            cc_here && target && cc_here->first->name != *target;
+        if (auto cc = cc_here; cc && !excluded_by_target)
         {
             int const ci = static_cast<int>(carriers.size());
             Carrier c;
@@ -1442,7 +1463,19 @@ auto fold_reassembly_groups(
             // as the blanket mentions_index test used to.
             auto const it = found.find(id);
             if (it == found.end() || it->second != occ)
+            {
+                // A coordinate held back *by the target* is not a mystery
+                // factor — say which it is, or the reason misleads.
+                note(
+                    excluded_by_target ?
+                        "the coordinates here are not the one you named, so "
+                        "their indices are left bound and nothing folds" :
+                        "a summed index is also carried by a factor this fold "
+                        "does not read — a second coordinate on the same "
+                        "index, or something that is neither a coordinate nor "
+                        "a frame vector");
                 blocked.insert(id);
+            }
         }
         for (auto const& [site, id]: sites)
             if (summed_set.count(id))
@@ -1466,6 +1499,11 @@ auto fold_reassembly_groups(
     // Only an orthonormal right-handed frame qualifies: there ε_{ijk} is the
     // plain permutation symbol and √g = 1, which is what `simplify_basis_cross`
     // emitted on the way in.  Elsewhere the weight would have to come back too.
+    if (!eps_factors.empty()
+        && !(basis.is_orthonormal() && is_scalar_one(basis.volume())))
+        note(
+            "an ε here can only fold in an orthonormal right-handed frame, "
+            "where ε is the plain permutation symbol and √g = 1");
     if (!eps_factors.empty() && basis.is_orthonormal()
         && is_scalar_one(basis.volume()))
     {
@@ -1482,7 +1520,10 @@ auto fold_reassembly_groups(
         {
             std::set<int> const distinct(ids.begin(), ids.end());
             if (ids.size() != 3 || distinct.size() != 3)
-                continue; // a repeated index makes ε vanish — not our fold
+            {
+                note("an ε with a repeated index vanishes; that is not a fold");
+                continue;
+            }
 
             std::vector<int> carrier_of(3, -1);
             int leg_slot = -1;
@@ -1493,6 +1534,10 @@ auto fold_reassembly_groups(
                 if (blocked.count(id) || !summed_set.count(id)
                     || in_eps[id] != 1)
                 {
+                    if (in_eps[id] > 1)
+                        note(
+                            "this index is shared by two ε's — that is the "
+                            "ε-pair contraction's business, not this fold's");
                     usable = false;
                     break;
                 }
@@ -1504,7 +1549,13 @@ auto fold_reassembly_groups(
                     // Only a rank-1 carrier is a cross operand; a higher-rank
                     // one would need a slot chosen, which ε does not say.
                     if (consumed[ci] || carriers[ci].legs.size() != 1)
+                    {
+                        note(
+                            "only a rank-1 carrier is a cross operand; a "
+                            "higher-rank one would need a slot chosen, and ε "
+                            "does not say which");
                         usable = false;
+                    }
                     else
                         carrier_of[k] = ci;
                 }
@@ -1603,7 +1654,15 @@ auto fold_reassembly_groups(
         else if (nc == 0 && nb == 2)
             kind[id] = Kind::Identity;
         else
+        {
+            if (!blocked.count(id))
+                note(
+                    "a summed index does not connect a foldable pair: a fold "
+                    "needs one coordinate and one frame vector (a leg), two "
+                    "coordinates (a contraction), or two frame vectors (the "
+                    "resolution of identity)");
             kind[id] = Kind::None;
+        }
     }
 
     // Group carriers into blobs joined by Internal (carrier-to-carrier) ids.
@@ -1661,6 +1720,9 @@ auto fold_reassembly_groups(
                 auto t = trace_carrier(ctx, active[occ[0].first], id);
                 if (!t)
                 {
+                    note(
+                        "a partial trace of a rank ≥ 3 tensor has no direct "
+                        "notation, so this self-contraction is left alone");
                     ok = false;
                     break;
                 }
@@ -1698,6 +1760,16 @@ auto fold_reassembly_groups(
                     m = contract_carriers_n(ctx, active[b], active[a], shared);
                 if (!m)
                 {
+                    note(
+                        shared.size() == 1 ?
+                            "a carrier of rank ≥ 3 cannot be re-oriented to "
+                            "bring the contracted index onto the slot the dot "
+                            "needs" :
+                            "the shared indices do not sit on one carrier's "
+                            "trailing slots and the other's leading ones, so "
+                            "no double dot expresses this pairing (it would "
+                            "need a transpose interposed) — and guessing "
+                            "would be silent");
                     ok = false;
                     break;
                 }
@@ -1739,12 +1811,19 @@ auto fold_reassembly_groups(
                 // basis vector — masked, not decided.
                 if (kind[c.legs[0]] != Kind::Leg)
                 {
+                    note(
+                        "this carrier's index was ruled unfoldable above, so "
+                        "realizing it here would silently drop whatever else "
+                        "carries that index");
                     ok = false;
                     break;
                 }
                 auto const& bp = in_basis[c.legs[0]];
                 if (bp.size() != 1)
                 {
+                    note(
+                        "a vector carrier has no single frame vector to be "
+                        "realized at");
                     ok = false;
                     break;
                 }
@@ -1762,7 +1841,10 @@ auto fold_reassembly_groups(
                 if (kind[c.legs[0]] != Kind::Leg
                     || kind[c.legs[1]] != Kind::Leg)
                 {
-                    ok = false; // see the rank-1 branch
+                    note(
+                        "a rank-2 carrier has an index that was ruled "
+                        "unfoldable above; see the rank-1 case");
+                    ok = false;
                     break;
                 }
                 auto const& b0 = in_basis[c.legs[0]];
@@ -1776,6 +1858,11 @@ auto fold_reassembly_groups(
                 Site const p1 = b1[0];
                 if (p0.nested() || p1.nested())
                 {
+                    note(
+                        "a rank ≥ 2 invariant cannot be placed at a frame "
+                        "vector nested inside a contraction: e_i's position "
+                        "says \"first slot\" but a dot contracts the last, and "
+                        "a wrong orientation is undetectable afterwards");
                     // Rank ≥ 2 realization drops one basis site and places the
                     // invariant at the other, and inside a contraction neither
                     // move is safe: an operand cannot be dropped, and a rank-2
@@ -1799,6 +1886,9 @@ auto fold_reassembly_groups(
             }
             else // rank ≥ 3 leg realization: ordering not expressible here
             {
+                note(
+                    "realizing a rank ≥ 3 carrier needs a ⊗ ordering this fold "
+                    "cannot express");
                 ok = false;
                 break;
             }
@@ -1823,14 +1913,22 @@ auto fold_reassembly_groups(
         {
             auto const& bp = in_basis[id];
             if (bp[0].nested() || bp[1].nested())
-                continue; // would drop a contraction operand — see above
+            {
+                note(
+                    "folding the resolution of identity here would mean "
+                    "dropping an operand of a contraction, which is ill-formed");
+                continue;
+            }
             replace[bp[0]] = make_identity(ctx, basis.space()); // vibe 000082
             drop.insert(bp[1]);
             folded.insert(id);
         }
 
     if (folded.empty())
+    {
+        note("no summed index here connects a pair this fold recognises");
         return nullptr;
+    }
 
     std::vector<Expr const*> out = scalars;
     for (std::size_t p = 0; p < factors.size(); ++p)
@@ -1975,8 +2073,14 @@ auto reassemble_pass(
     Context& ctx,
     Expr const* e,
     Basis const& basis,
-    std::optional<TensorName> const& target) -> Expr const*
+    std::optional<TensorName> const& target,
+    FoldNotes* notes = nullptr) -> Expr const*
 {
+    auto note = [notes](std::string why)
+    {
+        if (notes)
+            notes->note(std::move(why));
+    };
     // Self-prepare: the fold reads the summation binders off explicit
     // ExplicitSum nodes, so materialize the implicit Einstein sums first (via
     // canonicalize) — the caller never has to.  canonicalize throws on an
@@ -2022,7 +2126,12 @@ auto reassemble_pass(
                 if (auto const* es = std::get_if<ExplicitSum>(&body->node))
                 {
                     if (es->bound)
-                        return node; // symbolic bound: not a basis expansion
+                    {
+                        note(
+                            "the sum carries a symbolic bound, so it is not a "
+                            "basis expansion");
+                        return node;
+                    }
                     summed.push_back(es->index.id);
                     body = es->body;
                     continue;
@@ -2047,8 +2156,8 @@ auto reassemble_pass(
             // own (handles a term with several coordinate factors).  Falls
             // through when nothing matches, leaving the single higher-rank
             // coordinate to the whole-term path below.
-            if (auto* g =
-                    fold_reassembly_groups(c, summed, factors, basis, target))
+            if (auto* g = fold_reassembly_groups(
+                    c, summed, factors, basis, target, notes))
                 return signed_(g);
 
             // The body is one coordinate tensor times a polyad of basis
@@ -2064,15 +2173,31 @@ auto reassemble_pass(
                 }
                 auto const* t = std::get_if<TensorObject>(&f->node);
                 if (!t || coord)
-                    return node; // a non-coordinate factor, or a second one
+                {
+                    note(
+                        !t ?
+                            "a factor here is neither a coordinate nor a frame "
+                            "vector, so the term is not a clean expansion" :
+                            "the term holds two coordinate tensors, which the "
+                            "whole-term fold does not handle");
+                    return node;
+                }
                 if (target && t->name != *target)
-                    return node; // not the invariant asked for
+                {
+                    note("no coordinate of the requested name is in this term");
+                    return node;
+                }
                 // The coordinate must belong to this basis (vibe 000067): a
                 // foreign or two-point coordinate (slots straddling two bases)
                 // is not a clean reassembly target, so leave the term unfolded.
                 for (auto const& sb: t->slots)
                     if (sb.slot.basis_id != basis.basis_id())
+                    {
+                        note(
+                            "the coordinate belongs to a different basis (or "
+                            "straddles two), so it is not a clean target here");
                         return node;
+                    }
                 coord = t;
             }
             if (!coord)
@@ -2178,8 +2303,10 @@ auto reassemble(
     Context& ctx,
     Expr const* e,
     Basis const& basis,
-    std::optional<TensorName> target) -> Expr const*
+    std::optional<TensorName> target,
+    StepReport* report) -> Expr const*
 {
+    FoldNotes notes;
     // One entry point for reassembly (vibe 000106).  There were three —
     // `reassemble`, `reassemble_completeness` and `fold_resolution_of_identity`
     // — and a caller had to know which shape they were holding to pick one.
@@ -2221,7 +2348,7 @@ auto reassemble(
 
     auto once = [&](Context& c, Expr const* x) -> Expr const*
     {
-        x = reassemble_pass(c, x, basis, target);
+        x = reassemble_pass(c, x, basis, target, &notes);
         if (!target)
         {
             x = keep_if_productive(c, x, reassemble_completeness(c, x, basis));
@@ -2244,6 +2371,18 @@ auto reassemble(
             break;
         cur = next;
     }
+    // "Did it do work?", not "did it change?" — a pass canonicalizes on entry,
+    // so a fold that found nothing still returns a reordered expression.
+    if (expression_shape(ctx, e) == expression_shape(ctx, cur))
+    {
+        report_no_op(
+            report,
+            notes.first.empty() ?
+                "there is nothing here in component form to fold back" :
+                notes.first);
+        return cur;
+    }
+    report_fired(report);
     return cur;
 }
 

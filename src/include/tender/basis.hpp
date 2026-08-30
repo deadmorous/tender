@@ -341,7 +341,8 @@ enum class Variance
     Context& ctx,
     Expr const* e,
     Basis const& basis,
-    std::optional<TensorName> target = std::nullopt) -> Expr const*;
+    std::optional<TensorName> target = std::nullopt,
+    StepReport* report = nullptr) -> Expr const*;
 
 // Fold the resolution of identity Σ_i e_i ⊗ e^i = I where it appears partially
 // contracted — the completeness reassembly that `reassemble` (which needs a

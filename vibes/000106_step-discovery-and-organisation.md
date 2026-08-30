@@ -375,10 +375,39 @@ after `applicable`'s reordering noise.  Three independent encounters make it a
 property of the step contract rather than a local quirk, and the report is where
 it now lives.
 
-**Done so far:** `contract_delta`, `reduce_frame`.  The richest remaining is
-`reassemble` — `fold_reassembly_groups` has roughly eight distinct refusals,
-each already written out as a comment, which is a good sign the reports are
-recovering knowledge the code already has rather than inventing it.
+**Done:** `contract_delta`, `reduce_frame`, `reassemble`.
+
+`reassemble` was the richest, and the exercise confirmed the suspicion that made
+it worth doing: **every refusal was already written out as a comment.**  Teaching
+it to report was mostly moving prose from a comment to a string — the knowledge
+was in the code, just unreachable from outside it.  Eleven refusal points now
+speak, among them:
+
+```
+an invariant                 → "there is nothing here in component form to fold back"
+a×(b×c) after reduce_frame   → "this index is shared by two ε's — that is the
+                                ε-pair contraction's business, not this fold's"
+a rank-2 leg nested in a dot → "…e_i's position says 'first slot' but a dot
+                                contracts the last, and a wrong orientation is
+                                undetectable afterwards"
+reassemble(…, target="z")    → "the coordinates here are not the one you named"
+n ≥ 3 shared indices         → "no double dot expresses this pairing (it would
+                                need a transpose interposed) — and guessing
+                                would be silent"
+```
+
+Two things worth recording from the work:
+
+- **First reason wins, not last.**  An early refusal is more specific than a
+  later blob finding nothing, so the note sink keeps the first and ignores the
+  rest.
+- **A reason can mislead if it does not know why it was reached.**  With a
+  `target` set, non-target coordinates fall through to the *foreign factor*
+  branch, which reported "a summed index is also carried by a factor this fold
+  does not read" — true of the mechanism, useless to the reader.  The branch now
+  distinguishes "held back by your target" from "genuinely unreadable".  A
+  reporting step has to know not just that it declined but *which decline this
+  is*, which is a slightly higher bar than it first appears.
 
 ### Does the report make the fingerprint obsolete?
 
