@@ -1856,6 +1856,78 @@ auto fold_reassembly_groups(
 
 } // namespace
 
+namespace
+{
+
+// Run `moves` until the expression stops changing.  The cap is a safety net for
+// a non-convergent move, not a tuning knob: convergence is detected, so a
+// well-behaved pipeline never reaches it.
+template <typename F>
+auto to_fixpoint(Context& ctx, Expr const* e, F const& moves, int cap = 16)
+    -> Expr const*
+{
+    for (int pass = 0; pass < cap; ++pass)
+    {
+        Expr const* const before = e;
+        e = moves(ctx, e);
+        if (structural_eq(e, before))
+            return e;
+    }
+    return e;
+}
+
+} // namespace
+
+auto reduce_frame(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
+{
+    auto const* out = to_fixpoint(
+        ctx,
+        e,
+        [&basis](Context& c, Expr const* x) -> Expr const*
+        {
+            x = simplify_basis_cross(c, x, basis);
+            x = simplify_basis_dot(c, x, basis);
+            // canonicalize materializes the implicit sums the contraction needs
+            // to see; contract_delta puts the expression back in implicit form
+            // itself, so the pair composes.
+            try
+            {
+                x = steps::canonicalize(c, x);
+            }
+            catch (std::invalid_argument const&)
+            {
+                // An ill-formed implicit summation is not this step's business.
+                return x;
+            }
+            return steps::contract_delta(c, x);
+        });
+    return structural_eq(out, e) ? e : steps::implicitize(ctx, out);
+}
+
+auto to_concrete(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
+{
+    (void)basis; // the directions come from the expression's own index spaces
+    auto const* out = to_fixpoint(
+        ctx,
+        e,
+        [](Context& c, Expr const* x) -> Expr const*
+        {
+            try
+            {
+                x = steps::canonicalize(c, x);
+            }
+            catch (std::invalid_argument const&)
+            {
+                return x;
+            }
+            x = steps::unroll_sums(c, x);
+            x = steps::eval_eps_concrete(c, x);
+            x = steps::eval_delta_concrete(c, x);
+            return steps::fold_arithmetic(c, x);
+        });
+    return structural_eq(out, e) ? e : steps::implicitize(ctx, out);
+}
+
 auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
 {
     // Self-prepare: the fold reads the summation binders off explicit

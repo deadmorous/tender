@@ -3,6 +3,7 @@
 #include <tender/expr.hpp>
 #include <tender/identity.hpp>
 #include <tender/index_space.hpp>
+#include <tender/render.hpp>
 #include <tender/rewrite.hpp>
 
 #include <gtest/gtest.h>
@@ -61,15 +62,12 @@ auto coord(
 
 // Expand to symbolic coordinate components and contract the basis dots to
 // deltas — grounds tr(B), Bᵀ and dyads to comparable component sums.
+// Was a hand-rolled pipeline with a guessed repeat count (`i < 4`) — the very
+// shape vibe 000106 measured across the corpus.  `reduce_frame` is that
+// sequence, run to convergence.
 auto to_components(Context& ctx, Basis const& b, Expr const* x) -> Expr const*
 {
-    x = expand_in_basis(ctx, x, b, Variance::Covariant);
-    for (int i = 0; i < 4; ++i)
-    {
-        x = simplify_basis_dot(ctx, x, b);
-        x = steps::contract_delta(ctx, x);
-    }
-    return steps::canonicalize(ctx, x);
+    return reduce_frame(ctx, expand_in_basis(ctx, x, b, Variance::Covariant), b);
 }
 
 } // namespace
@@ -1333,6 +1331,141 @@ TEST(Reassemble, DoubleDotKeepsTheRightCarriersLegs)
     auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
     auto const* C = make_tensor_object(ctx, make_tensor_name("C"), {}, 4);
     EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), make_ddot(ctx, A, C)));
+}
+
+// ---- reduce_frame / to_concrete (vibe 000106) -----------------------------
+//
+// The two bridge steps the corpus wrote out by hand nine times.  Each is the
+// same sequence run to convergence, so what is tested is the *exit condition*,
+// not a fixed number of passes.
+
+TEST(ReduceFrame, ConsumesTheDotAndLeavesComponents)
+{
+    // a·b: the dot consumes both basis vectors — nothing frame-shaped is left.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+
+    auto const* out = reduce_frame(
+        ctx,
+        expand_in_basis(ctx, make_dot(ctx, u, v), b, Variance::Covariant),
+        b);
+    IndexNameMap m;
+    auto const tex = render_latex(*out, m, &ctx);
+    EXPECT_EQ(tex.find("\\mathbf{e}"), std::string::npos) << tex;
+    EXPECT_EQ(tex.find("\\sum"), std::string::npos) << tex; // implicit form
+}
+
+TEST(ReduceFrame, KeepsAFreeLeg)
+{
+    // A·b reduces to A_ij b_j e_i — the surviving e_i is the result's rank,
+    // not unfinished work.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* A = make_tensor_object(ctx, make_tensor_name("A"), {}, 2);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+
+    auto const* out = reduce_frame(
+        ctx,
+        expand_in_basis(ctx, make_dot(ctx, A, v), b, Variance::Covariant),
+        b);
+    IndexNameMap m;
+    auto const tex = render_latex(*out, m, &ctx);
+    EXPECT_NE(tex.find("\\mathbf{e}"), std::string::npos) << tex;
+    // …and it folds straight back to the invariant.
+    EXPECT_TRUE(
+        algebraic_eq(ctx, reassemble(ctx, out, b), make_dot(ctx, A, v)));
+}
+
+TEST(ReduceFrame, StopsAtAnEpsilonPairAndTheCallerDecides)
+{
+    // The boundary that makes this a step and not a route: reduce_frame does
+    // only what the *frame* licenses, so a×(b×c) stops with two ε's standing.
+    // Contracting them is a mathematical choice; re-entering reduce_frame after
+    // it reaches bac-cab.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto const* w = make_tensor_object(ctx, make_tensor_name("w"), {}, 1);
+
+    auto const* stalled = reduce_frame(
+        ctx,
+        expand_in_basis(
+            ctx,
+            make_cross(ctx, u, make_cross(ctx, v, w)),
+            b,
+            Variance::Covariant),
+        b);
+    IndexNameMap m;
+    EXPECT_NE(
+        render_latex(*stalled, m, &ctx).find("\\varepsilon"),
+        std::string::npos);
+    // Running it again changes nothing: it is a fixed point, not a partial
+    // pass.
+    EXPECT_TRUE(structural_eq(reduce_frame(ctx, stalled, b), stalled));
+
+    auto const* resumed =
+        reduce_frame(ctx, steps::contract_eps_pair(ctx, stalled), b);
+    auto const* bac = make_difference(
+        ctx,
+        make_tensor_product(ctx, make_dot(ctx, u, w), v),
+        make_tensor_product(ctx, make_dot(ctx, u, v), w));
+    EXPECT_TRUE(algebraic_eq(ctx, reassemble(ctx, resumed, b), bac));
+}
+
+TEST(ReduceFrame, IsANoOpOnSomethingAlreadyReduced)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    EXPECT_TRUE(structural_eq(reduce_frame(ctx, u, b), u));
+}
+
+TEST(ToConcrete, LeavesNoSymbolicIndex)
+{
+    // a·b over the world frame: a_x b_x + a_y b_y + a_z b_z.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+
+    auto const* comps = reduce_frame(
+        ctx,
+        expand_in_basis(ctx, make_dot(ctx, u, v), b, Variance::Covariant),
+        b);
+    auto const* nums = to_concrete(ctx, comps, b);
+
+    // Three concrete terms, and no summation left to perform.
+    IndexNameMap m;
+    auto const tex = render_latex(*nums, m, &ctx);
+    EXPECT_EQ(tex.find("\\sum"), std::string::npos) << tex;
+    // Concrete indices render numerically here — this bare basis carries no
+    // coordinate letters (a chart supplies those).
+    EXPECT_NE(tex.find("u_{1}"), std::string::npos) << tex;
+    EXPECT_NE(tex.find("u_{3}"), std::string::npos) << tex;
+    EXPECT_TRUE(structural_eq(to_concrete(ctx, nums, b), nums)); // fixed point
+}
+
+TEST(ToConcrete, EvaluatesTheEpsilonOfACross)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+
+    auto const* nums = to_concrete(
+        ctx,
+        reduce_frame(
+            ctx,
+            expand_in_basis(ctx, make_cross(ctx, u, v), b, Variance::Covariant),
+            b),
+        b);
+    IndexNameMap m;
+    auto const tex = render_latex(*nums, m, &ctx);
+    EXPECT_EQ(tex.find("\\varepsilon"), std::string::npos) << tex;
+    EXPECT_EQ(tex.find("\\sum"), std::string::npos) << tex;
 }
 
 TEST(Reassemble, EpsilonFoldsBackIntoACross)

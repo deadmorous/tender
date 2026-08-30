@@ -43,6 +43,8 @@ polar_2d = _b.polar_2d
 expand_in_basis = _b.expand_in_basis
 simplify_basis_dot = _b.simplify_basis_dot
 simplify_basis_cross = _b.simplify_basis_cross
+reduce_frame = _b.reduce_frame
+to_concrete = _b.to_concrete
 reassemble = _b.reassemble
 reassemble_completeness = _b.reassemble_completeness
 fold_resolution_of_identity = _b.fold_resolution_of_identity
@@ -61,6 +63,8 @@ __all__ = [
     "expand_in_basis",
     "simplify_basis_dot",
     "simplify_basis_cross",
+    "reduce_frame",
+    "to_concrete",
     "reassemble",
     "reassemble_completeness",
     "fold_resolution_of_identity",

@@ -312,7 +312,9 @@ Bridge steps:
 | Function | Does | Does **not** |
 |---|---|---|
 | `expand_in_basis(expr, basis, variance)` | Expand invariants into `Σ` over components on `basis` | — |
-| `simplify_basis_dot(expr, basis)` | Reduce `eᵢ·eⱼ` (concrete / frame-vector directions) | — |
+| **`reduce_frame(expr, basis)`** | **Everything the frame licenses, to a fixed point**: `eᵢ·eⱼ→δ`, `eᵢ×eⱼ→ε`, and the δ contractions that follow. Stops when no basis-vector *product* remains — a free leg survives (`A·b → A_ij b_j eᵢ`). Returns implicit (Einstein) form | Take a step the frame cannot justify — an ε-pair contraction, a metric move, an identity. Those are yours to choose: `a×(b×c)` stops at `−ε ε a b c e`, and you decide |
+| **`to_concrete(expr, basis)`** | **Evaluate over the frame's directions, to a fixed point**: unroll the symbolic indices, evaluate the ε/δ that become concrete, fold the arithmetic. Stops when no symbolic index remains | — |
+| `simplify_basis_dot(expr, basis)` | Reduce `eᵢ·eⱼ` (concrete / frame-vector directions) — one pass; `reduce_frame` is usually what you want | — |
 | `simplify_basis_cross(expr, basis)` | Reduce `eᵢ×eⱼ` | — |
 | `reassemble(expr, basis)` | Fold component sums back into invariants (incl. completeness). Folds are driven by what each summed index *connects*, so they still fire with unrelated factors around them and inside a contraction operand: `a_i (e_i·b) → a·b`. Two carriers sharing two indices fold to a double dot, with the index order picking `:` from `··` (`A_ij B_ij → A:B`, `A_ji B_ij → A··B`) | Place a rank ≥ 2 invariant at a basis vector *nested* in a contraction (the slot orientation would be guessed); fold an ε back into a cross |
 | `reassemble_completeness(expr, basis)` | Fold `Σ_k e_k⊗e_k → I` (resolution of identity) | — |

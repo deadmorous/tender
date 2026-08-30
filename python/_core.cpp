@@ -1602,6 +1602,29 @@ NB_MODULE(_core, m)
         "e_i × e_j -> √g ε_{ijk} e^k (orthonormal: ε_{ijk} e_k).");
 
     mb.def(
+        "reduce_frame",
+        [](PyExpr const& e, PyBasis const& b) -> PyExpr
+        { return derive(e, reduce_frame(*e.ctx, e.expr, b.basis)); },
+        "expr"_a,
+        "basis"_a,
+        "Reduce everything the frame licenses, to a fixed point: e·e → δ, "
+        "e×e → ε, and the δ contractions that follow.  Stops when no "
+        "basis-vector product remains (a free leg survives).  Does NOT take "
+        "mathematical steps the frame cannot justify — an ε-pair contraction, "
+        "a metric move — those are the caller's choice.  Returns implicit "
+        "(Einstein) form.");
+
+    mb.def(
+        "to_concrete",
+        [](PyExpr const& e, PyBasis const& b) -> PyExpr
+        { return derive(e, to_concrete(*e.ctx, e.expr, b.basis)); },
+        "expr"_a,
+        "basis"_a,
+        "Evaluate over the frame's concrete directions, to a fixed point: "
+        "unroll the symbolic indices, evaluate the ε and δ symbols that become "
+        "concrete, fold the arithmetic.  Stops when no symbolic index remains.");
+
+    mb.def(
         "reassemble",
         [](PyExpr const& e, PyBasis const& b) -> PyExpr
         { return derive(e, reassemble(*e.ctx, e.expr, b.basis)); },

@@ -608,3 +608,98 @@ def test_cross_reassociation_exposes_identity():
     got = td.apply_identity(commute)((a % I) % b)
     want = td.canonicalize(a % (b % I))
     assert td.structural_eq(got, want)
+
+
+# ---------------------------------------------------------------------------
+# The bridge steps (vibe 000106): the sequences the corpus wrote out by hand
+# nine times, each run to convergence.  What is tested is the exit condition,
+# not a fixed pass count.
+# ---------------------------------------------------------------------------
+
+
+def _expanded(ctx, frame, expr):
+    return tb.expand_in_basis(expr, frame, tb.Variance.Covariant)
+
+
+class TestBridgeSteps:
+    def test_reduce_frame_consumes_the_dot(self):
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        u, v = (tender.tensor(n, rank=1, ctx=ctx) for n in "uv")
+        out = tb.reduce_frame(_expanded(ctx, f, u @ v), f)
+        tex = out.latex()
+        assert r"\mathbf{e}" not in tex, tex
+        assert r"\sum" not in tex, tex  # implicit Einstein form, not Σ_i
+        assert "u_{i}" in tex and "v_{i}" in tex, tex
+
+    def test_reduce_frame_keeps_a_free_leg(self):
+        # A·b → A_ij b_j e_i: the surviving e_i is the result's rank.
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        A = tender.tensor("A", rank=2, ctx=ctx)
+        v = tender.tensor("v", rank=1, ctx=ctx)
+        out = tb.reduce_frame(_expanded(ctx, f, A @ v), f)
+        assert r"\mathbf{e}" in out.latex(), out.latex()
+        assert td.algebraic_eq(tb.reassemble(out, f), A @ v)
+
+    def test_reduce_frame_stops_at_an_epsilon_pair(self):
+        # The boundary that makes this a step, not a route: it does only what
+        # the *frame* licenses.  Contracting the ε-pair is the caller's choice,
+        # and re-entering reduce_frame afterwards reaches bac-cab.
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+        stalled = tb.reduce_frame(_expanded(ctx, f, a % (b % c)), f)
+        assert r"\varepsilon" in stalled.latex()
+        # a fixed point, not a partial pass
+        assert td.structural_eq(tb.reduce_frame(stalled, f), stalled)
+
+        resumed = tb.reduce_frame(td.contract_eps_pair(stalled), f)
+        assert td.algebraic_eq(
+            tb.reassemble(resumed, f), (a @ c) * b - (a @ b) * c
+        )
+
+    def test_reduce_frame_is_a_no_op_on_an_invariant(self):
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        u = tender.tensor("u", rank=1, ctx=ctx)
+        assert td.structural_eq(tb.reduce_frame(u, f), u)
+
+    def test_to_concrete_leaves_no_symbolic_index(self):
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        u, v = (tender.tensor(n, rank=1, ctx=ctx) for n in "uv")
+        nums = tb.to_concrete(tb.reduce_frame(_expanded(ctx, f, u @ v), f), f)
+        tex = nums.latex()
+        assert r"\sum" not in tex, tex
+        assert "u_{x}" in tex and "u_{z}" in tex, tex
+        assert td.structural_eq(tb.to_concrete(nums, f), nums)  # fixed point
+
+    def test_to_concrete_evaluates_a_cross(self):
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        u, v = (tender.tensor(n, rank=1, ctx=ctx) for n in "uv")
+        nums = tb.to_concrete(tb.reduce_frame(_expanded(ctx, f, u % v), f), f)
+        assert r"\varepsilon" not in nums.latex(), nums.latex()
+
+    def test_the_two_steps_reproduce_the_corpus_pipelines(self):
+        # The acceptance test of vibe 000106: what the challenges spell out by
+        # hand, these steps must reproduce.
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        a, b, c, d = (tender.tensor(n, rank=1, ctx=ctx) for n in "abcd")
+        for expr in (a @ b, a % b, (a % b) @ (c % d), a @ (b % c)):
+            by_hand = _expanded(ctx, f, expr)
+            for _ in range(4):
+                by_hand = tb.simplify_basis_cross(by_hand, f)
+                by_hand = tb.simplify_basis_dot(by_hand, f)
+                by_hand = td.contract_delta(td.canonicalize(by_hand))
+            by_hand = td.canonicalize(
+                td.fold_arithmetic(
+                    td.eval_delta_concrete(
+                        td.eval_eps_concrete(td.unroll_sums(by_hand))
+                    )
+                )
+            )
+            by_step = tb.to_concrete(tb.reduce_frame(_expanded(ctx, f, expr), f), f)
+            assert td.algebraic_eq(by_hand, by_step), expr.latex()

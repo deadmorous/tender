@@ -278,6 +278,37 @@ enum class Variance
 [[nodiscard]] auto simplify_basis_cross(
     Context& ctx, Expr const* e, Basis const& basis) -> Expr const*;
 
+// Reduce everything the frame alone licenses, to a fixed point (vibe 000106).
+//
+// The frame's own rules are `e_i·e_j → δ_ij`, `e_i×e_j → ε_ijk e_k`, and the
+// contraction of the δ's that fall out.  Applying them is not one pass:
+// reducing a dot can expose another, and canonicalization exposes more still —
+// which is why every caller in the corpus wrote the sequence out by hand, twice
+// over, with a guessed repeat count (`for _ in range(2)`, `for i in range(4)`).
+// This runs them to convergence instead.
+//
+// Stops when **no basis-vector product remains**.  A basis vector standing as a
+// free *leg* survives and should: `A·b` reduces to `A_ij b_j e_i`, which is a
+// vector.  What it deliberately does NOT do is anything the frame cannot
+// justify — an ε-pair contraction, a metric move, an identity — because those
+// are mathematical steps a derivation chooses, not frame bookkeeping.  So
+// `a×(b×c)` stops at `−ε_iml ε_mkj a_l b_k c_j e_i`, and the caller decides.
+//
+// Returns implicit (Einstein) form: the Σ binders it materializes internally,
+// so the contractions can see them, are stripped again on the way out.
+[[nodiscard]] auto reduce_frame(Context& ctx, Expr const* e, Basis const& basis)
+    -> Expr const*;
+
+// Evaluate over the frame's concrete directions, to a fixed point (vibe
+// 000106): unroll each symbolic index into the basis's directions, evaluate the
+// ε and δ symbols that become concrete, and fold the arithmetic.
+//
+// Stops when **no symbolic index remains**.  Like `reduce_frame` this is
+// iterated rather than applied once — evaluating a δ can expose an ε, and
+// folding arithmetic can expose another δ — and it returns implicit form.
+[[nodiscard]] auto to_concrete(Context& ctx, Expr const* e, Basis const& basis)
+    -> Expr const*;
+
 // Fold a coordinate expansion back to its invariant — the inverse of
 // expand_in_basis (vibe 000049 §3).  Recognizes a (possibly nested) Einstein
 // sum whose body is one coordinate tensor times a polyad of `basis`'s vectors,
