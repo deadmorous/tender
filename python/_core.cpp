@@ -1626,12 +1626,30 @@ NB_MODULE(_core, m)
 
     mb.def(
         "reassemble",
-        [](PyExpr const& e, PyBasis const& b) -> PyExpr
-        { return derive(e, reassemble(*e.ctx, e.expr, b.basis)); },
+        [](PyExpr const& e,
+           PyBasis const& b,
+           std::optional<std::string> target) -> PyExpr
+        {
+            return derive(
+                e,
+                reassemble(
+                    *e.ctx,
+                    e.expr,
+                    b.basis,
+                    target ? std::optional{make_tensor_name(*target)} :
+                             std::nullopt));
+        },
         "expr"_a,
         "basis"_a,
-        "Fold a coordinate expansion back to its invariant (inverse of "
-        "expand_in_basis); a no-op on anything that is not such an expansion.");
+        "target"_a = nb::none(),
+        "Fold components back into direct notation — the single entry point "
+        "for reassembly (vibe 000106): the coordinate-carrier fold, the "
+        "completeness fold and the resolution-of-identity fold, run together "
+        "to a fixed point, so the caller need not know which shape they hold.  "
+        "`target=\"b\"` names the one invariant to rebuild, leaving everything "
+        "else in components (a name, not a path: the step self-prepares and a "
+        "path would not survive that).  A no-op on anything that is not an "
+        "expansion.");
 
     mb.def(
         "reassemble_completeness",

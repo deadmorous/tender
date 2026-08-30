@@ -1333,6 +1333,74 @@ TEST(Reassemble, DoubleDotKeepsTheRightCarriersLegs)
     EXPECT_TRUE(structural_eq(reassemble(ctx, term, b), make_ddot(ctx, A, C)));
 }
 
+// ---- reassemble: one entry point, and target= (vibe 000106) ---------------
+
+TEST(Reassemble, UnifiesTheThreeFolds)
+{
+    // The resolution of identity used to need its own entry point; a caller had
+    // to know which shape they were holding.  Now one call handles it.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* I = make_identity(ctx);
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, I, b, Variance::Covariant));
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), I));
+
+    // …and the contraction form Σ_i (X·e_i) e_i → X, which was
+    // reassemble_completeness's job.
+    auto const* X = make_tensor_object(ctx, make_tensor_name("X"), {}, 1);
+    auto i = CountableIndex{ctx.alloc_index_id()};
+    auto const* term = make_explicit_sum(
+        ctx,
+        i,
+        make_tensor_product(
+            ctx,
+            make_dot(ctx, X, b.covariant_vector(ctx, i)),
+            b.covariant_vector(ctx, i)),
+        nullptr);
+    EXPECT_TRUE(algebraic_eq(ctx, reassemble(ctx, term, b), X));
+}
+
+TEST(Reassemble, TargetRebuildsOnlyTheNamedInvariant)
+{
+    // a⊗b in components: naming one leaves the other in component form.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* v = make_tensor_object(ctx, make_tensor_name("v"), {}, 1);
+    auto const* comps = reduce_frame(
+        ctx,
+        expand_in_basis(
+            ctx, make_tensor_product(ctx, u, v), b, Variance::Covariant),
+        b);
+
+    IndexNameMap m;
+    auto const only_u =
+        render_latex(*reassemble(ctx, comps, b, make_tensor_name("u")), m, &ctx);
+    EXPECT_NE(only_u.find("\\mathbf{u}"), std::string::npos) << only_u;
+    EXPECT_NE(only_u.find("v_{"), std::string::npos) << only_u; // v left alone
+
+    auto const only_v =
+        render_latex(*reassemble(ctx, comps, b, make_tensor_name("v")), m, &ctx);
+    EXPECT_NE(only_v.find("\\mathbf{v}"), std::string::npos) << only_v;
+    EXPECT_NE(only_v.find("u_{"), std::string::npos) << only_v;
+
+    // Untargeted rebuilds both.
+    EXPECT_TRUE(algebraic_eq(
+        ctx, reassemble(ctx, comps, b), make_tensor_product(ctx, u, v)));
+}
+
+TEST(Reassemble, ATargetThatIsNotPresentIsANoOp)
+{
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_tensor_object(ctx, make_tensor_name("u"), {}, 1);
+    auto const* comps =
+        reduce_frame(ctx, expand_in_basis(ctx, u, b, Variance::Covariant), b);
+    EXPECT_TRUE(
+        structural_eq(reassemble(ctx, comps, b, make_tensor_name("z")), comps));
+}
+
 // ---- reduce_frame / to_concrete (vibe 000106) -----------------------------
 //
 // The two bridge steps the corpus wrote out by hand nine times.  Each is the

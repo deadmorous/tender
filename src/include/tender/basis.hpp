@@ -321,8 +321,23 @@ enum class Variance
 // Operates on the canonical (materialized-sum) form.  Anything that is not a
 // clean expansion in `basis` is left unchanged (failure is a no-op).  Walks
 // the whole tree.
-[[nodiscard]] auto reassemble(Context& ctx, Expr const* e, Basis const& basis)
-    -> Expr const*;
+//
+// `target`, when given, names the one invariant to rebuild: `reassemble(e,
+// frame, "b")` puts `b` back together and leaves everything else in components.
+// A name rather than a path, because the step self-prepares (it canonicalizes)
+// and a path would not survive that (vibe 000104).  A targeted call also skips
+// the completeness folds below, which rebuild *basis* structure rather than the
+// object asked for.
+//
+// This is the single entry point for reassembly (vibe 000106): it runs the
+// coordinate-carrier fold, the completeness fold and the resolution-of-identity
+// fold together to a fixed point, because one can expose another's pattern and
+// a caller should not have to know which shape they are holding.
+[[nodiscard]] auto reassemble(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    std::optional<TensorName> target = std::nullopt) -> Expr const*;
 
 // Fold the resolution of identity Σ_i e_i ⊗ e^i = I where it appears partially
 // contracted — the completeness reassembly that `reassemble` (which needs a

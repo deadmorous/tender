@@ -703,3 +703,30 @@ class TestBridgeSteps:
             )
             by_step = tb.to_concrete(tb.reduce_frame(_expanded(ctx, f, expr), f), f)
             assert td.algebraic_eq(by_hand, by_step), expr.latex()
+
+    def test_reassemble_target_rebuilds_only_the_named_invariant(self):
+        # vibe 000106: a metric-style `target=`, so "put b back together and
+        # leave the rest alone" is expressible.  A name, not a path — the step
+        # self-prepares, and a path would not survive that.
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        comps = tb.reduce_frame(_expanded(ctx, f, a * b), f)
+
+        only_a = tb.reassemble(comps, f, target="a").latex()
+        assert r"\mathbf{a}" in only_a and "b_{" in only_a, only_a
+        only_b = tb.reassemble(comps, f, target="b").latex()
+        assert r"\mathbf{b}" in only_b and "a_{" in only_b, only_b
+
+        assert td.algebraic_eq(tb.reassemble(comps, f), a * b)
+        assert td.structural_eq(tb.reassemble(comps, f, target="c"), comps)
+
+    def test_reassemble_is_the_single_entry_point(self):
+        # The resolution of identity needed its own call before; a caller had to
+        # know which shape they were holding.
+        ctx = tender.Context()
+        f = tb.wcs(ctx)
+        I = tender.identity(ctx=ctx)
+        assert td.structural_eq(
+            tb.reassemble(td.canonicalize(_expanded(ctx, f, I)), f), I
+        )

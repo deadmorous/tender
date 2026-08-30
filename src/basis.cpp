@@ -1370,7 +1370,8 @@ auto fold_reassembly_groups(
     Context& ctx,
     std::vector<int> const& summed,
     std::vector<Expr const*> const& factors,
-    Basis const& basis) -> Expr const*
+    Basis const& basis,
+    std::optional<TensorName> const& target) -> Expr const*
 {
     auto coord_invariant = [&](TensorObject const* c, int rank)
     {
@@ -1395,7 +1396,12 @@ auto fold_reassembly_groups(
             in_basis[bv->first.id].push_back(Site{p, {}});
             continue;
         }
-        if (auto cc = as_coord_component(factors[p], basis))
+        // `target` names the one invariant to rebuild (vibe 000106).  A
+        // coordinate of any other name is not made into a carrier, so it falls
+        // through to the foreign-factor branch below and blocks its own
+        // indices — which is exactly right: its structure must be left alone.
+        if (auto cc = as_coord_component(factors[p], basis);
+            cc && (!target || cc->first->name == *target))
         {
             int const ci = static_cast<int>(carriers.size());
             Carrier c;
@@ -1928,7 +1934,11 @@ auto to_concrete(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
     return structural_eq(out, e) ? e : steps::implicitize(ctx, out);
 }
 
-auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
+auto reassemble_pass(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    std::optional<TensorName> const& target) -> Expr const*
 {
     // Self-prepare: the fold reads the summation binders off explicit
     // ExplicitSum nodes, so materialize the implicit Einstein sums first (via
@@ -1955,8 +1965,11 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
             // over sums/signs) before the coordinate-carrier folds below.  The
             // focused `reassemble_completeness` remains for callers who want
             // only this.
-            if (auto* fc = fold_completeness(c, node, basis))
-                return fc;
+            // Σ_i (X·e_i) e_i → X folds basis structure, not a named object,
+            // so a targeted call skips it.
+            if (!target)
+                if (auto* fc = fold_completeness(c, node, basis))
+                    return fc;
 
             // Peel nested ExplicitSums (collecting the summed indices) and
             // signs, interleaved.  A subtracted term carries its sign as a
@@ -1997,7 +2010,8 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
             // own (handles a term with several coordinate factors).  Falls
             // through when nothing matches, leaving the single higher-rank
             // coordinate to the whole-term path below.
-            if (auto* g = fold_reassembly_groups(c, summed, factors, basis))
+            if (auto* g =
+                    fold_reassembly_groups(c, summed, factors, basis, target))
                 return signed_(g);
 
             // The body is one coordinate tensor times a polyad of basis
@@ -2014,6 +2028,8 @@ auto reassemble(Context& ctx, Expr const* e, Basis const& basis) -> Expr const*
                 auto const* t = std::get_if<TensorObject>(&f->node);
                 if (!t || coord)
                     return node; // a non-coordinate factor, or a second one
+                if (target && t->name != *target)
+                    return node; // not the invariant asked for
                 // The coordinate must belong to this basis (vibe 000067): a
                 // foreign or two-point coordinate (slots straddling two bases)
                 // is not a clean reassembly target, so leave the term unfolded.
@@ -2119,6 +2135,79 @@ auto fold_resolution_of_identity(
     if (out == prepped && structural_eq(prepped, e))
         return e;
     return steps::implicitize(ctx, out);
+}
+
+auto reassemble(
+    Context& ctx,
+    Expr const* e,
+    Basis const& basis,
+    std::optional<TensorName> target) -> Expr const*
+{
+    // One entry point for reassembly (vibe 000106).  There were three —
+    // `reassemble`, `reassemble_completeness` and `fold_resolution_of_identity`
+    // — and a caller had to know which shape they were holding to pick one.
+    // They are all "put this back into direct notation", so they run together,
+    // to a fixed point: one fold can expose another's pattern.
+    //
+    // With a `target` the completeness folds are skipped: they rebuild *basis*
+    // structure (Σ e_i⊗e_i → I), which is not the named object the caller asked
+    // for, and folding it anyway would do work that was not requested.
+    // "Same up to normalization": each pass self-prepares by canonicalizing,
+    // and canon reorders a symmetric contraction (`y·a` → `a·y`).  So a pass
+    // that folded nothing still returns a *structurally* different expression,
+    // and a naive fixed point would loop once more and hand back the reordered
+    // form — changing what every existing caller sees, for no gain.  Progress
+    // therefore means "changed beyond canon", and the last productive result is
+    // returned.
+    auto same_modulo_canon = [](Context& c, Expr const* x, Expr const* y)
+    {
+        if (structural_eq(x, y))
+            return true;
+        try
+        {
+            return structural_eq(
+                steps::canonicalize(c, x), steps::canonicalize(c, y));
+        }
+        catch (std::invalid_argument const&)
+        {
+            return false;
+        }
+    };
+
+    // Each of the three folds self-prepares, so each *also* returns a
+    // canonicalized expression when it folded nothing.  Chaining them naively
+    // would let a fold that did no work reorder the previous fold's answer.  So
+    // a fold's result is kept only if it changed something beyond canon.
+    auto keep_if_productive =
+        [&](Context& c, Expr const* x, Expr const* folded) -> Expr const*
+    { return same_modulo_canon(c, folded, x) ? x : folded; };
+
+    auto once = [&](Context& c, Expr const* x) -> Expr const*
+    {
+        x = reassemble_pass(c, x, basis, target);
+        if (!target)
+        {
+            x = keep_if_productive(c, x, reassemble_completeness(c, x, basis));
+            x = keep_if_productive(
+                c, x, fold_resolution_of_identity(c, x, basis));
+        }
+        return x;
+    };
+
+    // The first pass runs unconditionally and its result stands: a pass
+    // surfaces its own preparation even when no fold fired (vibe 000064 #6 —
+    // the prep can cancel equal-and-opposite terms on its own), and that
+    // contract predates this unification.  Only *further* passes need to earn
+    // their place.
+    Expr const* cur = once(ctx, e);
+    for (int pass = 1; pass < 16; ++pass)
+    {
+        Expr const* const next = once(ctx, cur);
+        if (same_modulo_canon(ctx, next, cur))
+            break;
+        cur = next;
+    }
+    return cur;
 }
 
 auto expand_identity(Context& ctx, Expr const* e, Basis const& basis)
