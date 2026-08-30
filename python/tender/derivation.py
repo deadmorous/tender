@@ -31,24 +31,17 @@ import warnings
 from tender import _core
 from tender._core import derivation as _d
 
+# `__all__` is the *advertised* surface, not the reachable one: every name below
+# still imports and works.  The moves left out are catalogued in
+# :mod:`tender.steps` under their category — they are what the vocabulary is
+# built from rather than vocabulary themselves (vibe 000106).
 __all__ = [
     "Derivation",
     "NoOpStep",
-    "unroll_sums",
-    "eval_delta_concrete",
-    "eval_eps_concrete",
-    "fold_arithmetic",
-    "expand_products",
-    "expand_eps",
-    "fold_sums",
     "contract_delta",
     "contract_identity",
-    "expand_double_dot",
-    "expand_dyad_ops",
     "contract_eps_pair",
-    "fold_equal_addends",
     "collect_terms",
-    "canonicalize",
     "partial",
     "deriv",
     "apply_operators",

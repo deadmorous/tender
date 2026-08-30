@@ -50,6 +50,10 @@ reassemble_completeness = _b.reassemble_completeness
 fold_resolution_of_identity = _b.fold_resolution_of_identity
 expand_identity = _b.expand_identity
 
+# `__all__` is the *advertised* surface, not the reachable one: every name below
+# still imports and works.  The moves left out are catalogued in
+# :mod:`tender.steps` under their category — they are what the vocabulary is
+# built from rather than vocabulary themselves (vibe 000106).
 __all__ = [
     "Basis",
     "Variance",
@@ -61,12 +65,7 @@ __all__ = [
     "spherical",
     "polar_2d",
     "expand_in_basis",
-    "simplify_basis_dot",
-    "simplify_basis_cross",
     "reduce_frame",
     "to_concrete",
     "reassemble",
-    "reassemble_completeness",
-    "fold_resolution_of_identity",
-    "expand_identity",
 ]

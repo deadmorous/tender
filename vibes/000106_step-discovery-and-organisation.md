@@ -280,7 +280,24 @@ order — one idea, three payoffs, consistent with a pattern the project chose.
 
 This also gives the vibe-000092 namespace complaint somewhere to land, and fixes
 a regression: vibe 92 objected to ~30 exported steps, M3 got
-`tender.derivation.__all__` to 36, it is **41** today.
+`tender.derivation.__all__` to 36, it reached **41**.
+
+**Done (2026-08-30).**  `tender.steps` is now the catalogue: every step with its
+category, a one-line summary, and — the part `applicable` needs — the *kinds* of
+argument it wants beyond the expression (`needs` for required, `options` for
+accepted).  Measured: **34 of 39 steps run from a basis alone**; the other five
+announce exactly what they lack (`rules`, `op`, `level`, `coord`).  The
+"dictionary of what we could throw in there" is therefore data, not lore.
+
+`__all__` — the *advertised* surface, not the reachable one — shrank from 41 to
+**30** on `tender.derivation` and 18 to 13 on `tender.basis`, with every demoted
+name still importable and working.  `expand_in_basis` gained a `Covariant`
+default for `variance`, which is what the corpus passes almost everywhere and
+what an orthonormal frame makes moot.
+
+A reconciliation test mirrors the identity DAG's: an advertised step that nobody
+catalogued fails the suite, because a step nobody can find is worse than no
+catalogue.
 
 ## 4. Other feedback forms
 

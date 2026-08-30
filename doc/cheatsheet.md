@@ -309,9 +309,18 @@ Constructors / well-known frames:
 
 Bridge steps:
 
+> **Which step do I need?**  `tender.steps` is the catalogue —
+> `ts.describe()` prints every step by category with what it needs;
+> `ts.in_category("bridge")` narrows it; `ts.primaries()` is the short list a
+> derivation reaches for by name.  The categories are what a user needs
+> (**normalise / bridge / index / operators / engine**), not the module split.
+> A `*` in `describe()` marks a primary step; the rest are what those are built
+> from — still importable, just not vocabulary.  `ts.register(...)` adds your
+> own, as the identity library does.
+
 | Function | Does | Does **not** |
 |---|---|---|
-| `expand_in_basis(expr, basis, variance)` | Expand invariants into `Σ` over components on `basis` | — |
+| `expand_in_basis(expr, basis, variance=Covariant)` | Expand invariants into `Σ` over components on `basis` | — |
 | **`reduce_frame(expr, basis)`** | **Everything the frame licenses, to a fixed point**: `eᵢ·eⱼ→δ`, `eᵢ×eⱼ→ε`, and the δ contractions that follow. Stops when no basis-vector *product* remains — a free leg survives (`A·b → A_ij b_j eᵢ`). Returns implicit (Einstein) form | Take a step the frame cannot justify — an ε-pair contraction, a metric move, an identity. Those are yours to choose: `a×(b×c)` stops at `−ε ε a b c e`, and you decide |
 | **`to_concrete(expr, basis)`** | **Evaluate over the frame's directions, to a fixed point**: unroll the symbolic indices, evaluate the ε/δ that become concrete, fold the arithmetic. Stops when no symbolic index remains | — |
 | `simplify_basis_dot(expr, basis)` | Reduce `eᵢ·eⱼ` (concrete / frame-vector directions) — one pass; `reduce_frame` is usually what you want | — |

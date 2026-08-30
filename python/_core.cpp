@@ -1562,9 +1562,11 @@ NB_MODULE(_core, m)
         { return derive(e, expand_in_basis(*e.ctx, e.expr, b.basis, v)); },
         "expr"_a,
         "basis"_a,
-        "variance"_a,
+        "variance"_a = Variance::Covariant,
         "Expand each generic invariant tensor into its coordinate form in the "
-        "basis (A -> A^{i...} (e_i ...)).");
+        "basis (A -> A^{i...} (e_i ...)).  `variance` defaults to Covariant, "
+        "which is what nearly every derivation wants and what an orthonormal "
+        "frame makes moot.");
 
     mb.def(
         "expand_in_basis",
