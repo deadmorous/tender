@@ -329,3 +329,44 @@ class TestStepReport:
         res = ts.info("reduce_frame").run(tb.expand_in_basis(a @ b, frame), basis=frame)
         assert res.fired and not res.reason
         assert td.structural_eq(res.expr, tb.reduce_frame(tb.expand_in_basis(a @ b, frame), frame))
+
+
+def test_a_reporting_step_must_agree_with_the_fingerprint():
+    """A step's claim is checked against an independent measure.
+
+    The report is what the step *says*; the fingerprint is what the expression
+    *shows*.  Keeping both is what makes this test possible — and it is not
+    hypothetical: `reduce_frame` once reported `fired=True` on a term it had
+    only reordered, and that is exactly the disagreement caught here.
+    """
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+    A = tender.tensor("A", rank=2, ctx=ctx)
+
+    exprs = [
+        a @ b,
+        a % b,
+        A @ b,
+        tb.expand_in_basis(a @ b, frame),
+        tb.expand_in_basis(a % b, frame),
+        tb.expand_in_basis(A @ b, frame),
+        tb.reduce_frame(tb.expand_in_basis(a @ b, frame), frame),
+        tb.reduce_frame(tb.expand_in_basis(a % (b % c), frame), frame),
+    ]
+    reporting = [n for n in ts.names() if ts.info(n).reported is not None]
+    assert reporting, "no step reports yet — this test would be vacuous"
+
+    for name in reporting:
+        st = ts.info(name)
+        for e in exprs:
+            res = st.run(e, basis=frame)
+            before, after = ts.shape(e), ts.shape(res.expr)
+            changed = before != after
+            assert res.fired == changed, (
+                f"{name} reported fired={res.fired} but the fingerprint "
+                f"{'changed' if changed else 'did not change'}: {e.latex()}"
+            )
+            assert res.fired != bool(res.reason), (
+                f"{name} must give a reason exactly when it did not fire"
+            )

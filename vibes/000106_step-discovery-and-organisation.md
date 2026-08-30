@@ -380,6 +380,37 @@ it now lives.
 each already written out as a comment, which is a good sign the reports are
 recovering knowledge the code already has rather than inventing it.
 
+### Does the report make the fingerprint obsolete?
+
+No — and building both made the division sharper than it was.  They answer
+different questions, and three uses of the fingerprint have no report-based
+substitute:
+
+- **Comparing options.**  `applicable` ranks steps by *what they change*
+  (`basis_vectors−2, deltas+1`), which is how a reader tells "this moves me
+  toward components" from "this moves me back".  `fired: bool` cannot rank.
+- **`explain(before, after)`.**  It compares two arbitrary expressions.  There
+  is no step in the picture to ask.
+- **Policing the reports.**  The report is what a step *says*; the fingerprint
+  is what the expression *shows*.  Keeping both makes a disagreement detectable
+  — and it is not hypothetical: `reduce_frame` briefly reported `fired=True` on
+  a term it had only reordered.  There is now a test asserting, for every
+  reporting step over a battery of expressions, that `fired` matches the
+  fingerprint and that a reason appears exactly when it did not fire.  That test
+  is only possible because the two measures are independent.
+
+And a fourth use, for the milestone after this one: a *goal* like "no basis
+vector remains" is a fingerprint query, and ranking successors by how much they
+reduce needs a measure rather than a flag.
+
+**What the report does obsolete is `wants` as a source of reasons.**  Once a
+step explains itself, its `wants` entry is no longer consulted — two sources of
+truth for one thing, and the step's own is better.  But `wants` earns its keep
+differently: as a **cheap pre-filter**.  `applicable` currently runs all 39 steps
+in ~12 ms, and `wants` can skip 9 of them without running them at all, on the
+shape alone.  That is the cost driver for path search, so `wants` should stay —
+reframed from "the reason" to "a necessary condition, checked without working".
+
 ## 4a. The original list
 
 1. **`applicable(expr, **context)`** — §1.  Content-changing first, "reordered
