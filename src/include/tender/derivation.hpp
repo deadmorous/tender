@@ -239,7 +239,8 @@ auto insert_metric(
     Context& ctx,
     Expr const* e,
     Level level,
-    std::optional<TensorName> target = std::nullopt) -> Expr const*;
+    std::optional<TensorName> target = std::nullopt,
+    StepReport* report = nullptr) -> Expr const*;
 
 // `target` names which factor is to move; see `insert_metric`.  A metric
 // carries two indices and either may be spent, so without it the step takes
@@ -247,7 +248,8 @@ auto insert_metric(
 auto contract_metric(
     Context& ctx,
     Expr const* e,
-    std::optional<TensorName> target = std::nullopt) -> Expr const*;
+    std::optional<TensorName> target = std::nullopt,
+    StepReport* report = nullptr) -> Expr const*;
 
 // Apply `f` to the subexpression at `path` and splice the result back — the
 // selective-application primitive behind `tender.derivation.at` (vibe 000054),
@@ -416,7 +418,8 @@ auto partial(Context& ctx, Expr const* e, Expr const* coord, bool canon = true)
 // are applied rightmost-first; a trailing operator with no operand to its right
 // is left bare (an unapplied operator).  Self-preparing (distributes first),
 // result canonicalized.
-auto apply_operators(Context& ctx, Expr const* e) -> Expr const*;
+auto apply_operators(Context& ctx, Expr const* e, StepReport* report = nullptr)
+    -> Expr const*;
 
 // Fold a derivation operator's own expansion back into the operator — the
 // operator row of vibe 000103's fold table, and the return trip that
@@ -441,7 +444,11 @@ auto apply_operators(Context& ctx, Expr const* e) -> Expr const*;
 // non-scalar factor alongside (where the folded operator belongs in the product
 // order would be a guess), and an `op` that is not a sum of at least two
 // distinct concrete directions.  Walks the whole tree.
-auto fold_operator(Context& ctx, Expr const* e, Expr const* op) -> Expr const*;
+auto fold_operator(
+    Context& ctx,
+    Expr const* e,
+    Expr const* op,
+    StepReport* report = nullptr) -> Expr const*;
 
 // vibe 000081: an abstract surface ∇ (a `Nabla` node) cannot be canonicalized
 // once the basis has been expanded into concrete frame vectors.  Canon has no

@@ -391,7 +391,15 @@ after `applicable`'s reordering noise.  Three independent encounters make it a
 property of the step contract rather than a local quirk, and the report is where
 it now lives.
 
-**Done:** `contract_delta`, `reduce_frame`, `reassemble`.
+**Done:** every step whose refusal a person is likely to hit —
+`contract_delta`, `reduce_frame`, `reassemble`, `contract_metric`,
+`insert_metric`, `fold_operator`, `apply_operators`.
+
+Left deliberately silent: the general normalisers (`simplify`, `canonicalize`,
+`simplify_scalars`) and the engine verbs, where *"it ran and changed nothing"*
+**is** the complete answer and a manufactured reason would only be noise.  That
+is the line — a step explains itself when its silence has a cause the caller
+could act on.
 
 `reassemble` was the richest, and the exercise confirmed the suspicion that made
 it worth doing: **every refusal was already written out as a comment.**  Teaching
@@ -581,10 +589,8 @@ Two things the work turned up that were not in the design:
   not.**  `sym`/`skew` surfaced as options on a scalar, because transpose had no
   rank-0 case.  Fixed.
 
-Left for the next milestone: path search and goal specification (§6).  Also
-open, and now better shaped than "add 20 preconditions": teach the remaining
-steps to report for themselves (§4b), richest first — `reassemble`,
-`contract_metric`/`insert_metric`, `fold_operator`, `apply_operators`.  A
-handful of steps (`simplify`, `canonicalize`, `simplify_scalars`) genuinely have
-no precondition and should keep the fallback; and `sym`/`skew` want fixing
-rather than explaining, since `sym(s) = s` and `skew(s) = 0` for a scalar.
+Left for the next milestone: path search and goal specification (§6).
+
+The reporting work that replaced "add 20 preconditions" is **done**: seven steps
+explain themselves, the general normalisers are deliberately left with the
+fallback, and `sym`/`skew` were fixed rather than explained.

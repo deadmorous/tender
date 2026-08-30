@@ -298,9 +298,11 @@ _r("contract_eps_pair", _d, _D, category="index", primary=True,
    wants={"epsilons": 2},
    summary="the ε-δ identity: ε ε → δδ − δδ")
 _r("contract_metric", _d, _D, category="index", primary=True, options=("target",),
+   reported=_core.derivation._contract_metric_reported,
    wants={"metrics": 1},
    summary="raise, lower, or contract the inverse metric pair")
 _r("insert_metric", _d, _D, category="index", primary=True,
+   reported=_core.derivation._insert_metric_reported,
    needs=("level",), options=("target",),
    wants={"coordinates": 1},
    summary="move an index the other way, paying a metric")
@@ -313,11 +315,13 @@ _r("expand_eps", _d, _D, category="index",
 
 # ---- operators ------------------------------------------------------------
 _r("apply_operators", _d, _D, category="operators", primary=True,
+   reported=_core.derivation._apply_operators_reported,
    wants={"derivs": 1},
    summary="carry out the first-class ∂ operators by Leibniz")
 _r("partial", _d, _D, category="operators", primary=True, needs=("coord",),
    summary="differentiate with respect to a coordinate")
 _r("fold_operator", _d, _D, category="operators", primary=True, needs=("op",),
+   reported=_core.derivation._fold_operator_reported,
    wants={"deriv_marks": 1},
    summary="fold an operator's expansion back into the operator")
 

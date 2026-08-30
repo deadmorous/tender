@@ -2603,8 +2603,15 @@ auto insert_metric(
     Context& ctx,
     Expr const* e,
     Level level,
-    std::optional<TensorName> target) -> Expr const*
+    std::optional<TensorName> target,
+    StepReport* report) -> Expr const*
 {
+    std::string why;
+    auto note = [&why](std::string s)
+    {
+        if (why.empty())
+            why = std::move(s);
+    };
     bool fired = false;
     Expr const* prepped = e;
     try
@@ -2620,7 +2627,7 @@ auto insert_metric(
     auto const* out = rewrite_tree(
         ctx,
         prepped,
-        [&fired, level, paid, &target](Context& ctx, Expr const* e)
+        [&fired, level, paid, &target, &note](Context& ctx, Expr const* e)
             -> Expr const*
         {
             auto const* s = std::get_if<ExplicitSum>(&e->node);
@@ -2668,7 +2675,17 @@ auto insert_metric(
                     return node;
                 });
             if (!victim)
+            {
+                note(
+                    target ?
+                        "no coordinate of the name you gave sits at the level "
+                        "opposite the one asked for, so there is nothing to "
+                        "move" :
+                        "no coordinate here sits at the level opposite the one "
+                        "asked for — it may already be there, or the realm may "
+                        "be orthonormal, where the distinction is empty");
                 return e;
+            }
 
             // b_m → g_{mn} b^n: the coordinate's slot moves to a fresh index at
             // the target level, and the metric that pays for the move carries
@@ -2716,14 +2733,30 @@ auto insert_metric(
                     ctx, fresh, make_tensor_product(ctx, g, moved), nullptr),
                 nullptr);
         });
-    return fired ? implicitize(ctx, out) : e;
+    if (!fired)
+    {
+        report_no_op(
+            report,
+            why.empty() ? "there is no summation over which to move an index" :
+                          why);
+        return e;
+    }
+    report_fired(report);
+    return implicitize(ctx, out);
 }
 
 auto contract_metric(
     Context& ctx,
     Expr const* e,
-    std::optional<TensorName> target) -> Expr const*
+    std::optional<TensorName> target,
+    StepReport* report) -> Expr const*
 {
+    std::string why;
+    auto note = [&why](std::string s)
+    {
+        if (why.empty())
+            why = std::move(s);
+    };
     // Self-prepares exactly as contract_delta does, and for the same reasons.
     bool fired = false;
     Expr const* prepped = e;
@@ -2738,14 +2771,19 @@ auto contract_metric(
     auto const* out = rewrite_tree(
         ctx,
         prepped,
-        [&fired, &target](Context& ctx, Expr const* e) -> Expr const*
+        [&fired, &target, &note](Context& ctx, Expr const* e) -> Expr const*
         {
             auto const* s = std::get_if<ExplicitSum>(&e->node);
             if (!s || s->bound)
                 return e;
             int const m = s->index.id;
             if (core_is_distributed(s->body))
+            {
+                note(
+                    "the term is a distributed sum; expand_products splits it "
+                    "before an index can be moved across the ±");
                 return e;
+            }
 
             // Find a metric carrying m, and read off what the survivor becomes:
             // g's *other* index, at g's *other* level.  That single rule is
@@ -2788,23 +2826,49 @@ auto contract_metric(
                     return node;
                 });
             if (!g)
+            {
+                note("no metric in this term carries a summed index");
                 return e;
+            }
 
             auto const* without = drop_factor(ctx, s->body, g);
             if (!without)
-                return e; // Σ_m g^{mn} alone — nothing to raise
+            {
+                note(
+                    "the metric is the only factor, so there is no index to "
+                    "move");
+                return e;
+            }
 
             auto const partner_at = find_partner(ctx, without, m);
-            if (!partner_at || partner_at->slot.realm != m_slot.realm
-                || partner_at->slot.space != m_slot.space)
+            if (!partner_at)
+            {
+                note(
+                    "the metric's summed index appears nowhere else, so there "
+                    "is nothing for it to act on");
                 return e;
+            }
+            if (partner_at->slot.realm != m_slot.realm
+                || partner_at->slot.space != m_slot.space)
+            {
+                note(
+                    "the metric and its partner sit in different realms or "
+                    "index spaces");
+                return e;
+            }
             // A genuine raise or lower straddles the divide: g's index and the
             // partner's must sit at opposite levels, which is what Einstein
             // summation in an Oblique realm demands anyway.  Same-level pairs
             // are not a contraction and are left alone.
             if (partner_at->slot.realm != Realm::Orthonormal
                 && partner_at->slot.level == m_slot.level)
+            {
+                note(
+                    "the metric's index and its partner's sit at the same "
+                    "level, which is not an Einstein contraction — a raise or "
+                    "lower straddles the upper/lower divide");
                 return e;
+            }
             // `target` names *which* factor is to move (vibe 000104).  The
             // metric carries two indices and either may be spent; without a
             // target the step takes whichever binder it reaches first, which is
@@ -2812,14 +2876,26 @@ auto contract_metric(
             // whose partner is not the named tensor is skipped, so the sibling
             // binder gets its turn.
             if (target && partner_at->name != *target)
+            {
+                note(
+                    "the metric here would move a different factor than the "
+                    "one you named");
                 return e;
+            }
 
             fired = true;
             return substitute_index_leveled(
                 ctx, without, m, partner, survivor_level);
         });
     if (!fired)
+    {
+        report_no_op(
+            report,
+            why.empty() ? "there is no summation for a metric to act over" :
+                          why);
         return e;
+    }
+    report_fired(report);
     // g whose slots straddle the divide *is* the Kronecker δ — that is what the
     // reciprocal basis means (g^i{}_j = e^i·e_j = δ^i_j), and it is how the
     // inverse-metric pair g^{ip} g_{pk} arrives here.  Normalizing it lets the
@@ -4483,7 +4559,8 @@ auto scan_operators(Context& ctx, Expr const* e) -> OperatorPresence
           "the basis.");
 }
 
-auto apply_operators(Context& ctx, Expr const* e) -> Expr const*
+auto apply_operators(Context& ctx, Expr const* e, StepReport* report)
+    -> Expr const*
 {
     if (abstract_nabla_over_expanded_basis(ctx, e))
         throw_abstract_nabla("apply_operators");
@@ -4498,13 +4575,35 @@ auto apply_operators(Context& ctx, Expr const* e) -> Expr const*
     // rely on that cleanup.)
     auto const ops = scan_operators(ctx, e);
     if (ops.nabla && !ops.deriv)
+    {
+        report_no_op(
+            report,
+            "the only operator here is an abstract ∇, which this step cannot "
+            "apply — a chart expands it first (expand_nabla / grad / div / rot)");
         return e;
+    }
+    if (!ops.deriv)
+        report_no_op(
+            report,
+            "there is no unapplied ∂ here; the derivatives are already carried "
+            "as marks on the fields");
     // Leave the implicit/explicit summation as the caller had it (vibe 000081,
     // case 2): the internal canonicalize materializes every realm-contracted
     // index to an explicit Σ, surfacing sums that were implicit on the way in.
     // implicitize folds those redundant Σ back to implicit; a genuinely-needed
     // explicit Σ (ranged, or not realm-contracted) is left untouched.
-    return implicitize(ctx, canon_tolerant(ctx, apply_operators_impl(ctx, e)));
+    auto const* out =
+        implicitize(ctx, canon_tolerant(ctx, apply_operators_impl(ctx, e)));
+    if (ops.deriv)
+    {
+        if (expression_shape(ctx, e) == expression_shape(ctx, out))
+            report_no_op(
+                report,
+                "the ∂ operators here have nothing to their right to act on");
+        else
+            report_fired(report);
+    }
+    return out;
 }
 
 // ---- targeted scalar simplifier (vibe 000069 M3) -----------------------
@@ -5144,11 +5243,23 @@ auto simplify_scalars(Context& ctx, Expr const* e) -> Expr const*
     return implicitize(ctx, cur);
 }
 
-auto fold_operator(Context& ctx, Expr const* e, Expr const* op) -> Expr const*
+auto fold_operator(
+    Context& ctx,
+    Expr const* e,
+    Expr const* op,
+    StepReport* report) -> Expr const*
 {
     auto const terms = parse_operator(ctx, op);
     if (!terms)
+    {
+        report_no_op(
+            report,
+            "the operator is not of the form Σ_k c_k ⊗ ∂_k: each addend needs "
+            "exactly one concrete ∂ beside a coefficient, the directions must "
+            "differ, and there must be at least two of them (one direction has "
+            "no group to complete)");
         return e;
+    }
     auto const k_count = terms->size();
 
     // What one addend contributes: which direction it carries, the field the
@@ -5196,7 +5307,8 @@ auto fold_operator(Context& ctx, Expr const* e, Expr const* op) -> Expr const*
         return std::nullopt;
     };
 
-    return rewrite_tree(
+    bool any = false;
+    auto const* out = rewrite_tree(
         ctx,
         e,
         [&](Context& c, Expr const* node) -> Expr const*
@@ -5250,6 +5362,7 @@ auto fold_operator(Context& ctx, Expr const* e, Expr const* op) -> Expr const*
             }
             if (folded.empty())
                 return node;
+            any = true;
 
             std::vector<nf::SignedExpr> rebuilt;
             for (std::size_t a = 0; a < addends.size(); ++a)
@@ -5261,6 +5374,18 @@ auto fold_operator(Context& ctx, Expr const* e, Expr const* op) -> Expr const*
             }
             return view::sum_of(c, rebuilt);
         });
+    if (!any)
+    {
+        report_no_op(
+            report,
+            "no complete group of addends here matches that operator: folding "
+            "needs every direction present, all agreeing on the operand, the "
+            "sign, and the scalar factors beside them — an incomplete group "
+            "would claim a term that was never there");
+        return e;
+    }
+    report_fired(report);
+    return out;
 }
 
 namespace

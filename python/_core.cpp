@@ -1100,6 +1100,67 @@ NB_MODULE(_core, m)
         "contract_delta, with (expr, fired, reason).");
 
     md.def(
+        "_contract_metric_reported",
+        [](PyExpr const& e, std::optional<std::string> target) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = steps::contract_metric(
+                *e.ctx,
+                e.expr,
+                target ? std::optional{make_tensor_name(*target)} :
+                         std::nullopt,
+                &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "expr"_a,
+        "target"_a = nb::none(),
+        "contract_metric, with (expr, fired, reason).");
+
+    md.def(
+        "_insert_metric_reported",
+        [](PyExpr const& e,
+           Level level,
+           std::optional<std::string> target) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = steps::insert_metric(
+                *e.ctx,
+                e.expr,
+                level,
+                target ? std::optional{make_tensor_name(*target)} :
+                         std::nullopt,
+                &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "expr"_a,
+        "level"_a,
+        "target"_a = nb::none(),
+        "insert_metric, with (expr, fired, reason).");
+
+    md.def(
+        "_fold_operator_reported",
+        [](PyExpr const& e, PyExpr const& op) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = steps::fold_operator(*e.ctx, e.expr, op.expr, &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "expr"_a,
+        "op"_a,
+        "fold_operator, with (expr, fired, reason).");
+
+    md.def(
+        "_apply_operators_reported",
+        [](PyExpr const& e) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = steps::apply_operators(*e.ctx, e.expr, &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "expr"_a,
+        "apply_operators, with (expr, fired, reason).");
+
+    md.def(
         "_expression_shape",
         [](PyExpr const& e) -> nb::dict
         {

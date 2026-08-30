@@ -441,3 +441,96 @@ class TestReassembleExplainsItself:
             self._why(comps, f, target="z"),
         }
         assert len(reasons) == 3, reasons
+
+
+class TestTheRemainingReporters:
+    """`contract_metric`, `insert_metric`, `fold_operator`, `apply_operators`.
+
+    With these, every step whose refusal a person is likely to hit explains
+    itself.  The ones left silent are the general normalisers (`simplify`,
+    `canonicalize`, `simplify_scalars`), where "it ran and changed nothing" is
+    the complete answer.
+    """
+
+    def _oblique(self):
+        ctx = tender.Context()
+        frame = tb.make_oblique_basis(
+            [tender.tensor(n, rank=1, ctx=ctx) for n in ("p", "q", "s")],
+            tender.space_3d,
+        )
+        a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+        upper = td.canonicalize(
+            tb.simplify_basis_dot(
+                tb.expand_in_basis(a @ b, frame, tb.Variance.Contravariant), frame
+            )
+        )
+        return ctx, frame, a, b, upper
+
+    def _why(self, e, name, **kw):
+        return ts.why_not(e, name, **kw).split(": ", 1)[1]
+
+    def test_contract_metric_says_when_there_is_no_metric(self):
+        ctx, frame, a, b, _ = self._oblique()
+        assert "no summation for a metric" in self._why(a @ b, "contract_metric")
+
+    def test_contract_metric_says_when_the_target_is_the_other_factor(self):
+        _, _, _, _, upper = self._oblique()
+        msg = self._why(upper, "contract_metric", target="c")
+        assert "different factor than the one you named" in msg
+
+    def test_insert_metric_says_when_nothing_sits_at_the_wrong_level(self):
+        _, _, _, _, upper = self._oblique()
+        mixed = td.contract_metric(upper, target="a")  # a^i b_i
+        # `a` is already upper, so asking to raise it moves nothing.
+        msg = self._why(mixed, "insert_metric", level=tender.Level.Upper, target="a")
+        assert "level opposite the one asked for" in msg
+
+    def test_apply_operators_distinguishes_its_two_silences(self):
+        ws = tender.Workspace()
+        cart, _ = ws.cartesian_chart()
+        f = ws.field("f", 0)
+        abstract = self._why(ws.nabla() * f, "apply_operators")
+        assert "abstract ∇" in abstract and "expand_nabla" in abstract
+        none_at_all = self._why(f, "apply_operators")
+        assert "no unapplied ∂" in none_at_all
+        assert abstract != none_at_all
+
+    def test_fold_operator_rejects_a_thing_that_is_not_an_operator(self):
+        ws = tender.Workspace()
+        cart, _ = ws.cartesian_chart()
+        f = ws.field("f", 0)
+        assert "not of the form" in self._why(f, "fold_operator", op=f)
+
+    def test_fold_operator_says_when_the_group_is_incomplete(self):
+        ws = tender.Workspace()
+        cart, (x, y, z) = ws.cartesian_chart()
+        e = cart.physical_frame()
+        f = cart.field("f", 0)
+        op = e.direction(0) * td.deriv(x) + e.direction(1) * td.deriv(y)
+        partial = td.simplify_scalars(
+            td.apply_operators(e.direction(0) * td.deriv(x) * f)
+        )
+        msg = self._why(partial, "fold_operator", op=op)
+        assert "no complete group" in msg
+        assert "never there" in msg  # why an incomplete fold would be wrong
+
+    def test_every_reporting_step_still_agrees_with_the_fingerprint(self):
+        # The invariant from before, re-run over the wider set: a step's claim
+        # is checked against an independent measure.
+        ctx = tender.Context()
+        frame = tb.wcs(ctx)
+        a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+        exprs = [
+            a @ b,
+            tb.expand_in_basis(a @ b, frame),
+            tb.reduce_frame(tb.expand_in_basis(a % (b % c), frame), frame),
+        ]
+        reporting = [n for n in ts.names() if ts.info(n).reported is not None]
+        assert len(reporting) >= 7
+        for name in reporting:
+            st = ts.info(name)
+            for e in exprs:
+                res = st.run(e, basis=frame, level=tender.Level.Upper)
+                changed = ts.shape(e) != ts.shape(res.expr)
+                assert res.fired == changed, (name, e.latex())
+                assert res.fired != bool(res.reason), name
