@@ -190,6 +190,55 @@ user *states the goal* of a derivation.  Both belong in the next vibe.
 Vibe 000105's nine hand-written pipelines are then not a design but **test data**:
 what a search must be able to rediscover.
 
+### Does search duplicate the e-graph?  Measured: no, and here is the boundary
+
+A fair concern — the project already has equality saturation, and two engines
+would cut against "a single way to do a thing".  The decisive experiment:
+
+```python
+prove_equal(a·b, a_i b_i, <every shipped rule group>)
+    → ProofResult(proved=False, status='refuted', passes=1)
+```
+
+It does not merely fail — it **refutes**, in one pass, and correctly.  `Refuted`
+means "components differ: the statement is false", and as *chart-free*
+expressions those two are not equal: the equality `a·b = a_i b_i` holds only
+**relative to a chosen basis**.  None of the 16 shipped identities mentions a
+basis, frame or chart, and that is not an oversight:
+
+- **Rules are not parameterized.**  `expand_in_basis(e, frame, variance)` depends
+  on a runtime object and a variance choice.  There is no LHS→RHS pattern for
+  "…in this basis"; you would need a rule per basis.
+- **Rules cannot mint indices.**  Every shipped identity's RHS indices are bound
+  by its LHS.  `a → Σ_i a_i e_i` introduces a fresh unbound `i` — the classic
+  e-graph blow-up shape, unboundedly many e-nodes.
+- **Some bridge moves are not local.**  `unroll_sums` multiplies term count by
+  dim^k (measured: nodes +64 on a two-vector dot).  In an e-graph that lands in
+  the class permanently and is then re-matched by everything.
+
+So the two operate in different worlds: **saturation reasons *within* a
+representation; the bridge moves *between* representations.**  The engine's own
+verdict is the proof — it classifies the far side of the bridge as a different
+thing.
+
+Sizing them: in the corpus the bridge steps account for roughly 86 calls against
+roughly 30 for the engine surface.  Search would target the larger, currently
+un-automated half.
+
+**Where the concern *is* valid**, and the rule that follows: for a purely
+algebraic derivation the e-graph already does this, and better — it explores all
+rule orders at once, where a path search must commit and backtrack.  Search must
+therefore not re-implement equational reasoning.  The clean division:
+
+> **the engine is one of the steps the search can take.**
+
+Search navigates representations; inside one, it calls saturation.  That also
+gives goal specification a natural form — "reach a state where `prove_equal`
+finishes" is a goal the library can already evaluate.
+
+Risk to watch: if §2's redesign makes steps higher-level, some may come to
+*contain* engine calls, blurring this boundary.  It should stay explicit.
+
 ## Status
 
 Design, revised twice — after the routes objection, and after the user's scoping
