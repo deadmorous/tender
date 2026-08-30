@@ -192,20 +192,25 @@ Real intermediates, not a description:
 
 ```
 a·b        invariant        a·b
-           expand_in_basis  a_j e_j · b_i e_i          ← raw: the dot is still between basis vectors
-           reduce_frame     Σ_i a_i b_i                ← no basis vector survives; the dot consumed both
+           expand_in_basis  a_j e_j · b_i e_i        ← raw: the dot is still between basis vectors
+           reduce_frame     a_i b_i                  ← no basis vector survives; the dot consumed both
            to_concrete      a_x b_x + a_y b_y + a_z b_z
            reassemble       a·b
 
 a×b        expand_in_basis  a_j e_j × b_i e_i
-           reduce_frame     Σ ε_ikj a_k b_j e_i        ← one *free leg* e_i survives: the result is a vector
+           reduce_frame     ε_ikj a_k b_j e_i        ← one *free leg* e_i survives: the result is a vector
            to_concrete      a_y b_z i − a_z b_y i − …
            reassemble       a×b
 
 A·b        expand_in_basis  A_kj e_k e_j · b_i e_i
-           reduce_frame     Σ A_ij b_j e_i
+           reduce_frame     A_ij b_j e_i
            reassemble       A·b
 ```
+
+Output is in **implicit (Einstein) form**: `a_i b_i`, not `Σ_i a_i b_i`.  The
+steps materialise the Σ binders internally — the contractions need to see them —
+and must put them back before returning.  A leaked binder is a bug, and one the
+prototype had.
 
 So the exit conditions, which is what makes the joints crisp:
 
@@ -226,10 +231,10 @@ diagnosis would report.
 
 ```
 expand_in_basis   a_k e_k × (b_j e_j × c_i e_i)
-reduce_frame      Σ −ε_iml ε_mkj a_l b_k c_j e_i     ← stops: two ε's, nothing more the *frame* can say
-contract_eps_pair δ_ij δ_lk a_l b_j c_k e_i          ← a mathematical event, the user's choice
-reduce_frame      Σ a_j b_i c_j e_i + …              ← re-entered
-reassemble        (a·c) b − (a·b) c                   ← bac-cab, derived
+reduce_frame      −ε_iml ε_mkj a_l b_k c_j e_i   ← stops: two ε's, nothing more the *frame* can say
+contract_eps_pair δ_ij δ_lk a_l b_j c_k e_i      ← a mathematical event, the user's choice
+reduce_frame      a_j b_i c_j e_i − a_j b_j c_i e_i   ← re-entered
+reassemble        (a·c) b − (a·b) c               ← bac-cab, derived
 ```
 
 `reduce_frame` does **not** apply `contract_eps_pair`, and `reassemble` correctly
@@ -245,8 +250,7 @@ would make the second entry inexpressible.  They stay separate.
 
 ### Open calls before this lands
 
-1. **Names.**  `reduce_frame` / `to_concrete`?  (`evaluate` is taken by the chart;
-   `simplify_frame` reads as normalisation, which it is not.)
+1. ~~Names.~~ **Settled (user): `reduce_frame` and `to_concrete`.**
 2. ~~Does `expand_in_basis` stay separate?~~ **Settled: yes** — `reduce_frame`
    is re-entrant and `expand_in_basis` is not; see the bac-cab derivation above.
 3. ~~What does `target=` mean?~~ **Settled (user): a tensor name**, as
