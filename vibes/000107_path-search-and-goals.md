@@ -41,6 +41,38 @@ work per node**:
 
 None of that is research.  It is the reason this milestone is worth starting.
 
+## 1a. Correction: the corpus measured the wrong thing
+
+**The framing below is biased, and the bias is instructive.**
+
+Everything measured here came from the challenges, and a challenge is a
+*certification*: both sides are known by construction, because that is what
+"certify" means.  So the corpus reports what tender is **tested with**, and I
+read it as what tender is **used for**.  Those are not the same population, and
+the difference inverts the conclusion.
+
+In real use — the user's account, and the reason the library exists — a
+derivation **starts with a left-hand side and does not know the right**:
+
+> start with an invariant tensor expression and end up with expressions of its
+> components in a certain coordinate frame.  Or some other form.  Maybe collect
+> terms at powers of a small parameter.  The right-hand side is usually not
+> known when a derivation starts.
+
+That relegates §2(a) and §2(b) — meet-in-the-middle, and reaching a named target
+— to what they actually are: **verification**.  Useful, and worth having, but
+they answer a question the user has already answered.
+
+And it promotes §2(c), *reach a form*, from "blocked, and instructively" to
+**the case that matters**.  Which is uncomfortable, because it is the one this
+note has the least to say about: its goal vocabulary is three prose exit
+conditions and a fingerprint that cannot yet express one of them.
+
+The honest position is therefore not "design the search" but "we do not yet know
+how a user states what they want".  Guessing at that vocabulary from the
+certification suite is what produced this note's inversion; guessing again from
+first principles would be no better.
+
 ## 2. Four ways to say what you want, and only two of them work
 
 The corpus and the existing API between them already contain four goal shapes.
@@ -152,6 +184,24 @@ rather than magic.  A search that cannot reach its goal should say what it
 
 ## Status
 
-Design, prototyped.  Every number above is measured from the prototype in
-scratch; nothing is committed to the library.  The prerequisites are vibe
-000106's, and they are done.
+**Postponed — waiting on data from real use.**
+
+The engineering is ready: the prerequisites (vibe 000106) are done, and §1 shows
+the search itself is close to free.  What is missing is the thing this note set
+out to design — a vocabulary for *stating what you want* — and §1a explains why
+it cannot be settled from here: the only corpus available is a certification
+suite, which contains no examples of the case that dominates real use.
+
+So the next input is not more design.  It is **using tender on concrete
+problems** and recording what the goals actually turn out to be — "components in
+this frame", "collected at powers of ε", and the ones nobody has thought to name
+yet.  Those are the data the goal vocabulary should be fitted to.
+
+Kept as measured and still true, whenever this resumes:
+
+- the search rediscovers the corpus routes, in tens of nodes;
+- the cost is per node, not node count, and the levers for it are known;
+- `meet` is cheap and needs no goal language, so it remains the right *first*
+  thing to build — for verification, which is what it serves;
+- the fingerprint and the goal language co-design, and the fingerprint should not
+  be extended until a real goal asks for a field.
