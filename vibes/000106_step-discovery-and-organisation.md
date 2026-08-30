@@ -186,18 +186,72 @@ mathematical event a derivation chooses deliberately — not punctuation.  That
 line (an event the mathematician names vs. a move the machine needs) is the one
 worth holding.
 
+### What each step does, concretely
+
+Real intermediates, not a description:
+
+```
+a·b        invariant        a·b
+           expand_in_basis  a_j e_j · b_i e_i          ← raw: the dot is still between basis vectors
+           reduce_frame     Σ_i a_i b_i                ← no basis vector survives; the dot consumed both
+           to_concrete      a_x b_x + a_y b_y + a_z b_z
+           reassemble       a·b
+
+a×b        expand_in_basis  a_j e_j × b_i e_i
+           reduce_frame     Σ ε_ikj a_k b_j e_i        ← one *free leg* e_i survives: the result is a vector
+           to_concrete      a_y b_z i − a_z b_y i − …
+           reassemble       a×b
+
+A·b        expand_in_basis  A_kj e_k e_j · b_i e_i
+           reduce_frame     Σ A_ij b_j e_i
+           reassemble       A·b
+```
+
+So the exit conditions, which is what makes the joints crisp:
+
+| step | does | exits when |
+|---|---|---|
+| `expand_in_basis` | choose a frame and a variance; go to components | — (one shot) |
+| `reduce_frame` | everything the frame *alone* licenses: `e·e → δ`, `e×e → ε`, contract δ | no basis-vector product remains |
+| `to_concrete` | replace symbolic indices by the frame's directions, evaluate | no symbolic index remains |
+| `reassemble` | fold components back to invariants | nothing further folds |
+
+Each exit condition is **checkable**, which is not incidental: it is exactly the
+goal predicate a later search would use, and exactly what `applicable`'s stall
+diagnosis would report.
+
+### Where `reduce_frame` stops — and why that is the point
+
+`a×(b×c)` shows the boundary:
+
+```
+expand_in_basis   a_k e_k × (b_j e_j × c_i e_i)
+reduce_frame      Σ −ε_iml ε_mkj a_l b_k c_j e_i     ← stops: two ε's, nothing more the *frame* can say
+contract_eps_pair δ_ij δ_lk a_l b_j c_k e_i          ← a mathematical event, the user's choice
+reduce_frame      Σ a_j b_i c_j e_i + …              ← re-entered
+reassemble        (a·c) b − (a·b) c                   ← bac-cab, derived
+```
+
+`reduce_frame` does **not** apply `contract_eps_pair`, and `reassemble` correctly
+refuses on the un-contracted form.  The user interleaves their own mathematical
+decisions with the bookkeeping steps — which is the whole difference from vibe
+000105's routes, and it is why this is a step vocabulary rather than a pipeline
+with a shorter name.
+
+It also settles the merge question: **`reduce_frame` is re-entrant, and
+`expand_in_basis` is not.**  In the derivation above `reduce_frame` runs twice
+against one `expand_in_basis`, so folding them into a single `to_components`
+would make the second entry inexpressible.  They stay separate.
+
 ### Open calls before this lands
 
 1. **Names.**  `reduce_frame` / `to_concrete`?  (`evaluate` is taken by the chart;
    `simplify_frame` reads as normalisation, which it is not.)
-2. **Does `expand_in_basis` stay separate**, or is there one
-   `to_components(e, frame)` = expand + reduce?  They are adjacent 7 times and
-   `expand_in_basis` is never solo — but keeping them apart preserves the
-   variance decision and gives a future search a finer move.  Recommendation:
-   keep separate.
-3. **What does `target=` mean on `reassemble`** — a tensor name, as
-   `contract_metric` uses (survives canonicalization), or a path (precise but
-   invalidated by the self-prepare)?  Recommendation: a name, for consistency.
+2. ~~Does `expand_in_basis` stay separate?~~ **Settled: yes** — `reduce_frame`
+   is re-entrant and `expand_in_basis` is not; see the bac-cab derivation above.
+3. ~~What does `target=` mean?~~ **Settled (user): a tensor name**, as
+   `contract_metric` uses.  Richer selectors can come later; a name will not
+   block them.
 
 ## 3. Organisation
 
