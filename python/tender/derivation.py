@@ -514,6 +514,33 @@ def simplify(expr):
     return implicitize(canonicalize(expr))
 
 
+def _check_symmetrisable(expr, name):
+    """Transpose swaps *two* slots, so sym/skew mean something only at rank 2.
+
+    Rank 0 is the one other case with an answer, and it is forced: a scalar has
+    no slots to swap, so ``sᵀ = s``.  Rank 1 and rank ≥ 3 have none — a vector
+    has nothing to swap, and for a rank-3 the question "which pair?" is exactly
+    what is missing — so they are refused rather than given a formula that
+    reads as if it meant something (found by the `applicable` probe, which
+    listed ``sym`` as an option on a scalar; vibe 000106).
+
+    An unknown rank is not refused: the expression may still be well-formed and
+    the caller may know more than the inference does.
+    """
+    rank = expr.rank
+    if rank is None or rank in (0, 2):
+        return rank
+    raise ValueError(
+        f"{name}: transpose swaps two slots, so {name} is defined at rank 2 "
+        f"(and trivially at rank 0); this expression has rank {rank}"
+        + (
+            " — a vector has no slots to swap"
+            if rank == 1
+            else " — say which pair of slots you mean"
+        )
+    )
+
+
 def sym(expr):
     """The symmetric part of a rank-2 tensor: ``sym(A) = (A + Aᵀ)/2``.
 
@@ -521,7 +548,12 @@ def sym(expr):
     symmetric by construction.  Recognising the *result* as symmetric (so
     ``sym(A)ᵀ`` folds back) is the separate structural-normalisation work; this
     is just the constructor.
+
+    A scalar is returned unchanged (``sᵀ = s``, so the average is ``s``), and a
+    rank-1 or rank ≥ 3 argument raises: see :func:`_check_symmetrisable`.
     """
+    if _check_symmetrisable(expr, "sym") == 0:
+        return expr
     return (expr + expr.transpose()) / 2
 
 
@@ -529,7 +561,16 @@ def skew(expr):
     """The antisymmetric part of a rank-2 tensor: ``skew(A) = (A − Aᵀ)/2``.
 
     Companion to :func:`sym` (vibe 000080 Increment 7A); ``A = sym(A) + skew(A)``.
+
+    A scalar gives **zero** — ``sᵀ = s``, so the difference vanishes — which is
+    the asymmetry with :func:`sym` worth knowing: the two do not both reduce to
+    the identity at rank 0.
     """
+    if _check_symmetrisable(expr, "skew") == 0:
+        # `expr - expr`, canonicalized to the literal 0 — a builder does not
+        # normally normalise, but there is no information to preserve in a
+        # scalar zero and `s - s` would only puzzle the reader.
+        return canonicalize(expr - expr)
     return (expr - expr.transpose()) / 2
 
 

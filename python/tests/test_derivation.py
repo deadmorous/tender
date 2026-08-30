@@ -1037,6 +1037,44 @@ def test_sym_part_recognised_symmetric_by_construction():
     assert td.algebraic_eq(td.expand_products(td.sym(A) + td.skew(A)), A)
 
 
+def test_sym_and_skew_at_rank_zero():
+    """A scalar has no slots to swap, so sᵀ = s — and the two differ (vibe 000106).
+
+    `sym` is then the identity and `skew` is zero, which is the asymmetry worth
+    knowing: they do not both degenerate the same way.  Before this, both built
+    ½(s ± sᵀ) and neither collapsed, which is how the `applicable` probe came to
+    list `sym` as an option on a dot product.
+    """
+    ws = tender.Workspace()
+    s = ws.field("s", 0)
+    assert td.structural_eq(td.sym(s), s)
+    assert td.algebraic_eq(td.skew(s), tender.scalar(0, ctx=ws.ctx))
+    # …and the decomposition still holds at rank 0.
+    assert td.algebraic_eq(td.sym(s) + td.skew(s), s)
+
+
+def test_sym_and_skew_refuse_a_rank_they_cannot_mean():
+    # Transpose swaps *two* slots: a vector has none to swap, and for rank ≥ 3
+    # "which pair?" is exactly the missing information.  Refuse rather than
+    # build a formula that reads as if it meant something.
+    ws = tender.Workspace()
+    v = ws.field("v", 1)
+    T = ws.field("T", 3)
+    for fn in (td.sym, td.skew):
+        with pytest.raises(ValueError, match="rank 2"):
+            fn(v)
+        with pytest.raises(ValueError, match="which pair"):
+            fn(T)
+
+
+def test_sym_and_skew_still_build_at_rank_two():
+    # The case they are for is untouched.
+    ws = tender.Workspace()
+    A = ws.field("A", 2)
+    assert td.structural_eq(td.sym(A), (A + A.transpose()) / 2)
+    assert td.structural_eq(td.skew(A), (A - A.transpose()) / 2)
+
+
 def test_scalar_div_distributes_over_sum():
     # (A ± B)/c → A/c ± B/c under expand_products (vibe 000080 Increment 7 b1).
     ws = tender.Workspace()

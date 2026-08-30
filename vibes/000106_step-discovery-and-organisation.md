@@ -319,9 +319,25 @@ is honest and improvable step by step, as the vibe proposed.
 
 **The probe immediately found a bug in the library.**  `sym` and `skew` appeared
 as content-changing options on a *scalar*: `sym(a·b)` produced ½(a·b + (a·b)ᵀ)
-and never collapsed, because transpose had no rank-0 case.  A scalar has no
-slots to swap, so `sᵀ = s`; fixed in `nf_lower`.  A tool that reports what
-applies is also a tool that notices what applies *and should not*.
+and never collapsed, because transpose had no rank-0 case.  A tool that reports
+what applies is also a tool that notices what applies *and should not*.
+
+Fixed in two places, and the second was the real one.  `nf_lower` gained the
+rank-0 transpose (`sᵀ = s`), which made the result *simplifiable*; but `sym`
+still built the formula, so it still appeared as an option.  The builders now
+decide by rank:
+
+- **rank 0** — `sym(s) = s`, `skew(s) = 0`.  Worth stating because they
+  degenerate *differently*: the identity and the annihilator, not both the
+  identity.  `A = sym + skew` still holds.
+- **rank 2** — unchanged, the case they exist for.
+- **rank 1 or ≥ 3** — refused.  Transpose swaps *two* slots: a vector has none,
+  and for a rank-3 "which pair?" is exactly the missing information.  Building
+  ½(T ± Tᵀ) there reads as if it meant something.
+
+Afterwards `sym` correctly vanishes from the report on a scalar, while `skew`
+correctly *stays* — it does apply, and gives zero.  The report was not wrong to
+list them; the steps were wrong to accept them.
 
 ## 4b. Steps report for themselves — the interface change (user's call)
 
