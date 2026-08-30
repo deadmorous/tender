@@ -340,24 +340,40 @@ The step set comes **first**: `applicable` reports *over* a set of steps, so
 building it before §2 settles that set would mean building it twice, and tuning
 its fingerprint against steps that are about to be replaced.
 
-1. **Step-set investigation** (§2), ending in a proposed user-facing set.
-2. **Categories/tags** (§3), reusing the identities mechanism.
-3. **`applicable`** with content-change classification, over the settled set and
-   sorted by category; fingerprint tuned against the corpus.
-4. **`why_not`** for the most-used steps.
+1. ~~Step-set investigation~~ **done** — 14 of 15 steps in real derivations
+   were never used alone; the bridge went 12 → 4 (`dec51b6`, `c8492e3`).
+2. ~~Categories/tags~~ **done** — `tender.steps` is the catalogue; advertised
+   surface 41 → 30 and 18 → 13, everything still importable (`f27c4f0`).
+3. ~~`applicable`~~ **done**, with the fingerprint moved to the IR (`dfbf711`).
+4. ~~`why_not`~~ **done**, plus `explain`, in the same commit.
 
 ## 6. Out of scope — the next milestone
 
 **Path search and goal specification.**  The prerequisites above are what make
-it possible: `applicable` is the successor function, and hash-consing gives a
-visited set for free.  A first measurement — branching factor 2–12 at depth 8
-along challenge 000001's pipeline, with a crude over-counting classifier — says
-the space is small enough to be worth searching.
+it possible: `applicable` *is* the successor function, and hash-consing gives a
+visited set for free.
 
-But that measurement was taken over *today's* step set, and §2 expects that set
-to change.  So the search must be designed and assessed against the **redesigned**
-steps, not these; and it needs its own answer to the harder question of how a
-user *states the goal* of a derivation.  Both belong in the next vibe.
+The measurement, **re-taken over the redesigned set** now that it exists.  Along
+challenge 000001's derivation (`a×(b×c)` out to components, through the ε-pair,
+and back to bac-cab):
+
+| | branching | depth |
+|---|---|---|
+| old set, crude LaTeX classifier | 2–12 | 8 |
+| new set, all content-changing steps | 4–10 | 5 |
+| **new set, primaries only** | **2–5** | **5** |
+
+The redesign roughly halved both, and restricting to primaries halves it again —
+because the punctuation steps that used to pad every state are no longer things
+a derivation reaches for.  A worst case of 5⁵ before dedup is not a search
+problem so much as an enumeration.
+
+What is *not* settled, and is the real work of the next milestone: how a user
+**states the goal**.  §2 gave every bridge step a checkable exit condition ("no
+basis-vector product remains", "no symbolic index remains"), which is a start —
+those are goals a search can evaluate — and §6's boundary note gives another
+("reach a state where `prove_equal` finishes").  Whether that vocabulary is
+enough for a real derivation is the open question.
 
 Vibe 000105's nine hand-written pipelines are then not a design but **test data**:
 what a search must be able to rediscover.
@@ -413,6 +429,24 @@ Risk to watch: if §2's redesign makes steps higher-level, some may come to
 
 ## Status
 
-Design, revised twice — after the routes objection, and after the user's scoping
-call.  `applicable` is prototyped in scratch and the numbers here are measured
-from it; nothing is committed to the library.
+**Implemented** (2026-08-30), in four commits: `dec51b6` `reduce_frame` /
+`to_concrete`, `c8492e3` the unified `reassemble` with `target=`, `f27c4f0` the
+catalogue, `dfbf711` `applicable` / `why_not` / `explain`.
+
+Every number in this note is measured, not estimated — from the corpus for the
+step-set claims, and from the shipped code for the rest.
+
+Two things the work turned up that were not in the design:
+
+- **Composing self-preparing steps needs a "did it do work?" test**, not just
+  "did it change?".  Each fold canonicalizes on entry, so a fold that did
+  nothing still returns a reordered expression and would silently undo its
+  predecessor's answer (`y·a` came back as `a·y`).  This bit twice while
+  unifying `reassemble`, and it is the same distinction `applicable` rests on —
+  which suggests it is a property of the step contract, not a local quirk.
+- **A tool that reports what applies also notices what applies and should
+  not.**  `sym`/`skew` surfaced as options on a scalar, because transpose had no
+  rank-0 case.  Fixed.
+
+Left for the next milestone: path search and goal specification (§6), and
+`why_not` preconditions for the 20 steps that carry none.
