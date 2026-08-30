@@ -129,6 +129,76 @@ thing vibe 000105 got wrong — a prescribed route with a shorter name.  The
 `target=` escape hatch is what keeps it from becoming that, and step 4's
 legibility measure is what detects it.
 
+### Investigation results (2026-08-30)
+
+Re-measured on **real derivations only** — the 24 challenges and 12 examples,
+excluding `python/tests`, where a unit test calls a step alone *by design* and so
+is not evidence of anything.  The result is sharper than the first count:
+
+> **14 of the 15 steps used in real derivations are never used alone.**
+> The exception is `simplify_scalars`, once.
+
+Every real derivation is a pipeline.  So the question is not *whether* to raise
+the level but *where* the joints are.  Three candidate bridge steps, each a
+fixpoint of today's moves, were prototyped and checked against the corpus's own
+hand-written pipelines:
+
+```python
+reduce_frame(e, frame)   # fixpoint: simplify_basis_cross, simplify_basis_dot,
+                         #           canonicalize, contract_delta
+to_concrete(e, frame)    # fixpoint: unroll_sums, eval_eps_concrete,
+                         #           eval_delta_concrete, fold_arithmetic
+reassemble(e, frame)     # fixpoint: reassemble, reassemble_completeness,
+                         #           fold_resolution_of_identity
+```
+
+Measured:
+
+| corpus pipeline | today | proposed | result |
+|---|---|---|---|
+| 000004 `a·b` → symbolic components | 5 moves | 2 | match |
+| 000005 `a×I` → symbolic components | 3 moves | 2 | match |
+| 000001 `a×(b×c)` → concrete | 10 moves | 3 | match |
+| 000014 `(a×b)·(c×d)` → concrete | 8 moves | 3 | match |
+| 000017 round-trip battery, 10 shapes | — | 3 | 10/10 |
+
+`canonicalize` — 19 uses, never alone — **disappears from user code entirely** in
+all of them.  That is the self-preparation principle finally applied where it was
+always going to pay.
+
+### The proposed bridge set: 12 → 4
+
+| keep | why |
+|---|---|
+| `expand_in_basis(e, frame, variance)` | choosing to go to components, and on which frame, is a real decision |
+| `reduce_frame(e, frame)` | reduce whatever the frame licenses |
+| `to_concrete(e, frame)` | evaluate over the frame's directions |
+| `reassemble(e, frame, target=None)` | come back to direct notation |
+
+Demoted but still importable: `simplify_basis_dot`, `simplify_basis_cross`,
+`contract_delta`, `canonicalize`, `unroll_sums`, `eval_eps_concrete`,
+`eval_delta_concrete`, `fold_arithmetic`, `reassemble_completeness`,
+`fold_resolution_of_identity`.
+
+Note what is *not* absorbed: `contract_eps_pair`, `contract_metric`,
+`insert_metric`, `contract_identity` stay user-facing, because each is a distinct
+mathematical event a derivation chooses deliberately — not punctuation.  That
+line (an event the mathematician names vs. a move the machine needs) is the one
+worth holding.
+
+### Open calls before this lands
+
+1. **Names.**  `reduce_frame` / `to_concrete`?  (`evaluate` is taken by the chart;
+   `simplify_frame` reads as normalisation, which it is not.)
+2. **Does `expand_in_basis` stay separate**, or is there one
+   `to_components(e, frame)` = expand + reduce?  They are adjacent 7 times and
+   `expand_in_basis` is never solo — but keeping them apart preserves the
+   variance decision and gives a future search a finer move.  Recommendation:
+   keep separate.
+3. **What does `target=` mean on `reassemble`** — a tensor name, as
+   `contract_metric` uses (survives canonicalization), or a path (precise but
+   invalidated by the self-prepare)?  Recommendation: a name, for consistency.
+
 ## 3. Organisation
 
 The categories a user needs are **not** the current module split (`td` / `tb` /
@@ -167,11 +237,14 @@ a regression: vibe 92 objected to ~30 exported steps, M3 got
 
 ## 5. Order of work
 
-1. **`applicable`** with content-change classification, fingerprint held open
-   and tuned against the corpus.
-2. **Step-set investigation** (§2), ending in a proposed user-facing set.
-3. **Categories/tags**, reusing the identities mechanism; probe output sorted by
-   them; docs follow.
+The step set comes **first**: `applicable` reports *over* a set of steps, so
+building it before §2 settles that set would mean building it twice, and tuning
+its fingerprint against steps that are about to be replaced.
+
+1. **Step-set investigation** (§2), ending in a proposed user-facing set.
+2. **Categories/tags** (§3), reusing the identities mechanism.
+3. **`applicable`** with content-change classification, over the settled set and
+   sorted by category; fingerprint tuned against the corpus.
 4. **`why_not`** for the most-used steps.
 
 ## 6. Out of scope — the next milestone
