@@ -519,11 +519,90 @@ list would erase it; and the L1 brute-force reduction helpers, which are
 reductions rather than derivations and legitimately contain no-ops that
 `Derivation` would warn about.
 
+## 14. The catalogue could not see a step that lives on an object
+
+Found in use, trying to expand an invariant ∇ in WCS: `cart.expand_nabla` is a
+derivation step by every practical measure, and the chooser did not list it —
+not as applicable, not as blocked, not at all.
+
+**The size of the hole, counted.**  Across the challenges and the examples,
+~173 calls land on a chart object (`grad` 36, `div` 35, `components` 30, `rot`
+17, `laplacian` 17, `expand` 16, `evaluate` 14, `expand_nabla` 9,
+`reassemble_nabla` 5) against ~294 `tb.`/`td.` calls of all kinds.  Roughly a
+third of the moves in real derivations happened on a chart, and *none* of it
+was catalogued.
+
+**Why.**  The catalogue assumed a step is a **module-level function**:
+`_r(name, module, home)` is `getattr(module, name)`, and the honesty test
+asserted `getattr(mod, name) is step.fn`.  A chart's steps are methods on an
+object that is itself a *parameter* — the same relation `basis` has to
+`tb.expand_in_basis`, but spelled as a method.  And the test meant to catch
+omissions walked `td.__all__` and `tb.__all__`; `tender.chart.__all__` was
+`["CoordinateChart"]`, a class, so extending that loop would still have found
+nothing.  Vibe 000106 measured which steps appeared in real derivations — but
+it measured the two modules it knew about, and never asked whether that was the
+whole surface.
+
+That is the part worth remembering: **the surface promises "here is what
+applies here", and a promise that silently omits a third of the vocabulary is
+worse than no promise**, because absence is indistinguishable from
+inapplicability.  Nothing was shown, so nothing looked wrong.
+
+### The fix, in two halves
+
+**Seven functions.**  `tender.chart` now exports the rewriting methods as
+functions taking the expression first — `tc.expand_nabla(e, chart)` *is*
+`chart.expand_nabla(e)` — exactly as `tender.basis` exports `(expr, basis)`
+functions beside `Basis`.  Written that way they catalogue like anything else,
+and the "method-backed step" special case disappears instead of being
+accommodated.  They sort into the existing categories with no new one needed,
+which is a good sign the categories of vibe 000106 were drawn in the right
+place: `expand`, `express`, `to_reference` are **bridge**; `evaluate`,
+`expand_nabla`, `reassemble_nabla`, `componentize_nabla` are **operators**.
+
+`grad` / `div` / `rot` / `laplacian` are deliberately left out.  They are
+Expr→Expr and would fire, but offering `div` in a chooser means "take the
+divergence of this whole expression" — a modelling decision, not a rewriting
+step.
+
+The `chart` kind cost almost nothing: `scan_scope` already recognised a
+`CoordinateChart` (it was harvesting `.coords`), so it was being *looked at*
+and not asked the obvious question.  Several charts in scope — common in these
+examples — get the context row's dropdown, so switching chart re-probes the
+whole chooser.
+
+**A standing audit.**  Three tests now stand between the catalogue and the next
+omission:
+
+- every name in `td`/`tb`/`tc`'s `__all__` is catalogued **or** exempted in a
+  table that records *why* ("a type", "a factory", "a combinator or driver",
+  "an operator, not a rewriting step");
+- every public method of `CoordinateChart` and `Basis` shaped like a step —
+  exactly one expression parameter, an expression returned, read off the
+  signature nanobind puts in the docstring — is catalogued or exempted;
+- no exemption names something that no longer exists, so a stale entry cannot
+  hide the next omission.
+
+Both arms were checked by deleting a registration and watching them fail.  The
+exemption table is the useful artifact: classifying a new public name becomes a
+deliberate act rather than something nobody did.
+
+### The remaining wart
+
+`expand`, `evaluate` and `expand_nabla` all fire on an invariant ∇ expression
+and all three are now offered, which is the right answer to "what can I do
+here?" and an unhelpful one to "what do I want?".  Their summaries carry the
+distinction; the chooser shows only the bare name, where `chart.expand` sits
+beside `derivation.expand_products` and `basis.expand_in_basis`.  Left as it
+is for now — the fix is presentational (show the qualified tail), and the GUI
+is not being polished — but recorded, because it is the first case where two
+catalogued steps share a plain English word.
+
 ## Status
 
 **Built.**  `tender.explore` (the session), `tender.gui` (the widget),
 `td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
-showcase.  76 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+showcase.  81 tests in `python/tests/test_explore.py`; `ipywidgets` is an
 optional dependency and the widget tests skip without it.  Used, and corrected
 by that use — §9.
 

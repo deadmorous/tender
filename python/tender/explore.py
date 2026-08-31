@@ -39,6 +39,7 @@ import inspect
 
 from tender import _core
 from . import basis as _b
+from . import chart as _c
 from . import derivation as _d
 from . import steps as _ts
 
@@ -64,7 +65,9 @@ class DidNotFire(Exception):
 # The argument kinds a step can want, and how to recognise an object of that
 # kind in a namespace.  Closed list — the same one the catalogue draws `needs`
 # from — so a new kind is a deliberate addition in two places, not a guess.
-KINDS = ("basis", "coord", "rules", "level", "op", "identity", "ctx")
+KINDS = (
+    "basis", "chart", "coord", "rules", "level", "op", "identity", "ctx",
+)
 
 # The kinds an object in a namespace can be recognised as.  `identity` is not
 # among them on purpose: which rule to apply is a decision per step, not per
@@ -101,6 +104,7 @@ def _is_op(v):
 
 _RECOGNISE = {
     "basis": lambda v: isinstance(v, _b.Basis),
+    "chart": lambda v: isinstance(v, _c.CoordinateChart),
     "coord": lambda v: isinstance(v, _core.Expr) and _is_coord(v),
     "rules": _is_rules,
     "level": lambda v: isinstance(v, _core.Level),
@@ -145,7 +149,7 @@ def scan_scope(scope):
     for name, value in scope.items():
         if name.startswith("_"):
             continue
-        if type(value).__name__ == "CoordinateChart":
+        if isinstance(value, _c.CoordinateChart):
             charts.append((name, value))
         if type(value).__name__ == "Workspace":
             spaces.append((name, value))

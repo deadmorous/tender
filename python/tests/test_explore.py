@@ -60,6 +60,16 @@ class TestScopeScanning:
             "chart.coords[0]", "chart.coords[1]", "chart.coords[2]",
         ]
 
+    def test_a_chart_is_found_by_kind_as_well_as_for_its_coordinates(self):
+        # The gap of vibe 000108 §14: a chart was scanned only to harvest its
+        # coordinates, while the steps that take the chart itself were not in
+        # the catalogue at all.
+        ctx = tender.Context()
+        chart = _cyl_chart(ctx)
+        found = tx.scan_scope({"cart": chart})
+        assert [x.name for x in found["chart"]] == ["cart"]
+        assert found["chart"][0].value is chart
+
     def test_rules_and_levels_are_recognised_by_kind(self):
         ctx = tender.Context()
         rules = td.rules("eps_delta", ctx=ctx)
@@ -135,6 +145,47 @@ class TestContextFilling:
         ctx, frame, a, b = _setup()
         s = tx.Session(a @ b, scope={"frame": frame})
         assert s.applicable().missing["tender.derivation.partial"] == ("coord",)
+
+
+class TestChartSteps:
+    """A ∇ derivation starts on the chart, so the chooser must reach it."""
+
+    def _nabla_session(self, **kw):
+        ws = tender.Workspace()
+        cart, _ = ws.cartesian_chart()
+        u = tender.field("u", 1, ctx=ws.ctx)
+        nabla = tender.nabla(ws.ctx)
+        return ws, cart, tx.Session(nabla @ (nabla * u), **kw, scope={
+            "ws": ws, "cart": cart,
+        })
+
+    def test_the_chart_moves_are_offered(self):
+        ws, cart, s = self._nabla_session()
+        got = {h.step.name for h in s.applicable().changing}
+        assert {"expand_nabla", "evaluate", "expand"} <= got
+
+    def test_without_a_chart_they_are_not_tried_rather_than_absent(self):
+        # The failure that prompted this: nothing at all was shown, so absence
+        # was indistinguishable from inapplicability.
+        ws = tender.Workspace()
+        u = tender.field("u", 1, ctx=ws.ctx)
+        nabla = tender.nabla(ws.ctx)
+        s = tx.Session(nabla @ (nabla * u), needs={})
+        assert "tender.chart.expand_nabla" in s.applicable().blocked_on("chart")
+
+    def test_taking_one_emits_a_chart_bound_script(self):
+        ws, cart, s = self._nabla_session()
+        s.apply("expand_nabla")
+        assert "b = ts.using(chart=cart)" in s.script()
+        assert "b.expand_nabla," in s.script()
+
+    def test_the_function_form_is_the_method(self):
+        ws, cart, s = self._nabla_session()
+        import tender.chart as tc
+
+        assert td.structural_eq(
+            tc.expand_nabla(s.current, cart), cart.expand_nabla(s.current)
+        )
 
 
 class TestThePath:

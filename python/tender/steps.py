@@ -22,7 +22,8 @@ derivations never appeared alone — they were punctuation between the moves tha
 mattered.
 
 **`needs`** lists what a step wants besides the expression, drawn from a short
-closed list — ``basis``, ``coord``, ``rules``, ``level``, ``op``, ``identity``.
+closed list — ``basis``, ``chart``, ``coord``, ``rules``, ``level``, ``op``,
+``identity``.
 ``options`` lists what it will *accept*: ``target`` names a single object to act on,
 ``variance`` picks co/contravariant.  Both are here so a tool can supply them
 from context rather than each caller remembering.
@@ -36,6 +37,7 @@ from typing import Any, Callable
 
 from . import _core
 from . import basis as _b
+from . import chart as _c
 from . import derivation as _d
 
 # Re-exported for callers who want the demoted moves directly.
@@ -323,6 +325,7 @@ def describe(category=None):
 
 _D = "tender.derivation"
 _B = "tender.basis"
+_C = "tender.chart"
 
 
 def _r(name, mod, home, **kw):
@@ -370,6 +373,19 @@ _r("eval_eps_concrete", _d, _D, category="bridge",
    wants={"epsilons": 1},
    summary="evaluate ε on concrete indices")
 
+# ---- bridge: the chart ----------------------------------------------------
+# A third of the moves in real derivations happen on a chart, and none of them
+# were catalogued until vibe 000108 §14 — the catalogue assumed a step was a
+# module-level function, and these were methods on a parameter.
+_r("expand", _c, _C, category="bridge", primary=True, needs=("chart",),
+   summary="expand abstract fields into components on the physical frame")
+_r("express", _c, _C, category="bridge", primary=True, needs=("chart",),
+   wants={"basis_vectors": 1},
+   summary="re-express in this chart's frame — the general change of basis")
+_r("to_reference", _c, _C, category="bridge", needs=("chart",),
+   wants={"basis_vectors": 1},
+   summary="re-express in the reference (WCS) frame")
+
 # ---- index algebra --------------------------------------------------------
 _r("contract_delta", _d, _D, category="index", primary=True,
    reported=_core.derivation._contract_delta_reported,
@@ -405,6 +421,19 @@ _r("fold_operator", _d, _D, category="operators", primary=True, needs=("op",),
    reported=_core.derivation._fold_operator_reported,
    wants={"deriv_marks": 1},
    summary="fold an operator's expansion back into the operator")
+
+_r("evaluate", _c, _C, category="operators", primary=True, needs=("chart",),
+   wants={"nablas": 1},
+   summary="lower an invariant ∇ expression onto this chart's operators")
+_r("expand_nabla", _c, _C, category="operators", primary=True, needs=("chart",),
+   wants={"nablas": 1},
+   summary="expand a chart-free ∇ into the free-index frame form eᵢ∂ᵢ")
+_r("reassemble_nabla", _c, _C, category="operators", primary=True,
+   needs=("chart",), wants={"deriv_marks": 1},
+   summary="fold a reduced free-index expression back into ∇ operators")
+_r("componentize_nabla", _c, _C, category="operators", needs=("chart",),
+   wants={"deriv_marks": 1},
+   summary="lower an expand_nabla result to concrete components")
 
 # ---- normalise ------------------------------------------------------------
 _r("simplify", _d, _D, category="normalise", primary=True,

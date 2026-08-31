@@ -6,12 +6,75 @@ honest: an entry that has drifted from the function it names, or a step that
 exists but was never catalogued, is worse than no catalogue at all.
 """
 
+import re
+
 import pytest
 
 import tender
 import tender.basis as tb
+import tender.chart as tc
 import tender.derivation as td
 import tender.steps as ts
+
+
+# Every public name that could be a step is either catalogued or exempted
+# *here, with a reason*.  The reasons are the inventory: classifying a new
+# public name becomes a deliberate act, which is exactly the check that was
+# missing when `tender.chart` fell out of the catalogue and nothing noticed
+# (vibe 000108 §14).
+NOT_STEPS: dict = {}
+
+
+def _exempt(reason, *names):
+    NOT_STEPS.update(dict.fromkeys(names, reason))
+
+
+_exempt(
+    "a type",
+    "Basis", "Budget", "BudgetExceeded", "CoordinateChart", "Derivation",
+    "Handedness", "Identity", "NoOpStep", "ProofResult", "Variance",
+)
+_exempt("a predicate, not a rewrite", "algebraic_eq", "structural_eq")
+_exempt(
+    "a factory: it builds a thing steps use, rather than rewriting one",
+    "citable_for", "cylindrical", "deriv", "make_oblique_basis",
+    "make_orthonormal_basis", "polar_2d", "rule", "rule_groups", "rules",
+    "spherical", "wcs",
+)
+_exempt(
+    "a combinator or driver: it runs steps rather than being one",
+    "at", "derive", "explore", "prove_equal",
+)
+_exempt("a goal-directed verb, above the step layer", "PREFER")
+_exempt("configuration", "default_budget", "set_default_budget")
+_exempt(
+    "an operator, not a rewriting step: it *builds* ∇⊙X from an operand "
+    "rather than rewriting what is already there",
+    "div", "grad", "laplacian", "rot",
+)
+
+
+def _expression_methods(cls):
+    """Public methods of *cls* shaped like a step: one Expr in, an Expr out.
+
+    Read off the bound signature nanobind puts in the first docstring line,
+    since these are not introspectable by :mod:`inspect`.  Requiring *exactly
+    one* expression parameter is what separates a step from a builder like
+    ``chart.dot(u, v)``.
+    """
+    signature = re.compile(r"^\w+\((.*)\)\s*->\s*(.+)$")
+    found = []
+    for name in dir(cls):
+        if name.startswith("_"):
+            continue
+        first = (getattr(cls, name).__doc__ or "").split("\n")[0].strip()
+        match = signature.match(first)
+        if not match or match.group(2).strip() != "tender._core.Expr":
+            continue
+        params = match.group(1).split(", ")
+        if sum(": tender._core.Expr" in p for p in params) == 1:
+            found.append(name)
+    return sorted(found)
 
 
 class TestCatalogueIsHonest:
@@ -33,22 +96,37 @@ class TestCatalogueIsHonest:
         # The reconciliation the identity DAG does for rules: a step on the
         # advertised surface that nobody catalogued is a step nobody can find.
         catalogued = set(ts.names())
-        not_steps = {  # types, predicates, factories, combinators
-            "Budget", "BudgetExceeded", "Derivation", "Identity", "NoOpStep",
-            "PREFER", "ProofResult", "algebraic_eq", "structural_eq",
-            "prove_equal", "rules", "rule_groups", "citable_for",
-            "default_budget", "set_default_budget", "at", "apply_identity",
-            "deriv", "explore", "rule", "derive", "Basis", "Handedness",
-            "Variance", "wcs",
-            "cylindrical",
-            "spherical", "polar_2d", "make_orthonormal_basis",
-            "make_oblique_basis",
-        }
-        for mod in (td, tb):
+        for mod in (td, tb, tc):
             for name in mod.__all__:
-                if name in not_steps:
-                    continue
-                assert name in catalogued, f"{name} is advertised but not catalogued"
+                assert name in catalogued or name in NOT_STEPS, (
+                    f"{mod.__name__}.{name} is advertised but neither "
+                    f"catalogued nor exempted in NOT_STEPS"
+                )
+
+    def test_every_exemption_is_still_a_real_name(self):
+        # An exemption that has outlived its name hides the next omission.
+        advertised = {n for mod in (td, tb, tc) for n in mod.__all__}
+        advertised |= {
+            n
+            for cls in (tc.CoordinateChart, tb.Basis)
+            for n in _expression_methods(cls)
+        }
+        stale = sorted(set(NOT_STEPS) - advertised - set(ts.names()))
+        assert stale == [], f"NOT_STEPS names nothing any more: {stale}"
+
+    def test_a_step_hiding_on_an_object_is_catalogued_too(self):
+        # The omission this test exists for: `tender.chart`'s steps are methods
+        # on a *parameter*, so no module-level scan could see them, and a third
+        # of the moves in real derivations were invisible to the catalogue
+        # (vibe 000108 §14).  Anything shaped like a step — one expression in,
+        # an expression out — must be catalogued or exempted with a reason.
+        catalogued = set(ts.names())
+        for cls in (tc.CoordinateChart, tb.Basis):
+            for name in _expression_methods(cls):
+                assert name in catalogued or name in NOT_STEPS, (
+                    f"{cls.__name__}.{name} takes an expression and returns "
+                    f"one, but is neither catalogued nor exempted"
+                )
 
     def test_the_demoted_moves_are_still_importable(self):
         # Demotion is about the *advertised* surface; nothing was removed.
@@ -59,9 +137,12 @@ class TestCatalogueIsHonest:
             assert name not in mod.__all__, name
             assert callable(getattr(mod, name)), name
 
-    def test_the_bridge_primaries_are_the_four(self):
+    def test_the_bridge_primaries_cross_both_ways(self):
+        # Four on a frame, two on a chart — the chart half was missing from the
+        # catalogue entirely until vibe 000108 §14.
         assert [s.name for s in ts.in_category("bridge") if s.primary] == [
-            "expand_in_basis", "reassemble", "reduce_frame", "to_concrete",
+            "expand", "expand_in_basis", "express", "reassemble",
+            "reduce_frame", "to_concrete",
         ]
 
 
@@ -112,8 +193,10 @@ class TestStepCall:
             except Exception:
                 pass  # a domain error is fine; the call itself worked
         assert sorted(needs_more) == [
-            "apply_identity", "engine_simplify", "fold_operator",
-            "insert_metric", "partial", "saturate",
+            "apply_identity", "componentize_nabla", "engine_simplify",
+            "evaluate", "expand", "expand_nabla", "express", "fold_operator",
+            "insert_metric", "partial", "reassemble_nabla", "saturate",
+            "to_reference",
         ]
 
 

@@ -420,6 +420,15 @@ Bridge steps:
 
 ## `CoordinateChart` (`tender.chart`)
 
+> The rewriting methods below are also **functions** taking the expression
+> first — `tc.expand_nabla(e, chart)` is `chart.expand_nabla(e)` — which is the
+> shape the catalogue and `ts.using(chart=…)` speak.  Seven of them are steps:
+> `expand`, `express`, `to_reference` (bridge) and `evaluate`, `expand_nabla`,
+> `reassemble_nabla`, `componentize_nabla` (operators).  `grad`/`div`/`rot`/
+> `laplacian` are deliberately *not* steps: they build ∇⊙X from an operand
+> rather than rewriting what is there.
+
+
 ```python
 cart, (x, y, z)  = ws.cartesian_chart()      # the standard charts, by name
 cyl,  (r, th, z) = ws.cylindrical_chart()
