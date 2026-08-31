@@ -587,22 +587,38 @@ Both arms were checked by deleting a registration and watching them fail.  The
 exemption table is the useful artifact: classifying a new public name becomes a
 deliberate act rather than something nobody did.
 
-### The remaining wart
+### Steps are shown as `module.name`
 
-`expand`, `evaluate` and `expand_nabla` all fire on an invariant ∇ expression
-and all three are now offered, which is the right answer to "what can I do
-here?" and an unhelpful one to "what do I want?".  Their summaries carry the
-distinction; the chooser shows only the bare name, where `chart.expand` sits
-beside `derivation.expand_products` and `basis.expand_in_basis`.  Left as it
-is for now — the fix is presentational (show the qualified tail), and the GUI
-is not being polished — but recorded, because it is the first case where two
-catalogued steps share a plain English word.
+Cataloguing the chart produced the first case of two steps sharing a plain
+English word: `chart.expand`, `derivation.expand_products`,
+`basis.expand_in_basis`, and a chooser showing only `expand`.  So the chooser,
+the *not tried* line and the *did not fire* line all now show the qualified
+tail — which is how `describe()` has always presented the catalogue, so this is
+the panel catching up with the module rather than a new convention.
+
+The filter matches **what is shown**, which turns out to be the better half of
+the change: `^chart[.]` narrows to that module's steps, and `basis` reaches the
+nine listed as *not tried* for want of a frame.  One pattern now reaches a
+whole vocabulary, where before it could only reach a name.
+
+### And the script imports what the namespace lacks
+
+Asked in the same breath: *what is `ts` in the code pane?*  It is
+`tender.steps`, and the honest answer is that the script should not have
+required asking.  The emitter's module aliases were **defaults** — `ts`, `td`,
+`tb`, `tc` — guesses about names that may not exist, so a pasted script could
+fail on its first line.
+
+`script()` now emits an `import` line for each module it uses and the namespace
+does not hold, and none for those it does.  The artifact answers the question
+itself, and the rule generalises: everything the emitted code leans on is
+either in your preamble or imported at its head.
 
 ## Status
 
 **Built.**  `tender.explore` (the session), `tender.gui` (the widget),
 `td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
-showcase.  81 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+showcase.  83 tests in `python/tests/test_explore.py`; `ipywidgets` is an
 optional dependency and the widget tests skip without it.  Used, and corrected
 by that use — §9.
 

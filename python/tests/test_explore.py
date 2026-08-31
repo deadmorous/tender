@@ -238,7 +238,7 @@ class TestScript:
         # argument is bound once and the list is data you can edit.
         ctx, frame, a, b = _setup()
         e0 = a @ b
-        s = tx.Session(e0, scope={"frame": frame, "e0": e0})
+        s = tx.Session(e0, scope={"frame": frame, "e0": e0, "td": td, "ts": ts})
         s.apply("expand_in_basis").apply("reduce_frame")
         assert s.script() == (
             "b = ts.using(basis=frame)\n"
@@ -247,6 +247,23 @@ class TestScript:
             "    b.reduce_frame,\n"
             "]).current"
         )
+
+    def test_it_imports_what_your_namespace_does_not_have(self):
+        # A default alias is a guess about a name in the namespace; when the
+        # guess is wrong the pasted script fails on its first line.
+        ctx, frame, a, b = _setup()
+        e0 = a @ b
+        s = tx.Session(e0, scope={"frame": frame, "e0": e0})
+        s.apply("expand_in_basis")
+        assert s.script().startswith(
+            "import tender.derivation as td\nimport tender.steps as ts\n\n"
+        )
+        # …and says nothing when you already have them.
+        held = tx.Session(
+            e0, scope={"frame": frame, "e0": e0, "td": td, "ts": ts}
+        )
+        held.apply("expand_in_basis")
+        assert held.script().startswith("b = ts.using(")
 
     def test_the_assignment_chain_is_still_available(self):
         ctx, frame, a, b = _setup()
@@ -266,7 +283,7 @@ class TestScript:
 
     def test_a_step_with_no_arguments_needs_no_binder(self):
         ctx, frame, a, b = _setup()
-        s = tx.Session(a + a, needs={}, name="e0")
+        s = tx.Session(a + a, needs={}, name="e0", scope={"td": td})
         s.apply("fold_equal_addends")
         assert s.script() == (
             "e = td.derive(e0, [\n    td.fold_equal_addends,\n]).current"
@@ -486,10 +503,24 @@ class TestFilter:
         s, w = self._widget()
         item = w.items[0]
         before = {v for _, v in item.chooser.options if v}
-        item.filter.value = "basis"
+        item.filter.value = "basis_"
         after = {v for _, v in item.chooser.options if v}
         assert after < before
         assert all("basis" in n for n in after)
+
+    def test_it_matches_the_module_tail_too(self):
+        # The chooser shows `chart.expand`, so the filter matches that — one
+        # pattern reaches a whole module's worth of steps.
+        ws = tender.Workspace()
+        cart, _ = ws.cartesian_chart()
+        u = tender.field("u", 1, ctx=ws.ctx)
+        nabla = tender.nabla(ws.ctx)
+        gui = pytest.importorskip("tender.gui")
+        s = tx.Session(nabla @ (nabla * u), needs={"chart": cart})
+        item = gui.build(s).items[0]
+        item.filter.value = "^chart[.]"
+        offered = [lb for lb, v in item.chooser.options if v]
+        assert offered and all(lb.startswith("chart.") for lb in offered)
 
     def test_a_regex_is_a_regex(self):
         s, w = self._widget()
@@ -661,7 +692,7 @@ class TestIdentityChooser:
         # was tried — that is what the delimiter above it says.
         s, w = self._widget()
         labels = [lb for lb, _ in w.items[0].chooser.options]
-        assert any(lb.startswith("apply_identity") for lb in labels)
+        assert any(lb.startswith("derivation.apply_identity") for lb in labels)
         assert any(set(lb) == {"─"} for lb in labels)
         assert w.items[0].rule_row.layout.display == "none"
 

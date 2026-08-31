@@ -175,17 +175,26 @@ def scan_scope(scope):
 
 
 def _module_aliases(scope):
-    """What the user's namespace calls ``tender.basis`` and friends."""
+    """What the user's namespace calls ``tender.basis`` and friends.
+
+    Returns ``(alias, in_scope)`` — the second being the modules the namespace
+    actually holds, so a script can import the ones it does not.  A default
+    alias is a guess about a name that may not exist; an emitted script that
+    leans on one would fail on paste.
+    """
     alias = {
         "tender": "tender",
         "tender.basis": "tb",
+        "tender.chart": "tc",
         "tender.derivation": "td",
         "tender.steps": "ts",
     }
+    in_scope = set()
     for name, value in scope.items():
         if inspect.ismodule(value) and getattr(value, "__name__", "") in alias:
             alias[value.__name__] = name
-    return alias
+            in_scope.add(value.__name__)
+    return alias, in_scope
 
 
 class Node:
@@ -222,7 +231,7 @@ class Session:
         either — it is where a keyword argument to :func:`explore` lands.
         """
         self.scope = dict(scope or {})
-        self.aliases = _module_aliases(self.scope)
+        self.aliases, self._alias_in_scope = _module_aliases(self.scope)
         self.scanned = needs is None
         # Explicit beats inferred, and asking for one excludes the other: a
         # `needs` dict is a statement about what the steps get, so nothing the
@@ -379,7 +388,25 @@ class Session:
         "tender._core.derivation": "tender.derivation",
     }
 
-    def _literal(self, value):
+    def _alias(self, module, used):
+        """The name for *module*, remembering that the script now needs it."""
+        used.add(module)
+        return self.aliases.get(module, module)
+
+    def _imports(self, used):
+        """``import`` lines for the modules the script uses and you do not have.
+
+        A default alias is a guess about a name in your namespace; when the
+        guess is wrong the pasted script fails on its first line.  Emitting the
+        import is also the answer to "what is `ts`?" — asked, once, about a
+        binder line whose module nobody had imported.
+        """
+        return [
+            f"import {module} as {self.aliases[module]}"
+            for module in sorted(used - self._alias_in_scope)
+        ]
+
+    def _literal(self, value, used):
         """*value* as source text: your own name for it where there is one."""
         if isinstance(value, (str, bool, int, float)) or value is None:
             return repr(value)
@@ -387,7 +414,7 @@ class Session:
             # Cited by name, not by where it sat in a list: a rule named in a
             # script says which rewrite was taken.
             src = self.identity_source
-            alias = self.aliases.get("tender.derivation", "td")
+            alias = self._alias("tender.derivation", used)
             where = src.name if src is not None else "ctx"
             return f"{alias}.rule({value.name!r}, {where})"
         for name, held in self.scope.items():
@@ -396,12 +423,12 @@ class Session:
         text = repr(value)
         home = self._PUBLIC.get(getattr(type(value), "__module__", ""))
         if home and text.startswith(type(value).__name__ + "."):
-            return f"{self.aliases.get(home, home)}.{text}"
+            return f"{self._alias(home, used)}.{text}"
         return text
 
-    def _call_text(self, node):
+    def _call_text(self, node, used):
         st = _ts.info(node.step)
-        alias = self.aliases.get(st.home, st.home)
+        alias = self._alias(st.home, used)
         args = ["e"]
         for kind in st.needs:
             if kind in node.kwargs:
@@ -409,11 +436,11 @@ class Session:
                 args.append(
                     b.name
                     if b is not None and b.value is node.kwargs[kind]
-                    else self._literal(node.kwargs[kind])
+                    else self._literal(node.kwargs[kind], used)
                 )
         for kind in st.options:
             if kind in node.kwargs:
-                args.append(f"{kind}={self._literal(node.kwargs[kind])}")
+                args.append(f"{kind}={self._literal(node.kwargs[kind], used)}")
         return f"{alias}.{node.step}({', '.join(args)})"
 
     def script(self, style="list"):
@@ -433,11 +460,13 @@ class Session:
         ``style="assign"`` emits the chain of assignments instead — shorter to
         read for two or three steps, and nothing but a chain of assignments.
         """
+        used = set()
         if style == "assign":
             lines = [f"e = {self.start_name}"]
             for node in self.path[1:]:
-                lines.append(f"e = {self._call_text(node)}")
-            return "\n".join(lines)
+                lines.append(f"e = {self._call_text(node, used)}")
+            head = self._imports(used)
+            return "\n".join(head + ([""] if head else []) + lines)
         if style != "list":
             raise ValueError(f"unknown style {style!r}; expected list or assign")
 
@@ -457,7 +486,7 @@ class Session:
         lines, entries = [], []
         binding = any(node.kwargs for node in nodes)
         if binding:
-            ts_alias = self.aliases.get("tender.steps", "ts")
+            ts_alias = self._alias("tender.steps", used)
             args = ", ".join(f"{k}={b.name}" for k, b in sorted(shared.items()))
             lines.append(f"b = {ts_alias}.using({args})")
         for node in nodes:
@@ -468,19 +497,21 @@ class Session:
             }
             if not binding:
                 st = _ts.info(node.step)
-                entries.append(f"{self.aliases.get(st.home, st.home)}.{node.step}")
+                entries.append(f"{self._alias(st.home, used)}.{node.step}")
             elif extra:
                 kw = ", ".join(
-                    f"{k}={self._literal(v)}" for k, v in sorted(extra.items())
+                    f"{k}={self._literal(v, used)}"
+                    for k, v in sorted(extra.items())
                 )
                 entries.append(f"b({node.step!r}, {kw})")
             else:
                 entries.append(f"b.{node.step}")
-        td_alias = self.aliases.get("tender.derivation", "td")
+        td_alias = self._alias("tender.derivation", used)
         lines.append(f"e = {td_alias}.derive({self.start_name}, [")
         lines.extend(f"    {entry}," for entry in entries)
         lines.append("]).current")
-        return "\n".join(lines)
+        head = self._imports(used)
+        return "\n".join(head + ([""] if head else []) + lines)
 
     def to_cell(self, replace=False):
         """Put the derivation into a new notebook cell, below the current one.

@@ -375,7 +375,9 @@ Bridge steps:
 > here (keyed on the canonical form, so a route back is recognised), and
 > `s.attempts()` prints everything.  `s.steps` is `[(name, kwargs), …]` for
 > replay; `s.applicable()` / `s.why_not(name)` are the two above, asked of the
-> current expression.  A step that wants an *identity* is offered below a
+> current expression.  Steps are shown as `module.name` (`chart.expand`, not a
+> bare `expand`), and the filter matches that, so a module name narrows to its
+> own steps.  A step that wants an *identity* is offered below a
 > delimiter and opens a second list — the rules that match here, annotated the
 > same way, probed only when asked (`ts.rule_steps(rules)` is that list without
 > the widget).  The candidates come from a bound `rules` list, else from the
@@ -398,7 +400,8 @@ Bridge steps:
 | `.back(n=1)` / `.goto(k)` | `Session` | Move up the shown path; the branch left behind is kept |
 | `.applicable()` / `.why_not(step)` / `.tried()` | `Report` / `str` / `set[str]` | The feedback functions, with the context already filled in |
 | `.identities` / `.rule_steps()` | `list[Identity]` / `list[Step]` | The rules `apply_identity` may choose from, and the same as a step set: `s.applicable(steps=s.rule_steps())` answers "which identities apply here?" |
-| `.script()` / `.steps` / `.attempts()` | `str` / `list` / `str` | The path as code, as data, and the whole tree as text |
+| `.steps` / `.attempts()` | `list` / `str` | The path as data, and the whole tree as text |
+| `.script(style="list"\|"assign")` | `str` | The derivation as code, with an `import` line for any module your namespace does not already hold |
 | `.to_cell(replace=False)` | — | Put `script()` into a **new notebook cell** below.  The session is per-kernel scratch; the code is the reproducible artifact, and this turns one into the other.  Prints the code outside a kernel |
 | `.use(kind, value)` | `Session` | Pick between several candidates of one kind (two bases, say) |
 

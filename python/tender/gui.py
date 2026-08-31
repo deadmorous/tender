@@ -13,9 +13,13 @@ expression rather than of memory.  Choosing a step at some point in the list
 drops the tail and continues from there; the abandoned branch is kept, and a
 step tried before from the same expression is marked ``· tried``.
 
+Steps are shown as ``module.name`` — `chart.expand` is not `derivation.
+expand_products`, and the bare word would not say which you were choosing.
+
 Beside each chooser is a **filter**, and it is one lens over all three
 categories rather than a search of the list: typing narrows what fires, what was
-not tried, and what ran and did nothing.  Type a name that is not among the
+not tried, and what ran and did nothing.  It matches what is shown, so a module
+name reaches a whole module's worth of steps.  Type a name that is not among the
 options and you have asked "why not that one?" — so when the pattern leaves a
 single non-firing step, its reason appears instead of its name.  The pattern is
 a regular expression; a half-typed one falls back to a substring search and
@@ -54,6 +58,17 @@ def _math(latex):
     return W.HTMLMath(
         value=f'<div style="padding:2px 0">$${latex}$$</div>', layout=_LAYOUT
     )
+
+
+def _tail(qualified):
+    """``tender.chart.expand`` → ``chart.expand``.
+
+    The bare name is not enough to choose by: `expand`, `expand_products` and
+    `expand_in_basis` are three different moves, and one of them is a plain
+    English word.  The module tail is where the difference lives, and it is how
+    `describe()` already presents the catalogue.
+    """
+    return qualified.removeprefix("tender.")
 
 
 def _named(options, name):
@@ -250,9 +265,12 @@ class DerivationWidget:
         )
         taken_name = taken.name if taken is not None else None
 
-        offered = []  # (label, name) for the steps that do something here
+        # (label, name, searchable) — the filter matches what is shown, so
+        # typing "chart" narrows to the chart's steps.
+        offered = []
         for hit in report:
-            label = hit.step.name
+            shown = _tail(hit.step.qualified)
+            label = shown
             if hit.reshapes_only:
                 label += "   · reshapes only"
             else:
@@ -261,24 +279,30 @@ class DerivationWidget:
                 )
             if hit.step.name in tried:
                 label += "   · tried"
-            offered.append((label, hit.step.name))
-        if chosen is not None and chosen not in [n for _, n in offered]:
-            offered.append((f"{chosen}   · taken", chosen))
+            offered.append((label, hit.step.name, shown))
+        if chosen is not None and chosen not in [n for _, n, _ in offered]:
+            taken_shown = _tail(_ts.info(chosen).qualified)
+            offered.append((f"{taken_shown}   · taken", chosen, taken_shown))
 
         # A step that wants an identity is not offered like the others: which
         # rule to apply is a question, not a probed move, so it opens a second
         # list rather than being tried behind the scenes (vibe 000108 §11).
         asks = sorted(n for n in _ts.names() if "identity" in _ts.info(n).needs)
 
-        # The other two categories, by name, so the filter can reach them.
+        # The other two categories, shown the same way so the filter reaches
+        # all three through one pattern.
         blocked = {
-            q.rsplit(".", 1)[-1]: lack
+            _tail(q): lack
             for q, lack in report.missing.items()
             if q.rsplit(".", 1)[-1] not in asks
         }
-        quiet = sorted(
-            set(_ts.names()) - {n for _, n in offered} - set(blocked) - set(asks)
-        )
+        seen = {n for _, n, _ in offered} | set(asks)
+        quiet = {
+            _tail(_ts.info(n).qualified): n
+            for n in sorted(_ts.names())
+            if n not in seen
+        }
+        quiet = {k: v for k, v in quiet.items() if k not in blocked}
 
         chooser = W.Dropdown(
             options=[("— choose a step —", None)],
@@ -320,9 +344,15 @@ class DerivationWidget:
             be where the question is.
             """
             keep = _matcher(pattern)
-            kept = [o for o in offered if keep(o[1]) or o[1] == chosen]
+            kept = [
+                (label, name)
+                for label, name, shown in offered
+                if keep(shown) or name == chosen
+            ]
             asked = [
-                (f"{n} …", n) for n in asks if keep(n) or n == chosen
+                (f"{_tail(_ts.info(n).qualified)} …", n)
+                for n in asks
+                if keep(_tail(_ts.info(n).qualified)) or n == chosen
             ]
             self._building = True
             try:
@@ -352,13 +382,13 @@ class DerivationWidget:
                     )
                 )
             if pattern:
-                dead = [n for n in quiet if keep(n)]
+                dead = [shown for shown in quiet if keep(shown)]
                 if len(dead) == 1:
                     # Asked of *this* item's expression, not the session's
                     # current one — the two differ whenever you filter above
                     # the working end.
                     lines.append(
-                        _ts.why_not(node.expr, dead[0], **session.values)
+                        _ts.why_not(node.expr, quiet[dead[0]], **session.values)
                     )
                 elif dead:
                     lines.append("did not fire: " + ", ".join(dead))
@@ -392,7 +422,7 @@ class DerivationWidget:
                 node.expr, steps=_ts.rule_steps(found), **session.values
             )
             for hit in probed:
-                label = hit.step.name + "   " + (
+                label = _tail(hit.step.qualified) + "   " + (
                     ", ".join(f"{k}{v:+d}" for k, v in sorted(hit.change.items()))
                     or "· reshapes only"
                 )
