@@ -5,7 +5,9 @@
 #include <tender/nf_lower.hpp>
 #include <tender/rewrite.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -1226,17 +1228,63 @@ auto is_field_field_contraction(Context& ctx, Expr const* f, Basis const& fb)
 }
 
 // Reassemble one additive term (a ⊗-product) into ∇ operators.
+// Every free ∂_i in a ∇-expansion is paired with a frame vector e_i carrying
+// the same index — that pairing *is* the expansion of ∇ = e_i ∂_i, and it is
+// what this fold reads.  A term where some ∂_i has no e_i is a different
+// animal: a component form, where the frame vectors belong to the field's own
+// slots (`(∂_j ∂_j u_i) e_i`) and the ∂'s are contracted among themselves.
+// The classifier below would read the e_i as a gradient leg and the orphaned
+// ∂'s as nothing at all — `∇ u_i`, one derivative lost and an index dangling
+// (vibe 000109).
+auto every_direction_has_a_frame_vector(
+    Context& ctx, Basis const& fb, Expr const* term) -> bool
+{
+    std::set<int> links;
+    std::set<int> dirs;
+    rewrite_tree(
+        ctx,
+        term,
+        [&](Context&, Expr const* n) -> Expr const*
+        {
+            if (auto const d = frame_dir_index(n, fb))
+                dirs.insert(*d);
+            if (auto const* t = std::get_if<TensorObject>(&n->node))
+                for (auto const& m: t->deriv_marks)
+                    if (m.free)
+                        links.insert(m.link);
+            return n;
+        });
+    return std::all_of(
+        links.begin(),
+        links.end(),
+        [&dirs](int id) { return dirs.count(id) != 0; });
+}
+
 auto reassemble_term(
     Context& ctx,
     Basis const& fb,
     Expr const* nabla,
-    Expr const* term) -> Expr const*
+    Expr const* term,
+    std::string* why = nullptr) -> Expr const*
 {
     // No applied derivative in this term ⇒ nothing to reassemble: a bare frame
     // vector / expanded basis (`i`, `i_i e_i`) is not a ∇-expression.  Leave it
     // as-is instead of inventing a gradient ∇⊗1 (vibe 000081, I10/I11).
     if (!has_deriv_mark(ctx, term))
         return term;
+
+    // An orphaned ∂ direction means this is not a ∇-expansion (above).
+    if (!every_direction_has_a_frame_vector(ctx, fb, term))
+    {
+        if (why && why->empty())
+            *why =
+                "a ∂ direction here has no frame vector to pair with, so this "
+                "is a component form rather than a ∇ expansion — the field's "
+                "own indices carry the frame vectors.  Reassemble ∇ before "
+                "expanding the operand in a basis, or keep the operand "
+                "abstract";
+        return term;
+    }
 
     // Flatten the top-level ⊗ chain into factors.
     std::vector<Expr const*> factors;
@@ -1396,9 +1444,13 @@ auto dimension_identities(Context& ctx, Expr const* e, IndexSpace const* space)
 
 } // namespace
 
-auto reassemble_nabla(Context& ctx, CoordinateChart const& chart, Expr const* e)
-    -> Expr const*
+auto reassemble_nabla(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* e,
+    StepReport* report) -> Expr const*
 {
+    std::string why;
     Basis const fb = physical_frame(ctx, chart);
     Expr const* const nabla = make_nabla(ctx);
     // Summation binders are structural noise here (the frame-vector ↔ ∂-mark
@@ -1424,10 +1476,17 @@ auto reassemble_nabla(Context& ctx, CoordinateChart const& chart, Expr const* e)
             return make_sum(ctx, go(s->left, sign), go(s->right, -sign));
         if (auto const* s = std::get_if<Negate>(&n->node))
             return go(s->operand, -sign);
-        Expr const* r = reassemble_term(ctx, fb, nabla, n);
+        Expr const* r = reassemble_term(ctx, fb, nabla, n, &why);
         return sign < 0 ? make_negate(ctx, r) : r;
     };
-    return dimension_identities(ctx, go(body, +1), fb.space());
+    Expr const* const out = dimension_identities(ctx, go(body, +1), fb.space());
+    if (structural_eq(out, e))
+        report_no_op(
+            report,
+            why.empty() ? "there is no ∂ here to fold back into a ∇" : why);
+    else
+        report_fired(report);
+    return out;
 }
 
 auto gradient(

@@ -1036,3 +1036,92 @@ class TestScalarDivisionKeepsTheIndexLink:
             term = out.at(path)
             counts = _index_counts(term)
             assert all(c == 2 for c in counts.values()), term.latex()
+
+class TestContractingThroughADerivativeMark:
+    """A δ must contract against a ∂-direction, not only against a slot.
+
+    `δ_jk ∂_j ∂_k u_i e_i` is a Laplacian in components, and it stayed exactly
+    as written because `contract_delta` read only tensor *slots* — while the
+    summation machinery had always counted a free ∂-mark's direction as an
+    occurrence of its index (vibe 000109).
+    """
+
+    def _components(self):
+        ws = t.Workspace()
+        frame = ws.wcs()
+        u = t.field("u", 1, ctx=ws.ctx)
+        nabla = t.nabla(ctx=ws.ctx)
+        chart, _ = _chart(ws)
+        return ws, frame, chart, tb.simplify_basis_dot(
+            tb.expand_in_basis(
+                chart.expand_nabla(nabla @ (nabla * u)), frame
+            ),
+            frame,
+        )
+
+    def test_the_delta_contracts_the_two_directions(self):
+        ws, frame, chart, comps = self._components()
+        assert "delta" in comps.latex()
+        out = td.contract_delta(comps)
+        assert "delta" not in out.latex()
+        # ∂_j ∂_j u_i e_i — one direction, twice: the Laplacian.
+        assert out.latex().count("partial_{j}") == 2
+
+    def test_it_still_refuses_when_there_is_no_partner(self):
+        # A δ whose index appears nowhere else is not a contraction.
+        ws = t.Workspace()
+        i = t.alloc_index(ws.ctx)
+        j = t.alloc_index(ws.ctx)
+        d = t.delta(
+            t.Realm.Orthonormal, t.space_3d, t.Level.Lower, t.Level.Lower, i, j
+        )
+        assert td.structural_eq(td.contract_delta(d), d)
+
+
+class TestReassembleNablaRefusesAComponentForm:
+    """A ∂ with no frame vector is not a ∇ expansion.
+
+    `(∂_j ∂_j u_i) e_i` came back as `∇ u_i` — a bare unapplied ∇ times a
+    component with a dangling index, one derivative lost.  The classifier read
+    the `e_i` as a gradient leg, though it belongs to the field's own index
+    (vibe 000109).
+    """
+
+    def _setup(self):
+        ws = t.Workspace()
+        frame = ws.wcs()
+        u = t.field("u", 1, ctx=ws.ctx)
+        nabla = t.nabla(ctx=ws.ctx)
+        chart, _ = _chart(ws)
+        return ws, frame, chart, u, nabla
+
+    def test_the_free_index_form_still_folds(self):
+        ws, frame, chart, u, nabla = self._setup()
+        abstract = chart.expand_nabla(nabla @ (nabla * u))
+        assert "Delta" in chart.reassemble_nabla(abstract).latex()
+
+    def test_the_component_form_is_refused_with_a_reason(self):
+        import tender.steps as ts
+
+        ws, frame, chart, u, nabla = self._setup()
+        comps = td.contract_delta(
+            tb.simplify_basis_dot(
+                tb.expand_in_basis(
+                    chart.expand_nabla(nabla @ (nabla * u)), frame
+                ),
+                frame,
+            )
+        )
+        result = ts.info("reassemble_nabla").run(comps, chart=chart)
+        assert not result.fired
+        assert "no frame vector to pair with" in result.reason
+        assert td.structural_eq(result.expr, comps)
+
+    def test_an_expression_with_no_derivative_says_so(self):
+        import tender.steps as ts
+
+        ws, frame, chart, u, nabla = self._setup()
+        result = ts.info("reassemble_nabla").run(u, chart=chart)
+        assert not result.fired
+        assert "no ∂ here" in result.reason
+

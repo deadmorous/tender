@@ -238,6 +238,21 @@ auto substitute_index(Context& ctx, Expr const* e, int from_id, IndexAssoc to)
                         changed = true;
                     }
             }
+            // …and on the ∂-direction marks, which carry their index as a
+            // `link` rather than a slot.  Identifying m with n has to reach
+            // both, or a δ contracted against a ∂ would rename the slot
+            // occurrence and leave the derivative pointing at the spent index
+            // (vibe 000109).  Only a countable target: fixing a free direction
+            // to a *concrete* one is a different move, and `substitute` (which
+            // takes a ConcreteIndex) deliberately does not do it either.
+            auto marks = t->deriv_marks;
+            if (auto const* ci = std::get_if<CountableIndex>(&to))
+                for (auto& mark: marks)
+                    if (mark.free && mark.link == from_id)
+                    {
+                        mark.link = ci->id;
+                        changed = true;
+                    }
             if (!changed)
                 return e;
             // Copy the whole object so deriv marks (the applied ∂s of a
@@ -245,6 +260,8 @@ auto substitute_index(Context& ctx, Expr const* e, int from_id, IndexAssoc to)
             // only name/rank/traits/slots silently drops the derivative.
             TensorObject obj = *t;
             obj.slots = std::move(slots);
+            sort_deriv_marks(marks); // a changed link can reorder them
+            obj.deriv_marks = std::move(marks);
             return ctx.make<Expr>(std::move(obj));
         });
 }
@@ -2417,6 +2434,17 @@ auto find_partner(Context& ctx, Expr const* e, int m)
                     return node;
                 }
             }
+            // A free-index ∂_m is an occurrence of m too — the same reading
+            // the summation machinery already takes (`collect_term_uses`), so
+            // a δ must be able to contract against it: δ_mn ∂_m T is ∂_n T,
+            // and δ_mn ∂_m ∂_n T is the Laplacian everyone is looking for
+            // (vibe 000109).
+            for (auto const& mark: t->deriv_marks)
+                if (mark.free && mark.link == m)
+                {
+                    found = PartnerOccurrence{mark.free_slot, t->name};
+                    return node;
+                }
             return node;
         });
     return found;

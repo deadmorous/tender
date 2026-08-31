@@ -1,4 +1,4 @@
-# 000109 A scalar denominator broke the summation scope
+# 000109 Four defects behind one invalid derivation
 
 Reported from an interactive session: starting from the invariant `∇·T + f`
 with the isotropic Hooke stress `T = λ tr(ε) I + 2μ ε`, `ε = sym(∇u)`,
@@ -128,9 +128,84 @@ relying on the silent drop.  That is worth stating: a refusal added to a fold
 engine is exactly the kind of change that can quietly break a working route,
 and here it did not.
 
+## The third: `contract_delta` now contracts through a ∂ direction
+
+`δ_jk (∂_j ∂_k u_i) e_i` — a Laplacian in components — came back exactly as
+written.  `contract_delta` looked for its partner among tensor *slots* only,
+and both of the δ's indices sat on derivative marks.
+
+The inconsistency is the point: `collect_term_uses` has counted a free mark's
+direction as an occurrence of its index since vibe 000078 — that is *why* `e_i`
+and `∂_i` sum together.  The summation machinery and the contraction step
+disagreed about what carries an index, and the contraction step was the one in
+the wrong.
+
+`find_partner` now sees a free mark, and `substitute_index` rewrites the mark's
+`link` alongside the slots — restoring the canonical mark order afterwards,
+since a changed link can reorder them and `∂_i∂_j` must keep hash-consing with
+`∂_j∂_i`.  Only a *countable* target: fixing a free direction to a concrete one
+is a different move, and `substitute` (which takes a `ConcreteIndex`)
+deliberately still does not do it.
+
+With this the reported pipeline reaches the right component form:
+
+```
+λ (∂_i ∂_j u_j) e_i + μ (∂_j ∂_j u_i) e_i + μ (∂_i ∂_j u_j) e_i + f
+```
+
+— which is `(λ+μ)∇(∇·u) + μΔu + f`, written out.
+
+## The fourth: `reassemble_nabla` refuses a component form
+
+That component form then went in to `reassemble_nabla` and came out as
+`∇ u_i` — a bare unapplied ∇ times a component with a dangling index, one of
+the two derivatives gone.
+
+The classifier reads a term as a ∇-expansion: frame vectors are gradient legs,
+`e_ℓ·e_m` pairs are Laplacians, one factor is the operand.  In
+`(∂_j ∂_j u_i) e_i` the `e_i` is *not* a leg — it belongs to the field's own
+index, `u_i` — and the `∂_j ∂_j` pair has no frame vector at all.  Read as a
+leg, `e_i` became a ∇; read as nothing, the ∂'s vanished.
+
+The invariant that separates the two forms is one line: **every free ∂_i in a
+∇-expansion is paired with a frame vector e_i** — that pairing *is* the
+expansion of `∇ = e_i ∂_i`.  A term with an orphaned direction is a component
+form, and the fold declines it, saying which order does work:
+
+> a ∂ direction here has no frame vector to pair with, so this is a component
+> form rather than a ∇ expansion — the field's own indices carry the frame
+> vectors.  Reassemble ∇ before expanding the operand in a basis, or keep the
+> operand abstract
+
+`reassemble_nabla` gained a `StepReport` to carry that, so it explains itself
+like the rest of the catalogue rather than falling back to the synthesized
+"its pattern is not present".
+
+**The route that does work** is the one the maintained examples take — keep the
+operand abstract, fold ∇ back first:
+
+```python
+td.derive(nabla @ T + f,
+          [b.expand_nabla, td.contract_identity, td.canonicalize,
+           b.reassemble_nabla])
+#  f + μ Δu + ∇(λ ∇·u + μ ∇·u)
+```
+
+which is vibe 000080's "keep the operand abstract, expand the basis last",
+now enforced by a refusal instead of left as lore.
+
+## Two smaller things noticed, not fixed
+
+- **`factor_common` factors across a ∇.**  On `∇(λ∇·u + μ∇·u)` it returns
+  `((∇½ + ∇½)λ + ∇μ) ∇·u` — it pulled `∇·u` out from *inside* the gradient,
+  which no algebra licenses.  Same family as the ∇-fence bugs of vibe 000085.
+- **`2 λ ½` does not fold to `λ`.**  Two literals in one product term, with a
+  symbol between them, are left unmultiplied — so the Navier–Lamé endpoint
+  above renders with a stray `2·½`.  Cosmetic; the value is right.
+
 ## Status
 
-**Both fixed and verified.**  954 C++ tests, 563 Python, 69 challenges, 12
+**All four fixed and verified.**  954 C++ tests, 568 Python, 69 challenges, 12
 examples.
 
 - the scope defect: four Python regressions
@@ -142,9 +217,10 @@ examples.
   marks`) and one C++
   (`BasisFilter.ReassembleRefusesAComponentCarryingDerivatives`).
 
+- the δ/∂ contraction and the ∇-expansion refusal: five Python tests
+  (`TestContractingThroughADerivativeMark`,
+  `TestReassembleNablaRefusesAComponentForm`).
+
 Every one was checked against the unfixed build and fails there.
 
-**Still open:** `contract_delta` cannot contract a δ whose indices sit on
-derivative marks, so `δ_jk ∂_j ∂_k → ∂_j ∂_j` does not happen and the δ
-survives.  A gap rather than a corruption — the expression stays valid — but it
-is what stands between the reported pipeline and a Laplacian.
+All four fixed; see below for the third and fourth.

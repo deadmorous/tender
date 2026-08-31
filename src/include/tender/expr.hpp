@@ -454,6 +454,13 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 // must be a field (its TensorObject carries a FieldDeps trait);
 // `coord_name`/`coord` identify q.  Applying again appends further marks, kept
 // sorted so mixed partials coincide.
+// Restore the canonical order of a field's applied-derivative marks: by
+// (chart_id, slot), with the free-index `link` as the tiebreaker.  The
+// builders keep it; a rewrite that *changes* a link (contracting a δ against a
+// ∂-direction, vibe 000109) has to restore it, or ∂_i∂_j and ∂_j∂_i stop
+// hash-consing to one node.
+void sort_deriv_marks(std::vector<DerivMark>& marks);
+
 [[nodiscard]] auto make_field_derivative(
     Context&,
     Expr const* base,

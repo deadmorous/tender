@@ -430,6 +430,7 @@ _r("expand_nabla", _c, _C, category="operators", primary=True, needs=("chart",),
    summary="expand a chart-free ∇ into the free-index frame form eᵢ∂ᵢ")
 _r("reassemble_nabla", _c, _C, category="operators", primary=True,
    needs=("chart",), wants={"deriv_marks": 1},
+   reported=_core.chart._reassemble_nabla_reported,
    summary="fold a reduced free-index expression back into ∇ operators")
 _r("componentize_nabla", _c, _C, category="operators", needs=("chart",),
    wants={"deriv_marks": 1},

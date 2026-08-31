@@ -2185,4 +2185,18 @@ NB_MODULE(_core, m)
             "rank-2 tensor: the nested list m[i][j] = e_i·v·e_j (vibe 000074), "
             "with an abstract field expanded first, so m[i][j] is the minted "
             "physical component T_ij (symmetry folded: m[1][0] is T_rθ).");
+
+    mc.def(
+        "_reassemble_nabla_reported",
+        [](PyExpr const& e, PyChart const& c) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = reassemble_nabla(*e.ctx, c.chart, e.expr, &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "e"_a,
+        "chart"_a,
+        "reassemble_nabla, reporting whether it fired and why not (vibe "
+        "000109): a component form is not a ∇ expansion, and saying so beats "
+        "returning a confident wrong answer.");
 }

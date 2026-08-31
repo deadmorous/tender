@@ -80,7 +80,7 @@ auto make_field(
 // partials coincide and hash-cons to one node: by (chart_id, slot) for concrete
 // marks (∂_x∂_y T = ∂_y∂_x T), with the free-index `link` as the final
 // tiebreaker for abstract-direction ∂_i marks (vibe 000078).
-static void sort_deriv_marks(std::vector<DerivMark>& marks)
+void sort_deriv_marks(std::vector<DerivMark>& marks)
 {
     std::sort(
         marks.begin(),

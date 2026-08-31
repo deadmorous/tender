@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tender/basis.hpp>
+#include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 
 #include <vector>
@@ -160,7 +161,10 @@ void validate_chart(CoordinateChart const& chart);
 // invariant.  The inverse of expand_nabla+reduction: e.g. the strain interior's
 // Phase-1 sum folds to −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + ∇∇·ε + (∇∇·ε)ᵀ.
 [[nodiscard]] auto reassemble_nabla(
-    Context& ctx, CoordinateChart const& chart, Expr const* e) -> Expr const*;
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* e,
+    StepReport* report = nullptr) -> Expr const*;
 
 // grad T = Σ_i (1/h_i) e_i ⊗ ∂_{q^i} T, raising the rank by one.  For a scalar
 // f this is the familiar ∇ = e_r ∂_r + (1/r) e_θ ∂_θ + e_z ∂_z; for the
