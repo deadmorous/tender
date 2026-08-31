@@ -4051,6 +4051,54 @@ TEST(ContractEpsPair, ContractsFourEpsilonsPairByPair)
 // Canonicalize is a fixed point on a sum of two same-kind nodes for every node
 // kind — the sort orders the addends consistently, so a second canonicalize is
 // a no-op.  Covers the canonical-order comparison path across all node types.
+// A scalar denominator is not a summation-scope boundary: `X · (Y/c)` is
+// `(X·Y)/c`, so an index repeated across the division is the same Einstein
+// contraction it would be without it.  Treating the division as a boundary let
+// canonicalize α-rename the two occurrences apart — the defect that turned
+// ∇·sym(∇u) into a sum of terms with single, dangling indices (vibe 000109).
+TEST(Canonicalize, AScalarDenominatorKeepsTheSummationScope)
+{
+    Context ctx;
+    CountableIndex const i{ctx.alloc_index_id()};
+    CountableIndex const j{ctx.alloc_index_id()};
+    CountableIndex const k{ctx.alloc_index_id()};
+    auto const* space = space_3d();
+    auto const* d1 = make_delta(
+        ctx, Realm::Orthonormal, space, Level::Lower, Level::Lower, i, j);
+    auto const* d2 = make_delta(
+        ctx, Realm::Orthonormal, space, Level::Lower, Level::Lower, i, k);
+    auto const* two = make_scalar(ctx, Rational{2});
+
+    // Inside the term and outside it must land on the same normal form.
+    auto const* inside = steps::canonicalize(
+        ctx, make_tensor_product(ctx, d1, make_scalar_div(ctx, d2, two)));
+    auto const* outside = steps::canonicalize(
+        ctx, make_scalar_div(ctx, make_tensor_product(ctx, d1, d2), two));
+    EXPECT_TRUE(structural_eq(inside, outside));
+
+    // …and that form binds the shared index rather than leaving it dangling.
+    IndexNameMap map;
+    EXPECT_NE(render_latex(*inside, map).find("\\sum"), std::string::npos);
+}
+
+// A denominator that *does* carry an index stays a boundary: an index under a
+// division is not a linear contraction, and counting it as one would be worse
+// than deferring the summation.
+TEST(Canonicalize, AnIndexedDenominatorIsStillABoundary)
+{
+    Context ctx;
+    CountableIndex const i{ctx.alloc_index_id()};
+    CountableIndex const j{ctx.alloc_index_id()};
+    auto const* space = space_3d();
+    auto const* d1 = make_delta(
+        ctx, Realm::Orthonormal, space, Level::Lower, Level::Lower, i, j);
+    auto const* d2 = make_delta(
+        ctx, Realm::Orthonormal, space, Level::Lower, Level::Lower, i, i);
+    // d1 · (d2 / d2): the denominator carries i, so no scope merge is claimed.
+    auto const* e = make_tensor_product(ctx, d1, make_scalar_div(ctx, d1, d2));
+    EXPECT_NO_THROW(steps::canonicalize(ctx, e));
+}
+
 TEST(Canonicalize, ComparatorArmsAreExercised)
 {
     Context ctx;

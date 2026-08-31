@@ -6,6 +6,8 @@ these same capabilities; that module is now in the attic and everything here
 uses the core route — `t.nabla()`, a real `Expr`.
 """
 
+import re
+
 import tender as t
 import tender.derivation as td
 import tender.basis as tb
@@ -965,3 +967,72 @@ def test_chart_nabla_is_the_gradient_when_applied():
     assert "\\partial_{" in nab.latex()
     assert nab.rank == 1
     assert td.algebraic_eq(td.apply_operators(nab * f), cart.grad(f))
+
+# ---------------------------------------------------------------------------
+# vibe 000109: a ½ inside a ∇ operand must not orphan the direction indices
+# ---------------------------------------------------------------------------
+
+
+def _index_counts(term):
+    """How often each index name is written in *term*."""
+    names = re.findall(r"_\{(\w)\}", term.latex())
+    return {n: names.count(n) for n in set(names)}
+
+
+class TestScalarDivisionKeepsTheIndexLink:
+    """`expand_nabla` links each frame vector e_i to its own ∂_i.
+
+    A scalar denominator used to break the Einstein scope, so canonicalize
+    α-renamed the pair apart and the expansion came back with single, dangling
+    indices — invalid, and silently so.  `sym(∇u) = (∇u + (∇u)ᵀ)/2` is what a
+    reader meets this with first, which is to say every stress.
+    """
+
+    def _setup(self):
+        ws = t.Workspace()
+        u = t.field("u", 1, ctx=ws.ctx)
+        nabla = t.nabla(ctx=ws.ctx)
+        chart, _ = _chart(ws)
+        return ws, chart, u, nabla
+
+    def test_a_halved_operand_matches_the_unhalved_one(self):
+        ws, chart, u, nabla = self._setup()
+        assert td.algebraic_eq(
+            chart.expand_nabla(nabla @ (u / 2)),
+            chart.expand_nabla(nabla @ u) / 2,
+        )
+
+    def test_it_leaves_no_dangling_index(self):
+        # Every index in a term is written exactly twice — the property that
+        # makes the expression mean anything at all.
+        ws, chart, u, nabla = self._setup()
+        out = chart.expand_nabla(nabla @ td.sym(nabla * u))
+        for path in out.addends():
+            term = out.at(path)
+            counts = _index_counts(term)
+            assert all(c == 2 for c in counts.values()), (
+                f"{term.latex()} uses an index once: {counts}"
+            )
+
+    def test_no_summation_is_left_explicit(self):
+        # The Σ's were the visible symptom: an index the scope no longer
+        # recognised as contracted got a binder of its own.
+        ws, chart, u, nabla = self._setup()
+        out = chart.expand_nabla(nabla @ td.sym(nabla * u))
+        assert "\\sum" not in out.latex()
+
+    def test_the_isotropic_stress_divergence_expands(self):
+        # The reported case: ∇·T + f for the Hooke stress built from sym(∇u).
+        ws, chart, u, nabla = self._setup()
+        f = t.field("f", 1, ctx=ws.ctx)
+        I = t.identity(ws.ctx)
+        lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+        mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+        eps = td.sym(nabla * u)
+        T = lam * eps.tr() * I + 2 * mu * eps
+        out = chart.expand_nabla(nabla @ T + f)
+        assert "\\sum" not in out.latex()
+        for path in out.addends():
+            term = out.at(path)
+            counts = _index_counts(term)
+            assert all(c == 2 for c in counts.values()), term.latex()

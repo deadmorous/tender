@@ -102,6 +102,26 @@ auto bound_canon_id(int depth) -> int
 
 // ---- implicit (Einstein) summation detection ---------------------------
 
+// Does `e` mention a countable index anywhere — in a slot or on a ∂-mark?
+// A scalar denominator that does not is inert for summation purposes, which is
+// what lets a term keep its scope across the division (below).
+auto carries_countable_index(Expr const* e) -> bool
+{
+    if (auto const* t = std::get_if<TensorObject>(&e->node))
+    {
+        for (auto const& sb: t->slots)
+            if (sb.index && std::holds_alternative<CountableIndex>(*sb.index))
+                return true;
+        for (auto const& m: t->deriv_marks)
+            if (m.free)
+                return true;
+    }
+    for (auto const* child: children(e))
+        if (carries_countable_index(child))
+            return true;
+    return false;
+}
+
 auto is_term(Expr const* e) -> bool
 {
     return visit(
@@ -119,7 +139,19 @@ auto is_term(Expr const* e) -> bool
             [](DDotAlt const& d)
             { return is_term(d.left) && is_term(d.right); },
             [](Cross const& c) { return is_term(c.left) && is_term(c.right); },
-            [](auto const&) { return false; }, // Sum/Diff/ScalarDiv/binders
+            // Dividing by an index-free scalar does not break the summation
+            // scope: `X · (Y/c)` is `(X·Y)/c`, so an index repeated across the
+            // division is the same Einstein contraction it would be without it.
+            // Treating the division as a boundary let the two occurrences be
+            // α-renamed apart, which orphaned every ∂-mark under a ½ — the
+            // symmetric part `sym(∇u)` being the expression that meets this
+            // first (vibe 000109).  A denominator that *does* carry an index is
+            // still a boundary: an index under a division is not a linear
+            // contraction, and counting it as one would be worse than
+            // deferring.
+            [](ScalarDiv const& d)
+            { return is_term(d.left) && !carries_countable_index(d.right); },
+            [](auto const&) { return false; }, // Sum/Difference/binders
         },
         *e);
 }
@@ -168,6 +200,10 @@ void collect_term_uses(
             [&](DDot const& d) { bin(d.left, d.right); },
             [&](DDotAlt const& d) { bin(d.left, d.right); },
             [&](Cross const& c) { bin(c.left, c.right); },
+            // Numerator only: `is_term` admits a division only when the
+            // denominator carries no index, so there is nothing to collect
+            // there — and an index in a denominator would not be a contraction.
+            [&](ScalarDiv const& d) { collect_term_uses(d.left, bound, uses); },
             [&](auto const&) {}, // ScalarLiteral / scope boundaries: opaque
         },
         *e);
