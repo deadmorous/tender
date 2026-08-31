@@ -463,11 +463,67 @@ derivations that outlives a notebook *by design* is a different thing from
 notebook reproducibility, and using it for the latter would borrow a research
 artifact to do a job the code panel does better.
 
+## 13. A derivation is a list, not a chain of assignments
+
+§4 chose the assignment chain for the code panel *because that is what the
+challenges contained*.  The user's correction: the chain was itself an accident
+— written once because it looked simpler, then adopted as if it were the
+design — and the list form `Derivation` has always supported is the better one:
+
+> a list of steps is free of expression being modified by every step and looks
+> to me more manageable, because it's just a list, and we can apply algorithms
+> to it, or apply it to different initial expressions.
+
+That is the whole argument, and it is right: a list is *data*.  It can be
+sliced, reordered, reused on a different expression, generated, or handed to
+vibe 000107's search.  A chain of assignments is none of those; it is a
+transcript.
+
+**What kept people away from it was a lambda per step** — `lambda x:
+simplify_basis_dot(x, basis)` — which puts the shared frame inside every entry
+and stops the list reading as the derivation it is.  The catalogue already knows
+each step's argument *kinds*, so binding is a two-line idea:
+
+```python
+b = ts.using(basis=frame)
+e = td.derive(a @ b, [b.expand_in_basis, b.reduce_frame, b.reassemble]).current
+```
+
+`b.<step>` is a plain `Expr -> Expr`; `b("<step>", **extra)` adds what one step
+alone wants.  Each step takes only what it declares, so *one* context serves the
+whole list — the same property that lets `applicable` try everything from a
+single frame.  `functools.partial(reduce_frame, basis=frame)` also works and
+needed nothing; the binder exists only so the frame is not repeated on every
+line, which is the click budget of §3 in code form.
+
+`Derivation.run(steps)` and `td.derive(initial, steps)` finish it — the latter
+replacing a `for s in steps: d.step(s)` helper the user had written twice, in
+the sandbox and in the maintained example, which is the usual sign of a missing
+function.  An entry may be `(step, label)`, so the narrated routes in the
+challenges stay narrated while still being lists.
+
+`Session.script()` now emits the list form by default, `style="assign"` for the
+chain.  The binder line carries the kinds every step shares; anything one step
+alone takes — a `target`, an `identity` — stays with that step, because that is
+what it is.
+
+### Scope of the change
+
+Converted: the code panel's default, `examples/strain_compatibility` (script and
+notebook — it held the hand-rolled loop), and the narrated routes of challenges
+1 and 14, which were the only ones binding arguments with lambdas.
+
+Left alone, deliberately: the stage-by-stage examples (`navier_lame`,
+`cyl_equilibrium`, …), where each named intermediate is the exposition and a
+list would erase it; and the L1 brute-force reduction helpers, which are
+reductions rather than derivations and legitimately contain no-ops that
+`Derivation` would warn about.
+
 ## Status
 
 **Built.**  `tender.explore` (the session), `tender.gui` (the widget),
 `td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
-showcase.  73 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+showcase.  76 tests in `python/tests/test_explore.py`; `ipywidgets` is an
 optional dependency and the widget tests skip without it.  Used, and corrected
 by that use — §9.
 

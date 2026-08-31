@@ -172,7 +172,12 @@ def scan_scope(scope):
 
 def _module_aliases(scope):
     """What the user's namespace calls ``tender.basis`` and friends."""
-    alias = {"tender": "tender", "tender.basis": "tb", "tender.derivation": "td"}
+    alias = {
+        "tender": "tender",
+        "tender.basis": "tb",
+        "tender.derivation": "td",
+        "tender.steps": "ts",
+    }
     for name, value in scope.items():
         if inspect.ismodule(value) and getattr(value, "__name__", "") in alias:
             alias[value.__name__] = name
@@ -407,11 +412,70 @@ class Session:
                 args.append(f"{kind}={self._literal(node.kwargs[kind])}")
         return f"{alias}.{node.step}({', '.join(args)})"
 
-    def script(self):
-        """The path so far, as tender code that relies on your preamble."""
-        lines = [f"e = {self.start_name}"]
-        for node in self.path[1:]:
-            lines.append(f"e = {self._call_text(node)}")
+    def script(self, style="list"):
+        """The path so far, as tender code that relies on your preamble.
+
+        ``style="list"`` (the default) emits the derivation as a **list of
+        steps**, which is what a derivation is: data you can slice, reorder,
+        reuse on another expression, or generate.  The shared arguments are
+        bound once, so the list carries no lambdas::
+
+            b = ts.using(basis=frame)
+            e = td.derive(e0, [
+                b.expand_in_basis,
+                b.reduce_frame,
+            ]).current
+
+        ``style="assign"`` emits the chain of assignments instead — shorter to
+        read for two or three steps, and nothing but a chain of assignments.
+        """
+        if style == "assign":
+            lines = [f"e = {self.start_name}"]
+            for node in self.path[1:]:
+                lines.append(f"e = {self._call_text(node)}")
+            return "\n".join(lines)
+        if style != "list":
+            raise ValueError(f"unknown style {style!r}; expected list or assign")
+
+        nodes = self.path[1:]
+        if not nodes:
+            return f"e = {self.start_name}"
+
+        # A kind goes into the binder when every step taking it takes the very
+        # object the session bound; anything else — an identity, a target — is
+        # per step, because that is what it is.
+        shared = {}
+        for node in nodes:
+            for kind, value in node.kwargs.items():
+                bound = self.context.get(kind)
+                if bound is not None and bound.value is value:
+                    shared[kind] = bound
+        lines, entries = [], []
+        binding = any(node.kwargs for node in nodes)
+        if binding:
+            ts_alias = self.aliases.get("tender.steps", "ts")
+            args = ", ".join(f"{k}={b.name}" for k, b in sorted(shared.items()))
+            lines.append(f"b = {ts_alias}.using({args})")
+        for node in nodes:
+            extra = {
+                k: v
+                for k, v in node.kwargs.items()
+                if not (k in shared and shared[k].value is v)
+            }
+            if not binding:
+                st = _ts.info(node.step)
+                entries.append(f"{self.aliases.get(st.home, st.home)}.{node.step}")
+            elif extra:
+                kw = ", ".join(
+                    f"{k}={self._literal(v)}" for k, v in sorted(extra.items())
+                )
+                entries.append(f"b({node.step!r}, {kw})")
+            else:
+                entries.append(f"b.{node.step}")
+        td_alias = self.aliases.get("tender.derivation", "td")
+        lines.append(f"e = {td_alias}.derive({self.start_name}, [")
+        lines.extend(f"    {entry}," for entry in entries)
+        lines.append("]).current")
         return "\n".join(lines)
 
     def to_cell(self, replace=False):

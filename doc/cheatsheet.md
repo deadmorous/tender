@@ -205,6 +205,30 @@ drv.step(td.canonicalize).step(td.unroll_sums).step(td.fold_arithmetic)
 drv.current.latex()
 ```
 
+A derivation is best written as a **list of steps**: a list is data, so it can
+be sliced, reordered, reused on another expression, or generated — none of which
+a chain of assignments allows.  `ts.using(**context)` binds the shared arguments
+once, so the list needs no lambdas:
+
+```python
+import tender.steps as ts
+b = ts.using(basis=frame)                     # one context, every step
+e = td.derive(a @ b, [
+    b.expand_in_basis,
+    b.reduce_frame,
+    b("reassemble", target="u"),              # arguments beyond the shared ones
+]).current
+```
+
+| API | Returns | Does |
+|---|---|---|
+| `ts.using(**context)` | `Bound` | The catalogue with a context applied: `b.<step>` is a bound `Expr->Expr`; `b("<step>", **extra)` adds per-step arguments.  Each step takes only what it declares, so one context serves the whole list |
+| `td.derive(initial, steps)` | `Derivation` | Run a list over `initial`, keeping the history; `.current` is the result |
+| `.run(steps)` | `Derivation` | The same on an existing `Derivation`.  An entry may be `(step, label)` where the narration matters |
+
+(`functools.partial(tb.reduce_frame, basis=frame)` works too — the binder just
+stops the frame being repeated on every line.)
+
 ### `Derivation` class
 
 In Jupyter a `Derivation` renders as a table — each step, whether it *fired*,

@@ -146,6 +146,87 @@ class Step:
         return f"{self.home}.{self.name}"
 
 
+class BoundStep:
+    """One step with its extra arguments already supplied — an ``Expr -> Expr``.
+
+    What a derivation wants in a list: a plain callable, so the list is data
+    you can slice, reorder, reuse on another expression, or generate.
+    """
+
+    __slots__ = ("step", "context", "__name__")
+
+    def __init__(self, step, context):
+        self.step = step
+        self.context = dict(context)
+        self.__name__ = step.name
+
+    def __call__(self, expr):
+        return self.step(expr, **self.context)
+
+    def run(self, expr):
+        """Apply and say what happened — :meth:`Step.run` with the context."""
+        return self.step.run(expr, **self.context)
+
+    def __repr__(self):
+        given = ", ".join(
+            f"{k}={v!r}"
+            for k, v in sorted(self.context.items())
+            if k in self.step.needs + self.step.options
+        )
+        return f"<{self.step.qualified}({given})>"
+
+
+class Bound:
+    """The catalogue with a context already supplied (:func:`using`).
+
+    Attribute access binds a step; calling binds one with extra arguments::
+
+        b = ts.using(basis=frame)
+        steps = [b.expand_in_basis, b.reduce_frame, b("reassemble", target="u")]
+
+    Each step takes only what it declares, so *one* context serves a whole
+    derivation — the same reason :func:`applicable` can try everything from a
+    single frame.
+    """
+
+    def __init__(self, **context):
+        self.context = context
+
+    def __getattr__(self, name):
+        try:
+            step = info(name)
+        except ValueError:
+            raise AttributeError(
+                f"no step named {name!r}; see tender.steps.names()"
+            ) from None
+        return BoundStep(step, self.context)
+
+    def __call__(self, name, **extra):
+        """Bind *name* with arguments beyond the shared context."""
+        return BoundStep(info(name), {**self.context, **extra})
+
+    def __dir__(self):
+        return sorted(names())
+
+    def __repr__(self):
+        given = ", ".join(f"{k}={v!r}" for k, v in sorted(self.context.items()))
+        return f"<bound steps: {given}>"
+
+
+def using(**context):
+    """Bind a context to every step, so a derivation can be a plain list.
+
+    The alternative is a lambda per step (``lambda x: reduce_frame(x, frame)``)
+    or a :func:`functools.partial` repeating the frame on every line.  Neither
+    is wrong; both make the shared thing local, and the list stops reading as
+    the derivation it is::
+
+        b = ts.using(basis=frame)
+        td.derive(a @ b, [b.expand_in_basis, b.reduce_frame, b.reassemble])
+    """
+    return Bound(**context)
+
+
 _STEPS: dict = {}
 
 
@@ -603,6 +684,9 @@ __all__ = [
     "Hit",
     "Report",
     "applicable",
+    "Bound",
+    "BoundStep",
+    "using",
     "rule_steps",
     "StepResult",
     "why_not",

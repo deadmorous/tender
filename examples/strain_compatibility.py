@@ -37,6 +37,7 @@ import pathlib
 import tender as t
 import tender.basis as tb
 import tender.derivation as td
+import tender.steps as ts
 
 report: list[tuple[str, list[tuple[str, str]]]] = []
 
@@ -70,41 +71,39 @@ def cross_removal_identity(ctx):
     E = t.field("E", 2, ctx=ctx, symmetric=True)
     I = t.identity(ctx)
 
-    def derive(initial, steps):
-        d = td.Derivation(initial)
-        for s in steps:
-            d.step(s)
-        return d.current
+    # The shared frame is bound once, so each derivation is a plain list of
+    # steps rather than a list of lambdas closing over it.
+    b = ts.using(basis=basis, variance=co)
 
-    axIxb = derive(
+    axIxb = td.derive(
         a % I % c,
-        (
-            lambda x: tb.expand_in_basis(x, basis, co),
-            lambda x: tb.simplify_basis_cross(x, basis),
-            td.contract_eps_pair,
-            td.contract_delta,
-            lambda x: tb.reassemble(x, basis),
-        ),
-    )
+        [
+            b.expand_in_basis,
+            b.simplify_basis_cross,
+            b.contract_eps_pair,
+            b.contract_delta,
+            b.reassemble,
+        ],
+    ).current
     id_alt = td.Identity(
         "axIxb_alt", td.fold_equal_addends(axIxb + a @ c * I), a % I % c + a @ c * I
     )
-    axBxc = derive(
+    axBxc = td.derive(
         a % B % c,
-        (
-            lambda x: tb.expand_in_basis(x, basis, co),
+        [
+            b.expand_in_basis,
             id_alt,
-            lambda x: tb.expand_in_basis(x, basis, co),
-            lambda x: tb.simplify_basis_cross(x, basis),
-            lambda x: tb.simplify_basis_dot(x, basis),
-            td.contract_delta,
-            td.contract_eps_pair,
-            td.contract_delta,
-            td.contract_eps_pair,
-            td.contract_delta,
-            lambda x: tb.reassemble(x, basis),
-        ),
-    )
+            b.expand_in_basis,
+            b.simplify_basis_cross,
+            b.simplify_basis_dot,
+            b.contract_delta,
+            b.contract_eps_pair,
+            b.contract_delta,
+            b.contract_eps_pair,
+            b.contract_delta,
+            b.reassemble,
+        ],
+    ).current
     id_axBxc = td.Identity("axBxc", a % B % c, axBxc)
     id_inc = td.Identity(
         "inc",

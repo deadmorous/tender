@@ -37,6 +37,7 @@ from tender._core import derivation as _d
 # built from rather than vocabulary themselves (vibe 000106).
 __all__ = [
     "Derivation",
+    "derive",
     "NoOpStep",
     "contract_delta",
     "contract_identity",
@@ -152,6 +153,34 @@ class Derivation:
             )
         self._history.append(after)
         self._steps.append((name, fired))
+        return self
+
+    def run(self, steps, *, optional=False):
+        """Apply a *sequence* of steps in order; return *self* for chaining.
+
+        The form a derivation is usually best written in: a list is data, so it
+        can be built, sliced, reordered, reused on another expression, or
+        generated — none of which a chain of assignments allows.  Bind the
+        shared arguments once with :func:`tender.steps.using` and the list is
+        free of lambdas::
+
+            b = ts.using(basis=frame)
+            drv = td.Derivation(a @ b).run(
+                [b.expand_in_basis, b.reduce_frame, b.reassemble])
+
+        An entry may be a ``(step, label)`` pair where the narration matters —
+        a list stays a list, and the reason for a step is the kind of thing a
+        derivation should carry::
+
+            drv.run([(b.expand_in_basis, "expand in basis"),
+                     (td.contract_eps_pair, "Σ_m ε ε → δδ − δδ")])
+        """
+        for one in steps:
+            if isinstance(one, tuple):
+                fn, label = one
+                self.step(fn, optional=optional, label=label)
+            else:
+                self.step(one, optional=optional)
         return self
 
     @property
@@ -605,6 +634,22 @@ def skew(expr):
         # scalar zero and `s - s` would only puzzle the reader.
         return canonicalize(expr - expr)
     return (expr - expr.transpose()) / 2
+
+
+def derive(initial, steps, *, index_map=None, optional=False):
+    """Run *steps* over *initial* and return the :class:`Derivation`.
+
+    The one-liner for the list form — ``derive(e, steps).current`` is the
+    result, and the derivation itself keeps the history, so nothing is thrown
+    away for brevity::
+
+        b = ts.using(basis=frame)
+        e = td.derive(a @ b, [b.expand_in_basis, b.reduce_frame]).current
+
+    Because the steps are a list rather than a chain of assignments, the same
+    list runs on another expression unchanged.
+    """
+    return Derivation(initial, index_map=index_map).run(steps, optional=optional)
 
 
 class Identity:

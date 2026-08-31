@@ -3,7 +3,9 @@
 import pytest
 
 import tender
+import tender.basis as tb
 import tender.derivation as td
+import tender.steps as ts
 
 
 def _sp3():
@@ -518,6 +520,41 @@ def test_derivation_records_step_names_and_fired_flags():
     assert names == ["expand_products", "expand_products", "simplify"]
     assert fired[0] is True
     assert fired[1] is False
+
+
+def test_run_applies_a_list_of_steps():
+    # A derivation is a list: built once, it runs on another expression too.
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+    binder = ts.using(basis=frame)
+    steps = [binder.expand_in_basis, binder.reduce_frame, binder.reassemble]
+
+    drv = td.derive(a @ b, steps)
+    assert td.structural_eq(drv.current, a @ b)
+    assert [name for name, _ in drv.steps] == [
+        "expand_in_basis", "reduce_frame", "reassemble",
+    ]
+    assert len(drv.history) == 4
+    # the same list, a different expression
+    assert td.structural_eq(td.derive(b @ a, steps).current, a @ b)
+
+
+def test_a_bound_step_carries_only_what_the_step_declares():
+    # One context serves the whole derivation, because each step takes what it
+    # asks for and nothing else.
+    ctx = tender.Context()
+    frame = tb.wcs(ctx)
+    a, b = (tender.tensor(n, rank=1, ctx=ctx) for n in "ab")
+    binder = ts.using(basis=frame, level=tender.Level.Upper)
+    # `level` is along for the ride and expand_in_basis never sees it.
+    # (Fresh dummy indices per call, so compare up to α-renaming.)
+    assert td.algebraic_eq(
+        binder.expand_in_basis(a @ b), tb.expand_in_basis(a @ b, frame)
+    )
+    assert binder.canonicalize.__name__ == "canonicalize"
+    with pytest.raises(AttributeError, match="no step named"):
+        binder.no_such_step
 
 
 def test_apply_identity_as_derivation_step():

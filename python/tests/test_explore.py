@@ -182,16 +182,51 @@ class TestThePath:
 
 
 class TestScript:
-    def test_it_emits_code_that_leans_on_the_preamble(self):
+    def test_it_emits_the_derivation_as_a_list_of_steps(self):
+        # A derivation is a list, not a chain of assignments: the shared
+        # argument is bound once and the list is data you can edit.
+        ctx, frame, a, b = _setup()
+        e0 = a @ b
+        s = tx.Session(e0, scope={"frame": frame, "e0": e0})
+        s.apply("expand_in_basis").apply("reduce_frame")
+        assert s.script() == (
+            "b = ts.using(basis=frame)\n"
+            "e = td.derive(e0, [\n"
+            "    b.expand_in_basis,\n"
+            "    b.reduce_frame,\n"
+            "]).current"
+        )
+
+    def test_the_assignment_chain_is_still_available(self):
         ctx, frame, a, b = _setup()
         e0 = a @ b
         s = tx.Session(e0, scope={"frame": frame, "e0": e0, "tb": tb, "td": td})
         s.apply("expand_in_basis").apply("reduce_frame")
-        assert s.script() == (
+        assert s.script(style="assign") == (
             "e = e0\n"
             "e = tb.expand_in_basis(e, frame)\n"
             "e = tb.reduce_frame(e, frame)"
         )
+
+    def test_an_unknown_style_is_refused(self):
+        ctx, frame, a, b = _setup()
+        with pytest.raises(ValueError, match="unknown style"):
+            tx.Session(a @ b, needs={}).script(style="prose")
+
+    def test_a_step_with_no_arguments_needs_no_binder(self):
+        ctx, frame, a, b = _setup()
+        s = tx.Session(a + a, needs={}, name="e0")
+        s.apply("fold_equal_addends")
+        assert s.script() == (
+            "e = td.derive(e0, [\n    td.fold_equal_addends,\n]).current"
+        )
+
+    def test_a_per_step_argument_stays_per_step(self):
+        # The binder holds what every step shares; a target is not that.
+        ctx, frame, a, b = _setup()
+        s = tx.Session(a @ b, scope={"frame": frame}, name="e0")
+        s.apply("expand_in_basis", variance=tb.Variance.Contravariant)
+        assert "b('expand_in_basis', variance=" in s.script()
 
     def test_it_uses_the_aliases_the_namespace_uses(self):
         ctx, frame, a, b = _setup()
@@ -199,7 +234,7 @@ class TestScript:
 
         s = tx.Session(a @ b, scope={"frame": frame, "basis": basis_module})
         s.apply("expand_in_basis")
-        assert "basis.expand_in_basis(e, frame)" in s.script()
+        assert "basis.expand_in_basis(e, frame)" in s.script(style="assign")
 
     def test_an_option_is_emitted_as_a_keyword(self):
         # And an enum is written the way a person writes it, not as its repr.
@@ -208,7 +243,7 @@ class TestScript:
         s.apply("expand_in_basis", variance=tb.Variance.Contravariant)
         assert (
             "tb.expand_in_basis(e, frame, variance=tb.Variance.Contravariant)"
-            in s.script()
+            in s.script(style="assign")
         )
 
     def test_the_emitted_script_runs_and_reproduces_the_derivation(self):
@@ -217,8 +252,10 @@ class TestScript:
         e0 = a @ b
         s = tx.Session(e0, scope={"frame": frame, "e0": e0})
         s.apply("expand_in_basis").apply("reduce_frame")
-        env = {"tb": tb, "td": td, "frame": frame, "e0": e0}
+        env = {"tb": tb, "td": td, "ts": ts, "frame": frame, "e0": e0}
         exec(s.script(), env)
+        assert td.structural_eq(env["e"], s.current)
+        exec(s.script(style="assign"), env)
         assert td.structural_eq(env["e"], s.current)
 
 
@@ -545,13 +582,17 @@ class TestIdentities:
         ws, e = self._setup_cross()
         s = tx.Session(e, scope={"ws": ws}, name="e0")
         s.apply("apply_identity", identity=td.rule("bac-cab", ws.ctx))
-        assert "td.apply_identity(e, td.rule('bac-cab', ws.ctx))" in s.script()
+        assert "td.rule('bac-cab', ws.ctx)" in s.script()
+        assert (
+            "td.apply_identity(e, td.rule('bac-cab', ws.ctx))"
+            in s.script(style="assign")
+        )
 
     def test_the_emitted_script_runs(self):
         ws, e = self._setup_cross()
         s = tx.Session(e, scope={"ws": ws, "e0": e})
         s.apply("apply_identity", identity=td.rule("bac-cab", ws.ctx))
-        env = {"td": td, "ws": ws, "e0": e}
+        env = {"td": td, "ts": ts, "ws": ws, "e0": e}
         exec(s.script(), env)
         assert td.structural_eq(env["e"], s.current)
 

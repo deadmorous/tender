@@ -9,6 +9,7 @@ frame dot produces.  The identity is *derived*, not cited.
 import tender
 import tender.basis as tb
 import tender.derivation as td
+import tender.steps as ts
 
 from challenges import harness
 from challenges.harness import show
@@ -71,17 +72,20 @@ def test_performed_by_eps_pair_contraction():
     show("claim: lhs", lhs)
     show("claim: rhs", rhs)
 
-    cov = tb.Variance.Covariant
-    drv = td.Derivation(lhs)
-    drv.step(lambda e: tb.expand_in_basis(e, frame, cov), label="expand in basis")
-    drv.step(lambda e: tb.simplify_basis_cross(e, frame), label="crosses → ε")
-    drv.step(lambda e: tb.simplify_basis_dot(e, frame), label="frame dots → δ")
-    drv.step(td.canonicalize, label="materialize Einstein sums")
-    drv.step(td.contract_delta, label="contract δ (joins the ε pair)")
-    drv.step(td.contract_eps_pair, label="Σ_m ε ε → δδ − δδ")
-    drv.step(td.contract_delta, label="contract the new δ's")
-    drv.step(td.simplify, label="simplify")
-    drv.step(lambda e: tb.reassemble(e, frame), label="reassemble invariant")
+    # The frame is bound once, so the route below is a list of steps rather
+    # than a list of lambdas closing over it.
+    b = ts.using(basis=frame, variance=tb.Variance.Covariant)
+    drv = td.derive(lhs, [
+        (b.expand_in_basis, "expand in basis"),
+        (b.simplify_basis_cross, "crosses → ε"),
+        (b.simplify_basis_dot, "frame dots → δ"),
+        (td.canonicalize, "materialize Einstein sums"),
+        (td.contract_delta, "contract δ (joins the ε pair)"),
+        (td.contract_eps_pair, "Σ_m ε ε → δδ − δδ"),
+        (td.contract_delta, "contract the new δ's"),
+        (td.simplify, "simplify"),
+        (b.reassemble, "reassemble invariant"),
+    ])
 
     for (name, fired), result in zip(drv.steps, drv.history[1:]):
         show(f"[{'fired' if fired else 'no-op'}] {name}", result)
