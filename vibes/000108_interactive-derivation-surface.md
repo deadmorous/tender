@@ -416,11 +416,58 @@ list.  The widget compares rules by name for the same reason — a rule rebuilt
 from the same context is the same rule, and the panel is displaying a
 derivation, not comparing pointers.
 
+## 12. Reproducibility: the code, not the session
+
+Noticed in use: `s = td.explore(e)` returns a session the widget then fills, and
+cells below can lean on it — but re-run the notebook and `s` is empty again.
+The question was whether to persist it, or to stop returning it.
+
+**Neither.**  A notebook's contract is *the cells produce the outputs*.  A
+session restored from a side file would be state that no cell computed: the
+notebook would look self-contained and not be, which is a worse failure than an
+empty `s`, because an empty `s` is visible on the very next line.  And dropping
+the return would cost `script()`, `current` and `attempts()` — a widget that
+cannot be queried from code is worse than one whose state is per-kernel.
+
+The reproducible artifact already exists: **the emitted code**.  It rests only
+on the preamble and re-derives everything on a re-run.  So the shape of a
+notebook is *explore, put the code in a cell, and the session becomes scratch* —
+and the only gap was that putting it there was manual.
+
+`Session.to_cell()` closes it: `get_ipython().set_next_input(script)` puts the
+derivation into a new cell below.  Outside a kernel it prints the code, which is
+the same thing one copy away.  A note under the code panel says what the panel
+is for — *the notebook keeps this code, not the session* — so the impermanence
+is stated rather than discovered.
+
+### Why it is a method and not a button
+
+It was asked for as a button beside the code panel, and it cannot be one.
+`set_next_input` does not send anything: it writes into ipykernel's **payload
+manager**, and payloads are flushed only in the reply to an `execute_request`.
+A widget callback arrives as a `comm_msg`, which produces no such reply — so a
+button would queue the cell and deliver it whenever the user next ran anything.
+Working late, silently, is worse than not working.
+
+Called from a cell, the same code runs *inside* an `execute_request` and the
+payload is flushed with its reply.  So the reliable form of the button is a call
+you make, which is why `to_cell()` is a method.
+
+(The alternative — emitting `IPython.display.Javascript` from the callback,
+which does reach the frontend immediately — was rejected: manipulating the
+notebook model from output JS is unsupported in JupyterLab 4 and would break on
+a frontend upgrade.)
+
+**`record=` is untouched by this.**  It remains vibe 000107's item: a corpus of
+derivations that outlives a notebook *by design* is a different thing from
+notebook reproducibility, and using it for the latter would borrow a research
+artifact to do a job the code panel does better.
+
 ## Status
 
 **Built.**  `tender.explore` (the session), `tender.gui` (the widget),
 `td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
-showcase.  70 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+showcase.  73 tests in `python/tests/test_explore.py`; `ipywidgets` is an
 optional dependency and the widget tests skip without it.  Used, and corrected
 by that use — §9.
 

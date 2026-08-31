@@ -375,6 +375,7 @@ Bridge steps:
 | `.applicable()` / `.why_not(step)` / `.tried()` | `Report` / `str` / `set[str]` | The feedback functions, with the context already filled in |
 | `.identities` / `.rule_steps()` | `list[Identity]` / `list[Step]` | The rules `apply_identity` may choose from, and the same as a step set: `s.applicable(steps=s.rule_steps())` answers "which identities apply here?" |
 | `.script()` / `.steps` / `.attempts()` | `str` / `list` / `str` | The path as code, as data, and the whole tree as text |
+| `.to_cell(replace=False)` | — | Put `script()` into a **new notebook cell** below.  The session is per-kernel scratch; the code is the reproducible artifact, and this turns one into the other.  Prints the code outside a kernel |
 | `.use(kind, value)` | `Session` | Pick between several candidates of one kind (two bases, say) |
 
 | Function | Does | Does **not** |

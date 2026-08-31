@@ -255,6 +255,42 @@ class TestEntryPoint:
         assert "no derivation widget" in said and "s.applicable()" in said
 
 
+class TestToCell:
+    """The session is scratch; the code is the artifact (vibe 000108 §12)."""
+
+    def _session(self):
+        ctx, frame, a, b = _setup()
+        s = tx.Session(a @ b, needs={"basis": frame}, name="e0")
+        return s.apply("expand_in_basis")
+
+    def test_it_hands_the_script_to_the_frontend(self):
+        s = self._session()
+        seen = {}
+
+        class Shell:
+            def set_next_input(self, text, replace=False):
+                seen["text"], seen["replace"] = text, replace
+
+        real, tx._shell = tx._shell, lambda: Shell()
+        try:
+            s.to_cell()
+        finally:
+            tx._shell = real
+        assert seen["text"] == s.script()
+        assert seen["replace"] is False
+
+    def test_outside_a_kernel_it_prints_the_code(self):
+        # The same thing one copy away, rather than a silent no-op.
+        import contextlib
+        import io
+
+        s = self._session()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            s.to_cell()
+        assert out.getvalue().strip() == s.script()
+
+
 class TestWidget:
     """The surface, driven without a browser: a widget is a Python object.
 

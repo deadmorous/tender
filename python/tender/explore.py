@@ -414,6 +414,29 @@ class Session:
             lines.append(f"e = {self._call_text(node)}")
         return "\n".join(lines)
 
+    def to_cell(self, replace=False):
+        """Put the derivation into a new notebook cell, below the current one.
+
+        The session is *not* the reproducible thing — re-run the notebook and it
+        is empty again — and it should not be, because a notebook whose state
+        comes from clicking is one no cell produces.  The derivation *as code*
+        is the artifact: self-contained, resting only on the preamble, and
+        re-derived every time the notebook runs.  This is the one call that
+        turns the first into the second::
+
+            s.to_cell()      # the script lands in a new cell; the session is scratch
+
+        Outside a kernel the code is printed instead, which is the same thing
+        one copy away.  *replace* overwrites the calling cell rather than
+        adding one after it.
+        """
+        code = self.script()
+        shell = _shell()
+        if shell is None or not hasattr(shell, "set_next_input"):
+            print(code)
+            return
+        shell.set_next_input(code, replace=replace)
+
     def attempts(self):
         """The whole tree, abandoned branches included."""
         shown = set(id(n) for n in self.path)
@@ -438,6 +461,15 @@ class Session:
             f"<Session {len(self.path) - 1} steps, "
             f"{', '.join(f'{k}={b.name}' for k, b in sorted(self.context.items()))}>"
         )
+
+
+def _shell():
+    """The running IPython shell, or ``None`` outside one."""
+    try:
+        from IPython import get_ipython
+    except ImportError:
+        return None
+    return get_ipython()
 
 
 def _caller_scope(depth):

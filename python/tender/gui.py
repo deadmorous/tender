@@ -42,7 +42,7 @@ import ipywidgets as W
 from IPython.display import display
 
 from . import steps as _ts
-from .explore import DidNotFire
+from .explore import DidNotFire, _shell
 
 __all__ = ["DerivationWidget", "Item", "build", "show"]
 
@@ -139,6 +139,11 @@ class DerivationWidget:
                 self._why_not_pane(),
                 W.HTML("<b>the derivation, as code</b>"),
                 self.code,
+                _note(
+                    "the notebook keeps this code, not the session — run "
+                    "s.to_cell() in a cell to put it in one, and the "
+                    "derivation re-runs without the widget"
+                ),
             ],
             layout=_LAYOUT,
         )
@@ -532,11 +537,7 @@ class DerivationWidget:
 
 def _in_kernel():
     """Is there a frontend to show a widget in?"""
-    try:
-        from IPython import get_ipython
-    except ImportError:
-        return False
-    shell = get_ipython()
+    shell = _shell()
     return shell is not None and hasattr(shell, "kernel")
 
 
