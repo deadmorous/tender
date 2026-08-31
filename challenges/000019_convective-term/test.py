@@ -88,7 +88,7 @@ def test_performed_invariantly():
     # u×(∇×u): the inner curl supplies a real vector e_i for bac-cab to act on.
     cross = cart.expand_nabla(u % (nab % u))
     show("u×(∇×u) expanded", cross)
-    reduced = td.canonicalize(td.apply_identity(bac_cab)(cross))
+    reduced = td.canonicalize(td.apply_identity(cross, bac_cab))
     show("…after bac-cab", reduced)
     assert "times" not in reduced.latex(), reduced.latex()
 

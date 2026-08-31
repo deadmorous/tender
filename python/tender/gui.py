@@ -56,6 +56,13 @@ def _math(latex):
     )
 
 
+def _named(options, name):
+    """The rule called *name* among *options*, or ``None``."""
+    return next(
+        (r for _, r in options if r is not None and r.name == name), None
+    )
+
+
 def _valid(pattern):
     try:
         re.compile(pattern)
@@ -94,7 +101,10 @@ class Item:
     nothing else should have to know it.
     """
 
-    __slots__ = ("box", "chooser", "filter", "reveal", "target", "note")
+    __slots__ = (
+        "box", "chooser", "filter", "reveal", "target", "note",
+        "rules", "rule_note", "rule_row",
+    )
 
     def __init__(self, **parts):
         for name, part in parts.items():
@@ -225,6 +235,15 @@ class DerivationWidget:
         report = self._report(node)
         tried = session.tried(node.expr)
         chosen = session.path[k + 1].step if k + 1 < len(session.path) else None
+        # By name, not by object: a rule rebuilt from the same context is the
+        # same rule, and the widget is displaying a derivation rather than
+        # comparing pointers.
+        taken = (
+            session.path[k + 1].kwargs.get("identity")
+            if k + 1 < len(session.path)
+            else None
+        )
+        taken_name = taken.name if taken is not None else None
 
         offered = []  # (label, name) for the steps that do something here
         for hit in report:
@@ -241,10 +260,19 @@ class DerivationWidget:
         if chosen is not None and chosen not in [n for _, n in offered]:
             offered.append((f"{chosen}   · taken", chosen))
 
+        # A step that wants an identity is not offered like the others: which
+        # rule to apply is a question, not a probed move, so it opens a second
+        # list rather than being tried behind the scenes (vibe 000108 §11).
+        asks = sorted(n for n in _ts.names() if "identity" in _ts.info(n).needs)
+
         # The other two categories, by name, so the filter can reach them.
-        blocked = {q.rsplit(".", 1)[-1]: lack for q, lack in report.missing.items()}
+        blocked = {
+            q.rsplit(".", 1)[-1]: lack
+            for q, lack in report.missing.items()
+            if q.rsplit(".", 1)[-1] not in asks
+        }
         quiet = sorted(
-            set(_ts.names()) - {n for _, n in offered} - set(blocked)
+            set(_ts.names()) - {n for _, n in offered} - set(blocked) - set(asks)
         )
 
         chooser = W.Dropdown(
@@ -253,6 +281,16 @@ class DerivationWidget:
             layout=W.Layout(width="440px"),
         )
         note = W.HTML()
+        rule_chooser = W.Dropdown(
+            options=[("— choose an identity —", None)],
+            value=None,
+            layout=W.Layout(width="440px"),
+        )
+        rule_note = W.HTML()
+        rule_row = W.VBox(
+            [W.HBox([W.HTML("&nbsp;&nbsp;↳&nbsp;"), rule_chooser]), rule_note],
+            layout=W.Layout(display="none", width="100%"),
+        )
         filt = W.Text(
             placeholder="filter (regex)",
             layout=W.Layout(width="150px"),
@@ -278,10 +316,22 @@ class DerivationWidget:
             """
             keep = _matcher(pattern)
             kept = [o for o in offered if keep(o[1]) or o[1] == chosen]
+            asked = [
+                (f"{n} …", n) for n in asks if keep(n) or n == chosen
+            ]
             self._building = True
             try:
-                chooser.options = [("— choose a step —", None)] + kept
+                chooser.options = (
+                    [("— choose a step —", None)]
+                    + kept
+                    + ([("─" * 24, None)] + asked if asked else [])
+                )
                 chooser.value = chosen
+                if rule_row.layout.display != "none":
+                    rule_chooser.options = [
+                        ("— choose an identity —", None)
+                    ] + [o for o in rule_all if keep(o[1].name)]
+                    rule_chooser.value = _named(rule_chooser.options, taken_name)
             finally:
                 self._building = False
             filt.layout.border = "" if _valid(pattern) else "1px solid #a00"
@@ -311,12 +361,72 @@ class DerivationWidget:
                     lines.append("no step matches that")
             note.value = "".join(_note(t).value for t in lines)
 
+        rule_all = []  # (label, Identity) for the rules that fire here
+
+        def open_rules():
+            """Probe the rule library — now, because the user just asked.
+
+            The probing is the same as for any step; what is different is when
+            it happens.  Every other row was tried behind the scenes; these are
+            tried only on request, so a growing rule library costs nothing until
+            it is wanted.
+            """
+            rule_row.layout.display = ""
+            if rule_all:
+                return
+            found = session.identities
+            if not found:
+                rule_note.value = _note(
+                    "no identities to choose from — put a Context (or a rules "
+                    "list) in scope, or pass ctx=… to explore",
+                    "#a00",
+                ).value
+                return
+            by_name = {r.name: r for r in found}
+            probed = _ts.applicable(
+                node.expr, steps=_ts.rule_steps(found), **session.values
+            )
+            for hit in probed:
+                label = hit.step.name + "   " + (
+                    ", ".join(f"{k}{v:+d}" for k, v in sorted(hit.change.items()))
+                    or "· reshapes only"
+                )
+                rule_all.append((label, by_name[hit.step.name]))
+            missed = sorted(set(by_name) - {r.name for _, r in rule_all})
+            lines = []
+            if not rule_all:
+                lines.append("none of the %d identities match here" % len(found))
+            elif missed:
+                lines.append("did not match: " + ", ".join(missed))
+            rule_note.value = "".join(_note(t).value for t in lines)
+            show_for(filt.value)
+
+        def take_rule(change):
+            if change["name"] != "value" or self._building:
+                return
+            if change["new"] is None or change["new"].name == taken_name:
+                return
+            self._advance(
+                k, asks[0], target.value.strip(), identity=change["new"]
+            )
+
+        rule_chooser.observe(take_rule, names="value")
+
         def refilter(change):
             if change["name"] == "value":
                 show_for(change["new"])
 
         filt.observe(refilter, names="value")
         show_for("")
+        if chosen in asks:
+            # Reading a derivation back: the rule that was taken is shown where
+            # it was chosen, not buried in the emitted code.
+            open_rules()
+            self._building = True
+            try:
+                rule_chooser.value = _named(rule_chooser.options, taken_name)
+            finally:
+                self._building = False
 
         def toggle(change):
             target.layout.display = "" if change["new"] else "none"
@@ -327,7 +437,12 @@ class DerivationWidget:
             if change["name"] != "value" or self._building:
                 return
             name = change["new"]
-            if name is None or name == chosen:
+            if name is None:
+                return
+            if name in asks:
+                open_rules()
+                return
+            if name == chosen:
                 return
             self._advance(k, name, target.value.strip())
 
@@ -344,7 +459,7 @@ class DerivationWidget:
             row.append(drop)
 
         box = W.VBox(
-            [_math(node.expr.latex()), W.HBox(row), note],
+            [_math(node.expr.latex()), W.HBox(row), rule_row, note],
             layout=W.Layout(
                 border="1px solid #e0e0e0",
                 padding="4px",
@@ -364,6 +479,9 @@ class DerivationWidget:
             reveal=reveal,
             target=target,
             note=note,
+            rules=rule_chooser,
+            rule_note=rule_note,
+            rule_row=rule_row,
         )
 
     def _report(self, node):
@@ -375,10 +493,11 @@ class DerivationWidget:
         return self._reports[key]
 
     # -- transitions -------------------------------------------------------
-    def _advance(self, k, name, target):
+    def _advance(self, k, name, target, **extra):
         session = self.session
         session.goto(k)
-        extra = {"target": target} if target else {}
+        if target:
+            extra["target"] = target
         try:
             session.apply(name, **extra)
             self.status.value = ""

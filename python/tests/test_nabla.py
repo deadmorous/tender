@@ -52,7 +52,7 @@ def _cross_removal_identities(ctx):
         a % B % c,
         (
             lambda x: tb.expand_in_basis(x, basis, co),
-            td.apply_identity(id_alt),
+            id_alt,
             lambda x: tb.expand_in_basis(x, basis, co),
             lambda x: tb.simplify_basis_cross(x, basis),
             lambda x: tb.simplify_basis_dot(x, basis),
@@ -68,7 +68,7 @@ def _cross_removal_identities(ctx):
     id_inc = td.Identity(
         "inc",
         a % (c % E).transpose(),
-        td.canonicalize(-td.apply_identity(id_axBxc)(a % E % c)),
+        td.canonicalize(-td.apply_identity(a % E % c, id_axBxc)),
     )
     return id_axBxc, id_inc
 
@@ -281,7 +281,7 @@ def test_axbxc_identity_derives():
     basis = tb.wcs(ws.ctx)
     i, j = ws.ctx.alloc_index(), ws.ctx.alloc_index()
     ei, ej = basis.covariant_vector(i), basis.covariant_vector(j)
-    out = td.apply_identity(id_axBxc)(ei % B % ej)
+    out = td.apply_identity(ei % B % ej, id_axBxc)
     assert "times" not in out.latex()  # no cross products remain
 
 
@@ -297,7 +297,7 @@ def test_strain_phase1_reduction():
     _, id_inc = _cross_removal_identities(ws.ctx)
 
     interior = cart.expand_nabla(nab % (nab % eps).transpose())
-    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    phase1 = td.canonicalize(td.apply_identity(interior, id_inc))
     assert "times" not in phase1.latex()  # Phase-1 is cross-free
 
     a = cart.components(cart.componentize_nabla(phase1))
@@ -324,7 +324,7 @@ def test_strain_phase2_reassembly():
     _, id_inc = _cross_removal_identities(ws.ctx)
 
     interior = cart.expand_nabla(nab % (nab % eps).transpose())
-    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    phase1 = td.canonicalize(td.apply_identity(interior, id_inc))
     reass = cart.reassemble_nabla(phase1)
 
     th = t.tr(eps)
@@ -352,7 +352,7 @@ def test_reassemble_nabla_dimensions_identity_and_trace_folds():
     _, id_inc = _cross_removal_identities(ws.ctx)  # bare I inside
 
     interior = cart.expand_nabla(nab % (nab % eps).transpose())
-    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    phase1 = td.canonicalize(td.apply_identity(interior, id_inc))
     reass = cart.reassemble_nabla(phase1)
     assert reass.latex().count(r"\mathbf{I}") == 2  # clean I, no ^{•·}_{·•}
 
@@ -373,7 +373,7 @@ def test_reassemble_scalar_hessian_drops_transpose():
     _, id_inc = _cross_removal_identities(ws.ctx)
 
     interior = cart.expand_nabla(nab % (nab % eps).transpose())
-    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    phase1 = td.canonicalize(td.apply_identity(interior, id_inc))
     reass = cart.reassemble_nabla(phase1)
     tex = reass.latex()
 

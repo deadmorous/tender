@@ -22,8 +22,8 @@ derivations never appeared alone — they were punctuation between the moves tha
 mattered.
 
 **`needs`** lists what a step wants besides the expression, drawn from a short
-closed list — ``basis``, ``coord``, ``rules``, ``level``, ``op``.  ``options``
-lists what it will *accept*: ``target`` names a single object to act on,
+closed list — ``basis``, ``coord``, ``rules``, ``level``, ``op``, ``identity``.
+``options`` lists what it will *accept*: ``target`` names a single object to act on,
 ``variance`` picks co/contravariant.  Both are here so a tool can supply them
 from context rather than each caller remembering.
 
@@ -53,7 +53,7 @@ _CATEGORY_BLURB = {
     "bridge": "cross between invariant and component form",
     "index": "contract or move indices",
     "operators": "∇ and ∂ — apply them, or fold them back",
-    "engine": "goal-directed: hand the work to the rule engine",
+    "engine": "rule-driven: the identity library, saturated or one rule at a time",
 }
 
 
@@ -360,6 +360,9 @@ _r("skew", _d, _D, category="normalise",
    summary="the skew part ½(A − Aᵀ)")
 
 # ---- engine ---------------------------------------------------------------
+_r("apply_identity", _d, _D, category="engine", primary=True,
+   needs=("identity",),
+   summary="apply one named identity from the rule library")
 _r("engine_simplify", _d, _D, category="engine", primary=True, needs=("rules",),
    summary="equality saturation, extracting the cheapest form")
 _r("saturate", _d, _D, category="engine", needs=("rules",),
@@ -373,6 +376,49 @@ _r("saturate", _d, _D, category="engine", needs=("rules",),
 def shape(expr):
     """The structural fingerprint of *expr* — what a step's effect is measured by."""
     return _core.derivation._expression_shape(expr)
+
+
+def rule_steps(identities, home="tender.identities"):
+    """One :class:`Step` per identity — the rule library as a step set.
+
+    Identities are context-bound, so they cannot live in the catalogue the way
+    the shipped steps do; but they answer the same question, and this makes
+    them answerable by the same call::
+
+        print(applicable(expr, steps=rule_steps(td.rules("cross", ctx=ctx))))
+
+    Which rules apply here, with what each would change — the counterpart of
+    handing the whole set to :func:`~tender.derivation.engine_simplify` and
+    accepting its choice.
+    """
+    from functools import partial
+
+    def reporter(identity):
+        # A rule that does not fire has exactly one reason, and it is worth
+        # saying which pattern went looking: "no match" plus the lhs is the
+        # whole story, where the synthesized fallback would guess.
+        def run(expr):
+            got = identity(expr)
+            if _d.structural_eq(got, expr):
+                return got, False, (
+                    f"{identity.name} did not match; its left-hand side is "
+                    f"{identity.lhs.latex()}"
+                )
+            return got, True, ""
+
+        return run
+
+    return [
+        Step(
+            name=r.name,
+            category="engine",
+            summary=f"the identity {r.name}",
+            fn=partial(_d.apply_identity, identity=r),
+            reported=reporter(r),
+            home=home,
+        )
+        for r in identities
+    ]
 
 
 @dataclass(frozen=True)
@@ -439,7 +485,7 @@ class Report(list):
         return "\n".join(out)
 
 
-def applicable(expr, **context):
+def applicable(expr, steps=None, **context):
     """Which steps actually do something to *expr*?
 
     The answer to "which step do I need?", asked of the expression rather than
@@ -457,11 +503,16 @@ def applicable(expr, **context):
     listed at the end with what it was missing — so the report also says what
     you could hand it to see more.  That listing is ``report.missing``, keyed by
     the step and carrying every unmet need, not just the first.
+
+    *steps* narrows or replaces what is tried — names or :class:`Step` objects,
+    defaulting to the whole catalogue.  The catalogue is not the only source of
+    steps: a rule library builds one per identity, and those belong to a
+    session rather than to the module (vibe 000108 §11).
     """
     hits, missing = [], {}
     before = shape(expr)
-    for name in names():
-        st = info(name)
+    for entry in names() if steps is None else steps:
+        st = info(entry) if isinstance(entry, str) else entry
         lack = tuple(k for k in st.needs if k not in context)
         if lack:
             missing[st.qualified] = lack
@@ -552,6 +603,7 @@ __all__ = [
     "Hit",
     "Report",
     "applicable",
+    "rule_steps",
     "StepResult",
     "why_not",
     "explain",

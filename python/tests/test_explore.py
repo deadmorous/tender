@@ -14,6 +14,7 @@ import tender.basis as tb
 import tender.chart as tc
 import tender.derivation as td
 import tender.explore as tx
+import tender.identities as ti
 import tender.steps as ts
 
 
@@ -278,7 +279,8 @@ class TestWidget:
     def test_the_chooser_offers_what_applies_here(self):
         s, w = self._widget()
         offered = {v for _, v in w.items[0].chooser.options if v}
-        assert offered == {h.step.name for h in s.applicable()}
+        # …plus the entry that asks a question rather than being a probed move.
+        assert offered == {h.step.name for h in s.applicable()} | {"apply_identity"}
 
     def test_choosing_a_step_advances_the_session(self):
         s, w = self._widget()
@@ -442,6 +444,149 @@ class TestFilter:
         w.items[0].filter.value = "zzz"
         assert w.items[0].chooser.value == "expand_in_basis"
         assert s.steps == [("expand_in_basis", {"basis": s.values["basis"]})]
+
+
+class TestIdentities:
+    """Choosing a rule is a question, not a probed move (vibe 000108 §11)."""
+
+    def _setup_cross(self):
+        ws = tender.Workspace()
+        ctx = ws.ctx
+        a, b, c = (tender.tensor(n, rank=1, ctx=ctx) for n in "abc")
+        return ws, a % (b % c)
+
+    def test_the_library_is_a_step_set_like_any_other(self):
+        # The terminal half: "which identities apply here?" is `applicable`
+        # pointed at a different set of steps.
+        ws, e = self._setup_cross()
+        rs = td.rules("cross", ctx=ws.ctx)
+        got = {h.step.name for h in ts.applicable(e, steps=ts.rule_steps(rs))}
+        assert got == {"bac-cab"}
+
+    def test_a_rule_that_does_not_match_says_which_pattern_looked(self):
+        ws, e = self._setup_cross()
+        a = tender.tensor("a", rank=1, ctx=ws.ctx)
+        step = ts.rule_steps(td.rules("cross", ctx=ws.ctx))[0]
+        why = ts.why_not(a @ a, step)
+        assert "did not match" in why and "times" in why or "\\times" in why
+
+    def test_the_session_offers_the_library_from_a_context(self):
+        ws, e = self._setup_cross()
+        s = tx.Session(e, scope={"ws": ws})
+        assert len(s.identities) == len(ti.names())
+        assert s.identity_source.name == "ws.ctx"
+
+    def test_a_rules_list_overrides_the_library(self):
+        ws, e = self._setup_cross()
+        one = [td.rule("bac-cab", ws.ctx)]
+        s = tx.Session(e, needs={"ctx": ws.ctx, "rules": one})
+        assert [r.name for r in s.identities] == ["bac-cab"]
+        assert s.identity_source.kind == "rules"
+
+    def test_with_neither_there_is_nothing_to_choose_from(self):
+        # Identities are context-bound and an expression does not carry its
+        # context, so this is a real absence rather than an oversight.
+        ws, e = self._setup_cross()
+        assert tx.Session(e, needs={}).identities == []
+
+    def test_applying_one_records_it_as_an_argument(self):
+        ws, e = self._setup_cross()
+        s = tx.Session(e, needs={"ctx": ws.ctx})
+        s.apply("apply_identity", identity=td.rule("bac-cab", ws.ctx))
+        name, kwargs = s.steps[0]
+        assert name == "apply_identity"
+        assert kwargs["identity"].name == "bac-cab"
+
+    def test_the_script_cites_the_rule_by_name(self):
+        ws, e = self._setup_cross()
+        s = tx.Session(e, scope={"ws": ws}, name="e0")
+        s.apply("apply_identity", identity=td.rule("bac-cab", ws.ctx))
+        assert "td.apply_identity(e, td.rule('bac-cab', ws.ctx))" in s.script()
+
+    def test_the_emitted_script_runs(self):
+        ws, e = self._setup_cross()
+        s = tx.Session(e, scope={"ws": ws, "e0": e})
+        s.apply("apply_identity", identity=td.rule("bac-cab", ws.ctx))
+        env = {"td": td, "ws": ws, "e0": e}
+        exec(s.script(), env)
+        assert td.structural_eq(env["e"], s.current)
+
+
+class TestIdentityChooser:
+    def _widget(self):
+        gui = pytest.importorskip("tender.gui")
+        ws = tender.Workspace()
+        a, b, c = (tender.tensor(n, rank=1, ctx=ws.ctx) for n in "abc")
+        s = tx.Session(a % (b % c), scope={"ws": ws})
+        return s, gui.build(s)
+
+    def test_it_is_offered_but_not_probed(self):
+        # It is in the list because it is a move you can make, not because it
+        # was tried — that is what the delimiter above it says.
+        s, w = self._widget()
+        labels = [lb for lb, _ in w.items[0].chooser.options]
+        assert any(lb.startswith("apply_identity") for lb in labels)
+        assert any(set(lb) == {"─"} for lb in labels)
+        assert w.items[0].rule_row.layout.display == "none"
+
+    def test_choosing_it_opens_the_rules_and_takes_no_step(self):
+        s, w = self._widget()
+        w.items[0].chooser.value = "apply_identity"
+        assert w.items[0].rule_row.layout.display == ""
+        assert s.steps == []
+
+    def test_the_rules_are_annotated_like_steps(self):
+        s, w = self._widget()
+        w.items[0].chooser.value = "apply_identity"
+        offered = {r.name for _, r in w.items[0].rules.options if r}
+        assert offered == {"bac-cab"}
+        label = next(lb for lb, r in w.items[0].rules.options if r)
+        assert "nodes+" in label
+
+    def test_the_rules_that_missed_are_named(self):
+        s, w = self._widget()
+        w.items[0].chooser.value = "apply_identity"
+        note = w.items[0].rule_note.value
+        assert "did not match" in note
+        assert "bac-cab" not in note  # it did match
+
+    def test_choosing_a_rule_takes_the_step(self):
+        s, w = self._widget()
+        w.items[0].chooser.value = "apply_identity"
+        w.items[0].rules.value = next(r for _, r in w.items[0].rules.options if r)
+        assert [n for n, _ in s.steps] == ["apply_identity"]
+        assert "bac-cab" in s.script()
+
+    def test_a_taken_rule_is_shown_where_it_was_chosen(self):
+        # Reading a derivation back: the rule is on the item, not only in the
+        # emitted code.
+        s, w = self._widget()
+        s.apply("apply_identity", identity=td.rule("bac-cab", s.values["ctx"]))
+        w.refresh()
+        assert w.items[0].rule_row.layout.display == ""
+        assert w.items[0].rules.value.name == "bac-cab"
+
+    def test_the_filter_reaches_the_rules_too(self):
+        s, w = self._widget()
+        item = w.items[0]
+        item.chooser.value = "apply_identity"
+        item.filter.value = "zzz"
+        assert [r for _, r in item.rules.options if r] == []
+        item.filter.value = "bac"
+        assert [r.name for _, r in item.rules.options if r] == ["bac-cab"]
+
+    def test_with_no_context_it_says_so_rather_than_sitting_empty(self):
+        gui = pytest.importorskip("tender.gui")
+        ctx, frame, a, b = _setup()
+        s = tx.Session(a @ b, needs={"basis": frame})
+        w = gui.build(s)
+        w.items[0].chooser.value = "apply_identity"
+        assert "no identities to choose from" in w.items[0].rule_note.value
+
+    def test_it_is_not_listed_as_a_step_that_was_not_tried(self):
+        # It is not blocked for want of an argument; it asks for one.
+        s, w = self._widget()
+        assert "apply_identity" not in w.items[0].note.value
 
 
 class TestContextRow:

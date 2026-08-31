@@ -93,7 +93,7 @@ def cross_removal_identity(ctx):
         a % B % c,
         (
             lambda x: tb.expand_in_basis(x, basis, co),
-            td.apply_identity(id_alt),
+            id_alt,
             lambda x: tb.expand_in_basis(x, basis, co),
             lambda x: tb.simplify_basis_cross(x, basis),
             lambda x: tb.simplify_basis_dot(x, basis),
@@ -109,7 +109,7 @@ def cross_removal_identity(ctx):
     id_inc = td.Identity(
         "inc",
         a % (c % E).transpose(),
-        td.canonicalize(-td.apply_identity(id_axBxc)(a % E % c)),
+        td.canonicalize(-td.apply_identity(a % E % c, id_axBxc)),
     )
     return id_axBxc, id_inc
 
@@ -185,7 +185,7 @@ def main():
     )
 
     # ---- 4. Phase-1 reduction + Phase-2 reassembly, natively ----------------
-    phase1 = td.canonicalize(td.apply_identity(id_inc)(interior))
+    phase1 = td.canonicalize(td.apply_identity(interior, id_inc))
     reass = cart.reassemble_nabla(phase1)
     show(
         "4. reduce (cross-free) then reassemble into ∇ operators",
@@ -220,7 +220,7 @@ def main():
     # compatibility equations found in textbooks:
     #     −Δε − ∇∇(tr ε) + ∇(∇·ε) + (∇(∇·ε))ᵀ = 0.
     id_trace = td.Identity("inc_trace", nabla @ (nabla @ eps), t.laplacian(theta))
-    classical = td.apply_identity(id_trace)(reass)
+    classical = td.apply_identity(reass, id_trace)
     classical_textbook = (
         -t.laplacian(eps)  # −Δε
         - (nabla * (nabla * theta))  # −∇∇(tr ε)

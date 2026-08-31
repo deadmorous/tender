@@ -345,11 +345,80 @@ its `value` observer, which is how a step gets taken.  Filtering therefore has
 to suppress the same guard a rebuild does, and the step already chosen has to
 survive the filter, or the widget holds a value that is not among its options.
 
+## 11. Applying one identity: an entry that asks
+
+The rule library is a second vocabulary beside the step catalogue, and the
+surface had no way into it.  The obvious move — one chooser row per identity —
+is wrong twice over, and the user said so:
+
+**It breaks the list's guarantee.**  Every row in the chooser is there because
+the step was *run and did something*; the delta beside it is the evidence.
+Sixteen identities added as rows would be unprobed guesses looking exactly like
+probed moves, and *everything here does something* would quietly stop being
+true for most of the list.
+
+**It pays for what nobody asked for.**  Probing N rules × M items on every
+redraw, against N rules once, on request.  The registry grows; the chooser
+should not.
+
+So `apply_identity` is **one entry, below a delimiter**, and choosing it does
+not take a step — it opens a second list:
+
+```
+[ apply_identity …                                    ▾ ]
+  ↳ [ bac-cab   nodes+7                               ▾ ]
+    did not match: cross-identity, cross-removal, curl-curl, …
+```
+
+The second list is annotated exactly like the first, because it *is* the first
+mechanism pointed elsewhere: `applicable(expr, steps=…)` now takes a step set,
+and `steps.rule_steps(rules)` turns a rule library into one.  That call is the
+whole feature for a terminal user — "which identities apply here?" without a
+widget — and it is why the two-level display cost almost no new code.
+
+**The identity is a per-item argument, not a session binding.**  Which rule to
+apply is a decision per step; binding one into the context would have fought
+the requirement that different steps take different identities.  So `identity`
+is a kind that nothing in a namespace is ever scanned for — it is chosen where
+the step is chosen.
+
+### Where the candidates come from
+
+An `Expr` does not carry its `Context`, and identities are context-bound, so
+they cannot be conjured from the expression the widget is looking at.  Hence a
+new kind, `ctx`: a `Context` in the namespace (or a `Workspace`, which
+contributes `ws.ctx` as a chart contributes its coordinates) yields the whole
+shipped library, built once per session.  A bound `rules` list overrides it,
+which is how the choice is narrowed to rules of one's own.  With neither, the
+second list says so rather than sitting empty — a real absence, not an
+oversight.
+
+### Two corrections the build forced
+
+**`apply_identity` had the wrong shape.**  It was `apply_identity(identity) ->
+step`, the only member of the library whose signature was `(arg) -> step`
+rather than `(expr, …) -> expr` — and it added nothing, since
+`apply_identity(r)` is `r`, an `Identity` being callable.  That inconsistency is
+exactly what kept it out of the catalogue.  It is now `apply_identity(expr,
+identity)` like every other step; the call sites are all shorter for it.
+
+**A rule is cited by name.**  `rs[5]` says where a rule sat in a list; the
+emitted script says which rewrite was taken:
+
+```python
+e = td.apply_identity(e, td.rule("bac-cab", ws.ctx))
+```
+
+`td.rule(name, source)` is the singular of `td.rules`, taking a `Context` or a
+list.  The widget compares rules by name for the same reason — a rule rebuilt
+from the same context is the same rule, and the panel is displaying a
+derivation, not comparing pointers.
+
 ## Status
 
 **Built.**  `tender.explore` (the session), `tender.gui` (the widget),
 `td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
-showcase.  53 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+showcase.  70 tests in `python/tests/test_explore.py`; `ipywidgets` is an
 optional dependency and the widget tests skip without it.  Used, and corrected
 by that use — §9.
 

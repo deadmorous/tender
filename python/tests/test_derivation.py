@@ -536,7 +536,7 @@ def test_apply_identity_as_derivation_step():
     expected = tender.delta(tender.Realm.Oblique, sp, L, L, m, n, ctx=ctx)
 
     drv = td.Derivation(target)
-    drv.step(td.apply_identity(ident))
+    drv.step(ident)
     assert td.algebraic_eq(drv.current, expected)
     assert len(drv.history) == 2
 
@@ -910,7 +910,7 @@ def test_subtree_variable_identity():
     y = tender.tensor("y", rank=1, ctx=ctx)
     u = tender.tensor("u", rank=1, ctx=ctx)
     w = tender.tensor("w", rank=1, ctx=ctx)
-    res = td.apply_identity(ddot)((x * y).ddot(u * w))
+    res = td.apply_identity((x * y).ddot(u * w), ddot)
     assert td.algebraic_eq(res, (x @ u) * (y @ w))
 
 

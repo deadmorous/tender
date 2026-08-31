@@ -52,6 +52,7 @@ __all__ = [
     "simplify",
     "Identity",
     "apply_identity",
+    "rule",
     "prove_equal",
     "rules",
     "rule_groups",
@@ -632,16 +633,51 @@ class Identity:
         return f"Identity({self.name!r})"
 
 
-def apply_identity(identity):
-    """Return a derivation step that applies *identity* to its argument.
+def apply_identity(expr, identity):
+    """Apply one *identity* to *expr* — the rule library, one rule at a time.
 
-    The step rewrites the first (deepest-first) subtree matching ``identity.lhs``
-    into the instantiated ``identity.rhs``; a fired result is canonical.  If
-    nothing matches, the input comes back **unchanged** (the step no-op
-    contract, vibe 000095) — so :meth:`Derivation.step` can tell you the
-    identity did not fire instead of silently canonicalizing.
+    The complement of :func:`engine_simplify`, which hands the whole rule set to
+    the saturation engine and asks for the best result: here you name the rule
+    and the rewrite is the step.  It rewrites the first (deepest-first) subtree
+    matching ``identity.lhs`` into the instantiated ``identity.rhs``, and a
+    fired result is canonical.  If nothing matches, *expr* comes back
+    **unchanged** (the step no-op contract, vibe 000095), so a derivation can
+    tell you the identity did not fire instead of silently canonicalizing::
+
+        e = td.apply_identity(a % (b % c), td.rule("bac-cab", ctx))
+
+    *identity* is an :class:`Identity`, from :func:`rule`, :func:`rules`, or
+    built by hand.  An ``Identity`` is itself callable, so ``identity(expr)``
+    and ``drv.step(identity)`` are the same rewrite spelled shorter; this form
+    exists because a step in the catalogue takes its expression first (vibe
+    000108).
     """
-    return lambda expr: identity(expr)
+    return identity(expr)
+
+
+def rule(name, source):
+    """The single identity called *name*, from a context or a rule list.
+
+    *source* is either a :class:`tender.Context` — in which case the rule is
+    built from the shipped library — or an iterable of :class:`Identity` to
+    pick from, which is how you narrow the choice to rules of your own::
+
+        td.rule("bac-cab", ctx)          # from the library
+        td.rule("bac-cab", my_rules)     # from a list you built
+
+    The singular of :func:`rules`, and the form a derivation cites: a rule
+    named in a script says which rewrite was taken, where a subscript into a
+    list says only where it happened to sit.
+    """
+    from . import identities as _ident
+
+    if isinstance(source, _core.Context):
+        return _ident.rules_for(source, name)[0]
+    found = [r for r in source if getattr(r, "name", None) == name]
+    if not found:
+        available = ", ".join(sorted(getattr(r, "name", "?") for r in source))
+        raise ValueError(f"no identity named {name!r}; available: {available}")
+    return found[0]
 
 
 def saturate(expr, rules, max_iterations=30):

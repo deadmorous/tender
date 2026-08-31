@@ -279,7 +279,8 @@ keeps the compact form.
 | API | Returns | Does |
 |---|---|---|
 | `Identity(name, lhs, rhs)` | — | A directed rule `lhs=rhs`; free indices of `lhs` are pattern vars. Callable as a step; matches deepest-first, result canonical. **A no-match returns the input unchanged** |
-| `apply_identity(identity)` | step fn | Wrap an `Identity` as an `Expr->Expr` step |
+| `apply_identity(expr, identity)` | `Expr` | Apply one named rule — the rule library one rewrite at a time, against `engine_simplify`'s whole-set saturation.  An `Identity` is callable, so `identity(expr)` is the same rewrite |
+| `rule(name, source)` | `Identity` | The single rule called `name`, from a `Context` (the shipped library) or a list of your own |
 | `tender.identities` | module | The identity **DAG**: `node`, `ancestors`, `depth`, `register` your own. Rules are plain Python — extend without rebuilding |
 
 > Internal steps (`saturate`, `implicitize`, `distribute_contraction`,
@@ -350,7 +351,12 @@ Bridge steps:
 > here (keyed on the canonical form, so a route back is recognised), and
 > `s.attempts()` prints everything.  `s.steps` is `[(name, kwargs), …]` for
 > replay; `s.applicable()` / `s.why_not(name)` are the two above, asked of the
-> current expression.  Each chooser has a **filter** beside it — a regex over
+> current expression.  A step that wants an *identity* is offered below a
+> delimiter and opens a second list — the rules that match here, annotated the
+> same way, probed only when asked (`ts.rule_steps(rules)` is that list without
+> the widget).  The candidates come from a bound `rules` list, else from the
+> shipped library built on a bound `ctx`.  Each chooser has a **filter** beside
+> it — a regex over
 > step names that narrows all three categories at once (what fires, what was
 > not tried, what did nothing); type a name that is not on offer and its
 > `why_not` reason appears, since that is the question you just asked.

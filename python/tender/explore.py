@@ -64,7 +64,12 @@ class DidNotFire(Exception):
 # The argument kinds a step can want, and how to recognise an object of that
 # kind in a namespace.  Closed list — the same one the catalogue draws `needs`
 # from — so a new kind is a deliberate addition in two places, not a guess.
-KINDS = ("basis", "coord", "rules", "level", "op")
+KINDS = ("basis", "coord", "rules", "level", "op", "identity", "ctx")
+
+# The kinds an object in a namespace can be recognised as.  `identity` is not
+# among them on purpose: which rule to apply is a decision per step, not per
+# session, so it is chosen where the step is (vibe 000108 §11).  `ctx` is not a
+# step argument at all — it is where the rule library is built from.
 
 
 def _is_coord(v):
@@ -100,6 +105,7 @@ _RECOGNISE = {
     "rules": _is_rules,
     "level": lambda v: isinstance(v, _core.Level),
     "op": _is_op,
+    "ctx": lambda v: isinstance(v, _core.Context),
 }
 
 
@@ -135,12 +141,14 @@ def scan_scope(scope):
         seen[kind].add(id(value))
         found[kind].append(Binding(kind, name, value))
 
-    charts = []
+    charts, spaces = [], []
     for name, value in scope.items():
         if name.startswith("_"):
             continue
         if type(value).__name__ == "CoordinateChart":
             charts.append((name, value))
+        if type(value).__name__ == "Workspace":
+            spaces.append((name, value))
         for kind in KINDS:
             try:
                 if _RECOGNISE[kind](value):
@@ -154,6 +162,11 @@ def scan_scope(scope):
             continue
         for i, q in enumerate(coords):
             offer("coord", f"{cname}.coords[{i}]", q)
+    for wname, ws in spaces:
+        try:
+            offer("ctx", f"{wname}.ctx", ws.ctx)
+        except Exception:
+            continue
     return found
 
 
@@ -222,6 +235,8 @@ class Session:
         self.path = [self.root]
         self.start_name = name or self._name_of(expr, None) or "e"
         self._tried = {}
+        self._identities = None
+        self._identities_from = None
 
     def _binding(self, kind, value):
         if kind not in KINDS:
@@ -240,6 +255,32 @@ class Session:
             if v is value and not n.startswith("_"):
                 return n
         return kind or "expr"
+
+    @property
+    def identities(self):
+        """The rules :func:`~tender.derivation.apply_identity` may choose from.
+
+        A bound ``rules`` list if there is one — that is how you narrow the
+        choice — and otherwise the whole shipped library, built once from the
+        bound ``ctx``.  Rules are context-bound and an expression does not carry
+        its context, so with neither there is nothing to offer.
+        """
+        if "rules" in self.context:
+            return list(self.context["rules"].value)
+        if "ctx" not in self.context:
+            return []
+        ctx = self.context["ctx"].value
+        if self._identities is None or self._identities_from is not ctx:
+            from . import identities as _ident
+
+            self._identities = _ident.all_rules(ctx)
+            self._identities_from = ctx
+        return list(self._identities)
+
+    @property
+    def identity_source(self):
+        """The binding :meth:`identities` came from — what a script cites."""
+        return self.context.get("rules") or self.context.get("ctx")
 
     @property
     def values(self):
@@ -323,6 +364,13 @@ class Session:
         """*value* as source text: your own name for it where there is one."""
         if isinstance(value, (str, bool, int, float)) or value is None:
             return repr(value)
+        if isinstance(value, _d.Identity):
+            # Cited by name, not by where it sat in a list: a rule named in a
+            # script says which rewrite was taken.
+            src = self.identity_source
+            alias = self.aliases.get("tender.derivation", "td")
+            where = src.name if src is not None else "ctx"
+            return f"{alias}.rule({value.name!r}, {where})"
         for name, held in self.scope.items():
             if held is value and not name.startswith("_"):
                 return name

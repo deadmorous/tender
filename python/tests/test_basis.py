@@ -488,7 +488,7 @@ def test_user_ddot_identity_fires_on_basis_expansion():
     expand_ddot = td.Identity("ddot", (a * b).ddot(c * d), (a @ c) * (b @ d))
 
     y = tb.expand_in_basis(I.ddot(I), frame, tb.Variance.Covariant)
-    y = td.apply_identity(expand_ddot)(y)   # fires now
+    y = td.apply_identity(y, expand_ddot)   # fires now
     y = tb.simplify_basis_dot(y, frame)
     y = td.contract_delta(y)
     y = td.unroll_sums(y)
@@ -583,7 +583,7 @@ def test_cross_identity_cross_via_reassembly():
     s = td.canonicalize(a % (b % I_exp))
     s = td.distribute_contraction(s)
     s = td.canonicalize(s)
-    s = td.apply_identity(baccab)(s)
+    s = td.apply_identity(s, baccab)
     s = td.expand_products(s)
     s = td.canonicalize(s)
     s = tb.reassemble_completeness(s, frame)
@@ -605,7 +605,7 @@ def test_cross_reassociation_exposes_identity():
     x = tender.tensor("x", rank=1, ctx=ctx)
     commute = td.Identity("I-commute", I % x, x % I)
 
-    got = td.apply_identity(commute)((a % I) % b)
+    got = td.apply_identity((a % I) % b, commute)
     want = td.canonicalize(a % (b % I))
     assert td.structural_eq(got, want)
 

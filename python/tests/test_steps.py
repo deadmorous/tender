@@ -38,7 +38,7 @@ class TestCatalogueIsHonest:
             "PREFER", "ProofResult", "algebraic_eq", "structural_eq",
             "prove_equal", "rules", "rule_groups", "citable_for",
             "default_budget", "set_default_budget", "at", "apply_identity",
-            "deriv", "explore", "Basis", "Handedness", "Variance", "wcs",
+            "deriv", "explore", "rule", "Basis", "Handedness", "Variance", "wcs",
             "cylindrical",
             "spherical", "polar_2d", "make_orthonormal_basis",
             "make_oblique_basis",
@@ -111,8 +111,8 @@ class TestStepCall:
             except Exception:
                 pass  # a domain error is fine; the call itself worked
         assert sorted(needs_more) == [
-            "engine_simplify", "fold_operator", "insert_metric", "partial",
-            "saturate",
+            "apply_identity", "engine_simplify", "fold_operator",
+            "insert_metric", "partial", "saturate",
         ]
 
 
