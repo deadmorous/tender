@@ -350,7 +350,11 @@ Bridge steps:
 > here (keyed on the canonical form, so a route back is recognised), and
 > `s.attempts()` prints everything.  `s.steps` is `[(name, kwargs), …]` for
 > replay; `s.applicable()` / `s.why_not(name)` are the two above, asked of the
-> current expression.  The widget lives in `tender.gui` and needs `ipywidgets`
+> current expression.  Each chooser has a **filter** beside it — a regex over
+> step names that narrows all three categories at once (what fires, what was
+> not tried, what did nothing); type a name that is not on offer and its
+> `why_not` reason appears, since that is the question you just asked.
+> The widget lives in `tender.gui` and needs `ipywidgets`
 > **and a notebook** — a widget has no terminal form, so elsewhere `explore`
 > says so and hands back the session, which is the same library, only typed.
 > A long derivation wants room: raise `max_height=`, or dock the widget with

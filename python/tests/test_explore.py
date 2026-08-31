@@ -270,30 +270,27 @@ class TestWidget:
 
     def test_it_shows_one_item_per_point_on_the_path(self):
         s, w = self._widget()
-        assert len(w.history.children) == 1
+        assert len(w.items) == 1
         s.apply("expand_in_basis")
         w.refresh()
-        assert len(w.history.children) == 2
+        assert len(w.items) == 2
 
     def test_the_chooser_offers_what_applies_here(self):
         s, w = self._widget()
-        chooser = w.history.children[0].children[1].children[0]
-        offered = {value for _, value in chooser.options if value}
+        offered = {v for _, v in w.items[0].chooser.options if v}
         assert offered == {h.step.name for h in s.applicable()}
 
     def test_choosing_a_step_advances_the_session(self):
         s, w = self._widget()
-        chooser = w.history.children[0].children[1].children[0]
-        chooser.value = "expand_in_basis"
+        w.items[0].chooser.value = "expand_in_basis"
         assert [name for name, _ in s.steps] == ["expand_in_basis"]
-        assert len(w.history.children) == 2
+        assert len(w.items) == 2
 
     def test_choosing_at_an_earlier_item_drops_the_tail(self):
         s, w = self._widget()
         s.apply("expand_in_basis").apply("reduce_frame")
         w.refresh()
-        chooser = w.history.children[0].children[1].children[0]
-        chooser.value = "skew"
+        w.items[0].chooser.value = "skew"
         assert [name for name, _ in s.steps] == ["skew"]
         # and the abandoned branch is still recorded
         assert "reduce_frame" in s.attempts()
@@ -302,14 +299,14 @@ class TestWidget:
         s, w = self._widget()
         s.apply("expand_in_basis").apply("reduce_frame").back()
         w.refresh()
-        chooser = w.history.children[1].children[1].children[0]
-        label = next(lb for lb, v in chooser.options if v == "reduce_frame")
+        label = next(
+            lb for lb, v in w.items[1].chooser.options if v == "reduce_frame"
+        )
         assert label.endswith("· tried")
 
     def test_steps_blocked_for_want_of_an_argument_say_what_is_missing(self):
         s, w = self._widget()
-        note = w.history.children[0].children[2].value
-        assert "partial (needs coord)" in note
+        assert "partial (needs coord)" in w.items[0].note.value
 
     def test_the_code_panel_tracks_the_session(self):
         s, w = self._widget()
@@ -326,11 +323,10 @@ class TestWidget:
     def test_the_target_field_is_hidden_until_asked_for(self):
         # The click budget: a mandatory field costs a click on every step.
         s, w = self._widget()
-        row = w.history.children[0].children[1]
-        reveal, target = row.children[1], row.children[2]
-        assert target.layout.display == "none"
-        reveal.value = True
-        assert target.layout.display == ""
+        item = w.items[0]
+        assert item.target.layout.display == "none"
+        item.reveal.value = True
+        assert item.target.layout.display == ""
 
     def test_the_whole_catalogue_is_in_view_for_why_not(self):
         s, w = self._widget()
@@ -342,7 +338,7 @@ class TestWidget:
         s, w = self._widget()
         s.apply("expand_in_basis").apply("reduce_frame")
         w.refresh()
-        assert all(item.layout.flex == "0 0 auto" for item in w.history.children)
+        assert all(i.box.layout.flex == "0 0 auto" for i in w.items)
         assert w.history.layout.overflow == "auto"
 
     def test_the_list_may_be_made_taller(self):
@@ -350,6 +346,110 @@ class TestWidget:
 
         s, _ = self._widget()
         assert gui.build(s, max_height="900px").history.layout.max_height == "900px"
+
+class TestFilter:
+    """Typing narrows all three categories at once, not just the chooser."""
+
+    def _widget(self, expr=None):
+        ctx, frame, a, b = _setup()
+        gui = pytest.importorskip("tender.gui")
+        s = tx.Session(expr if expr is not None else a @ b, needs={"basis": frame})
+        return s, gui.build(s)
+
+    def test_it_narrows_the_chooser(self):
+        s, w = self._widget()
+        item = w.items[0]
+        before = {v for _, v in item.chooser.options if v}
+        item.filter.value = "basis"
+        after = {v for _, v in item.chooser.options if v}
+        assert after < before
+        assert all("basis" in n for n in after)
+
+    def test_a_regex_is_a_regex(self):
+        s, w = self._widget()
+        item = w.items[0]
+        item.filter.value = "^expand_"
+        assert all(v.startswith("expand_") for _, v in item.chooser.options if v)
+
+    def test_a_half_typed_regex_falls_back_to_a_substring(self):
+        # A text box passes through invalid patterns on the way to valid ones;
+        # that is not an error to shout about.
+        s, w = self._widget()
+        item = w.items[0]
+        item.filter.value = "expand_("
+        assert item.filter.layout.border == "1px solid #a00"
+        assert [v for _, v in item.chooser.options if v] == []
+
+    def test_it_reaches_the_steps_that_were_not_tried(self):
+        s, w = self._widget()
+        item = w.items[0]
+        item.filter.value = "partial"
+        assert "partial (needs coord)" in item.note.value
+
+    def test_a_single_quiet_step_is_answered_rather_than_listed(self):
+        # Typing a name that is not in the list *is* the "why not?" question.
+        s, w = self._widget()
+        item = w.items[0]
+        item.filter.value = "contract_delta"
+        assert "no summation" in item.note.value
+
+    def test_several_quiet_steps_are_named(self):
+        s, w = self._widget()
+        item = w.items[0]
+        item.filter.value = "eval_"
+        assert "did not fire: " in item.note.value
+        assert "eval_delta_concrete" in item.note.value
+
+    def test_a_pattern_matching_nothing_says_so(self):
+        s, w = self._widget()
+        item = w.items[0]
+        item.filter.value = "zzz"
+        assert "no step matches that" in item.note.value
+
+    def test_clearing_the_filter_restores_everything(self):
+        s, w = self._widget()
+        item = w.items[0]
+        before = {v for _, v in item.chooser.options if v}
+        item.filter.value = "basis"
+        item.filter.value = ""
+        assert {v for _, v in item.chooser.options if v} == before
+        assert item.filter.layout.border == ""
+
+    def test_filtering_does_not_take_a_step(self):
+        # Rewriting the options changes the dropdown's value; that must not
+        # read as a choice.
+        s, w = self._widget()
+        w.items[0].filter.value = "reduce"
+        assert s.steps == []
+
+    def test_it_asks_about_the_item_it_is_typed_in(self):
+        # Filtering above the working end must not answer about the end.
+        ctx, frame, a, b = _setup()
+        gui = pytest.importorskip("tender.gui")
+        s = tx.Session(a @ b, needs={"basis": frame})
+        s.apply("expand_in_basis")
+        w = gui.build(s)
+        w.items[0].filter.value = "contract_delta"
+        assert "no summation" in w.items[0].note.value
+        w.items[1].filter.value = "contract_delta"
+        assert "no δ in this term" in w.items[1].note.value
+
+    def test_the_step_already_taken_survives_the_filter(self):
+        # Its value has to stay selectable, or the dropdown holds one that is
+        # not among its options.
+        s, w = self._widget()
+        w.items[0].chooser.value = "expand_in_basis"
+        w.items[0].filter.value = "zzz"
+        assert w.items[0].chooser.value == "expand_in_basis"
+        assert s.steps == [("expand_in_basis", {"basis": s.values["basis"]})]
+
+
+class TestContextRow:
+    def _widget(self):
+        ctx, frame, a, b = _setup()
+        gui = pytest.importorskip("tender.gui")
+        s = tx.Session(a @ b, scope={"frame": frame})
+        return s, gui.build(s)
 
     def test_the_pairs_are_delimited(self):
         s, w = self._widget()

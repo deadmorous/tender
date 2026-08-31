@@ -276,10 +276,8 @@ to supply one.  The lesson generalises — *the inference is only legible if its
 misses are visible too*; an empty row said nothing where a named one says
 everything.
 
-**Filtering the chooser by typing** (a combo-box rather than a drop-down) is
-requested for v2 and not built.  It is cheap — a `Text` filtering the options —
-but it interacts with how the chooser groups its three categories (§3), and
-that is worth designing rather than bolting on.
+**Filtering the chooser by typing** was requested, and the design question it
+raised is answered in §10.
 
 **The search should not have been the only way in.**  Inferring the arguments
 from the calling scope was §3's headline simplification, and it stays — in a
@@ -302,17 +300,56 @@ the convenience rather than the contract.
 
 ### Version 2, as it now stands
 
-- filter the chooser by typing (above);
 - selecting a target with the mouse (§5, the reason the rendering is live DOM);
 - a compact form for items above the current one, so a long derivation does not
   push the working end off the screen;
 - `record=` for vibe 000107's corpus (§8).
 
+## 10. The filter is a lens, not a search box
+
+Typing to narrow the chooser was asked for as a combo-box.  What it wanted
+designing (§9) was its relation to the three categories of §3 — *fires*, *not
+tried*, *did not fire* — and the answer is that it applies to **all three at
+once**:
+
+```
+[ reduce_frame  coordinates−2 ▾ ]  [ contract_ ]
+not tried: partial (needs coord)
+did not fire: contract_eps_pair, contract_identity
+```
+
+The chooser shows the matching steps that fire; the line under it shows the
+matching steps that were not tried, with what they lack; and — only when a
+pattern is typed — the matching steps that ran and did nothing.
+
+**The payoff is at one match.**  Typing a step's name and not finding it in the
+list *is* the question `why_not` answers, so when the pattern leaves a single
+non-firing step, its reason appears in place of its name.  The filter and the
+feedback function turn out to be the same gesture: the user narrows to a step
+because they expected it, and the expectation is exactly what wants explaining.
+It also asks about *that item's* expression rather than the working end, since
+filtering above the end is a normal thing to do.
+
+**A drop-down, not a combo-box.**  `Combobox` would be one widget instead of
+two, but its matching is the browser's substring search over the option *text* —
+and the options carry their fingerprint delta (`coordinates−2`) and their
+`· tried` mark, which are exactly what a typist does not want to match against.
+A `Text` beside a `Dropdown` filters on the *name* and leaves the labels rich.
+
+**A half-typed regex is a normal state of a text box**, not an error: `contract_(`
+falls back to a substring search and outlines the box.  Nothing raises, nothing
+is logged, and the next keystroke usually fixes it.
+
+One implementation note worth keeping: rewriting a `Dropdown`'s options fires
+its `value` observer, which is how a step gets taken.  Filtering therefore has
+to suppress the same guard a rebuild does, and the step already chosen has to
+survive the filter, or the widget holds a value that is not among its options.
+
 ## Status
 
 **Built.**  `tender.explore` (the session), `tender.gui` (the widget),
 `td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
-showcase.  42 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+showcase.  53 tests in `python/tests/test_explore.py`; `ipywidgets` is an
 optional dependency and the widget tests skip without it.  Used, and corrected
 by that use — §9.
 
@@ -350,7 +387,7 @@ only `applicable`, `why_not`, `describe` and `explain` wired to three widgets.
 
 ### What is not built, deliberately
 
-The version-2 list of §9: filtering the chooser by typing, mouse selection of a
+The version-2 list of §9, less the filter (§10, built): mouse selection of a
 target (the reason §5 chose live DOM over an image), a compact form for items
 above the working end, and `record=` for vibe 000107's corpus.  None is blocked
 by anything here.

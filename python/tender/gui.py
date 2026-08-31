@@ -13,6 +13,14 @@ expression rather than of memory.  Choosing a step at some point in the list
 drops the tail and continues from there; the abandoned branch is kept, and a
 step tried before from the same expression is marked ``· tried``.
 
+Beside each chooser is a **filter**, and it is one lens over all three
+categories rather than a search of the list: typing narrows what fires, what was
+not tried, and what ran and did nothing.  Type a name that is not among the
+options and you have asked "why not that one?" — so when the pattern leaves a
+single non-firing step, its reason appears instead of its name.  The pattern is
+a regular expression; a half-typed one falls back to a substring search and
+outlines the box rather than complaining.
+
 Three things do not appear, and their absence is the design (vibe 000108 §3):
 
 * **no preamble box** — the session inherits the kernel's namespace, so the
@@ -28,6 +36,7 @@ algebra of its own.
 """
 
 import html as _html
+import re
 
 import ipywidgets as W
 from IPython.display import display
@@ -35,7 +44,7 @@ from IPython.display import display
 from . import steps as _ts
 from .explore import DidNotFire
 
-__all__ = ["DerivationWidget", "build", "show"]
+__all__ = ["DerivationWidget", "Item", "build", "show"]
 
 _LAYOUT = W.Layout(width="100%")
 
@@ -47,11 +56,49 @@ def _math(latex):
     )
 
 
+def _valid(pattern):
+    try:
+        re.compile(pattern)
+    except re.error:
+        return False
+    return True
+
+
+def _matcher(pattern):
+    """A step-name test for *pattern* — a regex, or a substring if it is not one.
+
+    A half-typed regex (`contract_(`) is a normal state of a text box, not an
+    error to shout about; it falls back to a substring search and the box is
+    outlined instead.
+    """
+    if not pattern:
+        return lambda name: True
+    try:
+        rx = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return lambda name: pattern.lower() in name.lower()
+    return lambda name: rx.search(name) is not None
+
+
 def _note(text, colour="#666"):
     return W.HTML(
         f'<div style="color:{colour};font-size:90%;padding-left:1.5em">'
         f"{_html.escape(text)}</div>"
     )
+
+
+class Item:
+    """One point on the path, and the widgets that act on it.
+
+    Named rather than indexed: the row's order is a layout decision, and
+    nothing else should have to know it.
+    """
+
+    __slots__ = ("box", "chooser", "filter", "reveal", "target", "note")
+
+    def __init__(self, **parts):
+        for name, part in parts.items():
+            setattr(self, name, part)
 
 
 class DerivationWidget:
@@ -63,6 +110,7 @@ class DerivationWidget:
         # re-run four hundred of them on each refresh.  A node's expression is
         # immutable, so the answer only depends on it and on the context.
         self._reports = {}
+        self.items = []  # one Item per point on the shown path
         self.status = W.HTML()
         self.history = W.VBox(
             layout=W.Layout(width="100%", max_height=max_height, overflow="auto")
@@ -178,7 +226,7 @@ class DerivationWidget:
         tried = session.tried(node.expr)
         chosen = session.path[k + 1].step if k + 1 < len(session.path) else None
 
-        options = [("— choose a step —", None)]
+        offered = []  # (label, name) for the steps that do something here
         for hit in report:
             label = hit.step.name
             if hit.reshapes_only:
@@ -189,14 +237,25 @@ class DerivationWidget:
                 )
             if hit.step.name in tried:
                 label += "   · tried"
-            options.append((label, hit.step.name))
-        if chosen is not None and chosen not in [o[1] for o in options]:
-            options.append((f"{chosen}   · taken", chosen))
+            offered.append((label, hit.step.name))
+        if chosen is not None and chosen not in [n for _, n in offered]:
+            offered.append((f"{chosen}   · taken", chosen))
+
+        # The other two categories, by name, so the filter can reach them.
+        blocked = {q.rsplit(".", 1)[-1]: lack for q, lack in report.missing.items()}
+        quiet = sorted(
+            set(_ts.names()) - {n for _, n in offered} - set(blocked)
+        )
 
         chooser = W.Dropdown(
-            options=options,
-            value=chosen,
-            layout=W.Layout(width="460px"),
+            options=[("— choose a step —", None)],
+            value=None,
+            layout=W.Layout(width="440px"),
+        )
+        note = W.HTML()
+        filt = W.Text(
+            placeholder="filter (regex)",
+            layout=W.Layout(width="150px"),
         )
         target = W.Text(
             placeholder="target (a name)",
@@ -208,6 +267,56 @@ class DerivationWidget:
             tooltip="act on one named object only",
             layout=W.Layout(width="80px"),
         )
+
+        def show_for(pattern):
+            """Re-aim all three categories at *pattern* — one lens, not three.
+
+            Typing narrows what fires (the chooser), what was not tried, and
+            what ran and did nothing — because a name you type and cannot find
+            is the moment "why not that one?" gets asked, and the answer should
+            be where the question is.
+            """
+            keep = _matcher(pattern)
+            kept = [o for o in offered if keep(o[1]) or o[1] == chosen]
+            self._building = True
+            try:
+                chooser.options = [("— choose a step —", None)] + kept
+                chooser.value = chosen
+            finally:
+                self._building = False
+            filt.layout.border = "" if _valid(pattern) else "1px solid #a00"
+
+            lines = []
+            miss = {n: lack for n, lack in blocked.items() if keep(n)}
+            if miss:
+                lines.append(
+                    "not tried: "
+                    + "; ".join(
+                        f"{n} (needs {', '.join(lack)})"
+                        for n, lack in sorted(miss.items())
+                    )
+                )
+            if pattern:
+                dead = [n for n in quiet if keep(n)]
+                if len(dead) == 1:
+                    # Asked of *this* item's expression, not the session's
+                    # current one — the two differ whenever you filter above
+                    # the working end.
+                    lines.append(
+                        _ts.why_not(node.expr, dead[0], **session.values)
+                    )
+                elif dead:
+                    lines.append("did not fire: " + ", ".join(dead))
+                if not kept and not miss and not dead:
+                    lines.append("no step matches that")
+            note.value = "".join(_note(t).value for t in lines)
+
+        def refilter(change):
+            if change["name"] == "value":
+                show_for(change["new"])
+
+        filt.observe(refilter, names="value")
+        show_for("")
 
         def toggle(change):
             target.layout.display = "" if change["new"] else "none"
@@ -224,7 +333,7 @@ class DerivationWidget:
 
         chooser.observe(take, names="value")
 
-        row = [chooser, reveal, target]
+        row = [chooser, filt, reveal, target]
         if k:
             drop = W.Button(
                 description="↑",
@@ -234,19 +343,8 @@ class DerivationWidget:
             drop.on_click(lambda _b, k=k: self._goto(k))
             row.append(drop)
 
-        parts = [_math(node.expr.latex()), W.HBox(row)]
-        if report.missing:
-            parts.append(
-                _note(
-                    "not tried: "
-                    + "; ".join(
-                        f"{q.rsplit('.', 1)[-1]} (needs {', '.join(lack)})"
-                        for q, lack in sorted(report.missing.items())
-                    )
-                )
-            )
-        return W.VBox(
-            parts,
+        box = W.VBox(
+            [_math(node.expr.latex()), W.HBox(row), note],
             layout=W.Layout(
                 border="1px solid #e0e0e0",
                 padding="4px",
@@ -258,6 +356,14 @@ class DerivationWidget:
                 # keep their size.
                 flex="0 0 auto",
             ),
+        )
+        return Item(
+            box=box,
+            chooser=chooser,
+            filter=filt,
+            reveal=reveal,
+            target=target,
+            note=note,
         )
 
     def _report(self, node):
@@ -295,9 +401,8 @@ class DerivationWidget:
         """Rebuild the list and the code panel from the session."""
         self._building = True
         try:
-            self.history.children = tuple(
-                self._item(k) for k in range(len(self.session.path))
-            )
+            self.items = [self._item(k) for k in range(len(self.session.path))]
+            self.history.children = tuple(item.box for item in self.items)
             self.code.value = self.session.script()
         finally:
             self._building = False
