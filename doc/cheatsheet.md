@@ -341,13 +341,20 @@ Bridge steps:
 > ```
 > The extra arguments come from *your* scope by kind — a `Basis` there is
 > passed to every step that wants one, so the frame is named once and never
-> repeated.  The session records the whole tree while showing one path:
+> repeated.  Nothing of a kind in scope?  The widget says so, and the steps
+> wanting it are listed as *not tried*; give it one by putting an object of that
+> kind in the cell, by passing it (`td.explore(expr, coord=r)`), or afterwards
+> with `s.use("coord", r)`.  The session records the whole tree while showing
+> one path:
 > `s.back()` keeps the branch, `s.tried()` says which steps were taken from
 > here (keyed on the canonical form, so a route back is recognised), and
 > `s.attempts()` prints everything.  `s.steps` is `[(name, kwargs), …]` for
 > replay; `s.applicable()` / `s.why_not(name)` are the two above, asked of the
-> current expression.  The widget lives in `tender.gui` and needs `ipywidgets`;
-> everything else works from a terminal.
+> current expression.  The widget lives in `tender.gui` and needs `ipywidgets`
+> **and a notebook** — a widget has no terminal form, so elsewhere `explore`
+> says so and hands back the session, which is the same library, only typed.
+> A long derivation wants room: raise `max_height=`, or dock the widget with
+> JupyterLab's right-click → *Create New View for Output*.
 
 | Session member | Returns | Does |
 |---|---|---|

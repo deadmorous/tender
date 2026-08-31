@@ -57,7 +57,7 @@ def _note(text, colour="#666"):
 class DerivationWidget:
     """The widget bound to one session.  ``.box`` is the displayable widget."""
 
-    def __init__(self, session):
+    def __init__(self, session, max_height="520px"):
         self.session = session
         # `applicable` runs every catalogued step, so a list of ten items would
         # re-run four hundred of them on each refresh.  A node's expression is
@@ -65,7 +65,7 @@ class DerivationWidget:
         self._reports = {}
         self.status = W.HTML()
         self.history = W.VBox(
-            layout=W.Layout(width="100%", max_height="520px", overflow="auto")
+            layout=W.Layout(width="100%", max_height=max_height, overflow="auto")
         )
         self.code = W.Textarea(
             layout=W.Layout(width="100%", height="140px"),
@@ -92,6 +92,16 @@ class DerivationWidget:
         cells = []
         for kind, found in sorted(self.session.bindings.items()):
             if not found:
+                # Named anyway: "how do I give a step what it needs?" is a
+                # question the panel should answer where it is asked, and an
+                # empty kind is the whole answer — put an object of it in the
+                # cell, or pass it to `explore`.
+                cells.append(
+                    W.HTML(
+                        f'<code>{kind}</code> <span style="color:#a00">'
+                        f"— none in scope</span>"
+                    )
+                )
                 continue
             if len(found) == 1:
                 cells.append(W.HTML(f"<code>{kind}</code> = {found[0].name}"))
@@ -110,9 +120,16 @@ class DerivationWidget:
 
             dd.observe(choose, names="value")
             cells.append(dd)
-        if not cells:
-            cells = [_note("nothing found in your namespace for the steps to use")]
-        return W.HBox(cells, layout=_LAYOUT)
+        return W.VBox(
+            [
+                W.HBox(cells, layout=W.Layout(flex_flow="row wrap", width="100%")),
+                _note(
+                    "found in your namespace by kind — put one in the cell, or "
+                    "pass it: td.explore(expr, basis=…)",
+                ),
+            ],
+            layout=_LAYOUT,
+        )
 
     def _catalogue_pane(self):
         """Every step, so that "why not this one?" has something to point at."""
@@ -224,7 +241,15 @@ class DerivationWidget:
         return W.VBox(
             parts,
             layout=W.Layout(
-                border="1px solid #e0e0e0", padding="4px", margin="2px 0", width="100%"
+                border="1px solid #e0e0e0",
+                padding="4px",
+                margin="2px 0",
+                width="100%",
+                # A flex child shrinks below its content by default, so a long
+                # history squeezed every item until the chooser was unreachable
+                # behind a scrollbar of its own.  The list scrolls; the items
+                # keep their size.
+                flex="0 0 auto",
             ),
         )
 
@@ -284,23 +309,25 @@ def _in_kernel():
     return shell is not None and hasattr(shell, "kernel")
 
 
-def build(session):
+def build(session, max_height="520px"):
     """The widget for *session*, unshown — for embedding in a layout of your own."""
-    return DerivationWidget(session)
+    return DerivationWidget(session, max_height=max_height)
 
 
-def show(session):
+def show(session, max_height="520px"):
     """Build the widget and display it in the current cell.
 
     Raises ``RuntimeError`` when there is no notebook frontend, so that
     :func:`tender.explore.explore` can fall back to the session alone rather
     than printing a widget repr into a terminal.
+
+    A long derivation eventually wants more room than a cell: raise
+    *max_height*, or dock the widget beside the notebook with JupyterLab's
+    right-click → *Create New View for Output*, where it does not scroll with
+    the cells.
     """
     if not _in_kernel():
-        raise RuntimeError(
-            "no Jupyter frontend to show the widget in; the session works "
-            "without it — see tender.explore.Session"
-        )
-    widget = build(session)
+        raise RuntimeError("there is no Jupyter frontend to draw it in")
+    widget = build(session, max_height=max_height)
     display(widget.box)
     return widget

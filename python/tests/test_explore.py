@@ -202,9 +202,22 @@ class TestEntryPoint:
         assert s.values["basis"] is other
 
     def test_it_is_a_session_outside_a_notebook(self):
-        # No frontend, no widget, no complaint: the session is the object.
+        # No frontend, no widget: the session is the object.
         ctx, frame, a, b = _setup()
         assert isinstance(td.explore(a @ b, scope={}, gui=None), tx.Session)
+
+    def test_a_terminal_is_told_why_there_is_no_widget(self):
+        # A widget needs a browser to draw in, so a terminal gets the session
+        # alone — but silence there looks like a failure, and it is not one.
+        ctx, frame, a, b = _setup()
+        import io
+        import contextlib
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            td.explore(a @ b, scope={})
+        said = out.getvalue()
+        assert "no derivation widget" in said and "s.applicable()" in said
 
 
 class TestWidget:
@@ -288,3 +301,28 @@ class TestWidget:
     def test_the_whole_catalogue_is_in_view_for_why_not(self):
         s, w = self._widget()
         assert "reduce_frame" in w.box.children[3].children[0].value
+
+    def test_the_items_keep_their_size_as_the_list_grows(self):
+        # A flex child shrinks below its content by default, which squeezed a
+        # long history until each item hid its own chooser behind a scrollbar.
+        s, w = self._widget()
+        s.apply("expand_in_basis").apply("reduce_frame")
+        w.refresh()
+        assert all(item.layout.flex == "0 0 auto" for item in w.history.children)
+        assert w.history.layout.overflow == "auto"
+
+    def test_the_list_may_be_made_taller(self):
+        import tender.gui as gui
+
+        s, _ = self._widget()
+        assert gui.build(s, max_height="900px").history.layout.max_height == "900px"
+
+    def test_every_kind_is_named_including_the_empty_ones(self):
+        # "How do I give a step what it needs?" is answered where it is asked:
+        # a kind with nothing in scope is shown as such, not omitted.
+        s, w = self._widget()
+        row = "".join(c.value for c in w.box.children[0].children[0].children)
+        assert "basis</code> = frame" in row
+        for kind in ("coord", "level", "op", "rules"):
+            assert f"{kind}</code>" in row and "none in scope" in row
+        assert "td.explore(expr, basis=" in w.box.children[0].children[1].value

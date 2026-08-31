@@ -368,7 +368,9 @@ def _caller_scope(depth):
     return scope
 
 
-def explore(expr, scope=None, gui=None, _depth=2, **context):
+def explore(
+    expr, scope=None, gui=None, max_height="520px", _depth=2, **context
+):
     """Open a derivation session on *expr*, and (in a notebook) its surface.
 
     The objects the steps need are taken from the calling scope, so the setup
@@ -380,7 +382,8 @@ def explore(expr, scope=None, gui=None, _depth=2, **context):
     *gui* forces the widget on or off; the default builds it when
     ``ipywidgets`` is available and there is a frontend to show it in.  The
     session is returned either way, and outlives the widget — closing the
-    output is not a lifecycle event (vibe 000108 §8).
+    output is not a lifecycle event (vibe 000108 §8).  *max_height* is how tall
+    the list of steps may grow before it scrolls.
     """
     session = Session(
         expr,
@@ -391,13 +394,32 @@ def explore(expr, scope=None, gui=None, _depth=2, **context):
         return session
     try:
         from .gui import show
-    except ImportError:
+    except ImportError as ex:
         if gui:
             raise
+        _no_widget(f"ipywidgets is not installed ({ex})")
         return session
     try:
-        show(session)
-    except Exception:
+        show(session, max_height=max_height)
+    except Exception as ex:  # noqa: BLE001 - the reason goes to the user
         if gui:
             raise
+        _no_widget(str(ex))
     return session
+
+
+def _no_widget(why):
+    """Say why there is no widget, rather than appearing to do nothing.
+
+    A widget needs a browser to draw in, so a terminal gets the session alone —
+    which is the whole library, only typed.  Silence would look like a failure;
+    the session is not one.
+    """
+    print(
+        f"tender: no derivation widget here — {why}.\n"
+        "        The session works without it:\n"
+        "          print(s.applicable())    what applies here\n"
+        "          s.apply('reduce_frame')  take a step\n"
+        "          print(s.why_not('sym'))  why one does nothing\n"
+        "          print(s.script())        the derivation, as code"
+    )

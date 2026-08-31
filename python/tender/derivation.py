@@ -70,7 +70,7 @@ __all__ = [
 ]
 
 
-def explore(expr, scope=None, gui=None, **context):
+def explore(expr, scope=None, gui=None, max_height="520px", **context):
     """Open an interactive derivation session on *expr* (vibe 000108).
 
     A thin forwarder to :func:`tender.explore.explore`, kept here because this
@@ -81,7 +81,8 @@ def explore(expr, scope=None, gui=None, **context):
         s = td.explore(a @ b)     # finds the Basis, passes it to every step
 
     In a notebook this also opens the widget from :mod:`tender.gui`; elsewhere
-    it is the session alone, which works the same from a terminal.
+    it is the session alone, which works the same from a terminal — a widget
+    needs a browser to draw in, and there is no terminal fallback.
     """
     from .explore import _caller_scope
     from .explore import explore as _explore
@@ -90,6 +91,7 @@ def explore(expr, scope=None, gui=None, **context):
         expr,
         scope=scope if scope is not None else _caller_scope(2),
         gui=gui,
+        max_height=max_height,
         **context,
     )
 

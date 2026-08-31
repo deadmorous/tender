@@ -245,12 +245,57 @@ preamble box and inferring the needs: a standalone application would need a
 session lifecycle, a storage location, and a policy on discarding.  Here there is
 nothing to design.
 
+## 9. First use, and what it changed
+
+The surface was used in JupyterLab on `a × (a × b)` and reached
+`(a·b) a − (a·a) b` in six steps.  Four observations, three of them fixed.
+
+**A widget has no terminal form, and silence was the wrong way to say so.**
+`explore` from a script or a plain REPL did nothing at all: `ipywidgets` needs a
+browser to draw in, `show` refused, and the refusal was swallowed.  That is the
+correct behaviour wrapped in the worst possible presentation — the session
+*does* work there, and is the whole library, only typed.  It now says so, and
+names the four calls that replace the clicks.  A text-mode driver is a real
+possibility and is not this: it would be a second surface with its own idea of
+how a list is chosen, not a fallback.
+
+**The list squeezed its items instead of scrolling.**  Past about six steps
+every item shrank until its chooser was unreachable behind a scrollbar of its
+own.  The cause is flexbox rather than tender: a flex child may shrink below
+its content, so a fixed-height column divides the space among its children
+instead of overflowing.  `flex: 0 0 auto` on the item is the fix — the *list*
+scrolls, the items keep their size.  `max_height` is now a parameter, and the
+detached output view (§2) is documented where the question arises rather than
+only here.
+
+**"How do I specify a step's needs?" was asked of a panel that half-answered
+it.**  The context row showed `basis = wcs` — inferred, correct, and silent
+about the four kinds it found nothing for.  Naming those is the answer to the
+question: a kind with nothing in scope is now shown as such, with the three ways
+to supply one.  The lesson generalises — *the inference is only legible if its
+misses are visible too*; an empty row said nothing where a named one says
+everything.
+
+**Filtering the chooser by typing** (a combo-box rather than a drop-down) is
+requested for v2 and not built.  It is cheap — a `Text` filtering the options —
+but it interacts with how the chooser groups its three categories (§3), and
+that is worth designing rather than bolting on.
+
+### Version 2, as it now stands
+
+- filter the chooser by typing (above);
+- selecting a target with the mouse (§5, the reason the rendering is live DOM);
+- a compact form for items above the current one, so a long derivation does not
+  push the working end off the screen;
+- `record=` for vibe 000107's corpus (§8).
+
 ## Status
 
 **Built.**  `tender.explore` (the session), `tender.gui` (the widget),
 `td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
-showcase.  31 tests in `python/tests/test_explore.py`; `ipywidgets` is an
-optional dependency and the widget tests skip without it.
+showcase.  35 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+optional dependency and the widget tests skip without it.  Used, and corrected
+by that use — §9.
 
 The two library items the design called for are done:
 
@@ -286,6 +331,7 @@ only `applicable`, `why_not`, `describe` and `explain` wired to three widgets.
 
 ### What is not built, deliberately
 
-Mouse selection of a target (the reason §5 chose live DOM over an image) and
-`record=` for vibe 000107's corpus.  Both were scoped out of version 1 and
-neither is blocked by anything here.
+The version-2 list of §9: filtering the chooser by typing, mouse selection of a
+target (the reason §5 chose live DOM over an image), a compact form for items
+above the working end, and `record=` for vibe 000107's corpus.  None is blocked
+by anything here.
