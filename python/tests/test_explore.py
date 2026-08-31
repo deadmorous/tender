@@ -489,6 +489,14 @@ class TestIdentities:
         ws, e = self._setup_cross()
         assert tx.Session(e, needs={}).identities == []
 
+    def test_the_session_asks_the_library_the_same_way(self):
+        # `applicable` over a different step set, reachable from the session —
+        # which is where a user with a session in hand goes looking.
+        ws, e = self._setup_cross()
+        s = tx.Session(e, scope={"ws": ws})
+        got = {h.step.name for h in s.applicable(steps=s.rule_steps())}
+        assert got == {"bac-cab"}
+
     def test_applying_one_records_it_as_an_argument(self):
         ws, e = self._setup_cross()
         s = tx.Session(e, needs={"ctx": ws.ctx})

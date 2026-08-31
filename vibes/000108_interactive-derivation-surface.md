@@ -374,7 +374,9 @@ The second list is annotated exactly like the first, because it *is* the first
 mechanism pointed elsewhere: `applicable(expr, steps=…)` now takes a step set,
 and `steps.rule_steps(rules)` turns a rule library into one.  That call is the
 whole feature for a terminal user — "which identities apply here?" without a
-widget — and it is why the two-level display cost almost no new code.
+widget — and it is why the two-level display cost almost no new code.  From a
+session it is `s.applicable(steps=s.rule_steps())`, which is what a user with a
+session in hand reached for unprompted; the method exists because they did.
 
 **The identity is a per-item argument, not a session binding.**  Which rule to
 apply is a decision per step; binding one into the context would have fought

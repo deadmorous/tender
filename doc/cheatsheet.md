@@ -373,6 +373,7 @@ Bridge steps:
 | `.current` / `.path` / `.tree` | `Expr` / `list[Node]` / `Node` | Where you are, how you got there, and everything ever tried |
 | `.back(n=1)` / `.goto(k)` | `Session` | Move up the shown path; the branch left behind is kept |
 | `.applicable()` / `.why_not(step)` / `.tried()` | `Report` / `str` / `set[str]` | The feedback functions, with the context already filled in |
+| `.identities` / `.rule_steps()` | `list[Identity]` / `list[Step]` | The rules `apply_identity` may choose from, and the same as a step set: `s.applicable(steps=s.rule_steps())` answers "which identities apply here?" |
 | `.script()` / `.steps` / `.attempts()` | `str` / `list` / `str` | The path as code, as data, and the whole tree as text |
 | `.use(kind, value)` | `Session` | Pick between several candidates of one kind (two bases, say) |
 

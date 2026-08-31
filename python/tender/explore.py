@@ -277,6 +277,16 @@ class Session:
             self._identities_from = ctx
         return list(self._identities)
 
+    def rule_steps(self):
+        """:meth:`identities`, as steps — for asking which rules apply here::
+
+            print(s.applicable(steps=s.rule_steps()))
+
+        The rule library answers the same question as the catalogue, so it is
+        asked the same way (vibe 000108 §11).
+        """
+        return _ts.rule_steps(self.identities)
+
     @property
     def identity_source(self):
         """The binding :meth:`identities` came from — what a script cites."""
