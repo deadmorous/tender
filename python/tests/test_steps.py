@@ -38,7 +38,8 @@ class TestCatalogueIsHonest:
             "PREFER", "ProofResult", "algebraic_eq", "structural_eq",
             "prove_equal", "rules", "rule_groups", "citable_for",
             "default_budget", "set_default_budget", "at", "apply_identity",
-            "deriv", "Basis", "Handedness", "Variance", "wcs", "cylindrical",
+            "deriv", "explore", "Basis", "Handedness", "Variance", "wcs",
+            "cylindrical",
             "spherical", "polar_2d", "make_orthonormal_basis",
             "make_oblique_basis",
         }
@@ -196,8 +197,10 @@ class TestApplicable:
     def test_steps_needing_absent_context_are_listed_not_silently_dropped(self):
         _, frame, a, b = self._setup()
         report = ts.applicable(tb.expand_in_basis(a @ b, frame), basis=frame)
-        assert "coord" in report.missing
-        assert "rules" in report.missing
+        # Keyed by step, carrying every unmet need — so a chooser can offer
+        # "supply this and see" rather than just naming an absent kind.
+        assert report.missing["tender.derivation.partial"] == ("coord",)
+        assert "tender.derivation.engine_simplify" in report.blocked_on("rules")
         assert "not tried" in str(report)
 
     def test_the_report_prints(self):

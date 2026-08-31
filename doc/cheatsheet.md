@@ -331,6 +331,33 @@ Bridge steps:
 > A `*` in `describe()` marks a primary step; the rest are what those are built
 > from — still importable, just not vocabulary.  `ts.register(...)` adds your
 > own, as the identity library does.
+>
+> **Or let it drive.**  `td.explore(expr)` opens a *session* on the expression
+> (vibe 108) — and in a notebook, a widget where the next step is a click:
+> ```python
+> s = td.explore(a % (a % b))    # finds `frame` in your namespace by itself
+> s.apply("expand_in_basis").apply("reduce_frame")
+> print(s.script())              # the derivation, as code to paste
+> ```
+> The extra arguments come from *your* scope by kind — a `Basis` there is
+> passed to every step that wants one, so the frame is named once and never
+> repeated.  The session records the whole tree while showing one path:
+> `s.back()` keeps the branch, `s.tried()` says which steps were taken from
+> here (keyed on the canonical form, so a route back is recognised), and
+> `s.attempts()` prints everything.  `s.steps` is `[(name, kwargs), …]` for
+> replay; `s.applicable()` / `s.why_not(name)` are the two above, asked of the
+> current expression.  The widget lives in `tender.gui` and needs `ipywidgets`;
+> everything else works from a terminal.
+
+| Session member | Returns | Does |
+|---|---|---|
+| `td.explore(expr, scope=None, gui=None, **context)` | `Session` | Open a session; fills the step arguments from the calling scope, and shows the widget when there is a notebook to show it in (`gui=False` never does) |
+| `.apply(step, **extra)` | `Session` | Take a step from here; raises `DidNotFire` — with the step's own reason — rather than recording a no-op. Chainable |
+| `.current` / `.path` / `.tree` | `Expr` / `list[Node]` / `Node` | Where you are, how you got there, and everything ever tried |
+| `.back(n=1)` / `.goto(k)` | `Session` | Move up the shown path; the branch left behind is kept |
+| `.applicable()` / `.why_not(step)` / `.tried()` | `Report` / `str` / `set[str]` | The feedback functions, with the context already filled in |
+| `.script()` / `.steps` / `.attempts()` | `str` / `list` / `str` | The path as code, as data, and the whole tree as text |
+| `.use(kind, value)` | `Session` | Pick between several candidates of one kind (two bases, say) |
 
 | Function | Does | Does **not** |
 |---|---|---|

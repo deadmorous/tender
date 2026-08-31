@@ -396,11 +396,21 @@ class Hit:
 
 
 class Report(list):
-    """The applicable steps, content-changing first; prints as a table."""
+    """The applicable steps, content-changing first; prints as a table.
+
+    ``missing`` maps a step's qualified name to *every* need the context did
+    not cover, because a step blocked for want of an argument is a third
+    category — not tried, rather than tried and quiet — and supplying what it
+    lacks is an obvious next move (vibe 000108 §3).
+    """
 
     def __init__(self, hits, missing=()):
         super().__init__(hits)
-        self.missing = dict(missing)
+        self.missing = {k: tuple(v) for k, v in dict(missing).items()}
+
+    def blocked_on(self, kind):
+        """The steps not tried because *kind* was absent."""
+        return sorted(n for n, lack in self.missing.items() if kind in lack)
 
     @property
     def changing(self):
@@ -419,9 +429,12 @@ class Report(list):
         if quiet:
             out.append(f"  (+{quiet} more that only reshape: canonical reordering)")
         if self.missing:
-            for kind, names in sorted(self.missing.items()):
+            by_kind = {}
+            for qualified, lack in self.missing.items():
+                by_kind.setdefault(", ".join(lack), []).append(qualified)
+            for kinds, who in sorted(by_kind.items()):
                 out.append(
-                    f"  not tried — no {kind} in context: {', '.join(sorted(names))}"
+                    f"  not tried — no {kinds} in context: {', '.join(sorted(who))}"
                 )
         return "\n".join(out)
 
@@ -442,15 +455,16 @@ def applicable(expr, **context):
 
     A step whose ``needs`` the context does not cover is not tried, and is
     listed at the end with what it was missing — so the report also says what
-    you could hand it to see more.
+    you could hand it to see more.  That listing is ``report.missing``, keyed by
+    the step and carrying every unmet need, not just the first.
     """
     hits, missing = [], {}
     before = shape(expr)
     for name in names():
         st = info(name)
-        lack = [k for k in st.needs if k not in context]
+        lack = tuple(k for k in st.needs if k not in context)
         if lack:
-            missing.setdefault(lack[0], set()).add(st.qualified)
+            missing[st.qualified] = lack
             continue
         try:
             got = st(expr, **context)

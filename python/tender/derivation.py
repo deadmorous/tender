@@ -66,7 +66,32 @@ __all__ = [
     "structural_eq",
     "algebraic_eq",
     "at",
+    "explore",
 ]
+
+
+def explore(expr, scope=None, gui=None, **context):
+    """Open an interactive derivation session on *expr* (vibe 000108).
+
+    A thin forwarder to :func:`tender.explore.explore`, kept here because this
+    is where a derivation starts.  The extra arguments the steps want are taken
+    from *your* namespace, so a session needs no setup beyond the cell you
+    already wrote::
+
+        s = td.explore(a @ b)     # finds the Basis, passes it to every step
+
+    In a notebook this also opens the widget from :mod:`tender.gui`; elsewhere
+    it is the session alone, which works the same from a terminal.
+    """
+    from .explore import _caller_scope
+    from .explore import explore as _explore
+
+    return _explore(
+        expr,
+        scope=scope if scope is not None else _caller_scope(2),
+        gui=gui,
+        **context,
+    )
 
 
 class NoOpStep(UserWarning):

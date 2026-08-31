@@ -247,21 +247,45 @@ nothing to design.
 
 ## Status
 
-**Design complete for version 1; nothing built.**
+**Built.**  `tender.explore` (the session), `tender.gui` (the widget),
+`td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
+showcase.  31 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+optional dependency and the widget tests skip without it.
 
-Settled: technology (§2, with the evidence), the three simplifications the
-notebook choice bought (§3), code emission (§4), rendering (§5), branching (§7),
-and session lifetime (§8).
+The two library items the design called for are done:
 
-What the build needs from the library, both small:
+- `applicable`'s `missing` is now keyed by **step** and carries every unmet
+  need, with `Report.blocked_on(kind)` for the other direction (§3);
+- `td.explore(expr)` returns a `Session` owning the tree, the shown path, and
+  `script()` / `steps` / `attempts()` (§8).
 
-- `applicable`'s `missing` keyed by **step** with the full list of unmet needs,
-  rather than by kind with only the first (§3);
-- a `td.explore(expr)` entry point returning a session that owns the tree, the
-  current path, and `script()` / `steps` / `attempts()`.
+Everything else was assembly, as predicted — the widget contains no algebra,
+only `applicable`, `why_not`, `describe` and `explain` wired to three widgets.
 
-Everything else is assembly of what vibe 000106 already built: the catalogue
-supplies the step list, the need kinds and the summaries; `applicable` supplies
-the chooser; `why_not` supplies the answer to "why not that one"; `explain`
-supplies the per-step change.  That the GUI needs almost no new library surface
-is the clearest evidence that milestone landed in the right place.
+### What the build added beyond the design
+
+- **A `DidNotFire` exception.**  `apply` refuses a step that does not fire, and
+  the message is the step's own reason.  A history of moves that changed
+  nothing is exactly the failure mode `NoOpStep` was introduced to catch, so
+  the session should not be able to record one.
+- **`Session.use(kind, value)`**, and a chooser row for it.  Two bases in a
+  notebook is the normal case in the curvilinear examples, not an edge one.
+- **A coordinate is recognised by `partial`, not by a type.**  There is no
+  Python-visible predicate separating a coordinate from a scalar; but
+  `partial(v, v)` succeeds on exactly the coordinates, which is the same
+  question the `coord` steps ask.  Charts contribute their `coords` under an
+  attribute path, since a notebook holds the chart rather than loose
+  coordinates.
+- **`_literal` for emission.**  An enum has to be written the way a person
+  writes it — `tb.Variance.Contravariant`, not `Variance.Contravariant` — so
+  the emitter maps the binding type's private module to its public alias.
+- **The reports are cached per node.**  `applicable` runs forty steps, and the
+  list re-renders on every change; a ten-item history would otherwise re-run
+  four hundred of them per click.  A node's expression is immutable, so the
+  cache key is `(node, context)`.
+
+### What is not built, deliberately
+
+Mouse selection of a target (the reason §5 chose live DOM over an image) and
+`record=` for vibe 000107's corpus.  Both were scoped out of version 1 and
+neither is blocked by anything here.

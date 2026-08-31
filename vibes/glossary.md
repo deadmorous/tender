@@ -52,6 +52,17 @@ is probably not worth abbreviating.
 | **Saint-Venant** | Either the generalized extension/bending/torsion problem for a prismatic body, or the strain compatibility equations — context distinguishes them. |
 | **Lamé constants** | The isotropic elastic moduli λ and μ. |
 
+## The derivation surface
+
+| Term | Meaning |
+|---|---|
+| **catalogue** | `tender.steps` — every step with its category, summary, and what it wants besides the expression (vibe 000106).  The answer to "which step do I need?", as data rather than lore. |
+| **primary step** | A step a derivation reaches for *by name*; the rest are the moves those are built from — still importable, but not vocabulary.  Marked `*` in `ts.describe()` (vibe 000106). |
+| **need / option / kind** | What a step wants besides the expression.  A **need** is required (`basis`, `coord`, `rules`, `level`, `op`), an **option** is accepted (`target`, `variance`); the name of each is its **kind**, drawn from a closed list so a tool can supply it from context. |
+| **fires** | A step *fires* when it does work — as distinct from changing the expression, which canonical reordering also does.  A step reports it (`StepResult.fired`) rather than having it inferred from the outside (vibe 000106). |
+| **session** | A derivation in progress: `td.explore(expr)` (vibe 000108).  Owns the tree of everything tried, the path currently shown through it, and the arguments found in the user's namespace. |
+| **binding** | One object from the user's namespace, the kind it serves, and *the name that scope calls it* — which is what the emitted script writes, so pasted code leans on the preamble (vibe 000108 §4). |
+
 ## Project process
 
 | Term | Meaning |

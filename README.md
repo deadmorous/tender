@@ -44,6 +44,10 @@ print(div_u.latex())
   `∇` expression (including `Δ = ∇·∇`) onto a chart — moving-frame terms and all.
 - **LaTeX rendering** — every expression renders to LaTeX; notebooks display it
   live via MathJax.
+- **Guidance, not recall** — ask the expression which steps apply to it and why
+  one did not; or open `td.explore(expr)` in a notebook and pick the next step
+  from a list of what actually does something, with the arguments filled in
+  from your own namespace.
 
 The worked examples take this end-to-end: cylindrical equilibrium to the hoop-
 stress formula, the strain-compatibility identity `ε = ∇×(∇×ε)ᵀ`, and the
@@ -100,7 +104,7 @@ LaTeX/PDF Makefile.
 | Path | Contents |
 |---|---|
 | `src/` | The C++20 core — expression tree, normal form, e-graph, bases, charts, rendering (headers in `src/include/tender/`). |
-| `python/` | nanobind bindings (`_core.cpp`) and the `tender` Python package (`Workspace`, `derivation`, `basis`, `chart`, `render`). |
+| `python/` | nanobind bindings (`_core.cpp`) and the `tender` Python package (`Workspace`, `derivation`, `basis`, `chart`, `render`, `steps`, `explore`, `gui`). |
 | `tests/` | C++ unit and integration tests (GoogleTest). |
 | `python/tests/` | Python test suite (pytest). |
 | `benchmarks/` | Micro-benchmarks for performance-sensitive operations. |
