@@ -335,17 +335,17 @@ Bridge steps:
 > **Or let it drive.**  `td.explore(expr)` opens a *session* on the expression
 > (vibe 108) — and in a notebook, a widget where the next step is a click:
 > ```python
-> s = td.explore(a % (a % b))    # finds `frame` in your namespace by itself
+> s = td.explore(a % (a % b), {"basis": frame})     # or basis=frame
 > s.apply("expand_in_basis").apply("reduce_frame")
 > print(s.script())              # the derivation, as code to paste
 > ```
-> The extra arguments come from *your* scope by kind — a `Basis` there is
-> passed to every step that wants one, so the frame is named once and never
-> repeated.  Nothing of a kind in scope?  The widget says so, and the steps
-> wanting it are listed as *not tried*; give it one by putting an object of that
-> kind in the cell, by passing it (`td.explore(expr, coord=r)`), or afterwards
-> with `s.use("coord", r)`.  The session records the whole tree while showing
-> one path:
+> The dict says what the steps get, **by kind**, once — the frame is named
+> there and never repeated into a call.  Omit it and your scope is searched for
+> an object of each kind instead, which is the notebook convenience; the two do
+> not mix, so nothing you did not name appears beside what you did.  A kind with
+> nothing given is shown as such in the widget, and the steps wanting it are
+> listed as *not tried*; supply one afterwards with `s.use("coord", r)`.  The
+> session records the whole tree while showing one path:
 > `s.back()` keeps the branch, `s.tried()` says which steps were taken from
 > here (keyed on the canonical form, so a route back is recognised), and
 > `s.attempts()` prints everything.  `s.steps` is `[(name, kwargs), …]` for
@@ -358,7 +358,7 @@ Bridge steps:
 
 | Session member | Returns | Does |
 |---|---|---|
-| `td.explore(expr, scope=None, gui=None, **context)` | `Session` | Open a session; fills the step arguments from the calling scope, and shows the widget when there is a notebook to show it in (`gui=False` never does) |
+| `td.explore(expr, needs=None, scope=None, gui=None, max_height=…, **context)` | `Session` | Open a session.  `needs` is `{kind: object}`; omit it and the calling scope is searched for an object of each kind.  Shows the widget when there is a notebook to show it in (`gui=False` never does) |
 | `.apply(step, **extra)` | `Session` | Take a step from here; raises `DidNotFire` — with the step's own reason — rather than recording a no-op. Chainable |
 | `.current` / `.path` / `.tree` | `Expr` / `list[Node]` / `Node` | Where you are, how you got there, and everything ever tried |
 | `.back(n=1)` / `.goto(k)` | `Session` | Move up the shown path; the branch left behind is kept |

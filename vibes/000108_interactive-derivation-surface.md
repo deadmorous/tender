@@ -281,6 +281,25 @@ requested for v2 and not built.  It is cheap — a `Text` filtering the options 
 but it interacts with how the chooser groups its three categories (§3), and
 that is worth designing rather than bolting on.
 
+**The search should not have been the only way in.**  Inferring the arguments
+from the calling scope was §3's headline simplification, and it stays — in a
+notebook it is what removes the needs fields and the preamble box.  But it was
+*the* mechanism rather than *a* mechanism, and a reader of
+`td.explore(a @ b)` had nowhere to look for where the frame came from.  So the
+kinds can now be named: `td.explore(expr, {"basis": frame})`, or the shorter
+`basis=frame`.
+
+Naming and searching **do not mix**: a `needs` dict is a statement about what
+the steps get, so nothing the caller did not name appears beside it.  A dict
+that merged with the search would be the worst of the two — explicit in
+appearance, implicit in effect, and impossible to read off the call.  The widget
+says which way the arguments arrived, so the panel is never ambiguous about it
+either.
+
+The search keeps its place as the default because the click budget (§3) is real
+and a notebook genuinely holds these objects.  What changed is that it is now
+the convenience rather than the contract.
+
 ### Version 2, as it now stands
 
 - filter the chooser by typing (above);
@@ -293,7 +312,7 @@ that is worth designing rather than bolting on.
 
 **Built.**  `tender.explore` (the session), `tender.gui` (the widget),
 `td.explore` as the entry point, and `examples/guided_derivation.ipynb` as the
-showcase.  35 tests in `python/tests/test_explore.py`; `ipywidgets` is an
+showcase.  42 tests in `python/tests/test_explore.py`; `ipywidgets` is an
 optional dependency and the widget tests skip without it.  Used, and corrected
 by that use — §9.
 

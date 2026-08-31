@@ -88,9 +88,13 @@ class DerivationWidget:
 
     # -- the fixed panes ---------------------------------------------------
     def _context_row(self):
-        """What was found in your namespace, and which one the steps get."""
+        """What the steps get, by kind — and what nothing was given for."""
+        scanned = self.session.scanned
+        absent = "— none in scope" if scanned else "— not given"
         cells = []
         for kind, found in sorted(self.session.bindings.items()):
+            if cells:
+                cells.append(W.HTML("<span>,&nbsp;</span>"))
             if not found:
                 # Named anyway: "how do I give a step what it needs?" is a
                 # question the panel should answer where it is asked, and an
@@ -99,7 +103,7 @@ class DerivationWidget:
                 cells.append(
                     W.HTML(
                         f'<code>{kind}</code> <span style="color:#a00">'
-                        f"— none in scope</span>"
+                        f"{absent}</span>"
                     )
                 )
                 continue
@@ -124,8 +128,11 @@ class DerivationWidget:
             [
                 W.HBox(cells, layout=W.Layout(flex_flow="row wrap", width="100%")),
                 _note(
-                    "found in your namespace by kind — put one in the cell, or "
-                    "pass it: td.explore(expr, basis=…)",
+                    "found in your namespace by kind — name them instead with "
+                    "td.explore(expr, {'basis': frame})"
+                    if scanned
+                    else "as given — omit the dict to search your namespace "
+                    "for an object of each kind instead"
                 ),
             ],
             layout=_LAYOUT,

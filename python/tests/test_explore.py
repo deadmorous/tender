@@ -91,6 +91,40 @@ class TestContextFilling:
         assert s.context["basis"].name == "cyl"
         assert s.values["basis"] is other
 
+    def test_needs_may_be_given_explicitly_instead_of_searched_for(self):
+        ctx, frame, a, b = _setup()
+        s = tx.Session(a @ b, needs={"basis": frame})
+        assert s.values["basis"] is frame
+        assert not s.scanned
+
+    def test_an_explicit_dict_excludes_the_search(self):
+        # Explicit means explicit: `frame` is in scope and of the right kind,
+        # and it still does not appear beside what the caller named.
+        ctx, frame, a, b = _setup()
+        other = tb.cylindrical(ctx)
+        s = tx.Session(a @ b, needs={"basis": other}, scope={"frame": frame})
+        assert [x.value for x in s.bindings["basis"]] == [other]
+
+    def test_an_empty_dict_is_a_session_with_nothing_supplied(self):
+        ctx, frame, a, b = _setup()
+        s = tx.Session(a @ b, needs={}, scope={"frame": frame})
+        assert s.values == {}
+        assert "tender.basis.reduce_frame" in s.applicable().blocked_on("basis")
+
+    def test_a_keyword_wins_over_both(self):
+        ctx, frame, a, b = _setup()
+        other = tb.cylindrical(ctx)
+        s = tx.Session(
+            a @ b, needs={"basis": frame}, context={"basis": other},
+            scope={"frame": frame},
+        )
+        assert s.values["basis"] is other
+
+    def test_an_unknown_kind_in_the_dict_is_refused(self):
+        ctx, frame, a, b = _setup()
+        with pytest.raises(ValueError, match="unknown kind"):
+            tx.Session(a @ b, needs={"frame": frame})
+
     def test_an_unknown_kind_is_refused(self):
         ctx, frame, a, b = _setup()
         with pytest.raises(ValueError, match="unknown kind"):
@@ -317,6 +351,23 @@ class TestWidget:
         s, _ = self._widget()
         assert gui.build(s, max_height="900px").history.layout.max_height == "900px"
 
+    def test_the_pairs_are_delimited(self):
+        s, w = self._widget()
+        row = w.box.children[0].children[0]
+        assert any(",&nbsp;" in c.value for c in row.children if hasattr(c, "value"))
+
+    def test_the_row_says_which_way_the_arguments_arrived(self):
+        import tender.gui as gui
+
+        ctx, frame, a, b = _setup()
+        scanned = gui.build(tx.Session(a @ b, scope={"frame": frame}))
+        given = gui.build(tx.Session(a @ b, needs={"basis": frame}))
+        assert "your namespace" in scanned.box.children[0].children[1].value
+        assert "as given" in given.box.children[0].children[1].value
+        assert "not given" in "".join(
+            c.value for c in given.box.children[0].children[0].children
+        )
+
     def test_every_kind_is_named_including_the_empty_ones(self):
         # "How do I give a step what it needs?" is answered where it is asked:
         # a kind with nothing in scope is shown as such, not omitted.
@@ -325,4 +376,4 @@ class TestWidget:
         assert "basis</code> = frame" in row
         for kind in ("coord", "level", "op", "rules"):
             assert f"{kind}</code>" in row and "none in scope" in row
-        assert "td.explore(expr, basis=" in w.box.children[0].children[1].value
+        assert "td.explore(expr, " in w.box.children[0].children[1].value

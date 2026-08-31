@@ -70,13 +70,17 @@ __all__ = [
 ]
 
 
-def explore(expr, scope=None, gui=None, max_height="520px", **context):
+def explore(expr, needs=None, scope=None, gui=None, max_height="520px", **context):
     """Open an interactive derivation session on *expr* (vibe 000108).
 
     A thin forwarder to :func:`tender.explore.explore`, kept here because this
-    is where a derivation starts.  The extra arguments the steps want are taken
-    from *your* namespace, so a session needs no setup beyond the cell you
-    already wrote::
+    is where a derivation starts.  Say what the steps get by kind, and it is
+    passed to every one that wants it::
+
+        s = td.explore(a @ b, {"basis": frame})    # or basis=frame
+
+    Leave it out and *your* namespace is searched for an object of each kind,
+    so a session needs no setup beyond the cell you already wrote::
 
         s = td.explore(a @ b)     # finds the Basis, passes it to every step
 
@@ -89,6 +93,7 @@ def explore(expr, scope=None, gui=None, max_height="520px", **context):
 
     return _explore(
         expr,
+        needs=needs,
         scope=scope if scope is not None else _caller_scope(2),
         gui=gui,
         max_height=max_height,

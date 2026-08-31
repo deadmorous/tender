@@ -194,21 +194,45 @@ def _key(expr):
 class Session:
     """A derivation in progress: a tree of attempts, and a path through it."""
 
-    def __init__(self, expr, scope=None, context=None, name=None):
+    def __init__(self, expr, needs=None, scope=None, context=None, name=None):
+        """*needs* is ``{kind: object}``, given explicitly; omit it to scan
+        *scope* for objects of each kind instead.  *context* is merged over
+        either — it is where a keyword argument to :func:`explore` lands.
+        """
         self.scope = dict(scope or {})
-        self.bindings = scan_scope(self.scope)
         self.aliases = _module_aliases(self.scope)
+        self.scanned = needs is None
+        # Explicit beats inferred, and asking for one excludes the other: a
+        # `needs` dict is a statement about what the steps get, so nothing the
+        # caller did not name should appear beside it.
+        if self.scanned:
+            self.bindings = scan_scope(self.scope)
+        else:
+            self.bindings = {k: [] for k in KINDS}
+            for kind, value in needs.items():
+                self._offer(kind, value)
+        for kind, value in (context or {}).items():
+            self._offer(kind, value)
         # One chosen object per kind — the first candidate, which is the only
         # one in the common case; `use` picks another.
-        self.context = {
-            k: v[0] for k, v in self.bindings.items() if v
-        }
+        self.context = {k: v[0] for k, v in self.bindings.items() if v}
         for kind, value in (context or {}).items():
-            self.context[kind] = Binding(kind, self._name_of(value, kind), value)
+            self.context[kind] = self._binding(kind, value)
         self.root = Node(expr)
         self.path = [self.root]
         self.start_name = name or self._name_of(expr, None) or "e"
         self._tried = {}
+
+    def _binding(self, kind, value):
+        if kind not in KINDS:
+            raise ValueError(f"unknown kind {kind!r}; expected one of {KINDS}")
+        return Binding(kind, self._name_of(value, kind), value)
+
+    def _offer(self, kind, value):
+        """Put *value* at the head of the candidates for *kind*."""
+        b = self._binding(kind, value)
+        rest = [x for x in self.bindings.get(kind, []) if x.value is not value]
+        self.bindings[kind] = [b] + rest
 
     # -- context ----------------------------------------------------------
     def _name_of(self, value, kind):
@@ -224,9 +248,8 @@ class Session:
 
     def use(self, kind, value):
         """Choose which object of *kind* the steps get."""
-        if kind not in KINDS:
-            raise ValueError(f"unknown kind {kind!r}; expected one of {KINDS}")
-        self.context[kind] = Binding(kind, self._name_of(value, kind), value)
+        self._offer(kind, value)
+        self.context[kind] = self._binding(kind, value)
         return self
 
     # -- the path ---------------------------------------------------------
@@ -369,15 +392,30 @@ def _caller_scope(depth):
 
 
 def explore(
-    expr, scope=None, gui=None, max_height="520px", _depth=2, **context
+    expr,
+    needs=None,
+    scope=None,
+    gui=None,
+    max_height="520px",
+    _depth=2,
+    **context,
 ):
     """Open a derivation session on *expr*, and (in a notebook) its surface.
 
-    The objects the steps need are taken from the calling scope, so the setup
-    is the cell you already wrote::
+    Say what the steps get, by kind::
+
+        s = td.explore(a @ b, {"basis": frame})     # or basis=frame
+
+    Or leave it out, and the calling scope is searched for an object of each
+    kind — convenient in a notebook, where the setup is the cell you already
+    wrote, and the reason a frame need not be repeated into every call::
 
         frame = tb.wcs(ctx)
         s = td.explore(a @ b)      # finds `frame`, passes it to every step
+
+    The two do not mix: a *needs* dict is a statement about what the steps get,
+    so nothing you did not name appears beside it.  Keyword arguments
+    (``basis=frame``) are the same thing spelled shorter, and win over both.
 
     *gui* forces the widget on or off; the default builds it when
     ``ipywidgets`` is available and there is a frontend to show it in.  The
@@ -387,6 +425,7 @@ def explore(
     """
     session = Session(
         expr,
+        needs=needs,
         scope=scope if scope is not None else _caller_scope(_depth),
         context=context,
     )
