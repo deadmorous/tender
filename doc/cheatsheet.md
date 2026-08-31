@@ -246,7 +246,7 @@ Any of these can be passed to `.step()` or called directly.
 | `expand_dyad_ops` | `tr(a⊗b)→a·b`, `vec(a⊗b)→a×b`, `transpose(a⊗b)→b⊗a`; linear | Fire when operand isn't a dyad |
 | `fold_equal_addends` | **Self-preparing**: canonicalize → group identical addends (`X+X→2X`, `X−X→0`, even across dummy renaming) → implicitize | — |
 | `fold_equal_addends_structural` | Bare structural version — merges only addends written identically | Rename dummies / normalise order |
-| `collect_terms` | Group addends by their tensor (dyad) part, sum an **arbitrary scalar** coeff | Handle numeric-only (that's `fold_equal_addends`) |
+| `collect_terms` | Group addends by their tensor (dyad) part, sum an **arbitrary scalar** coeff.  A collected `±1` is written as `X` / `−X`, not `1⊗X` | Handle numeric-only (that's `fold_equal_addends`) |
 | `factor_common` | Factor a common rank-0 non-literal scalar out of a group: `λ(∇·u)+μ(∇·u)→(λ+μ)(∇·u)`; runs bottom-up | Pull a numeric or tensor factor |
 | `simplify_scalars` | Targeted scalar simplifier to a fixed point: `cos²·C+sin²·C→C`, `x⁰→1`/`x¹→x`, `√(x²ᵏ)→xᵏ` (nonneg), `r(a+b)→ra+rb` | General CAS simplification |
 | `partial(expr, coord)` | ∂expr/∂coord: linearity + Leibniz + quotient + chain rules; only the matching coord →1, all else constant; result canonical | Differentiate w.r.t. a non-coordinate |

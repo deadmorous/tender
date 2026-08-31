@@ -188,6 +188,14 @@ class TestApplicable:
         assert "simplify_basis_cross" in cross
         assert "simplify_basis_cross" not in dot
 
+    def test_a_step_that_only_decorates_is_not_offered(self):
+        # collect_terms used to write a unit coefficient back — `a × (a × b)`
+        # became `1 · (a × (a × b))` — which reads as an option in a list whose
+        # whole value is that everything in it does something.
+        _, frame, a, b = self._setup()
+        offered = {h.step.name for h in ts.applicable(a % (a % b), basis=frame)}
+        assert "collect_terms" not in offered
+
     def test_each_hit_carries_the_result_it_would_produce(self):
         _, frame, a, b = self._setup()
         e = tb.expand_in_basis(a @ b, frame)

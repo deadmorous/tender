@@ -3655,10 +3655,27 @@ auto collect_terms(Context& ctx, Expr const* e) -> Expr const*
     for (auto const& g: groups)
     {
         Expr const* c = simplify_scalars(ctx, canonicalize(ctx, g.coeff));
-        if (auto const* s = std::get_if<ScalarLiteral>(&c->node);
-            s && s->value.is_zero())
+        // ±1 is not a coefficient anyone writes: `1 ⊗ X` is X and `(−1) ⊗ X`
+        // is −X.  Emitting the literal would make collecting a lone term look
+        // like work it did not do — noise exactly where the derivation surface
+        // of vibe 000108 must be quiet, since it offers every step that
+        // changes the expression.  `extract_coeff` lifts a sign out of the
+        // coefficient, so a bare `−1` is recognised however it is spelled.
+        auto const [value, core] = extract_coeff(c);
+        auto const* lit = std::get_if<ScalarLiteral>(&core->node);
+        bool const numeric = lit != nullptr;
+        Rational const coeff = numeric ? value * lit->value : value;
+        if (numeric && coeff.is_zero())
             continue;
-        Expr const* term = g.tensor ? make_tensor_product(ctx, c, g.tensor) : c;
+        Expr const* term = nullptr;
+        if (g.tensor == nullptr)
+            term = c;
+        else if (numeric && coeff == Rational{1})
+            term = g.tensor;
+        else if (numeric && coeff == Rational{-1})
+            term = make_negate(ctx, g.tensor);
+        else
+            term = make_tensor_product(ctx, c, g.tensor);
         out = out ? make_sum(ctx, out, term) : term;
     }
     return out ? out : make_scalar(ctx, Rational{0});

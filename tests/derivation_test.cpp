@@ -4139,6 +4139,37 @@ TEST(CollectTerms, GroupsByDyadSummingScalarCoefficients)
     EXPECT_EQ(count(tex, "\\mathbf{g} \\, \\mathbf{e}"), 1);
 }
 
+// A unit coefficient is not written back: `1 ⊗ X` is X, and a step that only
+// decorates its input with a literal reads as work it did not do — which is
+// exactly the noise the derivation surface of vibe 000108 must not offer.
+TEST(CollectTerms, AUnitCoefficientLeavesTheTermAlone)
+{
+    Context ctx;
+    auto a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto b = make_tensor_object(ctx, make_tensor_name("b"), {}, 1);
+    auto const* single = make_cross(ctx, a, make_cross(ctx, a, b));
+
+    auto const* out = steps::collect_terms(ctx, single);
+    EXPECT_TRUE(structural_eq(out, steps::canonicalize(ctx, single)));
+
+    // And a coefficient of −1 keeps its sign without acquiring the literal.
+    auto const* negated = make_negate(ctx, make_tensor_product(ctx, a, b));
+    EXPECT_TRUE(structural_eq(
+        steps::collect_terms(ctx, negated), steps::canonicalize(ctx, negated)));
+}
+
+// The grouping still fires where there is grouping to do: a unit coefficient
+// that *survives* a merge is a real coefficient, not a decoration.
+TEST(CollectTerms, AMergeThatLandsOnOneStillCollapsesTheTerms)
+{
+    Context ctx;
+    auto a = make_tensor_object(ctx, make_tensor_name("a"), {}, 1);
+    auto two = make_scalar(ctx, Rational{2});
+    // 2a − a → a, with no literal left over.
+    auto const* sum = make_difference(ctx, make_tensor_product(ctx, two, a), a);
+    EXPECT_TRUE(structural_eq(steps::collect_terms(ctx, sum), a));
+}
+
 // factor_common pulls a shared rank-0 factor out of a sum — the reverse of
 // distribution — where collect_terms cannot (the shared factor is itself a
 // scalar, so it lands in the coefficient).  `λ s + μ s → (λ + μ) s`, and it
