@@ -695,6 +695,34 @@ TEST(BasisFilter, ReassembleIgnoresForeignBasis)
     EXPECT_TRUE(structural_eq(reassemble(ctx, expB, b), v));
 }
 
+TEST(BasisFilter, ReassembleRefusesAComponentCarryingDerivatives)
+{
+    // A reassembled invariant has nowhere to hold a ∂-mark, so folding a
+    // marked component drops the derivative — silently, which is the worst of
+    // the three outcomes (vibe 000109).  Refuse, and say why.  No ∇ needed:
+    // the defect is about the marks, not about how they got there.
+    Context ctx;
+    auto b = wcs_basis(ctx);
+    auto const* u = make_field(ctx, make_tensor_name("u"), 1);
+    // (∂_x u_i) e_i — the expansion of a field, differentiated.
+    auto const* expanded = steps::canonicalize(
+        ctx, expand_in_basis(ctx, u, b, Variance::Covariant));
+    auto const* x = make_coordinate(ctx, make_tensor_name("x"), 1, 0);
+    auto const* marked = steps::partial(ctx, expanded, x);
+    IndexNameMap before;
+    ASSERT_NE(render_latex(*marked, before).find("partial"), std::string::npos);
+
+    StepReport report;
+    auto const* out = reassemble(ctx, marked, b, std::nullopt, &report);
+    EXPECT_FALSE(report.fired);
+    EXPECT_NE(report.reason.find("derivative marks"), std::string::npos);
+    IndexNameMap after;
+    EXPECT_NE(render_latex(*out, after).find("partial"), std::string::npos);
+
+    // Without the marks the same shape still folds back to the invariant.
+    EXPECT_TRUE(structural_eq(reassemble(ctx, expanded, b), u));
+}
+
 TEST(BasisFilter, TwoPointCoordinateNotReassembled)
 {
     // F_{iJ} with i in A and J in B is a two-point coordinate, not a clean A

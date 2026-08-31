@@ -80,12 +80,7 @@ Two further defects were found in the same session while following the reported
 pipeline to its end, both downstream of this one, both filed but **not fixed
 here**:
 
-1. **`reassemble` drops ∂-marks.**  `δ_jk (∂_j ∂_k u_i) e_i` reassembles to
-   `Σ_j Σ_i δ_ij u` — the completeness fold `u_i e_i → u` is right, and the two
-   derivatives riding on `u_i` are silently discarded.  They should come with
-   it (`∂_j ∂_k u`, which is `Δu` once the δ contracts) or the fold should
-   refuse, as `reassemble_nabla` learned to (vibe 000108's eight refusals).
-   Silent loss is the worst of the three options.
+1. **`reassemble` drops ∂-marks** — *now fixed by refusing; see below.*
 
 2. **`contract_delta` cannot contract through a ∂-mark.**  In
    `δ_jk (∂_j ∂_k u_i) e_i` both of the δ's indices sit on derivative marks
@@ -94,12 +89,62 @@ here**:
    valid — but it blocks `δ_jk ∂_j ∂_k → ∂_j ∂_j`, which is how a Laplacian
    should appear.
 
+## The second defect: `reassemble` now refuses a marked component
+
+`δ_jk (∂_j ∂_k u_i) e_i` reassembled to `u`.  The completeness fold
+`u_i e_i → u` is right; the two derivatives riding on `u_i` were discarded in
+silence.
+
+The cause is one line, in two places.  Both fold paths rebuild the invariant
+with
+
+```cpp
+make_tensor_object(ctx, coord->name, {}, rank, coord->dim);
+```
+
+— name, rank and dimension, and nothing else.  The `deriv_marks` on the
+component have nowhere to go, so they simply do not come along.
+
+**Refusal, not carriage.**  Of the three options — carry the marks through,
+refuse, or drop — dropping is the worst and was what happened.  Carrying them
+through is the real feature and a larger question: `∂_j ∂_k u_i e_i` wants to
+become `∂_j ∂_k u`, and once the δ contracts, `Δu` — which is
+`reassemble_nabla`'s job, and it already exists.  So `reassemble` refuses and
+says which step does understand ∂-marks.  That matches what the same fold
+engine learned once before, when `reassemble_nabla` returned a bare `u` for
+`(u·∇)u` and was made to refuse (vibe 000108).
+
+**Per term, not per expression.**  The guard sits where each fold path accepts
+a coordinate carrier, so a term whose components are unmarked still folds
+beside one that is refused:
+
+```
+δ_jk (∂_j ∂_k u_i) e_i + a_i e_i   →   δ_jk (∂_j ∂_k u_i) e_i + a
+```
+
+**It cost nothing.**  953 C++ tests, 561 Python, 69 challenges and 12 examples
+all pass unchanged with the refusal in place — no maintained derivation was
+relying on the silent drop.  That is worth stating: a refusal added to a fold
+engine is exactly the kind of change that can quietly break a working route,
+and here it did not.
+
 ## Status
 
-**Fixed and verified.**  953 C++ tests, 561 Python, 69 challenges, 12 examples.
-Four Python regressions (`TestScalarDivisionKeepsTheIndexLink`) and two C++
-tests (`Canonicalize.AScalarDenominatorKeepsTheSummationScope`,
-`AnIndexedDenominatorIsStillABoundary`); all six were checked against the
-unfixed build and all six fail there.
+**Both fixed and verified.**  954 C++ tests, 563 Python, 69 challenges, 12
+examples.
 
-The two defects above are open.
+- the scope defect: four Python regressions
+  (`TestScalarDivisionKeepsTheIndexLink`) and two C++ tests
+  (`Canonicalize.AScalarDenominatorKeepsTheSummationScope`,
+  `AnIndexedDenominatorIsStillABoundary`);
+- the fold defect: two Python tests (`test_reassemble_refuses_a_component_
+  carrying_derivatives`, `test_reassemble_still_folds_the_terms_that_have_no_
+  marks`) and one C++
+  (`BasisFilter.ReassembleRefusesAComponentCarryingDerivatives`).
+
+Every one was checked against the unfixed build and fails there.
+
+**Still open:** `contract_delta` cannot contract a δ whose indices sit on
+derivative marks, so `δ_jk ∂_j ∂_k → ∂_j ∂_j` does not happen and the δ
+survives.  A gap rather than a corruption — the expression stays valid — but it
+is what stands between the reported pipeline and a Laplacian.

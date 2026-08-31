@@ -286,6 +286,62 @@ class TestBasisSteps:
         )
         assert td.structural_eq(tb.reassemble(expanded, b), s * (a @ y))
 
+    def test_reassemble_refuses_a_component_carrying_derivatives(self):
+        """An invariant has nowhere to hold a ∂-mark, so folding one loses it.
+
+        `δ_jk (∂_j ∂_k u_i) e_i` folded to `u`: the completeness fold
+        `u_i e_i → u` is right and the two derivatives riding on `u_i` were
+        dropped in silence — the worst of the three possible outcomes (vibe
+        000109).  Refusing is the correct failure; `reassemble_nabla` is the
+        step that understands ∂-marks.
+        """
+        import tender.steps as ts
+
+        ws = tender.Workspace()
+        frame = ws.wcs()
+        u = tender.field("u", 1, ctx=ws.ctx)
+        nabla = tender.nabla(ctx=ws.ctx)
+        x, y, z = ws.coords("x", "y", "z")
+        chart = ws.chart(frame, [x, y, z], [x, y, z])
+
+        comps = td.contract_delta(
+            tb.simplify_basis_dot(
+                tb.expand_in_basis(
+                    chart.expand_nabla(nabla @ (nabla * u)), frame
+                ),
+                frame,
+            )
+        )
+        assert "partial" in comps.latex()  # the marks are there to lose
+
+        result = ts.info("reassemble").run(comps, basis=frame)
+        assert not result.fired
+        assert "derivative marks" in result.reason
+        assert td.algebraic_eq(result.expr, comps)
+        assert "partial" in result.expr.latex()
+
+    def test_reassemble_still_folds_the_terms_that_have_no_marks(self):
+        # The refusal is per term, not per expression.
+        ws = tender.Workspace()
+        frame = ws.wcs()
+        u = tender.field("u", 1, ctx=ws.ctx)
+        a = tender.tensor("a", 1, ctx=ws.ctx)
+        nabla = tender.nabla(ctx=ws.ctx)
+        x, y, z = ws.coords("x", "y", "z")
+        chart = ws.chart(frame, [x, y, z], [x, y, z])
+
+        marked = td.contract_delta(
+            tb.simplify_basis_dot(
+                tb.expand_in_basis(
+                    chart.expand_nabla(nabla @ (nabla * u)), frame
+                ),
+                frame,
+            )
+        )
+        out = tb.reassemble(marked + tb.expand_in_basis(a, frame), frame)
+        assert "\\mathbf{a}" in out.latex()  # the clean term folded
+        assert "partial" in out.latex()  # the marked one did not
+
     def test_reassemble_refuses_rank2_inside_a_contraction(self):
         # A rank-2 realization must drop one basis site and place the invariant
         # at the other; inside a contraction neither move is safe, and a wrong

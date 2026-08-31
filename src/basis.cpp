@@ -1424,6 +1424,20 @@ auto fold_reassembly_groups(
             cc_here && target && cc_here->first->name != *target;
         if (auto cc = cc_here; cc && !excluded_by_target)
         {
+            // A component carrying ∂-marks is not this fold's to rebuild: the
+            // invariant it would produce has nowhere to put them, and dropping
+            // them silently turns δ_jk (∂_j∂_k u_i) e_i into u — the
+            // derivatives gone and nothing said (vibe 000109).  Refuse, and
+            // name the step that does understand them.
+            if (!cc->first->deriv_marks.empty())
+            {
+                note(
+                    "the coordinate carries derivative marks, which a "
+                    "reassembled invariant has nowhere to hold; folding it "
+                    "would drop them — reassemble_nabla folds a ∂-carrying "
+                    "expansion back into ∇ operators");
+                return nullptr;
+            }
             int const ci = static_cast<int>(carriers.size());
             Carrier c;
             c.value =
@@ -2198,6 +2212,18 @@ auto reassemble_pass(
                             "straddles two), so it is not a clean target here");
                         return node;
                     }
+                // As in the group fold above: an invariant has nowhere to
+                // hold a ∂-mark, so rebuilding one from a marked component
+                // would lose the derivative silently (vibe 000109).
+                if (!t->deriv_marks.empty())
+                {
+                    note(
+                        "the coordinate carries derivative marks, which a "
+                        "reassembled invariant has nowhere to hold; folding it "
+                        "would drop them — reassemble_nabla folds a "
+                        "∂-carrying expansion back into ∇ operators");
+                    return node;
+                }
                 coord = t;
             }
             if (!coord)
