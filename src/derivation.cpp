@@ -3799,8 +3799,24 @@ auto factor_common(Context& ctx, Expr const* e) -> Expr const*
             for (std::size_t i = 0; i < addends.size(); ++i)
                 flatten_factors(addends[i].body, avail[i]);
 
+            // An unapplied operator factor reaches everything to its right in
+            // its own product, so a factor standing there is *inside* a
+            // gradient and cannot be lifted out of the term: factoring `∇·u`
+            // out of `λ ⊗ ∇ ⊗ (∇·u)` leaves `∇ ⊗ λ`, the gradient of a
+            // constant, and the sum stops meaning what it meant (vibe 000109).
+            // Note the operator has to be a *bare* ∇/∂ factor — the `∇·u` of
+            // vibe 000080's own example is a completed contraction, not an
+            // operator standing over its neighbours, and stays factorable.
+            std::vector<int> reach(addends.size(), -1);
+            for (std::size_t i = 0; i < addends.size(); ++i)
+                for (std::size_t k = 0; k < avail[i].size(); ++k)
+                    if (std::holds_alternative<Nabla>(avail[i][k]->node)
+                        || std::holds_alternative<Deriv>(avail[i][k]->node))
+                        reach[i] = static_cast<int>(k);
+
             // A candidate common factor: a rank-0, non-literal factor of the
-            // first addend that occurs (with multiplicity) in every addend.
+            // first addend that occurs (with multiplicity) in every addend,
+            // and that no operator in its addend reaches.
             std::vector<Expr const*> common;
             for (Expr const* f: avail[0])
             {
@@ -3814,6 +3830,8 @@ auto factor_common(Context& ctx, Expr const* e) -> Expr const*
                     for (std::size_t k = 0; k < avail[i].size(); ++k)
                         if (avail[i][k] && structural_eq(avail[i][k], f))
                         {
+                            if (reach[i] >= 0 && static_cast<int>(k) > reach[i])
+                                continue; // inside an operator's scope
                             pos[i] = static_cast<int>(k);
                             break;
                         }

@@ -4056,6 +4056,31 @@ TEST(ContractEpsPair, ContractsFourEpsilonsPairByPair)
 // contraction it would be without it.  Treating the division as a boundary let
 // canonicalize α-rename the two occurrences apart — the defect that turned
 // ∇·sym(∇u) into a sum of terms with single, dangling indices (vibe 000109).
+// A ⊗-chain carrying an operator is kept whole so its fence survives — but
+// the literals *left* of the operator are outside its reach and belong in the
+// term's coefficient, or canon breaks its own promise of one rational per term
+// (vibe 000109).
+TEST(Canonicalize, LiteralsLeftOfAnOperatorJoinTheCoefficient)
+{
+    Context ctx;
+    auto const* u = make_field(ctx, make_tensor_name("u"), 1);
+    auto const* lam = make_tensor_object(ctx, make_tensor_name("l"), {}, 0);
+    auto const* nabla = make_nabla(ctx);
+    auto const* half = make_scalar(ctx, Rational{1, 2});
+    auto const* two = make_scalar(ctx, Rational{2});
+    // λ ½ ∇⊗(∇·u), then doubled — the shape a like-term collection produces.
+    auto const* fenced =
+        make_tensor_product(ctx, nabla, make_dot(ctx, nabla, u));
+    auto const* once = steps::canonicalize(
+        ctx,
+        make_tensor_product(ctx, lam, make_tensor_product(ctx, half, fenced)));
+    auto const* doubled =
+        steps::canonicalize(ctx, make_tensor_product(ctx, two, once));
+    auto const* plain =
+        steps::canonicalize(ctx, make_tensor_product(ctx, lam, fenced));
+    EXPECT_TRUE(structural_eq(doubled, plain));
+}
+
 TEST(Canonicalize, AScalarDenominatorKeepsTheSummationScope)
 {
     Context ctx;
@@ -4084,6 +4109,34 @@ TEST(Canonicalize, AScalarDenominatorKeepsTheSummationScope)
 // A denominator that *does* carry an index stays a boundary: an index under a
 // division is not a linear contraction, and counting it as one would be worse
 // than deferring the summation.
+// factor_common must not lift a factor out from *inside* a gradient: an
+// unapplied ∇ reaches everything to its right in its product, so `∇·u` in
+// `λ ⊗ ∇ ⊗ (∇·u)` is the gradient's operand, not a common factor (vibe 000109).
+TEST(FactorCommon, DoesNotFactorAcrossAnOperatorsReach)
+{
+    Context ctx;
+    auto const* u = make_field(ctx, make_tensor_name("u"), 1);
+    auto const* lam = make_tensor_object(ctx, make_tensor_name("l"), {}, 0);
+    auto const* mu = make_tensor_object(ctx, make_tensor_name("m"), {}, 0);
+    auto const* nabla = make_nabla(ctx);
+    auto const* div = make_dot(ctx, nabla, u);
+    auto const* grad_div = make_tensor_product(ctx, nabla, div);
+
+    // Inside a gradient: left alone.
+    auto const* fenced = make_sum(
+        ctx,
+        make_tensor_product(ctx, lam, grad_div),
+        make_tensor_product(ctx, mu, grad_div));
+    EXPECT_TRUE(structural_eq(steps::factor_common(ctx, fenced), fenced));
+
+    // vibe 000080's own case — a completed contraction — still folds.
+    auto const* plain = make_sum(
+        ctx,
+        make_tensor_product(ctx, lam, div),
+        make_tensor_product(ctx, mu, div));
+    EXPECT_FALSE(structural_eq(steps::factor_common(ctx, plain), plain));
+}
+
 TEST(Canonicalize, AnIndexedDenominatorIsStillABoundary)
 {
     Context ctx;

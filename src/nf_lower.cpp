@@ -91,11 +91,32 @@ void flatten_product(Expr const* e, ProductParts& out);
 // the rendered form (`∇ λ μ u`) and — because a term holding a top-level
 // operator keeps *every* factor positional — leaves the scalars unsorted, so
 // `λμ(∇⊗u)` and `μλ(∇⊗u)` canonicalized to different normal forms.
+// Peel the numeric factors that *precede* the operator in a fenced ⊗ chain.
+// ∇ acts rightward, so a literal to its left is outside its reach and belongs
+// in the term's coefficient like any other.  Left inside the fence they were
+// invisible to the pooling, and canon broke its own promise of one rational
+// coefficient per term: `2 ⊗ (½ λ ∇ ∇·u)` stayed `2 ½ λ ∇ ∇·u`, where the same
+// term without a ∇ folded to `λ Y` (vibe 000109).  Leading only — a literal to
+// the *right* of the operator is inside its scope, and hoisting it would be a
+// linearity argument this pass has no business making.
+auto peel_leading_literals(Expr const* e, ProductParts& out) -> Expr const*
+{
+    while (auto const* p = std::get_if<TensorProduct>(&e->node))
+    {
+        auto const* lit = std::get_if<ScalarLiteral>(&p->left->node);
+        if (!lit)
+            break;
+        out.coeff *= lit->value;
+        e = p->right;
+    }
+    return e;
+}
+
 void flatten_operand(Expr const* e, ProductParts& out)
 {
     if (std::holds_alternative<TensorProduct>(e->node) && holds_nabla(e))
     {
-        out.factors.push_back(e);
+        out.factors.push_back(peel_leading_literals(e, out));
         return;
     }
     flatten_product(e, out);

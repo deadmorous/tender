@@ -1,4 +1,4 @@
-# 000109 Four defects behind one invalid derivation
+# 000109 Six defects behind one invalid derivation
 
 Reported from an interactive session: starting from the invariant `∇·T + f`
 with the isotropic Hooke stress `T = λ tr(ε) I + 2μ ε`, `ε = sym(∇u)`,
@@ -194,18 +194,48 @@ td.derive(nabla @ T + f,
 which is vibe 000080's "keep the operand abstract, expand the basis last",
 now enforced by a refusal instead of left as lore.
 
-## Two smaller things noticed, not fixed
+## The fifth: coefficients did not pool across a ∇ fence
 
-- **`factor_common` factors across a ∇.**  On `∇(λ∇·u + μ∇·u)` it returns
-  `((∇½ + ∇½)λ + ∇μ) ∇·u` — it pulled `∇·u` out from *inside* the gradient,
-  which no algebra licenses.  Same family as the ∇-fence bugs of vibe 000085.
-- **`2 λ ½` does not fold to `λ`.**  Two literals in one product term, with a
-  symbol between them, are left unmultiplied — so the Navier–Lamé endpoint
-  above renders with a stray `2·½`.  Cosmetic; the value is right.
+`2 λ ½ ∇∇·u` would not fold to `λ ∇∇·u`, while the identical term over a plain
+vector folded to `λ Y`.  Canon's contract is *one rational coefficient per
+term*, and it was keeping that promise only in the absence of an operator.
+
+The cause is the fence of vibe 000096 increment 3: a ⊗-chain carrying an
+operator is kept **whole** so it reaches `encapsulate` as one factor, and the
+literals inside it were therefore invisible to the pooling.  In
+`2 ⊗ (½ λ ∇ ∇·u)` the `2` is pooled and the `½` is not.
+
+∇ acts rightward, so a literal to its **left** is outside its reach and belongs
+in the coefficient like any other; those are now peeled off the chain before it
+is fenced.  Leading only — a literal to the *right* of the operator is inside
+its scope, and hoisting it would be a linearity argument this pass has no
+business making.
+
+The shape arises from like-term collection (`λ½X + λ½X → 2·(λ½X)`), which is
+why it took a derivation with a `sym` in it to produce.  Note that canon was
+*idempotent* on the bad form: a wrong fixed point, not an unfinished one, which
+is why no amount of re-running found it.
+
+## The sixth: `factor_common` factored across a ∇
+
+`λ ∇(∇·u) + μ ∇(∇·u)` came back as `(∇λ + ∇μ) ∇·u`: `∇·u` lifted out from
+*inside* the gradient, leaving the gradient of a constant.  Not equal to what
+went in, by the library's own `algebraic_eq`.
+
+An unapplied operator reaches everything to its right in its product — the same
+reading `apply_operators` takes — so a factor standing there is the operator's
+operand and cannot be lifted out of the term.  A candidate common factor is now
+rejected when a **bare** ∇ or ∂ factor precedes it.
+
+"Bare" is what keeps vibe 000080's own example working: the `∇·u` in
+`λ(∇·u) + μ(∇·u)` is a completed contraction, not an operator standing over its
+neighbours, so it still factors to `(λ+μ)(∇·u)`.  The two cases differ by
+exactly one top-level ∇ factor, which is the thing to look at whenever a step
+"knows" it may move a factor.
 
 ## Status
 
-**All four fixed and verified.**  954 C++ tests, 568 Python, 69 challenges, 12
+**All six fixed and verified.**  956 C++ tests, 573 Python, 69 challenges, 12
 examples.
 
 - the scope defect: four Python regressions
@@ -221,6 +251,50 @@ examples.
   (`TestContractingThroughADerivativeMark`,
   `TestReassembleNablaRefusesAComponentForm`).
 
+- the coefficient pooling and the factoring: three Python tests
+  (`TestCoefficientsPoolAcrossANablaFence`,
+  `TestFactorCommonRespectsTheOperatorsReach`) and two C++
+  (`Canonicalize.LiteralsLeftOfAnOperatorJoinTheCoefficient`,
+  `FactorCommon.DoesNotFactorAcrossAnOperatorsReach`).
+
 Every one was checked against the unfixed build and fails there.
+
+## What the six had in common
+
+Four of the six are the same mistake in different clothes: **a step decided
+what one term is, and got the boundary wrong.**  `is_term` put a scalar
+division outside the term; the flattening put a literal inside a fence;
+`factor_common` reached past an operator; `reassemble_nabla` read a component
+index as a frame leg.  Each is a judgement about *scope* — what a term
+contains, and what an operator reaches — made in one place and disagreeing with
+the same judgement made elsewhere.
+
+The other two are the fold engines dropping what they could not carry
+(`reassemble`) or not seeing what was there (`contract_delta` and the ∂-marks).
+
+Worth stating because it predicts where the next one is: any step that
+partitions a term into "what I act on" and "the rest" is making this call, and
+the calls are not written down in one place.
+
+## Still missing: the fold back from `∂_i ∂_i u`
+
+Following the reported route to its end leaves one shape unfolded.  Keeping the
+operand abstract and reducing the frame — `expand_nabla`, `contract_identity`,
+`reduce_frame` — lands `∇·(∇⊗u)` on
+
+```
+∂_i ∂_i u
+```
+
+which is `Δu`: a field with two free ∂-marks on the same direction, the δ
+already contracted away.  `reassemble_nabla` refuses it (correctly, under the
+rule above — the direction has no frame vector), and nothing else folds it, so
+the Navier–Lamé endpoint comes out as `f + Σ_i μ ∂_i∂_i u + ∇(λ∇·u + μ∇·u)`
+with the Laplacian left in ∂ form.
+
+The missing rule is one line of vocabulary the classifier almost has: it
+already reads an `e_ℓ·e_m` pair as a Laplacian, and this is the same pair after
+`reduce_frame` has contracted it.  A *repeated* free direction on one operand,
+with no frame vector, is `∇·∇`.  Every other orphan stays refused.
 
 All four fixed; see below for the third and fourth.

@@ -1125,3 +1125,76 @@ class TestReassembleNablaRefusesAComponentForm:
         assert not result.fired
         assert "no ∂ here" in result.reason
 
+class TestCoefficientsPoolAcrossANablaFence:
+    """Canon promises one rational coefficient per term — ∇ or no ∇.
+
+    A ⊗-chain carrying an operator is kept whole so the fence survives, and the
+    literals *inside* it were invisible to the pooling: `2 ⊗ (½ λ ∇∇·u)` stayed
+    `2 ½ λ ∇∇·u`, where the same term over a plain vector folded to `λ Y`
+    (vibe 000109).  A literal to the left of ∇ is outside its reach.
+    """
+
+    def _pieces(self):
+        ws = t.Workspace()
+        lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+        u = t.field("u", 1, ctx=ws.ctx)
+        nabla = t.nabla(ctx=ws.ctx)
+        return ws, lam, t.scalar(t.Rational(1, 2)), nabla * (nabla @ u)
+
+    def test_a_literal_outside_the_operator_joins_the_coefficient(self):
+        ws, lam, half, grad_div = self._pieces()
+        folded = td.canonicalize(lam * half * grad_div)
+        assert td.structural_eq(
+            td.canonicalize(2 * folded), td.canonicalize(lam * grad_div)
+        )
+
+    def test_the_fence_still_holds(self):
+        # Pooling the coefficient must not flatten the operator's scope: the
+        # gradient stays a gradient of ∇·u.
+        ws, lam, half, grad_div = self._pieces()
+        out = td.canonicalize(2 * td.canonicalize(lam * half * grad_div))
+        assert td.algebraic_eq(out, lam * grad_div)
+        assert "\\nabla \\, \\nabla \\cdot" in out.latex()
+
+    def test_a_plain_term_folds_the_same_way(self):
+        # The parity that was broken: with and without an operator.
+        ws, lam, half, _ = self._pieces()
+        y = t.tensor("Y", 1, ctx=ws.ctx)
+        out = td.canonicalize(2 * td.canonicalize(lam * half * y))
+        assert td.structural_eq(out, td.canonicalize(lam * y))
+
+
+class TestFactorCommonRespectsTheOperatorsReach:
+    """A factor inside a gradient cannot be lifted out of the term.
+
+    `λ ∇(∇·u) + μ ∇(∇·u)` came back as `(∇λ + ∇μ) ∇·u` — `∇·u` pulled out from
+    *inside* the ∇, leaving the gradient of a constant (vibe 000109).
+    """
+
+    def _pieces(self):
+        ws = t.Workspace()
+        return (
+            ws,
+            t.tensor(r"\lambda", 0, ctx=ws.ctx),
+            t.tensor(r"\mu", 0, ctx=ws.ctx),
+            t.nabla(ctx=ws.ctx),
+            t.field("u", 1, ctx=ws.ctx),
+        )
+
+    def test_it_leaves_a_term_whose_common_factor_is_inside_a_gradient(self):
+        ws, lam, mu, nabla, u = self._pieces()
+        grad_div = nabla * (nabla @ u)
+        e = lam * grad_div + mu * grad_div
+        out = td.factor_common(e)
+        assert td.structural_eq(out, e)
+        assert td.algebraic_eq(out, e)
+
+    def test_the_case_it_was_written_for_still_folds(self):
+        # vibe 000080's own example: `∇·u` is a completed contraction, not an
+        # operator standing over its neighbours, so it factors as before.
+        ws, lam, mu, nabla, u = self._pieces()
+        div = nabla @ u
+        out = td.factor_common(lam * div + mu * div)
+        assert td.algebraic_eq(out, lam * div + mu * div)
+        assert "(\\lambda + \\mu)" in out.latex()
+
