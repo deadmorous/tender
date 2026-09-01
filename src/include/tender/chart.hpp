@@ -160,6 +160,19 @@ void validate_chart(CoordinateChart const& chart);
 // vectors the Laplacian (Δ = ∇·∇), and `tr` of the marked field its scalar
 // invariant.  The inverse of expand_nabla+reduction: e.g. the strain interior's
 // Phase-1 sum folds to −∇∇θ + Δθ·I − (∇∇··ε)I − Δε + ∇∇·ε + (∇∇·ε)ᵀ.
+// Write each single-index component of the chart's physical frame as the
+// contraction that defines it: `a_i` → `a·e_i` (vibe 000109).  The inverse
+// half of a component expansion: paired with the completeness fold
+// `(X·e_i) e_i → X` it takes a componentized expression back to invariants,
+// carrying ∂ marks with it — which `reassemble` cannot, since it rebuilds the
+// invariant from a name.  Refuses on a non-constant frame when marks are
+// present, where ∂e_i ≠ 0 would contribute connection terms.
+[[nodiscard]] auto to_contraction(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* e,
+    StepReport* report = nullptr) -> Expr const*;
+
 [[nodiscard]] auto reassemble_nabla(
     Context& ctx,
     CoordinateChart const& chart,

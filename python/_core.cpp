@@ -2014,6 +2014,20 @@ NB_MODULE(_core, m)
                     reassemble_nabla(*c.ctx, c.chart, e.expr)};
             },
             "e"_a,
+            "Write each single-index component of this chart's frame as the "
+            "contraction that defines it: a_i → a·e_i (vibe 000109).  The "
+            "inverse half of a component expansion — paired with the "
+            "completeness fold (X·e_i) e_i → X it takes a componentized "
+            "expression back to invariants, carrying ∂ marks with it, which "
+            "`reassemble` cannot since it rebuilds the invariant from a name.  "
+            "Refuses on a non-constant frame when marks are present.")
+        .def(
+            "to_contraction",
+            [](PyChart const& c, PyExpr const& e) -> PyExpr {
+                return PyExpr{
+                    c.ctx_keep, c.ctx, to_contraction(*c.ctx, c.chart, e.expr)};
+            },
+            "e"_a,
             "Reassemble a Phase-1-reduced free-index expression back into "
             "chart-free ∇ operators (vibe 000078 increment 4): read each "
             "frame-vector ↔ ∂-mark pair's role (⊗ leg → ∇⊗, contraction → ∇·, a "
@@ -2185,6 +2199,18 @@ NB_MODULE(_core, m)
             "rank-2 tensor: the nested list m[i][j] = e_i·v·e_j (vibe 000074), "
             "with an abstract field expanded first, so m[i][j] is the minted "
             "physical component T_ij (symmetry folded: m[1][0] is T_rθ).");
+
+    mc.def(
+        "_to_contraction_reported",
+        [](PyExpr const& e, PyChart const& c) -> nb::tuple
+        {
+            StepReport r;
+            auto const* out = to_contraction(*e.ctx, c.chart, e.expr, &r);
+            return nb::make_tuple(derive(e, out), r.fired, r.reason);
+        },
+        "e"_a,
+        "chart"_a,
+        "to_contraction, reporting whether it fired and why not.");
 
     mc.def(
         "_reassemble_nabla_reported",

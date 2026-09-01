@@ -11,6 +11,7 @@ import re
 import tender as t
 import tender.derivation as td
 import tender.basis as tb
+import tender.chart as tc
 
 
 def _chart(ws):
@@ -1246,4 +1247,156 @@ class TestFactorCommonRespectsTheOperatorsReach:
         out = td.factor_common(lam * div + mu * div)
         assert td.algebraic_eq(out, lam * div + mu * div)
         assert "(\\lambda + \\mu)" in out.latex()
+
+class TestToContraction:
+    """`a_i = a·e_i` — the inverse half of a component expansion (vibe 000109).
+
+    On its own it looks like a step backwards.  Paired with the completeness
+    fold `(X·e_i) e_i → X` it takes a componentized expression back to
+    invariants *carrying its ∂ marks*, which the direct fold cannot: that one
+    rebuilds the invariant from a name and rank, so the marks have nowhere to
+    go, and it refuses rather than drop them.
+    """
+
+    def _setup(self):
+        ws = t.Workspace()
+        frame = ws.wcs()
+        u = t.field("u", 1, ctx=ws.ctx)
+        nabla = t.nabla(ctx=ws.ctx)
+        chart, _ = _chart(ws)
+        return ws, frame, chart, u, nabla
+
+    def _components(self):
+        ws, frame, chart, u, nabla = self._setup()
+        comps = td.contract_delta(
+            tb.simplify_basis_dot(
+                tb.expand_in_basis(
+                    chart.expand_nabla(nabla @ (nabla * u)), frame
+                ),
+                frame,
+            )
+        )
+        return ws, frame, chart, comps
+
+    def test_it_writes_a_component_as_its_contraction(self):
+        ws, frame, chart, comps = self._components()
+        out = tc.to_contraction(comps, chart)
+        # u_i became u·e_i, and the ∂ marks moved onto the invariant.
+        assert "u_{" not in out.latex()
+        assert "\\mathbf{u}) \\cdot \\mathbf{e}" in out.latex()
+        assert out.latex().count("partial") == 2
+
+    def test_the_componentized_form_now_folds_all_the_way_back(self):
+        # The route that did not exist: from components to Δu, three steps.
+        ws, frame, chart, comps = self._components()
+        got = td.derive(
+            comps,
+            [
+                lambda e: tc.to_contraction(e, chart),
+                lambda e: tb.reassemble(e, frame),
+                lambda e: chart.reassemble_nabla(e),
+            ],
+        ).current
+        u = t.field("u", 1, ctx=ws.ctx)
+        nabla = t.nabla(ctx=ws.ctx)
+        assert td.algebraic_eq(got, nabla @ (nabla * u))
+
+    def test_a_curvilinear_frame_is_refused_rather_than_losing_the_connection(self):
+        # ∂(a·e_i) = (∂a)·e_i only where ∂e_i = 0.
+        import tender.steps as ts
+
+        ws = t.Workspace()
+        cyl, (r, th, z) = ws.cylindrical_chart()
+        a = t.field("a", 1, ctx=ws.ctx)
+        marked = td.partial(tb.expand_in_basis(a, cyl.physical_frame()), r)
+        result = ts.info("to_contraction").run(marked, chart=cyl)
+        assert not result.fired
+        assert "not constant" in result.reason
+        assert td.structural_eq(result.expr, marked)
+
+    def test_an_unmarked_component_needs_no_constant_frame(self):
+        # `a_i = a·e_i` is unconditional; only moving ∂'s across e_i is not.
+        ws = t.Workspace()
+        cyl, _ = ws.cylindrical_chart()
+        a = t.field("a", 1, ctx=ws.ctx)
+        out = tc.to_contraction(
+            tb.expand_in_basis(a, cyl.physical_frame()), cyl
+        )
+        assert "\\mathbf{a} \\cdot \\mathbf{e}" in out.latex()
+
+    def test_it_says_so_when_there_is_no_component(self):
+        import tender.steps as ts
+
+        ws, frame, chart, u, nabla = self._setup()
+        result = ts.info("to_contraction").run(u, chart=chart)
+        assert not result.fired
+        assert "no component" in result.reason
+
+
+class TestTheComponentRouteClosesToNavierLame:
+    """The reported pipeline, with the one step it was missing."""
+
+    def test_it_reaches_the_equation(self):
+        import tender.steps as ts
+
+        ws = t.Workspace()
+        frame = ws.wcs()
+        u = t.field("u", 1, ctx=ws.ctx)
+        f = t.field("f", 1, ctx=ws.ctx)
+        nabla = t.nabla(ctx=ws.ctx)
+        I = t.identity(ws.ctx)
+        lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+        mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+        eps = td.sym(nabla * u)
+        T = lam * eps.tr() * I + 2 * mu * eps
+        chart, _ = _chart(ws)
+        b = ts.using(basis=frame, chart=chart)
+
+        got = td.derive(
+            nabla @ T + f,
+            [
+                b.expand_nabla,
+                b.expand_in_basis,
+                b.simplify_basis_dot,
+                b.contract_delta,
+                b.to_contraction,
+                b.reassemble,
+                b.reassemble_nabla,
+                td.canonicalize,
+            ],
+        ).current
+        want = (
+            mu * (nabla @ (nabla * u))
+            + lam * (nabla * (nabla @ u))
+            + mu * (nabla * (nabla @ u))
+            + f
+        )
+        assert td.algebraic_eq(got, want)
+
+
+class TestAlphaRenamingKeepsTheMarksInStep:
+    """Renaming a binder must rename the ∂ links it binds.
+
+    `substitute_index_id` renamed only the slots, so a binder over a direction
+    that lives *only* on marks desynced: the binder moved to a fresh id, the
+    marks kept the old one, and canon materialized a second binder beside an
+    empty one — `Σ_? Σ_i ∂_i∂_i u` (vibe 000109).
+    """
+
+    def test_no_empty_binder_survives(self):
+        ws = t.Workspace()
+        frame = ws.wcs()
+        u = t.field("u", 1, ctx=ws.ctx)
+        nabla = t.nabla(ctx=ws.ctx)
+        chart, _ = _chart(ws)
+        lap = td.canonicalize(
+            tb.reduce_frame(chart.expand_nabla(nabla @ (nabla * u)), frame)
+        )
+        i = t.alloc_index(ws.ctx)
+        shape = (lap @ frame.covariant_vector(i)) * frame.covariant_vector(i)
+
+        assert "?" not in td.canonicalize(shape).latex()
+        folded = tb.reassemble(shape, frame)
+        assert "?" not in folded.latex()
+        assert td.algebraic_eq(folded, lap)
 

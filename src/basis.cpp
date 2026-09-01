@@ -1974,6 +1974,12 @@ auto fold_reassembly_groups(
 
 } // namespace
 
+auto as_component(Expr const* e, Basis const& basis)
+    -> std::optional<std::pair<TensorObject const*, std::vector<int>>>
+{
+    return as_coord_component(e, basis);
+}
+
 namespace
 {
 

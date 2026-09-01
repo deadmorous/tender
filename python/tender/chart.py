@@ -85,6 +85,23 @@ def express(expr, chart):
     return chart.express(expr)
 
 
+def to_contraction(expr, chart):
+    """Write each component as the contraction that defines it: ``a_i → a·e_i``.
+
+    The inverse half of a component expansion.  On its own it looks like a step
+    backwards; paired with the completeness fold ``(X·e_i) e_i → X`` that
+    :func:`tender.basis.reassemble` runs, it takes a componentized expression
+    back to invariants **carrying its ∂ marks** — which the direct fold cannot,
+    since it rebuilds the invariant from a name and rank and the marks have
+    nowhere to go.
+
+    The marked case needs a constant frame (``∂e_i = 0``), the same licence
+    :func:`expand_nabla` demands; a curvilinear chart is refused rather than
+    quietly dropping the connection terms.
+    """
+    return chart.to_contraction(expr)
+
+
 def to_reference(expr, chart):
     """Re-express in the reference (WCS) frame: ``e_r → cos θ i + sin θ j``."""
     return chart.to_reference(expr)
@@ -98,5 +115,6 @@ __all__ = [
     "expand_nabla",
     "express",
     "reassemble_nabla",
+    "to_contraction",
     "to_reference",
 ]

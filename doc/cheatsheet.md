@@ -426,8 +426,11 @@ Bridge steps:
 > The rewriting methods below are also **functions** taking the expression
 > first — `tc.expand_nabla(e, chart)` is `chart.expand_nabla(e)` — which is the
 > shape the catalogue and `ts.using(chart=…)` speak.  Seven of them are steps:
-> `expand`, `express`, `to_reference` (bridge) and `evaluate`, `expand_nabla`,
-> `reassemble_nabla`, `componentize_nabla` (operators).  `grad`/`div`/`rot`/
+> `expand`, `express`, `to_reference`, `to_contraction` (bridge) and
+> `evaluate`, `expand_nabla`, `reassemble_nabla`, `componentize_nabla`
+> (operators).  `to_contraction` writes a component as `a_i = a·e_i`, which is
+> what lets `reassemble` fold a componentized expression back **with** its ∂
+> marks — the direct fold rebuilds the invariant from a name and refuses.  `grad`/`div`/`rot`/
 > `laplacian` are deliberately *not* steps: they build ∇⊙X from an operand
 > rather than rewriting what is there.
 

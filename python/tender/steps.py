@@ -432,6 +432,10 @@ _r("reassemble_nabla", _c, _C, category="operators", primary=True,
    needs=("chart",), wants={"deriv_marks": 1},
    reported=_core.chart._reassemble_nabla_reported,
    summary="fold a reduced free-index expression back into ∇ operators")
+_r("to_contraction", _c, _C, category="bridge", needs=("chart",),
+   reported=_core.chart._to_contraction_reported,
+   wants={"coordinates": 1},
+   summary="write a component as its defining contraction, aᵢ → a·eᵢ")
 _r("componentize_nabla", _c, _C, category="operators", needs=("chart",),
    wants={"deriv_marks": 1},
    summary="lower an expand_nabla result to concrete components")

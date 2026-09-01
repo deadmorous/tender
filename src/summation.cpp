@@ -13,39 +13,16 @@ using mpk::mix::Overloads;
 
 // ---- α-renaming --------------------------------------------------------
 
+// One id, in terms of the map version below — which is the one that renames a
+// ∂-mark's direction link along with the slots.  Spelled separately, this
+// function renamed only the slots, so α-renaming a binder over a direction that
+// lives *only* on marks (`Σ_i ∂_i ∂_i u`) desynced the two: the binder moved to
+// a fresh id, the marks kept the old one, and canon then materialized a second
+// binder beside an empty one — `Σ_? Σ_i ∂_i∂_i u` (vibe 000109).
 auto substitute_index_id(Context& ctx, Expr const* e, int old_id, int new_id)
     -> Expr const*
 {
-    return rewrite_tree(
-        ctx,
-        e,
-        [old_id, new_id](Context& ctx, Expr const* e) -> Expr const*
-        {
-            auto const* t = std::get_if<TensorObject>(&e->node);
-            if (!t)
-                return e;
-            auto slots = t->slots;
-            bool changed = false;
-            for (auto& sb: slots)
-            {
-                if (!sb.index)
-                    continue;
-                if (auto const* ci = std::get_if<CountableIndex>(&*sb.index))
-                    if (ci->id == old_id)
-                    {
-                        sb.index = CountableIndex{new_id};
-                        changed = true;
-                    }
-            }
-            if (!changed)
-                return e;
-            // Copy the whole object so deriv marks (the applied ∂s of a
-            // field, vibe 000073) survive index substitution — rebuilding with
-            // only name/rank/traits/slots silently drops the derivative.
-            TensorObject obj = *t;
-            obj.slots = std::move(slots);
-            return ctx.make<Expr>(std::move(obj));
-        });
+    return substitute_index_ids(ctx, e, {{old_id, new_id}});
 }
 
 auto substitute_index_ids(

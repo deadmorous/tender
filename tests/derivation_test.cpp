@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <tender/basis.hpp>
+#include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>
 #include <tender/expr.hpp>
 #include <tender/index_space.hpp>
@@ -4060,6 +4061,42 @@ TEST(ContractEpsPair, ContractsFourEpsilonsPairByPair)
 // the literals *left* of the operator are outside its reach and belong in the
 // term's coefficient, or canon breaks its own promise of one rational per term
 // (vibe 000109).
+// α-renaming a binder must rename the ∂ links it binds.  The single-id
+// substitution renamed only the slots, so a binder over a direction that lives
+// *only* on marks desynced from them, and canon then materialized a second
+// binder beside an empty one (vibe 000109).
+TEST(Canonicalize, RenamingABinderCarriesItsDerivativeDirections)
+{
+    Context ctx;
+    auto const* u = make_field(ctx, make_tensor_name("u"), 1);
+    auto b = wcs(ctx);
+    CountableIndex const i{ctx.alloc_index_id()};
+    CountableIndex const j{ctx.alloc_index_id()};
+    IndexSlot const slot =
+        std::get<TensorObject>(b.covariant_vector(ctx, i)->node).slots[0].slot;
+    // Σ_j ∂_j ∂_j u — a binder whose index appears only on ∂ marks.
+    auto const* twice = make_field_derivative_free(
+        ctx, make_field_derivative_free(ctx, u, j, slot), j, slot);
+    auto const* bound = make_explicit_sum(ctx, j, twice);
+    // …put inside a completeness contraction, so canon has cause to rename it.
+    auto const* ei = b.covariant_vector(ctx, i);
+    auto const* shape = make_tensor_product(ctx, make_dot(ctx, bound, ei), ei);
+
+    auto const* canoned = steps::canonicalize(ctx, shape);
+    // Two binders — the direction and the completeness index — not three.
+    int binders = 0;
+    rewrite_tree(
+        ctx,
+        canoned,
+        [&binders](Context&, Expr const* n) -> Expr const*
+        {
+            if (std::holds_alternative<ExplicitSum>(n->node))
+                ++binders;
+            return n;
+        });
+    EXPECT_EQ(binders, 2);
+}
+
 TEST(Canonicalize, LiteralsLeftOfAnOperatorJoinTheCoefficient)
 {
     Context ctx;

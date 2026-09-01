@@ -1,4 +1,4 @@
-# 000109 Seven defects behind one invalid derivation
+# 000109 Eight defects behind one invalid derivation
 
 Reported from an interactive session: starting from the invariant `∇·T + f`
 with the isotropic Hooke stress `T = λ tr(ε) I + 2μ ε`, `ε = sym(∇u)`,
@@ -233,10 +233,77 @@ neighbours, so it still factors to `(λ+μ)(∇·u)`.  The two cases differ by
 exactly one top-level ∇ factor, which is the thing to look at whenever a step
 "knows" it may move a factor.
 
+## The eighth: α-renaming left a binder behind
+
+Chasing the route back from components turned up one more, and it is the same
+mistake once more.  `substitute_index_id` — the single-id α-renamer — rewrote
+only the **slots**, while its sibling `substitute_index_ids` (the map version)
+had renamed a ∂-mark's direction link too since vibe 000078, comment and all.
+
+So renaming a binder over a direction that lives *only* on marks desynced the
+two: the binder moved to a fresh id, the marks kept the old one, and canon then
+materialized a second binder beside the now-empty first.
+
+```
+Σ_j (∂_j ∂_j u)·e_i ⊗ e_i    --canonicalize-->    Σ_? Σ_j Σ_i (…)
+```
+
+`Σ_?` is the renderer having no name for an index that no longer occurs.  It
+survived `implicitize`, and `algebraic_eq` refused to equate the result with
+what it came from.
+
+The fix is to delete the duplicate: `substitute_index_id` is now
+`substitute_index_ids(ctx, e, {{old, new}})`.  Two spellings of one rewrite,
+one of them a year behind the other, is how this kind of thing happens.
+
+## The way back from components: `a_i = a·e_i`
+
+The user's idea, and it is the right one.  `reassemble` cannot carry ∂ marks
+because it *rebuilds* the invariant from a name and a rank — there is nowhere
+to put them, which is why it refuses (§4).  But the completeness fold
+`(X·e_i) e_i → X` hands `X` back **as it received it**, a whole subexpression,
+marks and all.
+
+So the missing piece is not a mark-carrying fold; it is the identity that turns
+a component into something the existing fold can take:
+
+```
+tc.to_contraction(e, chart)      a_i → a·e_i
+tb.reassemble(e, frame)          (X·e_i) e_i → X
+chart.reassemble_nabla(e)        ∂_i ∂_i u → Δu
+```
+
+**Why it is a chart step and not a basis one.**  `a_i = a·e_i` is unconditional,
+but moving a ∂ across `e_i` is not: `∂(a·e_i) = (∂a)·e_i` only where
+`∂e_i = 0`.  That is the same licence `expand_nabla` demands, and the chart is
+what can check it — so a marked component on a curvilinear frame is refused,
+naming the connection terms it would have lost.  An *unmarked* component needs
+no such licence and is written out on any frame.
+
+The check itself is now `frame_is_constant`, factored out of `expand_nabla`
+where it was inline: one predicate, two callers, one reason.
+
+With this the reported pipeline closes as it stands, one step inserted:
+
+```python
+b = ts.using(basis=wcs, chart=chart)
+td.derive(nabla @ T + f, [
+    b.expand_nabla, b.expand_in_basis, b.simplify_basis_dot, b.contract_delta,
+    b.to_contraction,          # ← the missing step
+    b.reassemble, b.reassemble_nabla, td.canonicalize,
+])
+#  f + μ Δu + λ ∇(∇·u) + μ ∇(∇·u)
+```
+
+Two routes now reach the equation from the same start: keep the operand
+abstract (`reduce_frame`), or componentize and write the components back
+(`to_contraction`).  The second exists because the first is not always what a
+person wants to do.
+
 ## Status
 
-**All seven fixed and verified.**  958 C++ tests, 575 Python, 69 challenges, 12
-examples.
+**All eight fixed and verified**, and the componentized route closes.  960 C++
+tests, 582 Python, 69 challenges, 12 examples.
 
 - the scope defect: four Python regressions
   (`TestScalarDivisionKeepsTheIndexLink`) and two C++ tests
@@ -260,6 +327,10 @@ examples.
 - the Laplacian pair: two Python tests and two C++
   (`Chart.ReassembleNablaReadsAContractedDirectionPairAsALaplacian`,
   `Chart.ReassembleNablaStillRefusesAComponentForm`).
+
+- the α-renaming and `to_contraction`: eight Python tests and two C++
+  (`Canonicalize.RenamingABinderCarriesItsDerivativeDirections`,
+  `Chart.ToContractionTakesAComponentFormBack`).
 
 Every one was checked against the unfixed build and fails there.
 

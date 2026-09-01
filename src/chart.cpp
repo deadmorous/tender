@@ -735,6 +735,22 @@ auto del_apply(
     return acc;
 }
 
+// A constant unit-scale (Cartesian) frame: every scale factor is 1, so
+// ∂_j e_i = 0 and a frame vector rides through differentiation untouched.  The
+// licence `expand_nabla` needs, and `to_contraction` needs for the same reason.
+auto frame_is_constant(Context& ctx, CoordinateChart const& chart) -> bool
+{
+    int const n = static_cast<int>(chart.coords.size());
+    for (int i = 0; i < n; ++i)
+    {
+        auto const* h = std::get_if<ScalarLiteral>(
+            &steps::simplify_scalars(ctx, scale_factor(ctx, chart, i))->node);
+        if (!h || h->value != Rational{1})
+            return false;
+    }
+    return true;
+}
+
 auto del(Context& ctx, CoordinateChart const& chart) -> Expr const*
 {
     Basis const fb = physical_frame(ctx, chart);
@@ -762,23 +778,17 @@ auto expand_nabla(Context& ctx, CoordinateChart const& chart, Expr const* e)
 {
     Basis const fb = physical_frame(ctx, chart);
     int const cid = chart_id_of(chart);
-    int const n = static_cast<int>(chart.coords.size());
     // The free-index expansion keeps ∇ = e_i ∂_i as a *single*
     // implicitly-summed term (not the n-fold concrete unrolling of `del`), so a
     // nested ∇×(∇×ε)ᵀ stays abstract in ε.  A moving frame's ∂_i e_j ≠ 0 and
     // its per-direction scale factors 1/h_i cannot ride a summed index
     // uniformly, so this targets a constant unit-scale (Cartesian/WCS) frame;
     // assert that here.
-    for (int i = 0; i < n; ++i)
-    {
-        auto const* h = std::get_if<ScalarLiteral>(
-            &steps::simplify_scalars(ctx, scale_factor(ctx, chart, i))->node);
-        if (!h || h->value != Rational{1})
-            throw std::invalid_argument(
-                "expand_nabla: the free-index ∇ expansion currently supports "
-                "only a constant unit-scale (Cartesian) frame; use the chart "
-                "operators (grad/div/rot) for curvilinear charts");
-    }
+    if (!frame_is_constant(ctx, chart))
+        throw std::invalid_argument(
+            "expand_nabla: the free-index ∇ expansion currently supports "
+            "only a constant unit-scale (Cartesian) frame; use the chart "
+            "operators (grad/div/rot) for curvilinear charts");
     Expr const* replaced = rewrite_tree(
         ctx,
         e,
@@ -1497,6 +1507,82 @@ auto dimension_identities(Context& ctx, Expr const* e, IndexSpace const* space)
 }
 
 } // namespace
+
+// `a_i` → `a·e_i`: a component *is* the invariant contracted with its frame
+// vector, and writing it that way is what lets the completeness fold
+// `(X·e_i) e_i → X` take a component expansion back — carrying whatever the
+// component holds, ∂-marks included, because `X` rides through as a whole
+// subexpression rather than being rebuilt from a name (vibe 000109).
+//
+// The marked case needs the frame to be *constant*: `∂(a·e_i) = (∂a)·e_i` only
+// where `∂e_i = 0`, which is the same licence `expand_nabla` demands and
+// checks.  A curvilinear chart is refused rather than silently dropping the
+// connection terms.
+auto to_contraction(
+    Context& ctx,
+    CoordinateChart const& chart,
+    Expr const* e,
+    StepReport* report) -> Expr const*
+{
+    Basis const fb = physical_frame(ctx, chart);
+    bool marked = false;
+    bool skipped_rank = false;
+    rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* n) -> Expr const*
+        {
+            if (auto cc = as_component(n, fb))
+            {
+                if (cc->second.size() != 1)
+                    skipped_rank = true;
+                else if (!cc->first->deriv_marks.empty())
+                    marked = true;
+            }
+            (void)c;
+            return n;
+        });
+    if (marked && !frame_is_constant(ctx, chart))
+    {
+        report_no_op(
+            report,
+            "a component here carries ∂ marks and this chart's frame is not "
+            "constant, so a_i = a·e_i would lose the connection terms "
+            "∂e_i — use the chart operators for a curvilinear frame");
+        return e;
+    }
+    bool fired = false;
+    auto const* out = rewrite_tree(
+        ctx,
+        e,
+        [&](Context& c, Expr const* n) -> Expr const*
+        {
+            auto cc = as_component(n, fb);
+            if (!cc || cc->second.size() != 1)
+                return n;
+            TensorObject inv = *cc->first; // name, traits, dim, ∂ marks
+            inv.slots.clear();
+            inv.rank = 1;
+            fired = true;
+            return make_dot(
+                c,
+                c.make<Expr>(std::move(inv)),
+                fb.covariant_vector(c, CountableIndex{cc->second[0]}));
+        });
+    if (!fired)
+    {
+        report_no_op(
+            report,
+            skipped_rank ?
+                "the components here carry more than one index, which this "
+                "step does not write out yet (a_ij = e_i·a·e_j)" :
+                "there is no component of this chart's frame here to write as "
+                "a contraction");
+        return e;
+    }
+    report_fired(report);
+    return out;
+}
 
 auto reassemble_nabla(
     Context& ctx,

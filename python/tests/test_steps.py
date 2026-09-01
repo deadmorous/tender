@@ -196,7 +196,7 @@ class TestStepCall:
             "apply_identity", "componentize_nabla", "engine_simplify",
             "evaluate", "expand", "expand_nabla", "express", "fold_operator",
             "insert_metric", "partial", "reassemble_nabla", "saturate",
-            "to_reference",
+            "to_contraction", "to_reference",
         ]
 
 

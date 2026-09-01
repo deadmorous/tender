@@ -337,6 +337,14 @@ enum class Variance
 // coordinate-carrier fold, the completeness fold and the resolution-of-identity
 // fold together to a fixed point, because one can expose another's pattern and
 // a caller should not have to know which shape they are holding.
+// The component of `basis` that `e` is, if it is one: the rank-0 tensor
+// `expand_in_basis` mints, with every slot carrying one of this basis's
+// countable indices.  Returns the object and its slot ids in slot order.
+// Shared so the chart's `to_contraction` reads a component the same way the
+// reassembly folds do (vibe 000109).
+[[nodiscard]] auto as_component(Expr const* e, Basis const& basis)
+    -> std::optional<std::pair<TensorObject const*, std::vector<int>>>;
+
 [[nodiscard]] auto reassemble(
     Context& ctx,
     Expr const* e,

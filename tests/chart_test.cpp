@@ -1990,6 +1990,35 @@ TEST(Chart, ReassembleNablaReadsAContractedDirectionPairAsALaplacian)
 // …and the mirror condition keeps the component form out: a frame vector whose
 // index is the *field's* slot is not a gradient leg, or the Laplacian rule
 // above would readmit `(∂_j ∂_j u_i) e_i` and read `e_i` as one.
+// `a_i = a·e_i`, and with it the way back from a component expansion that a
+// direct fold cannot take: `reassemble` rebuilds the invariant from a name, so
+// the ∂ marks have nowhere to go and it refuses; this writes the contraction
+// instead, and the completeness fold carries `X` through whole (vibe 000109).
+TEST(Chart, ToContractionTakesAComponentFormBack)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto fb = physical_frame(ctx, chart);
+    auto* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto* nab = make_nabla(ctx);
+    auto* divgrad = make_dot(ctx, nab, make_tensor_product(ctx, nab, u));
+
+    auto const* comps = steps::contract_delta(
+        ctx,
+        simplify_basis_dot(
+            ctx,
+            expand_in_basis(
+                ctx, expand_nabla(ctx, chart, divgrad), fb, Variance::Covariant),
+            fb));
+
+    StepReport report;
+    auto const* written = to_contraction(ctx, chart, comps, &report);
+    EXPECT_TRUE(report.fired);
+    auto const* folded = reassemble(ctx, written, fb);
+    EXPECT_TRUE(eq(ctx, reassemble_nabla(ctx, chart, folded), divgrad));
+}
+
 TEST(Chart, ReassembleNablaStillRefusesAComponentForm)
 {
     Context ctx;
