@@ -5,8 +5,9 @@
 #include <tender/nf_lower.hpp>
 #include <tender/rewrite.hpp>
 
-#include <algorithm>
 #include <cmath>
+#include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -1236,11 +1237,29 @@ auto is_field_field_contraction(Context& ctx, Expr const* f, Basis const& fb)
 // The classifier below would read the e_i as a gradient leg and the orphaned
 // ∂'s as nothing at all — `∇ u_i`, one derivative lost and an index dangling
 // (vibe 000109).
-auto every_direction_has_a_frame_vector(
-    Context& ctx, Basis const& fb, Expr const* term) -> bool
+// …with one exception, and it is the Laplacian.  Once `reduce_frame` has
+// turned `e_i·e_j` into a δ and contracted it, the two directions are paired
+// with *each other* — `∂_i ∂_i u` — and no frame vector is left to pair with.
+// That is `∇·∇`: the same pair the classifier already reads as a Laplacian
+// when it is still spelled `e_ℓ·e_m`, only further along (vibe 000109).
+//
+// Returns how many such pairs the term holds, or nothing when some direction is
+// unaccountable — used once and not twice, or spread across two fields, or
+// (the reported case) pairing with a component slot rather than a ∂.
+auto orphan_laplacians(
+    Context& ctx,
+    Basis const& fb,
+    Expr const* term,
+    std::string* why) -> std::optional<int>
 {
-    std::set<int> links;
-    std::set<int> dirs;
+    auto note = [why](std::string const& text)
+    {
+        if (why && why->empty())
+            *why = text;
+    };
+    std::map<int, int> uses;     // free link → occurrences in the whole term
+    std::set<int> paired_in_one; // links used twice within one object
+    std::set<int> dirs;          // frame-vector directions
     rewrite_tree(
         ctx,
         term,
@@ -1248,16 +1267,56 @@ auto every_direction_has_a_frame_vector(
         {
             if (auto const d = frame_dir_index(n, fb))
                 dirs.insert(*d);
-            if (auto const* t = std::get_if<TensorObject>(&n->node))
-                for (auto const& m: t->deriv_marks)
-                    if (m.free)
-                        links.insert(m.link);
+            auto const* t = std::get_if<TensorObject>(&n->node);
+            if (!t)
+                return n;
+            std::map<int, int> local;
+            for (auto const& m: t->deriv_marks)
+                if (m.free)
+                {
+                    ++uses[m.link];
+                    ++local[m.link];
+                }
+            for (auto const& [id, count]: local)
+                if (count == 2)
+                    paired_in_one.insert(id);
             return n;
         });
-    return std::all_of(
-        links.begin(),
-        links.end(),
-        [&dirs](int id) { return dirs.count(id) != 0; });
+    // And the mirror condition: a frame vector whose index is *not* a ∂
+    // direction is not a ∇ leg — it belongs to the field's own slot, as in the
+    // component form `(∂_j ∂_j u_i) e_i`, where reading `e_i` as a gradient leg
+    // produced `∇ u_i` (vibe 000109).  Without this the Laplacian rule above
+    // would let exactly that case back in.
+    for (int d: dirs)
+        if (uses.count(d) == 0)
+        {
+            note(
+                "a frame vector here has no ∂ to pair with — its index belongs "
+                "to the field's own slots, so this is a component form rather "
+                "than a ∇ expansion.  Fold the components back before "
+                "reassembling ∇, or keep the operand abstract");
+            return std::nullopt;
+        }
+
+    int laplacians = 0;
+    for (auto const& [id, count]: uses)
+    {
+        if (dirs.count(id) != 0)
+            continue; // an ordinary ∇ leg or divergence
+        // Both occurrences on one field, and nowhere else in the term: the
+        // δ-contracted direction pair, which is Δ.
+        if (count == 2 && paired_in_one.count(id) != 0)
+        {
+            ++laplacians;
+            continue;
+        }
+        note(
+            "a ∂ direction here pairs with neither a frame vector nor a second "
+            "∂ on the same field, so it is neither a ∇ leg nor a Laplacian — "
+            "not a shape this fold reads");
+        return std::nullopt;
+    }
+    return laplacians;
 }
 
 auto reassemble_term(
@@ -1273,18 +1332,11 @@ auto reassemble_term(
     if (!has_deriv_mark(ctx, term))
         return term;
 
-    // An orphaned ∂ direction means this is not a ∇-expansion (above).
-    if (!every_direction_has_a_frame_vector(ctx, fb, term))
-    {
-        if (why && why->empty())
-            *why =
-                "a ∂ direction here has no frame vector to pair with, so this "
-                "is a component form rather than a ∇ expansion — the field's "
-                "own indices carry the frame vectors.  Reassemble ∇ before "
-                "expanding the operand in a basis, or keep the operand "
-                "abstract";
+    // An orphaned ∂ direction means this is not a ∇-expansion (above) — unless
+    // it is a δ-contracted pair, which is a Laplacian.
+    auto const orphan_laps = orphan_laplacians(ctx, fb, term, why);
+    if (!orphan_laps)
         return term;
-    }
 
     // Flatten the top-level ⊗ chain into factors.
     std::vector<Expr const*> factors;
@@ -1327,7 +1379,9 @@ auto reassemble_term(
     // Classify factors: δ-pairs `e_ℓ·e_m` (two directions ⇒ a Laplacian), free
     // frame vectors (gradient legs), the identity, and the operand blob (the
     // one factor carrying the field).
-    int laplacians = 0;
+    // The δ-contracted direction pairs found above are Laplacians too; the
+    // `e_ℓ·e_m` factors below are the same thing one step earlier.
+    int laplacians = *orphan_laps;
     std::vector<Expr const*> identities;
     std::vector<std::pair<int, Expr const*>> coefficients; // (position, factor)
     std::vector<int> grad_positions;

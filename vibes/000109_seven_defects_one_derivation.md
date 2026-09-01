@@ -1,4 +1,4 @@
-# 000109 Six defects behind one invalid derivation
+# 000109 Seven defects behind one invalid derivation
 
 Reported from an interactive session: starting from the invariant `∇·T + f`
 with the isotropic Hooke stress `T = λ tr(ε) I + 2μ ε`, `ε = sym(∇u)`,
@@ -235,7 +235,7 @@ exactly one top-level ∇ factor, which is the thing to look at whenever a step
 
 ## Status
 
-**All six fixed and verified.**  956 C++ tests, 573 Python, 69 challenges, 12
+**All seven fixed and verified.**  958 C++ tests, 575 Python, 69 challenges, 12
 examples.
 
 - the scope defect: four Python regressions
@@ -257,6 +257,10 @@ examples.
   (`Canonicalize.LiteralsLeftOfAnOperatorJoinTheCoefficient`,
   `FactorCommon.DoesNotFactorAcrossAnOperatorsReach`).
 
+- the Laplacian pair: two Python tests and two C++
+  (`Chart.ReassembleNablaReadsAContractedDirectionPairAsALaplacian`,
+  `Chart.ReassembleNablaStillRefusesAComponentForm`).
+
 Every one was checked against the unfixed build and fails there.
 
 ## What the six had in common
@@ -276,25 +280,46 @@ Worth stating because it predicts where the next one is: any step that
 partitions a term into "what I act on" and "the rest" is making this call, and
 the calls are not written down in one place.
 
-## Still missing: the fold back from `∂_i ∂_i u`
+## The seventh: `∂_i ∂_i u` is a Laplacian
 
-Following the reported route to its end leaves one shape unfolded.  Keeping the
-operand abstract and reducing the frame — `expand_nabla`, `contract_identity`,
-`reduce_frame` — lands `∇·(∇⊗u)` on
+The refusal above left one shape unfolded, and it is the one every elasticity
+derivation ends on.  Keeping the operand abstract and reducing the frame —
+`expand_nabla`, `contract_identity`, `reduce_frame` — lands `∇·(∇⊗u)` on
 
 ```
 ∂_i ∂_i u
 ```
 
-which is `Δu`: a field with two free ∂-marks on the same direction, the δ
-already contracted away.  `reassemble_nabla` refuses it (correctly, under the
-rule above — the direction has no frame vector), and nothing else folds it, so
-the Navier–Lamé endpoint comes out as `f + Σ_i μ ∂_i∂_i u + ∇(λ∇·u + μ∇·u)`
-with the Laplacian left in ∂ form.
+A field with two free ∂-marks on the same direction, the δ already contracted
+away.  That is `Δu`, and it is the *same pair* the classifier has always read
+as a Laplacian when it is still spelled `e_ℓ·e_m` — only one step further on.
+So a repeated free direction, both marks on one field and nowhere else in the
+term, now counts as a `∇·∇`, folded by the machinery already there.
 
-The missing rule is one line of vocabulary the classifier almost has: it
-already reads an `e_ℓ·e_m` pair as a Laplacian, and this is the same pair after
-`reduce_frame` has contracted it.  A *repeated* free direction on one operand,
-with no frame vector, is `∇·∇`.  Every other orphan stays refused.
+**The mirror condition is what keeps this safe.**  Admitting an orphan pair
+would have readmitted the component form of §4 — `(∂_j ∂_j u_i) e_i` has a
+paired direction `j` too — so the guard gained its other half: a **frame
+vector** whose index is not a ∂ direction is not a gradient leg either.  In the
+component form `e_i` belongs to the field's own slot, and that is now what the
+refusal says.
+
+The two halves together state the invariant plainly: in a ∇-expansion, ∂'s and
+frame vectors pair off, and the only thing that may go unpaired is a ∂ with
+another ∂ on the same field.  Everything else is a component form, and the fold
+declines it by name.
+
+With this the whole derivation closes, from the invariant to the equation:
+
+```python
+b = ts.using(basis=wcs, chart=chart)
+td.derive(nabla @ T + f,
+          [b.expand_nabla, td.contract_identity, b.reduce_frame,
+           b.reassemble_nabla])
+#  f + μ Δu + λ ∇(∇·u) + μ ∇(∇·u)
+```
+
+`reduce_frame` rather than `expand_in_basis` is the whole difference: it takes
+the frame dots the operand *needs* without componentising the field, so the
+operand is still `u` when the ∇'s are folded back.
 
 All four fixed; see below for the third and fourth.

@@ -1961,6 +1961,60 @@ TEST(Chart, ExpandNablaScalarDivGradIsLaplacian)
 
 // expand_nabla refuses a curvilinear (non-unit-scale) chart: the free-index
 // ∂_i cannot carry the moving frame's per-direction scale factors.
+// After `reduce_frame` has contracted the δ, a Laplacian's two directions pair
+// with *each other* and no frame vector is left — `∂_i ∂_i u`.  That is the
+// same pair the classifier reads when it is still spelled `e_ℓ·e_m`, one step
+// further on, so it folds to Δ (vibe 000109).
+TEST(Chart, ReassembleNablaReadsAContractedDirectionPairAsALaplacian)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto fb = physical_frame(ctx, chart);
+    auto* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto* nab = make_nabla(ctx);
+    auto* divgrad = make_dot(ctx, nab, make_tensor_product(ctx, nab, u));
+
+    // Reduce the frame with the operand kept abstract: e_i·e_j → δ, contracted.
+    auto const* reduced = steps::canonicalize(
+        ctx, reduce_frame(ctx, expand_nabla(ctx, chart, divgrad), fb));
+    IndexNameMap before;
+    ASSERT_NE(render_latex(*reduced, before).find("partial"), std::string::npos);
+
+    StepReport report;
+    auto const* folded = reassemble_nabla(ctx, chart, reduced, &report);
+    EXPECT_TRUE(report.fired);
+    EXPECT_TRUE(eq(ctx, folded, divgrad));
+}
+
+// …and the mirror condition keeps the component form out: a frame vector whose
+// index is the *field's* slot is not a gradient leg, or the Laplacian rule
+// above would readmit `(∂_j ∂_j u_i) e_i` and read `e_i` as one.
+TEST(Chart, ReassembleNablaStillRefusesAComponentForm)
+{
+    Context ctx;
+    auto ref = wcs(ctx);
+    auto chart = cartesian_chart(ctx, ref);
+    auto fb = physical_frame(ctx, chart);
+    auto* u = make_field(ctx, make_tensor_name("u"), 1, {});
+    auto* nab = make_nabla(ctx);
+    auto* divgrad = make_dot(ctx, nab, make_tensor_product(ctx, nab, u));
+
+    auto const* comps = steps::contract_delta(
+        ctx,
+        simplify_basis_dot(
+            ctx,
+            expand_in_basis(
+                ctx, expand_nabla(ctx, chart, divgrad), fb, Variance::Covariant),
+            fb));
+
+    StepReport report;
+    auto const* out = reassemble_nabla(ctx, chart, comps, &report);
+    EXPECT_FALSE(report.fired);
+    EXPECT_NE(report.reason.find("no ∂ to pair with"), std::string::npos);
+    EXPECT_TRUE(structural_eq(out, comps));
+}
+
 TEST(Chart, ExpandNablaRejectsCurvilinear)
 {
     Context ctx;

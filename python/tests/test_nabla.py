@@ -1114,8 +1114,57 @@ class TestReassembleNablaRefusesAComponentForm:
         )
         result = ts.info("reassemble_nabla").run(comps, chart=chart)
         assert not result.fired
-        assert "no frame vector to pair with" in result.reason
+        assert "no ∂ to pair with" in result.reason
         assert td.structural_eq(result.expr, comps)
+
+    def test_a_contracted_direction_pair_is_a_laplacian(self):
+        """The one orphan that *is* readable: `∂_i ∂_i u` is `Δu`.
+
+        Once `reduce_frame` contracts the δ, the two directions pair with each
+        other and no frame vector is left — the same pair the classifier reads
+        as a Laplacian when it is still spelled `e_ℓ·e_m`, one step further on
+        (vibe 000109).
+        """
+        ws, frame, chart, u, nabla = self._setup()
+        reduced = td.canonicalize(
+            tb.reduce_frame(
+                chart.expand_nabla(nabla @ (nabla * u)), frame
+            )
+        )
+        assert "partial" in reduced.latex() and "Delta" not in reduced.latex()
+        assert "\\Delta \\mathbf{u}" in chart.reassemble_nabla(reduced).latex()
+
+    def test_the_route_that_keeps_the_operand_abstract_reaches_navier_lame(self):
+        # The endpoint, end to end: ∇·T + f for the isotropic Hooke stress.
+        import tender.steps as ts
+
+        ws, frame, chart, u, nabla = self._setup()
+        f = t.field("f", 1, ctx=ws.ctx)
+        I = t.identity(ws.ctx)
+        lam = t.tensor(r"\lambda", 0, ctx=ws.ctx)
+        mu = t.tensor(r"\mu", 0, ctx=ws.ctx)
+        eps = td.sym(nabla * u)
+        T = lam * eps.tr() * I + 2 * mu * eps
+        b = ts.using(basis=frame, chart=chart)
+
+        got = td.canonicalize(
+            td.derive(
+                nabla @ T + f,
+                [
+                    b.expand_nabla,
+                    td.contract_identity,
+                    b.reduce_frame,
+                    b.reassemble_nabla,
+                ],
+            ).current
+        )
+        want = (
+            mu * (nabla @ (nabla * u))
+            + lam * (nabla * (nabla @ u))
+            + mu * (nabla * (nabla @ u))
+            + f
+        )
+        assert td.algebraic_eq(got, want)
 
     def test_an_expression_with_no_derivative_says_so(self):
         import tender.steps as ts
