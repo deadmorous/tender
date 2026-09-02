@@ -445,7 +445,9 @@ another body whose orientation is composed of two or three rotations about fixed
 axes.  It is the right shape for this increment because nothing in it is
 abstract: named axes, a composition, a rolling constraint, and an angular
 velocity that must come out along the contact line rather than being asserted
-to.  It exercises the composition law above, the transport rule, and the time
+to.  Its rolling condition is integrable — nonholonomic in form, effectively
+holonomic in substance (Stepan) — so it is a kinematics challenge that happens
+to carry a constraint, not a nonholonomic one; see Q2.  It exercises the composition law above, the transport rule, and the time
 chain together, and it is the first challenge in the brief that is a *problem*
 rather than an identity.
 
@@ -667,9 +669,18 @@ say that is what it is doing, not present itself as a variation.
 And in invariant form the same shape appears without generalized coordinates at
 all: rolling without slipping is `v_C + ω × ρ = 0` at the contact point, whose
 admissibility condition is `δr_C + δo × ρ = 0` — linear in the virtual
-quantities, and balanced in δ.  **The rolling cone of I7 is therefore already an
-instance of this answer**, which is a good sign for both: the constraint work has
-a challenge before it has a design, rather than after.
+quantities, and balanced in δ.
+
+**But the rolling cone is not a nonholonomic example** (Stepan): its rolling
+condition is *integrable* — nonholonomic in form, effectively holonomic in
+substance.  So I7's challenge exercises the **shape** of the answer above and
+none of its difficulty, and this brief must not be read as discharging the
+nonholonomic case.  A genuinely nonholonomic challenge — a rolling disc, a
+sphere, a skate, the Neimark–Fufaev material of vibe 000093's M5A item 3 — is
+still owed, and it is where the Chetaev distinction above stops being a
+formality.  Worth noting that the difference between the two is itself a
+derivation (is this linear form integrable?), and one tender says nothing about
+today.
 
 **Q3 — ~~which representation of `P` is the foundation?~~**  **Settled
 (Stepan, 2026-09-02):** the property is carried by the tensor, as symmetry is,
