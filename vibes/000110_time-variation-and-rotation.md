@@ -318,26 +318,48 @@ any orthogonal `P`, differentiating `P·Pᵀ = I` gives
 D(P)·Pᵀ + P·D(P)ᵀ = 0        ⟹        D(P)·Pᵀ  is skew
 ```
 
-so every derivation has a spin.  `d/dt` gives the angular velocity tensor
-`Ω = Ṗ·Pᵀ` and `Ṗ = Ω·P`; `δ` gives the **virtual rotation** `Θ = δP·Pᵀ` and
-`δP = Θ·P`.  One construction, and the "better tooling for rotation variations"
-this reframing asks for falls out of it rather than being built separately.
+so every derivation has a spin — and a skew tensor is `ω × I`, which is the form
+this project writes it in (Stepan: the standalone `Ω` is not used; `ω × I` is).
+So the increment's real content is the **axial vector**, not a spin tensor:
 
-Measured: the Leibniz step works today for both operators, transpose included —
-`d/dt(P·Pᵀ)` returns `Ṗ·Pᵀ + P·Ṗᵀ` and `δ(Q·Qᵀ)` the matching pair with the ∂_q
-chain rule (M2 below).  So the skewness is *derivable*, not to be asserted.
+```
+d/dt :   Ṗ·Pᵀ = ω × I           Ṗ  = ω × P            ω  = −½ (Ṗ·Pᵀ)_×
+δ    :   δP·Pᵀ = δo × I         δP = δo × P           δo = −½ (δP·Pᵀ)_×
+```
 
-What is missing is the **skew ⇄ axial vector** bridge: `Ω = ω × I`, `Ω·a =
-ω × a`, `(a × I)ᵀ = −(a × I)`.  Measured (M5): neither of the last two is in the
-rule library, and both come back `exhausted` — not refuted, so they are simply
-absent.  They are the natural core of the `rotation` group, and the sign
-convention relating `ω` to `vec(Ω)` is to be **measured against the library's
-own ε, not assumed** from a textbook.
+One construction, two derivations.  The "better tooling for rotation
+variations" this reframing asks for is not separate machinery — it is the same
+machinery handed `δ` instead of `d/dt`.
+
+**Notation: keep the balance of δ.**  The virtual rotation is written `δo`
+(Eliseev's notation), not `θ`, so that every term of every equation carries the
+same number of δ's — `δP = δo × P` balances, `δP = θ × P` does not.  This is a
+real check, not a decoration: an unbalanced equation in a variational
+derivation is almost always a mistake, and the eye catches it only if the
+notation makes δ visible.  It is also the first place I1's decorated names earn
+their keep, since `δo` is `\delta{o}` and the rate of a virtual rotation is
+`\delta{\dot{o}}`.
+
+Measured, and the conventions line up with no adjustment needed:
+
+- **M2**: the Leibniz step works today for both operators, transpose included —
+  `d/dt(P·Pᵀ)` returns `Ṗ·Pᵀ + P·Ṗᵀ` and `δ(Q·Qᵀ)` the matching pair with the
+  ∂_q chain rule.  So the skewness is *derivable*, not to be asserted.
+- **M7**: `(a × I)_× = −2a` in tender's own ε and `vec` conventions — measured
+  on a concrete vector, so it is decidable rather than a matter of taste.  The
+  inversion `ω = −½ (…)_×` is therefore the library's convention already, and
+  `(a⊗b)_× = a×b` is what `expand_dyad_ops` does.
+
+What is missing is the rest of the **axial-vector bridge**: `(a × I)·b = a × b`
+and `(a × I)ᵀ = −(a × I)`.  Measured (M5): both come back `exhausted` under the
+`cross` and `dyadic` groups — absent, not wrong.  They are the first content of
+the `rotation` group.  A third is wanted by I8: the commutator
+`(a × I)·(b × I) − (b × I)·(a × I) = (a × b) × I`.
 
 *Done when:* skewness of `D(P)·Pᵀ` is derived (not declared) for both `d/dt` and
-`δ`; `Ṗ = ω × P` and `δP = θ × P` are available; and Poisson's formula
-`ė_k = ω × e_k` follows for `e_k = P·E_k`, with challenge 000027 recovered as
-its planar, single-angle instance.
+`δ`; `Ṗ = ω × P` and `δP = δo × P` are available with `ω = −½ (Ṗ·Pᵀ)_×`; and
+Poisson's formula `ė_k = ω × e_k` follows for `e_k = P·E_k`, with challenge
+000027 recovered as its planar, single-angle instance.
 
 ### I7 — rigid-body kinematics
 
@@ -360,23 +382,23 @@ The payoff, and the increment that decides how far the virtual-work principle
 carries.  Two parts:
 
 1. **The commuting relation.**  δ and d/dt commute on `P` (I2 guarantees it
-   through the coordinate chain), so
+   through the coordinate chain), so with `Ṗ = ω × P` and `δP = δo × P`
    ```
-   δΩ − Θ̇  =  Ṗ·δPᵀ − δP·Ṗᵀ  =  Θ·Ω − Ω·Θ
+   δ(ω × I) − d/dt(δo × I)  =  Ṗ·δPᵀ − δP·Ṗᵀ  =  (δo × ω) × I
    ```
-   — three lines of Leibniz plus orthogonality, and in vector form the
-   classical `δω = θ̇ − ω × θ` (sign to be settled by derivation, not by
-   memory).  This is the identity that makes rotations usable in a variational
-   argument at all, and it is the sharpest test of whether I2's commuting
-   invariant was built right.
+   — three lines of Leibniz plus orthogonality, then the commutator identity of
+   I6 — giving `δω = (δo)˙ − ω × δo`, balanced in δ on both sides (sign to be
+   settled by derivation, not by memory).  This is the identity that makes
+   rotations usable in a variational argument at all, and it is the sharpest
+   test of whether I2's commuting invariant was built right.
 2. **Virtual work for a finite-DOF system.**  `δA = F·δr_C + M·θ` for a rigid
    body; the equations follow from `δA = 0` for *arbitrary independent* `δr_C`
-   and `θ`.  Note what this does **not** need: no integral, no fundamental
+   and `δo`.  Note what this does **not** need: no integral, no fundamental
    lemma over a domain — for finitely many degrees of freedom the lemma is just
    "the coefficient of each independent arbitrary vector vanishes".  That is the
    whole reason the integral could move to vibe 000111 without stalling M5A.
 
-*Done when:* `δω` is derived; and the plane pendulum's equation of motion comes
+*Done when:* `δω = (δo)˙ − ω × δo` is derived; and the plane pendulum's equation of motion comes
 out of d'Alembert–Lagrange (virtual work of active and inertial forces) with no
 integral anywhere — the finite-DOF sibling of challenge 000026's Hamilton
 route.
@@ -413,6 +435,9 @@ prerequisites rather than nice-to-haves:
 - **M4 — the cross of two concrete frame vectors does not fold** (recorded with
   challenge 000027): `k × i` reduces to the bound sum `−ε_{i13} e_i`, and four
   further public steps are needed to reach `j`.
+- **M7 — the `vec` convention already agrees with Zhilin's.**  `(a × I)_× = −2a`,
+  measured on a concrete vector in WCS, so `ω = −½ (Ṗ·Pᵀ)_×` is the library's
+  own convention and nothing has to be adjusted or chosen.
 - **M6 — symmetry is a *canonical form*, orthogonality cannot be.**
   `canonicalize(Sᵀ)` is structurally `S` for a symmetric field, and `Gᵀ = G` for
   a non-symmetric one is correctly `refuted` — so the property machinery already
@@ -445,11 +470,29 @@ frame to be constant in time (which it is because i, j, k are not fields —
 nothing had to be declared about `t`); and its middle member is Poisson's
 formula for `Ω = ω k`, the planar instance of I6.
 
+**Stepan's second challenge — the angular velocity of a finite rotation.**  For
+a rotation of angle `θ` about a unit axis `n` (the finite rotation vector `θ n`,
+Zhilin):
+
+```
+ω  =  θ̇ n  +  sin θ · ṅ  +  (1 − cos θ) · n × ṅ
+```
+
+Derived, not asserted: differentiate the turn tensor of I5, contract with its
+transpose, and read off `−½ (…)_×`.  This is the hardest thing in the brief and
+the best single indicator that the rotation machinery is real — everything
+before it is definitional, and this is the first result that could come out
+*wrong* rather than merely absent.  It also exercises every piece at once: the
+turn tensor, the unit constraint on `n` (and `n·ṅ = 0`, its derivative), the
+axial-vector bridge, and the time chain.  If it lands, I8's `δω` is the same
+derivation with δ in place of d/dt.
+
 Planned for the rotation increments, one per increment as vibe 000093 requires:
 a declared rotation preserves lengths and angles while an undeclared tensor
 does not (I4) · each way of writing a rotation is orthogonal by construction
 (I5) · `D(P)·Pᵀ` is skew for both derivations, and Poisson's formula in general
-(I6) · rigid-body velocity and acceleration (I7) · `δω`, and the pendulum by
+(I6) · Zhilin's `ω(θ, n)` above, as I6's proof that the machinery is real ·
+rigid-body velocity and acceleration (I7) · `δω`, and the pendulum by
 d'Alembert–Lagrange (I8).
 
 ## Open questions — Stepan's, recorded not resolved
