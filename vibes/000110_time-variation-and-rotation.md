@@ -641,15 +641,35 @@ for a helper would have to come from a challenge where the *assembly*, not the
 algebra, is what hurts.  Recommendation: no helper until such a challenge
 exists; revisit after I7's pendulum.
 
-**Q2 — variations of constraint equations.**  For a holonomic `f(q,t) = 0`,
-`δf = Σ (∂f/∂q_k) δq_k` is just δ applied, and works today.  The genuinely open
-part is *nonholonomic*: the admissibility condition on virtual displacements is
-not the variation of anything — it is a declaration about which `δq` are
-allowed, and it is what Lagrange multipliers and Appell's quasi-velocities key
-on.  Does tender need a first-class constraint object that filters admissible
-variations, or is that user bookkeeping?  Recommendation: leave it open until a
-Neimark–Fufaev challenge is attempted; deciding it now would be designing
-against an imagined problem.
+**Q2 — ~~variations of constraint equations~~ — settled in scope (Stepan):
+nonholonomic constraints are limited to those *linear in the generalized
+speeds*.**  That restriction is what makes the question answerable, because both
+kinds then produce the *same shape*:
+
+```
+holonomic      f(q,t) = 0            ⟹   δf  =  Σ (∂f/∂q_k) δq_k = 0
+nonholonomic   Σ a_k(q,t) q̇_k + a₀ = 0  ⟹   Σ a_k(q,t) δq_k     = 0
+```
+
+— in both cases **a linear form in the variations, equated to zero**.  So there
+is no constraint *object* to design: what tender owes is the linear form and the
+means to read its coefficients off, and admissibility is the statement that this
+form vanishes.
+
+One distinction has to stay visible in the surface, because it is exactly where
+a mechanical application of δ gives the wrong answer: **the virtual condition is
+not δ of the nonholonomic constraint.**  Varying `Σ a_k q̇_k + a₀` produces `δq̇`
+terms; the admissibility condition is instead the Chetaev replacement
+`q̇_k → δq_k` with `a₀` dropped.  Holonomic constraints are the special case
+where the two happen to coincide.  A step that performs that replacement should
+say that is what it is doing, not present itself as a variation.
+
+And in invariant form the same shape appears without generalized coordinates at
+all: rolling without slipping is `v_C + ω × ρ = 0` at the contact point, whose
+admissibility condition is `δr_C + δo × ρ = 0` — linear in the virtual
+quantities, and balanced in δ.  **The rolling cone of I7 is therefore already an
+instance of this answer**, which is a good sign for both: the constraint work has
+a challenge before it has a design, rather than after.
 
 **Q3 — ~~which representation of `P` is the foundation?~~**  **Settled
 (Stepan, 2026-09-02):** the property is carried by the tensor, as symmetry is,
@@ -667,9 +687,10 @@ first such thing will be a form whose sign cannot be taken on the user's word
 check-and-stamp** — `ws.orthogonal_from(name, expr, proper=…)`, verified by the
 engine against the declared constraints.  See I5.
 
-**Q4 — left or right?**  `Ω = Ṗ·Pᵀ` (spatial) and `Pᵀ·Ṗ` (body) are both wanted
-and are not the same tensor.  Names and defaults to be chosen when I5 is
-written; the construction is the same either way.
+**Q4 — ~~left or right?~~**  **Settled (Stepan): left, and only left.**
+`d/dt P = ω × P`, so `ω × I = Ṗ·Pᵀ`.  The body-frame `Pᵀ·Ṗ` is not carried; if
+it is ever wanted it is a conjugate of this one, not a second primitive.  I6 is
+written this way already.
 
 ## Order and risk
 
