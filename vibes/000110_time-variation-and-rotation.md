@@ -218,6 +218,21 @@ ways.  The proposal:
    a derivation has few rotations, and this needs no matcher work.
    `td.rules("rotation", ctx)` then collects whatever that context has declared,
    so the group is *context-derived* rather than static.
+2b. **The derivative of a constraint is a constraint** (Stepan): `n·ṅ = 0` and
+   the skewness of `Ṗ·Pᵀ` are the same phenomenon, and should be handled the
+   same way.  A property is therefore an *equation* first and a rewrite rule
+   second — `unit n` is `n·n = 1`, `orthogonal P` is `P·Pᵀ = I` — and for any
+   derivation `D` the library can produce `D` of it:
+   ```
+   D(n·n = 1)   ⟹   n·D(n) = 0          (directed: n·ṅ → 0, n·δn → 0)
+   D(P·Pᵀ = I)  ⟹   D(P)·Pᵀ  is skew    (directed: (D(P)·Pᵀ)ᵀ → −D(P)·Pᵀ)
+   ```
+   Minted as rules alongside the constraint itself, per derivation in play.  The
+   pay-off is that I6's skewness stops being a hand-written special case and
+   becomes an *instance*: one mechanism, and every future constraint gets its
+   differentiated form for free.  It also settles the orientation question the
+   general form raises — for `unit` the directed reading is obvious, for
+   `orthogonal` it is the skewness rule above.
 3. **The refutation abstains** when a claim contains a constrained symbol:
    status `exhausted`, never `refuted`, because the component expansion cannot
    represent the constraint.  Symmetry keeps refuting, because it can.
@@ -298,6 +313,23 @@ Each shipped form owes a challenge that its formula really is orthogonal;
 measured, the reflection's proof is two rules deep — `(I − 2n⊗n)·(I − 2n⊗n)ᵀ`
 expands to `I·I + 4(n·n) n⊗n − 2n⊗(n·I) − 2(I·n)⊗n`, which needs only
 `I·a = a` (shipped, `identity-dot`) and `n·n = 1` (I4's unit property).
+
+**Transport, and where the sign finally bites.**  Conjugation by a rotation is
+what makes the forms compose, and it needs three rules, the last two of which
+hold *only for a proper* `Q` (an improper one flips the sign — a reflection
+reverses cross products):
+
+```
+Q·(a⊗b)·Qᵀ = (Q·a)⊗(Q·b)          any orthogonal Q
+Q·(a × b)  = (Q·a) × (Q·b)        proper Q only
+Q·(a × I)·Qᵀ = (Q·a) × I          proper Q only
+```
+
+This is the concrete consumer that justifies carrying proper/improper on the
+property even though there is no `det` (Q5): without the flag these rules cannot
+be minted correctly, and with it they can.  Measured: the first is *already*
+canonical for the left factor (`A·(a⊗b) = (A·a)⊗b` proves), while
+`(a⊗b)·A = a⊗(Aᵀ·b)` hits the M8 bug below; the two cross rules are absent.
 
 **Polar decomposition** (`A = P·U = V·P`, `U`, `V` symmetric, `P` a rotation)
 needs nothing new: *using* the theorem means declaring an abstract rotation and
@@ -435,6 +467,31 @@ prerequisites rather than nice-to-haves:
 - **M4 — the cross of two concrete frame vectors does not fold** (recorded with
   challenge 000027): `k × i` reduces to the bound sum `−ε_{i13} e_i`, and four
   further public steps are needed to reach `j`.
+- **M8 — `refuted` is unsound where a `transpose` survives into the component
+  check.**  Found while measuring the transport rules above, and it outranks
+  everything else in this brief.  Every one of these *true* identities comes
+  back **`refuted`** — the status documented as "a real negative, from a
+  decision procedure independent of the rules":
+  ```
+  tr(Aᵀ) = tr(A)          a·Aᵀ = A·a          a·A = Aᵀ·a
+  Aᵀ·Bᵀ = (B·A)ᵀ          (a⊗b)·A = a⊗(Aᵀ·b)
+  ```
+  Expanded by hand on the public surface, both sides of each are *identical*
+  (`tr(Aᵀ)` and `tr(A)` both give `A_ii`; `a·Aᵀ` and `A·a` both give
+  `A_ij a_j e_i`).  The cause, read in `src/engine.cpp`: `to_components` never
+  calls `expand_dyad_ops` and has no rule for a surviving `Transpose`, so the
+  node reaches the comparison as an *opaque atom*; the two sides then differ
+  structurally, and `has_residue` — a whitelist naming ε, δ, the metric,
+  binders, `Nabla` and `Deriv` — does not list `Transpose`, `Trace` or
+  `VectorInvariant`, so the procedure believes it decided.  `(Aᵀ)ᵀ = A` escapes
+  only because canon collapses the double transpose first.
+
+  Two fixes, wanted in this order: make `has_residue` conservative about the
+  unary invariants (a wrong answer becomes an honest `exhausted`), then teach
+  `to_components` to push a transpose through the component form (an honest
+  answer becomes the right one).  Every rotation identity in I4–I8 is stated
+  with transposes, and I4's abstention design assumes this procedure is
+  trustworthy, so this is a **prerequisite**, not a neighbouring bug.
 - **M7 — the `vec` convention already agrees with Zhilin's.**  `(a × I)_× = −2a`,
   measured on a concrete vector in WCS, so `ω = −½ (Ṗ·Pᵀ)_×` is the library's
   own convention and nothing has to be adjusted or chosen.
@@ -450,8 +507,10 @@ prerequisites rather than nice-to-haves:
   and `(a × I)ᵀ = −(a × I)` both come back `exhausted` under the `cross` and
   `dyadic` groups.  They are I5's first content.
 
-M1, M3 and M6 are the ones that decide the shape of I4 and I5; none was visible
-from the plan, and all were cheap to find.
+M1, M3 and M6 are the ones that decide the shape of I4 and I5; M8 has to be
+fixed before any of them.  None was visible from the plan, and all were cheap to
+find — M8 in particular fell out of checking one transport rule the conjugation
+challenge needs.
 
 ## Challenges of the group
 
@@ -487,11 +546,28 @@ turn tensor, the unit constraint on `n` (and `n·ṅ = 0`, its derivative), the
 axial-vector bridge, and the time chain.  If it lands, I8's `δω` is the same
 derivation with δ in place of d/dt.
 
+**Stepan's third challenge — conjugation rotates the axis.**  With `P(θn)` the
+turn tensor of I5 and `Q` any rotation,
+
+```
+Q · P(θ n) · Qᵀ  =  P(θ · Q·n)
+```
+
+— the same angle about the rotated axis.  *Prove* it at least; *derive* the
+right-hand side at best, which is the stronger claim and the more useful one,
+since the theorem is what the composition (commutation) formula for rotations
+rests on.  The derivation is the three-term form conjugated term by term, and
+each term needs one transport rule from I5: `Q(n⊗n)Qᵀ = (Qn)⊗(Qn)`,
+`Q·Qᵀ = I`, and `Q(n × I)Qᵀ = (Qn) × I` — the last of which is exactly where
+properness is *required*, so this challenge is also the negative test for the
+sign: with an improper `Q` the identity is false, and the library should say so.
+
 Planned for the rotation increments, one per increment as vibe 000093 requires:
 a declared rotation preserves lengths and angles while an undeclared tensor
 does not (I4) · each way of writing a rotation is orthogonal by construction
 (I5) · `D(P)·Pᵀ` is skew for both derivations, and Poisson's formula in general
-(I6) · Zhilin's `ω(θ, n)` above, as I6's proof that the machinery is real ·
+(I6) · Zhilin's `ω(θ, n)` and the conjugation theorem above, as the proof that
+the machinery is real ·
 rigid-body velocity and acceleration (I7) · `δω`, and the pendulum by
 d'Alembert–Lagrange (I8).
 
@@ -536,6 +612,12 @@ and are not the same tensor.  Names and defaults to be chosen when I5 is
 written; the construction is the same either way.
 
 ## Order and risk
+
+**I0 — fix M8 first.**  `refuted` claiming a true identity is false is the one
+defect in this brief that makes the library actively misleading rather than
+merely incomplete, and every rotation statement below is written with
+transposes.  Nothing else should start until it is fixed and a challenge pins
+it.
 
 I1 → I3 are done.  I4 (constrained symbols) is the foundation and the only
 increment with a genuine mechanism question left in it; I5 (the ways to write a
