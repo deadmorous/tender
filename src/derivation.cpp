@@ -4194,10 +4194,18 @@ auto diff(Context& ctx, Expr const* e, DiffCoord const& q) -> Expr const*
             },
             [&](Nabla const&) -> Expr const*
             {
-                // Likewise for the ∇ operator: expand it in a chart first.
+                // ∇ describes the frame, and nothing about the frame varies
+                // with a nonspatial coordinate (vibe 000110 I3): ∂_t ∇ = 0, so
+                // Leibniz leaves ∂_t(∇⊗u) = ∇⊗(∂_t u) — the commuting that
+                // elastodynamics is written in.
+                if (q.ref.nonspatial)
+                    return make_scalar(ctx, Rational{0});
+                // For a coordinate of space it is not zero — ∂_r ∇ picks up the
+                // scale factors and the connection — so refuse rather than
+                // guess, and let a chart expand ∇ first.
                 throw std::invalid_argument(
-                    "diff: differentiating a ∇ operator is not supported; "
-                    "expand ∇ in a chart first");
+                    "diff: differentiating a ∇ operator by a coordinate of "
+                    "space is not supported; expand ∇ in a chart first");
             },
         },
         *e);

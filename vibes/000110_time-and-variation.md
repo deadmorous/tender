@@ -145,7 +145,7 @@ Shipped: challenge **000025** (tier E, L2 performed) carries exactly those,
 plus the derivation property of both operators over a product.  Challenge
 **000026** (the pendulum's Lagrange equation) is the enumerated red for I4/I5.
 
-### I3 — tensors and fields of time
+### I3 — tensors and fields of time — **done**
 
 Rank ≥ 1 fields of time already differentiate (`d/dt (r·v)` gives the product
 rule, measured).  What is missing is the **commuting of ∂ₜ with an abstract ∇**:
@@ -156,6 +156,15 @@ written invariantly.
 
 *Done when:* `∂ₜ(∇⊗u) = ∇⊗(∂ₜu)` and `∂ₜ(∇·σ) = ∇·(∂ₜσ)` hold with no chart,
 and the refusal survives for a genuine chart coordinate.
+
+Shipped as a **declared bit**, not an inference: `nonspatial` on
+`CoordinateRef`, beside `nonneg`, set by `ws.time` on everything it mints.  The
+differentiator cannot deduce it — an abstract ∇ belongs to no chart, so ∂ₜ and
+∂_r are structurally alike, and the difference is a fact about what the
+coordinate *is*.  With the bit, `∂_q ∇ = 0`; without it the refusal stands, and
+correctly: `∂_r ∇` picks up the scale factors and the connection.  Both
+directions are in challenge 000025, and the pass-through test was checked
+against a build with the bit ignored.
 
 ### I4 — the definite integral over a named domain
 

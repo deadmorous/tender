@@ -635,3 +635,40 @@ TEST(Partial, PolarTangentVectors)
         make_tensor_product(ctx, make_tensor_product(ctx, r, cos), j));
     EXPECT_TRUE(algebraic_eq(ctx, steps::partial(ctx, R, phi), g_phi));
 }
+
+// ---- nonspatial coordinates (vibe 000110 I3) ---------------------------
+
+TEST(Partial, NonspatialCoordinatePassesThroughNabla)
+{
+    // Time is an independent variable a field depends on, but not a coordinate
+    // of space: nothing about the frame varies with it, so ∂_t ∇ = 0 and
+    // Leibniz leaves ∂_t(∇·σ) = ∇·(∂_t σ).
+    Context ctx;
+    auto* t = make_coordinate(ctx, make_tensor_name("t"), 7, 0, false, true);
+    auto* nab = make_nabla(ctx);
+    auto* u = make_field(ctx, make_tensor_name("u"), 1);
+    auto* du = make_field_derivative(
+        ctx, u, make_tensor_name("t"), CoordinateRef{7, 0, false, true});
+
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::partial(ctx, make_dot(ctx, nab, u), t),
+        make_dot(ctx, nab, du)));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::partial(ctx, make_tensor_product(ctx, nab, u), t),
+        make_tensor_product(ctx, nab, du)));
+}
+
+TEST(Partial, SpatialCoordinateStillRefusesNabla)
+{
+    // ∂_r ∇ is not zero in a curvilinear frame — it picks up the scale factors
+    // and the connection — so the differentiator refuses rather than guessing.
+    Context ctx;
+    auto* r = coord(ctx, "r", 0);
+    auto* nab = make_nabla(ctx);
+    auto* u = make_field(ctx, make_tensor_name("u"), 1);
+    EXPECT_THROW(
+        (void)steps::partial(ctx, make_dot(ctx, nab, u), r),
+        std::invalid_argument);
+}

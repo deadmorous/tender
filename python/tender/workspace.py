@@ -63,10 +63,22 @@ class Workspace:
         """
         return _core.identity(ctx=self.ctx, space=space)
 
-    def coordinate(self, name, chart_id=0, slot=0, nonneg=False):
-        """A single chart coordinate variable (use :meth:`coords` for a set)."""
+    def coordinate(
+        self, name, chart_id=0, slot=0, nonneg=False, nonspatial=False
+    ):
+        """A single chart coordinate variable (use :meth:`coords` for a set).
+
+        ``nonspatial=True`` marks an independent variable that is not a
+        coordinate of space (time — see :meth:`time`): ∂ then passes through
+        anything describing the frame, so ∂ₜ(∇⊗u) = ∇⊗(∂ₜu).
+        """
         return _core.coordinate(
-            name, chart_id=chart_id, slot=slot, nonneg=nonneg, ctx=self.ctx
+            name,
+            chart_id=chart_id,
+            slot=slot,
+            nonneg=nonneg,
+            nonspatial=nonspatial,
+            ctx=self.ctx,
         )
 
     # ---- bases ----------------------------------------------------------
@@ -163,7 +175,7 @@ class Workspace:
 
     # ---- coordinate minting (P1) ----------------------------------------
 
-    def coords(self, *names, chart_id=None, nonneg=()):
+    def coords(self, *names, chart_id=None, nonneg=(), nonspatial=False):
         """Mint a set of coordinate atoms, slots filled in by position.
 
         All coordinates share one ``chart_id`` (a fresh one per call unless
@@ -178,7 +190,12 @@ class Workspace:
         nn = set(nonneg)
         return [
             _core.coordinate(
-                name, chart_id=chart_id, slot=i, nonneg=name in nn, ctx=self.ctx
+                name,
+                chart_id=chart_id,
+                slot=i,
+                nonneg=name in nn,
+                nonspatial=nonspatial,
+                ctx=self.ctx,
             )
             for i, name in enumerate(names)
         ]

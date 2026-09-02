@@ -66,6 +66,14 @@ struct CoordinateRef final
     int chart_id = 0;
     int slot = 0;
     bool nonneg = false;
+    // Time (and any other parameter of a motion) is an independent variable a
+    // field may depend on, but it is not a coordinate of physical space
+    // (vibe 000110 I3).  Nothing that describes the *frame* — a basis vector, a
+    // scale factor, the ∇ operator — varies with it, so ∂ passes straight
+    // through them.  A spatial coordinate cannot claim this: ∂_r ∇ is not zero
+    // in a curvilinear frame, which is why the differentiator refuses ∇ there
+    // rather than guessing.  Identity-neutral, like `nonneg`.
+    bool nonspatial = false;
 };
 
 // A tensor field's coordinate dependence (vibe 000070 P7).  Stamped on a tensor
@@ -426,10 +434,15 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 // Coordinate variable of a chart: a rank-0 TensorObject carrying a
 // CoordinateRef trait (vibe 000069 M1).  chart_id 0 / slot 0 leave it unbound
 // to a chart.  nonneg marks a coordinate known to be ≥ 0 (vibe 000069 M3),
-// enabling √(x²) → x.
+// enabling √(x²) → x.  nonspatial marks a coordinate that is not a coordinate
+// of physical space (time, vibe 000110 I3), so ∂ passes through frame objects.
 [[nodiscard]] auto make_coordinate(
-    Context&, TensorName, int chart_id = 0, int slot = 0, bool nonneg = false)
-    -> Expr const*;
+    Context&,
+    TensorName,
+    int chart_id = 0,
+    int slot = 0,
+    bool nonneg = false,
+    bool nonspatial = false) -> Expr const*;
 
 // A tensor field of any rank (vibe 000070 P7): a TensorObject carrying a
 // FieldDeps trait so the differentiator treats it as varying in space rather

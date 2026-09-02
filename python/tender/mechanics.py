@@ -62,7 +62,10 @@ class Time:
 
     def _mint(self, name):
         c = self._ws.coordinate(
-            name, chart_id=self._chart_id, slot=self._slot
+            name,
+            chart_id=self._chart_id,
+            slot=self._slot,
+            nonspatial=True,
         )
         self._slot += 1
         return c

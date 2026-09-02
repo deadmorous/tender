@@ -88,3 +88,25 @@ def test_variation_without_coordinates_refuses():
     tm = ws.time()
     with pytest.raises(ValueError):
         tm.variation()
+
+
+def test_time_passes_through_an_abstract_nabla():
+    # Vibe 000110 I3: time is not a coordinate of space, so ∂ₜ∇ = 0.
+    ws = t.Workspace()
+    cart, (x, y, z) = ws.cartesian_chart()
+    tm = ws.time()
+    u = ws.field("u", 1, deps=[x, y, z, tm.t])
+    nab = ws.nabla()
+    dt = td.deriv(tm.t)
+    assert td.algebraic_eq(
+        td.apply_operators(dt * (nab * u)),
+        nab * td.apply_operators(dt * u),
+    )
+
+
+def test_a_spatial_coordinate_does_not_get_that_licence():
+    ws = t.Workspace()
+    cyl, (r, th, z) = ws.cylindrical_chart()
+    u = ws.field("u", 1)
+    with pytest.raises(ValueError):
+        td.apply_operators(td.deriv(r) * (ws.nabla() * u))

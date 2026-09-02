@@ -14,6 +14,13 @@ vibe 000110).  Two claims, and neither needs a new algebraic mechanism:
     That is the invariant `Workspace.time` exists to own: assembled by hand the
     two operators come out non-commuting, and the vibe records the measurement.
 
+A third claim, of the same kind: **∂ₜ commutes with an abstract ∇**.  Time is
+an independent variable a field depends on, but not a coordinate of *space*, so
+nothing describing the frame varies with it and ∂ₜ∇ = 0.  A coordinate of space
+gets no such licence — ∂_r ∇ picks up the scale factors and the connection — so
+the differentiator still refuses there.  Without this, elastodynamics cannot be
+written invariantly.
+
 The partial/total distinction that trips every Lagrangian-mechanics text needs
 no representation here: it *is* the declared dependence.  `∂L/∂q` holds q̇ and
 t fixed because q̇ is a separate declared dependency of L, not a function of q;
@@ -27,7 +34,7 @@ from challenges import harness
 from challenges.harness import show
 
 CHALLENGE = harness.declare(
-    title="d/dt and δ are derivations, and they commute",
+    title="d/dt and δ are derivations; ∂ₜ passes through ∇",
     tier="E",
     source="Gantmacher, Lectures in Analytical Mechanics §1; vibe 000110",
 )
@@ -112,3 +119,42 @@ def test_delta_and_ddt_commute_on_a_lagrangian():
     show("δ(dL/dt)", lhs)
     show("d/dt(δL)", rhs)
     harness.assert_algebraic_eq(lhs, rhs, "δ and d/dt commute")
+
+
+@harness.level("L2")
+def test_the_time_derivative_passes_through_an_abstract_nabla():
+    """∂ₜ(∇⊗u) = ∇⊗(∂ₜu) and ∂ₜ(∇·σ) = ∇·(∂ₜσ), with no chart in sight.
+
+    The equation of motion ρ ü = ∇·σ + f is written in exactly this mixture —
+    a field of space *and* time, differentiated both ways — so the two
+    operators have to pass each other while ∇ is still abstract.
+    """
+    ws = t.Workspace()
+    cart, (x, y, z) = ws.cartesian_chart()
+    tm = ws.time("t")
+    u = ws.field("u", 1, deps=[x, y, z, tm.t])
+    sigma = ws.field("\\sigma", 2, deps=[x, y, z, tm.t])
+    nab = ws.nabla()
+    dt = td.deriv(tm.t)
+    ap = td.apply_operators
+
+    show("∂ₜ(∇⊗u)", ap(dt * (nab * u)))
+    show("∂ₜ(∇·σ)", ap(dt * (nab @ sigma)))
+    harness.assert_algebraic_eq(
+        ap(dt * (nab * u)), nab * ap(dt * u), "∂ₜ passes through ∇⊗"
+    )
+    harness.assert_algebraic_eq(
+        ap(dt * (nab @ sigma)), nab @ ap(dt * sigma), "∂ₜ passes through ∇·"
+    )
+
+
+@harness.level("L1")
+def test_a_coordinate_of_space_is_still_refused():
+    """∂_r ∇ is not zero, so the licence is the nonspatial bit, not laxity."""
+    import pytest
+
+    ws = t.Workspace()
+    cyl, (r, th, z) = ws.cylindrical_chart()
+    u = ws.field("u", 1)
+    with pytest.raises(ValueError):
+        td.apply_operators(td.deriv(r) * (ws.nabla() * u))

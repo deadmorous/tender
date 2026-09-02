@@ -545,8 +545,13 @@ tm.variation_of(qd)              # δq̇
   `q̇` and `t` fixed because `q̇` is a *separate declared dependency* of `L`;
   `dL/dt` chains because the operator says which coordinates move with `t`.
 - **`deps` is required** on `tm.field`: a field left to depend on "all
-  coordinates" would chain through the variations too.  Use `ws.field` for a
-  field of a spatial chart.
+  coordinates" would chain through the variations too.  For a field of space
+  *and* time use `ws.field(..., deps=[x, y, z, tm.t])`.
+- **∂ₜ passes through an abstract ∇** — `∂ₜ(∇·σ) = ∇·(∂ₜσ)` with no chart —
+  because time is not a coordinate of space, so nothing about the frame varies
+  with it.  A coordinate of space gets no such licence (`∂_r ∇` picks up the
+  scale factors and the connection) and is still refused.  The bit is
+  `nonspatial=True` on `ws.coordinate`/`ws.coords`; `ws.time` sets it.
 - **δ and d/dt commute** — by construction, because `tm.ddt()` carries the
   variation chain as well (`d/dt δq = δq̇`).  Assembled by hand they do not;
   that is what the factory is for (challenge 000025, vibe 000110).

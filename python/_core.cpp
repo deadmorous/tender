@@ -659,6 +659,7 @@ NB_MODULE(_core, m)
            int chart_id,
            int slot,
            bool nonneg,
+           bool nonspatial,
            nb::object ctx_arg) -> PyExpr
         {
             auto [ctx, keep] = resolve_ctx(ctx_arg);
@@ -666,15 +667,23 @@ NB_MODULE(_core, m)
                 keep,
                 ctx,
                 make_coordinate(
-                    *ctx, make_tensor_name(name), chart_id, slot, nonneg)};
+                    *ctx,
+                    make_tensor_name(name),
+                    chart_id,
+                    slot,
+                    nonneg,
+                    nonspatial)};
         },
         "name"_a,
         "chart_id"_a = 0,
         "slot"_a = 0,
         "nonneg"_a = false,
+        "nonspatial"_a = false,
         "ctx"_a = nb::none(),
         "Create a chart coordinate variable (rank-0 scalar field).  chart_id 0 "
-        "leaves it unbound to a chart; nonneg marks it ≥ 0 (enables √(x²)→x).");
+        "leaves it unbound to a chart; nonneg marks it ≥ 0 (enables "
+        "√(x²)→x); nonspatial marks it not a coordinate of space "
+        "(time), so ∂ passes through frame objects such as ∇.");
 
     auto bind_scalar_fn =
         [&m](char const* py_name, ScalarFnKind kind, char const* doc)
