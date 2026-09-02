@@ -53,6 +53,57 @@ TEST(MakeTensorName, LatexCommandWithDigitRejected)
     EXPECT_THROW((void)make_tensor_name("\\sig3ma"), std::invalid_argument);
 }
 
+// ---- decorated names (vibe 000110 I1) ----------------------------------
+
+TEST(MakeTensorName, DecoratedNameAccepted)
+{
+    // The mechanics vocabulary: a rate, a second rate, a variation.
+    EXPECT_EQ(make_tensor_name("\\dot{q}").v.view(), "\\dot{q}");
+    EXPECT_NO_THROW((void)make_tensor_name("\\ddot{q}"));
+    EXPECT_NO_THROW((void)make_tensor_name("\\delta{q}"));
+    EXPECT_NO_THROW((void)make_tensor_name("\\bar{A}"));
+}
+
+TEST(MakeTensorName, DecoratedGreekAccepted)
+{
+    EXPECT_NO_THROW((void)make_tensor_name("\\dot{\\phi}"));
+    EXPECT_NO_THROW((void)make_tensor_name("\\ddot{\\phi}"));
+}
+
+TEST(MakeTensorName, DecorationNests)
+{
+    // δq̇ — the variation of a rate, which the commuting of δ and d/dt needs
+    // to name (vibe 000110).
+    EXPECT_NO_THROW((void)make_tensor_name("\\delta{\\dot{q}}"));
+}
+
+TEST(MakeTensorName, MalformedDecorationRejected)
+{
+    EXPECT_THROW((void)make_tensor_name("\\dot q"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("\\dot{}"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("\\dot{q}x"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("\\dot{qq}"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("dot{q}"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("{q}"), std::invalid_argument);
+    EXPECT_THROW((void)make_tensor_name("\\dot{q"), std::invalid_argument);
+}
+
+TEST(MakeTensorName, DecoratedGreekRateFitsTheNameStorage)
+{
+    // The pendulum challenge's own vocabulary — 20 characters, and the reason
+    // NameStr is 32 rather than 16 (vibe 000110 I1).
+    EXPECT_NO_THROW((void)make_tensor_name("\\delta{\\ddot{\\phi}}"));
+}
+
+TEST(MakeTensorName, DecoratedNamesAreDistinctAtoms)
+{
+    // The decoration carries no meaning to the algebra: q and q̇ are simply
+    // two different names, and nothing relates them but the operator built
+    // over them.
+    EXPECT_NE(
+        make_tensor_name("q").v.view(), make_tensor_name("\\dot{q}").v.view());
+}
+
 // ---- make_index_name ---------------------------------------------------
 
 TEST(MakeIndexName, SingleLetterAccepted)

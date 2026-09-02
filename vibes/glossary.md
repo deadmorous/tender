@@ -21,6 +21,7 @@ is probably not worth abbreviating.
 | **e-node / e-class** | One operator application inside an e-graph / a set of e-nodes known to be equal.  See above. |
 | **e-matching** | Pattern matching *inside* an e-graph — a pattern may match any representative of an e-class, not just one syntactic form. |
 | **saturation** | Running every rewrite rule everywhere it matches, repeatedly, until nothing new is learned (the *fixed point*) or a budget stops it.  "Equality saturation" is this over an e-graph. |
+| **decorated name** | A tensor name written as a LaTeX command applied to a braced name, nesting: `\dot{q}`, `\ddot{\phi}`, `\delta{\dot{q}}`.  One opaque atom — the decoration is notation for the reader, and carries no meaning to the algebra (vibe 000110 I1). |
 | **α-renaming** | Consistently renaming bound (dummy) indices, so `Σ_i a_i b_i` and `Σ_j a_j b_j` are recognised as the same expression.  From the λ-calculus notion of α-equivalence. |
 | **LHS / RHS** | Left- / right-hand side (of an identity, equation, or rewrite rule). |
 | **DAG** | *Directed acyclic graph* — the shape of an expression once identical subtrees are shared (hash-consed) rather than duplicated. |
@@ -51,6 +52,8 @@ is probably not worth abbreviating.
 | **Navier–Lamé** | The elastic equilibrium operator `μ∇·∇u + (λ+μ)∇(∇·u)`. |
 | **Saint-Venant** | Either the generalized extension/bending/torsion problem for a prismatic body, or the strain compatibility equations — context distinguishes them. |
 | **Lamé constants** | The isotropic elastic moduli λ and μ. |
+| **generalized coordinate** | An independent parameter fixing a mechanical system's configuration (the `q` of Lagrangian mechanics), and its rates `q̇`, `q̈`.  In tender these are ordinary coordinate atoms of a chart-free coordinate group; what makes `q̇` the rate of `q` is the d/dt operator built over them, not the objects (vibe 000110). |
+| **variation** | The operator δ of the calculus of variations: a derivation (`δ(ab) = δ(a)b + aδ(b)`) sending each generalized coordinate to an independent virtual displacement `δq`.  Measured to be of the ordinary `Σ c_k ∂_k` form — coefficients `δq_k`, partials with respect to the `q_k` — so it needs no mechanism of its own (vibe 000110, settling vibe 000102's question 1b). |
 
 ## The derivation surface
 

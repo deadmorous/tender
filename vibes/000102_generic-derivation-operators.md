@@ -391,10 +391,13 @@ That makes vibe 000100 the blocker for finishing (D), not a parallel concern.
 1. ~~Is `∇_⊥` a derivation in the same sense?~~  **Settled by (5.2)**: `∇⊥ ≡
    e_α ∂/∂x_α` is the same shape as `∇ = R^i ∂/∂q^i`, summed over the
    cross-section indices only.  No projection machinery needed.
-1b. Is the **variation δ** representable as `Σ c_k ⊗ D_k`?  It is a derivation,
-   but not obviously a coefficient-weighted sum of coordinate partials — which
-   is the one place (D) might not reach, and therefore the argument for keeping
-   (B)'s trait available.
+1b. ~~Is the **variation δ** representable as `Σ c_k ⊗ D_k`?~~  **Settled: yes**
+   (vibe 000110, measured).  `δ = Σ_k δq_k ∂/∂q_k` — a coefficient-weighted sum
+   of partials after all, once one notices the expansion is over *configuration*
+   space rather than physical space, which is what made it look doubtful here.
+   `apply_operators` carries it out unmodified, and `d/dt` is the same object
+   with coefficients `(1, q̇, q̈, …)`.  So (B)'s trait has no consumer, and the
+   argument for keeping it available lapses.
 2. ~~Where does the formal small parameter λ live?~~  **Settled (user)**: λ and
    the collection of terms by powers of λ are a **separate work item**, already
    on the M5B roadmap.  Not part of the operator design.

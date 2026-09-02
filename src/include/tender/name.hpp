@@ -13,13 +13,20 @@ namespace tender
 
 // ---- underlying storage ------------------------------------------------
 
-using NameStr = mpk::mix::FixedLengthString<16>;
+// 32 rather than 16: a decorated name nests (vibe 000110 I1), and the
+// mechanics vocabulary reaches `\delta{\ddot{\phi}}` (20 chars) in the very
+// first Lagrange challenge.
+using NameStr = mpk::mix::FixedLengthString<32>;
 
 // ---- TensorName --------------------------------------------------------
 //
-// Name of a TensorObject: must be a single ASCII letter or a LaTeX command
-// (backslash followed by one or more ASCII letters), e.g. "A", "\sigma".
-// Multi-letter words are rejected.
+// Name of a TensorObject: a single ASCII letter, a LaTeX command (backslash
+// followed by one or more ASCII letters), or a *decorated* name — a LaTeX
+// command applied to a braced name, recursively (vibe 000110 I1), e.g. "A",
+// "\sigma", "\dot{q}", "\ddot{\theta}", "\delta{\dot{q}}".  Multi-letter
+// words are rejected.  A decorated name is still one opaque atom: the
+// decoration carries no meaning to the algebra, it only lets the mechanics
+// vocabulary (rates q̇, variations δq) be written down.
 
 MPKMIX_STRONG_STRING_VIEW(TensorNameView);
 MPKMIX_STRONG_TYPE(
@@ -59,20 +66,40 @@ inline auto is_alpha_word(std::string_view s) noexcept -> bool
     return true;
 }
 
+// A decorated name: a LaTeX command applied to a braced name, the inner name
+// being itself a letter, a command, or a decorated name — so "\delta{\dot{q}}"
+// nests.  Recursive, hence the forward declaration.
+inline auto is_decorated_name(std::string_view s) noexcept -> bool;
+
+inline auto is_name(std::string_view s) noexcept -> bool
+{
+    return (s.size() == 1 && std::isalpha(static_cast<unsigned char>(s[0])))
+           || is_latex_command(s) || is_decorated_name(s);
+}
+
+inline auto is_decorated_name(std::string_view s) noexcept -> bool
+{
+    if (s.size() < 4 || s[0] != '\\' || s.back() != '}')
+        return false;
+    auto const open = s.find('{');
+    if (open == std::string_view::npos)
+        return false;
+    return is_latex_command(s.substr(0, open))
+           && is_name(s.substr(open + 1, s.size() - open - 2));
+}
+
 } // namespace detail
 
 // ---- factory functions -------------------------------------------------
 
 [[nodiscard]] inline auto make_tensor_name(std::string_view s) -> TensorName
 {
-    bool valid =
-        (s.size() == 1 && std::isalpha(static_cast<unsigned char>(s[0])))
-        || detail::is_latex_command(s);
-    if (!valid)
+    if (!detail::is_name(s))
         throw std::invalid_argument(
-            "TensorName must be a single ASCII letter (e.g. \"x\") or a LaTeX "
-            "command (e.g. \"\\phi\", \"\\sigma\"); a plain multi-letter name "
-            "like \""
+            "TensorName must be a single ASCII letter (e.g. \"x\"), a LaTeX "
+            "command (e.g. \"\\phi\", \"\\sigma\"), or a decorated name — a "
+            "command applied to a braced name (e.g. \"\\dot{q}\", "
+            "\"\\delta{\\dot{q}}\"); a plain multi-letter name like \""
             + std::string{s}
             + "\" is not allowed — for a Greek letter use its LaTeX command "
               "(e.g. \"\\"

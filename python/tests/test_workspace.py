@@ -63,3 +63,23 @@ def test_multiletter_name_error_suggests_latex():
     with pytest.raises(ValueError) as ei:
         t.coordinate("phi")
     assert "\\phi" in str(ei.value)
+
+
+def test_decorated_names_for_rates_and_variations():
+    # Vibe 000110 I1: the mechanics vocabulary — a rate, a variation, and the
+    # variation of a rate — written as decorated names.
+    ws = t.Workspace()
+    q, qd, dq, dqd = ws.coords(
+        "q", r"\dot{q}", r"\delta{q}", r"\delta{\dot{q}}"
+    )
+    assert str(qd) == r"\dot{q}"
+    assert str(dqd) == r"\delta{\dot{q}}"
+    # Distinct atoms: nothing relates q to q̇ but an operator built over them.
+    assert not td.algebraic_eq(q, qd)
+
+
+def test_malformed_decoration_is_still_rejected():
+    with pytest.raises(ValueError):
+        t.coordinate(r"\dot q")
+    with pytest.raises(ValueError):
+        t.coordinate(r"\dot{qq}")
