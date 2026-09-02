@@ -88,7 +88,7 @@ Four things, none of them a new algebraic mechanism:
 
 ## Increments
 
-### I1 — decorated names
+### I1 — decorated names — **done** (a329af0)
 
 `TensorName` accepts a LaTeX command applied to a braced name, recursively:
 `\dot{q}`, `\ddot{q}`, `\delta{q}`, `\delta{\dot{q}}`, `\bar{\sigma}`,
@@ -99,27 +99,51 @@ structural identity is unaffected — `q` and `\dot{q}` are simply two names.
 *Done when:* `ws.coords(r"\dot{q}")` mints a coordinate that renders as q̇, and
 `make_tensor_name` still rejects `qdot`, `\dot q`, `\dot{q}x` and `\dot{}`.
 
-### I2 — the time chain and its two operators
+Shipped as specified.  One thing the plan did not anticipate: `NameStr` had to
+grow 16 → 32 characters, because the pendulum challenge's own vocabulary
+(`\delta{\ddot{\phi}}`) is 20.  Canon and saturation benchmarks unchanged.
 
-A public factory (naming TBC with Stepan) that mints `t`, a set of generalized
+### I2 — the time chain and its two operators — **done**
+
+A public factory — `ws.time("t")` → `tender.mechanics.Time`, named by Stepan
+from three candidates — that mints `t`, a set of generalized
 coordinates to a requested order of derivative, their variations, and returns
 the two operators built over all of them:
 
 ```python
-tc = ws.time_chain("t")                       # working name
-q, qd, qdd = tc.coordinate("q", orders=2)     # q, q̇, q̈  (named by decoration)
-ddt, delta = tc.ddt(), tc.delta()
+tm = ws.time("t")
+q, qd, qdd = tm.coordinate("q", orders=2)     # q, q̇, q̈  (named by decoration)
+L = tm.field("L", 0, deps=[q, qd, tm.t])
+ddt, delta = tm.ddt(), tm.variation()
 ```
 
 The factory owns the invariant: every minted coordinate is registered in the
 chain, `ddt` carries `q̇ ∂_q + q̈ ∂_q̇ + δq̇ ∂_{δq} + …` over all of them, and
-`delta` carries `δq ∂_q + δq̇ ∂_q̇ + …`.  Minting a coordinate after an operator
-was taken invalidates that operator, so the operators are built on demand and
-the chain refuses to mint after handing one out (or re-hands a fresh one — to
-decide when writing it).
+`variation` carries `δq ∂_q + δq̇ ∂_q̇ + …`.
+
+Three decisions taken while writing it:
+
+- **Operators are built afresh on every call** rather than cached and the chain
+  frozen.  Minting after taking an operator is then not an error, it just means
+  the operator you hold is older than the chain — documented as "take the
+  operator at the point of use".  Freezing would have made the natural notebook
+  order (mint, work, mint more) an error for no gain.
+- **The chain closes one order beyond what it returns.**  `coordinate("q",
+  orders=2)` hands back `q, q̇, q̈` but the operator also knows `q⃛`, so `d/dt q̈`
+  is its true successor rather than a silent zero — the one place truncation
+  would have produced a *wrong* answer instead of an incomplete one.  `orders`
+  caps at 2 because LaTeX has no fourth dot.
+- **`tm.field` requires `deps`.**  The core default (depend on all coordinates)
+  is a trap here: `dL/dt` of such a field chains through the *variations* and
+  sprouts δ terms that mean nothing.  Refusing with that explanation costs one
+  line at each call site and removes a whole class of nonsense result.
 
 *Done when:* a challenge asserts `δ(dL/dt) = d/dt(δL)` for `L(q, q̇, t)`, and
 `d/dt q = q̇`, `δ q̇ = δq̇`, with every object coming from the factory.
+
+Shipped: challenge **000025** (tier E, L2 performed) carries exactly those,
+plus the derivation property of both operators over a product.  Challenge
+**000026** (the pendulum's Lagrange equation) is the enumerated red for I4/I5.
 
 ### I3 — tensors and fields of time
 

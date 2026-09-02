@@ -524,6 +524,41 @@ to see or manipulate the expansion (challenge 000024, vibe 000102).
 
 ---
 
+## Time, generalized coordinates and δ (`ws.time`)
+
+Time is an ordinary coordinate; `q̇` and `q̈` are ordinary coordinate atoms;
+`d/dt` and the variation `δ` are ordinary `Σ_k c_k ∂_k` derivations, applied by
+`apply_operators` like any other:
+
+```python
+tm = ws.time("t")
+q, qd, qdd = tm.coordinate("q", orders=2)     # q, \dot{q}, \ddot{q}
+L  = tm.field("L", 0, deps=[q, qd, tm.t])     # deps are required, see below
+ddt, delta = tm.ddt(), tm.variation()
+
+td.apply_operators(ddt * L)      # ∂_t L + (∂_q L) q̇ + (∂_q̇ L) q̈
+td.apply_operators(delta * L)    # (∂_q L) δq + (∂_q̇ L) δq̇
+tm.variation_of(qd)              # δq̇
+```
+
+- **The partial/total distinction is the declared dependence.**  `∂L/∂q` holds
+  `q̇` and `t` fixed because `q̇` is a *separate declared dependency* of `L`;
+  `dL/dt` chains because the operator says which coordinates move with `t`.
+- **`deps` is required** on `tm.field`: a field left to depend on "all
+  coordinates" would chain through the variations too.  Use `ws.field` for a
+  field of a spatial chart.
+- **δ and d/dt commute** — by construction, because `tm.ddt()` carries the
+  variation chain as well (`d/dt δq = δq̇`).  Assembled by hand they do not;
+  that is what the factory is for (challenge 000025, vibe 000110).
+- Take the operators **at the point of use**: they are built afresh over
+  everything minted so far, so one taken before a later `tm.coordinate()` call
+  does not know about it.
+- A name may be **decorated**: `\dot{q}`, `\ddot{\phi}`, `\delta{\dot{q}}` — a
+  LaTeX command applied to a braced name, nesting.  It is still one opaque
+  atom; the decoration means nothing to the algebra.
+
+---
+
 ## Differential-operator DSL (`tender.operators`) — superseded
 
 > **Prefer the core route.** `ws.nabla()` is a real `Expr`, so it composes with

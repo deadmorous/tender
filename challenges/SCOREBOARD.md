@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**24 challenges** — 24 at L2, 0 at L1, 0 at L0.
+**26 challenges** — 25 at L2, 0 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -78,3 +78,5 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000009 | inc ε = ∇×(∇×ε)ᵀ closed identity + Saint-Venant form | **L2 performed** | Eliseev, Mechanics of Elastic Bodies §compatibility; examples/strain_compatibility.py (vibes 000075/000078/000080) |
 | 000022 | thick-walled cylinder → Lamé displacement ODE | **L2 performed** | Lurie, Theory of Elasticity §Lamé problem |
 | 000023 | ∇·T in spherical coordinates = textbook equilibrium equations | **L2 performed** | Lurie, Theory of Elasticity, appendix of coordinate formulas |
+| 000025 | d/dt and δ are derivations, and they commute | **L2 performed** | Gantmacher, Lectures in Analytical Mechanics §1; vibe 000110 |
+| 000026 | m l² φ̈ + m g l sin φ = 0 from δ∫L dt = 0 | L0 failing | Gantmacher, Lectures in Analytical Mechanics §2 (pendulum) |

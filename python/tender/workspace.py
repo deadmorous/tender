@@ -22,6 +22,7 @@ The explicit ``ctx=`` API still works unchanged; the facade is purely additive.
 from . import _core
 from . import basis as _basis
 from . import chart as _chart
+from . import mechanics as _mechanics
 
 __all__ = ["Workspace"]
 
@@ -181,6 +182,25 @@ class Workspace:
             )
             for i, name in enumerate(names)
         ]
+
+    # ---- time and the configuration chain (vibe 000110) -----------------
+
+    def time(self, name="t"):
+        """Time, the generalized coordinates moving with it, and δ.
+
+        Returns a :class:`~tender.mechanics.Time` owning its own coordinate
+        group::
+
+            tm = ws.time("t")
+            q, qd, qdd = tm.coordinate("q", orders=2)
+            L = tm.field("L", 0, deps=[q, qd, tm.t])
+            ddt, delta = tm.ddt(), tm.variation()
+
+        Both operators are ordinary ``Σ c_k ∂_k`` derivations, so
+        :func:`tender.derivation.apply_operators` applies them; what the
+        factory owns is that they *commute* (vibe 000110).
+        """
+        return _mechanics.Time(self, name)
 
     # ---- chart (P1) -----------------------------------------------------
 
