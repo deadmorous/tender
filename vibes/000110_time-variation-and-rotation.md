@@ -185,33 +185,109 @@ correctly: `∂_r ∇` picks up the scale factors and the connection.  Both
 directions are in challenge 000025, and the pass-through test was checked
 against a build with the bit ignored.
 
-### I4 — the rotation tensor
+### I4 — constrained symbols: `unit` and `orthogonal`
 
-A proper orthogonal `P`: `P·Pᵀ = Pᵀ·P = I`.  Three things have to be settled,
-and the measurements below (M1, M3) say the first is the hard one.
+Stepan's requirement, and it reframes the increment: orthogonality is a
+**property carried by the tensor**, the way symmetry is — and, like symmetry, it
+must survive being handed to any part of the engine.  Two kinds are needed and
+must be told apart: **proper** (det = +1, a rotation; these form a group under
+`·`) and **improper** (det = −1, containing a reflection).
 
-*Representation.*  Two candidates, and they are complementary rather than
-rival:
+Measured, and it is the fact that decides the mechanism:
 
-- **Declared.**  `P` is an opaque rank-2 symbol carrying an *orthogonality
-  property*, the way a rank-2 field can already carry `symmetric=True`.  This
-  is how direct-notation mechanics is actually written, and it is what every
-  invariant derivation below needs.
-- **Constructed.**  `P = e_k ⊗ E_k`, the tensor that carries one orthonormal
-  frame onto another (Zhilin's own way of writing it).  Then orthogonality is
-  not an axiom but a two-line consequence of frame completeness, and the
-  library *proves* what the declared form asserts.
+- **Symmetry is consumed by *canon*.**  `canonicalize(Sᵀ)` *is* `S` for a field
+  declared symmetric — a structural identification of components, so the
+  normal form can simply absorb it, and a false claim about a non-symmetric `G`
+  is still correctly `refuted`.
+- **Orthogonality cannot be.**  `P·Pᵀ = I` is a *quadratic* relation between
+  components; no normal form on the index structure expresses it.  Nor can the
+  component decision procedure use it — which is exactly why it wrongly refutes
+  today (M1).
 
-Proposal: ship both, with the constructed form as the **proof route** for the
-declared form's rules — the same honest-vs-asserted split the identity DAG
-already draws (vibe 000102 Q2).  A `rotation` rule group holds `P·Pᵀ → I`,
-`Pᵀ·P → I`, and their proof obligation is a challenge that builds `P` from two
-frames and reduces.
+So the two properties are declared in the same place and consumed in different
+ways.  The proposal:
 
-*Done when:* `prove_equal(P·Pᵀ, I)` proves for a declared rotation, `(P·a)·(P·b)
-= a·b` proves, and a challenge derives both from the constructed form.
+1. **A property on the symbol**, extended to plain tensors as well as fields
+   (measured: `symmetric=` is available on `ws.field` only, which is the gap
+   behind Stepan's "(should) already have").  Rank-1 gains `unit` (|n| = 1) —
+   needed by the reflection and turn forms below, and a constrained symbol of
+   exactly the same kind.
+2. **The property mints rewrite rules in the Context**, per symbol: `unit n`
+   mints `n·n → 1`; `orthogonal P` mints `P·Pᵀ → I` and `Pᵀ·P → I`.  Per-symbol
+   rules rather than a schema with a property-restricted pattern variable —
+   a derivation has few rotations, and this needs no matcher work.
+   `td.rules("rotation", ctx)` then collects whatever that context has declared,
+   so the group is *context-derived* rather than static.
+3. **The refutation abstains** when a claim contains a constrained symbol:
+   status `exhausted`, never `refuted`, because the component expansion cannot
+   represent the constraint.  Symmetry keeps refuting, because it can.
+4. **Propagation**, which is what makes the group structure usable: `Pᵀ` is
+   orthogonal with the same sign; a `·`-chain of orthogonal symbols is
+   orthogonal with the product of their signs (so rotation·rotation is a
+   rotation, rotation·reflection is improper).  Structural, no pattern matching.
 
-### I5 — spin: the angular velocity of a *derivation*
+Measured support for the pieces: a `Basis` already carries `Handedness` and a
+signed cell volume ±1, so "two orthonormal frames of the same orientation" is
+checkable rather than assumed.  There is **no `det`** in the library; the sign
+rides on the property instead (see the open question below).
+
+*Done when:* `prove_equal(P·Pᵀ, I)` proves for a declared rotation with no rule
+list passed by hand; `(P·a)·(P·b) = a·b` proves; the same claim about an
+undeclared rank-2 `A` is still `refuted`; and `n·n → 1` holds for a unit vector.
+
+### I5 — the ways to write a rotation
+
+An abstract declared `P` is necessary and **not sufficient** (Stepan).  The
+forms that must all be first-class, each of them orthogonal *by construction*:
+
+| Form | | Sign |
+|---|---|---|
+| `P = e_i ⊗ E_i` | two orthonormal frames | proper iff same handedness |
+| `Q = I − 2 n⊗n` | reflection in the plane ⟂ `n`, `\|n\| = 1` | improper |
+| `P = n⊗n + (I − n⊗n) cos θ + (n × I) sin θ` | the turn tensor about `n` by `θ` | proper |
+| `P = P₁·P₂·…·P_n` | composition — the group property | product of signs |
+| `P = exp(a × I)` | the finite-rotation vector | proper |
+
+The last is on the list as a joke that is nearly serious: the three-term form
+above is what one actually writes, so `exp` is not needed — but it is the same
+tensor, and if an exponential ever arrives it arrives here.
+
+**How they are represented.**  A property lives on a *leaf*, and every form
+except the composition is a **sum**, not a leaf.  So each shipped form is a
+**constructor that names the tensor, stamps the property, and registers its
+defining identity**:
+
+```python
+Q = ws.reflection(n)             # a symbol Q, improper-orthogonal
+td.apply_identity(Q, defn(Q))    # unfolds to I − 2 n⊗n when you want it
+```
+
+which is how one works by hand — you write `Q`, not its formula, until you need
+the formula.  Composition needs no constructor: it is recognised structurally
+by I4's propagation.
+
+**The escape hatch matters more than the list.**  Stepan: "not sure what else
+can appear."  So the general mechanism is *name it, stamp it, and owe a proof*:
+a form the library has never seen is handed in, checked (by expansion against
+the constraints already declared), and comes back as a stamped symbol with its
+defining identity — the shipped forms being pre-proved instances of that same
+path.  Each shipped form owes a challenge that its formula really is
+orthogonal; measured, the reflection's proof is two rules deep —
+`(I − 2n⊗n)·(I − 2n⊗n)ᵀ` expands to `I·I + 4(n·n) n⊗n − 2n⊗(n·I) − 2(I·n)⊗n`,
+which needs only `I·a = a` (shipped, `identity-dot`) and `n·n = 1` (I4's unit
+property).
+
+**Polar decomposition** (`A = P·U = V·P`, `U`, `V` symmetric, `P` a rotation)
+needs nothing new: *using* the theorem means declaring an abstract rotation and
+an abstract symmetric tensor, which is I4.  Proving it is a different matter and
+is not in this brief.
+
+*Done when:* each form in the table constructs a tensor that satisfies
+`P·Pᵀ = I` through the library's own rules, with the right sign; a composition
+of two declared rotations is a rotation without being told; and an unanticipated
+form can be checked and stamped by the general path.
+
+### I6 — spin: the angular velocity of a *derivation*
 
 The observation this brief is organised around.  For **any** derivation `D` and
 any orthogonal `P`, differentiating `P·Pᵀ = I` gives
@@ -241,7 +317,7 @@ own ε, not assumed** from a textbook.
 `ė_k = ω × e_k` follows for `e_k = P·E_k`, with challenge 000027 recovered as
 its planar, single-angle instance.
 
-### I6 — rigid-body kinematics
+### I7 — rigid-body kinematics
 
 With `r = r_C + P·ρ` and `ρ` fixed in the body,
 
@@ -256,7 +332,7 @@ both by applying `d/dt` twice and folding through I5 — no components, no chart
 from two applications of `tm.ddt()`, invariantly; and the same for a point of a
 body whose reference point itself moves.
 
-### I7 — virtual work, and δω
+### I8 — virtual work, and δω
 
 The payoff, and the increment that decides how far the virtual-work principle
 carries.  Two parts:
@@ -298,7 +374,9 @@ prerequisites rather than nice-to-haves:
   carries user hypotheses; or the hypothesis rides on the *symbol* (a declared
   property the component expander respects) rather than on a rule.  The second
   is the one that also makes `prove_equal` usable without a rule list, and it
-  is why I4's "declared" representation is not optional.
+  is why I4's "declared" representation is not optional.  **Settled by Stepan:
+  the property rides on the symbol**, so the abstention is the *other* half of
+  the same fix rather than an alternative to it.
 - **M2 — Leibniz already reaches through the transpose**, for both operators.
   `d/dt(P·Pᵀ)` and `δ(Q·Qᵀ)` both come out as the correct two-term sums.  I5's
   skewness derivation has no representational obstacle.
@@ -313,12 +391,20 @@ prerequisites rather than nice-to-haves:
 - **M4 — the cross of two concrete frame vectors does not fold** (recorded with
   challenge 000027): `k × i` reduces to the bound sum `−ε_{i13} e_i`, and four
   further public steps are needed to reach `j`.
+- **M6 — symmetry is a *canonical form*, orthogonality cannot be.**
+  `canonicalize(Sᵀ)` is structurally `S` for a symmetric field, and `Gᵀ = G` for
+  a non-symmetric one is correctly `refuted` — so the property machinery already
+  works end to end where the constraint is a linear identification of
+  components.  `P·Pᵀ = I` is quadratic and no index normal form expresses it,
+  which is precisely why it needs rules plus abstention rather than canon.  Also
+  measured: `symmetric=` is available on `ws.field` but not on `ws.tensor`, and
+  a symmetric `S` does not yet give `a·S·b = b·S·a` (`exhausted`).
 - **M5 — the axial-vector facts are absent, not wrong.**  `(a × I)·b = a × b`
   and `(a × I)ᵀ = −(a × I)` both come back `exhausted` under the `cross` and
   `dyadic` groups.  They are I5's first content.
 
-M1 and M3 are the two that decide the shape of I4; neither was visible from the
-plan, and both were cheap to find.
+M1, M3 and M6 are the ones that decide the shape of I4 and I5; none was visible
+from the plan, and all were cheap to find.
 
 ## Challenges of the group
 
@@ -335,12 +421,14 @@ the mechanics first meet.  It needs the chain rule in time through an angle
 `φ = ω t` that is an expression rather than a coordinate; it needs the fixed
 frame to be constant in time (which it is because i, j, k are not fields —
 nothing had to be declared about `t`); and its middle member is Poisson's
-formula for `Ω = ω k`, the planar instance of I5.
+formula for `Ω = ω k`, the planar instance of I6.
 
 Planned for the rotation increments, one per increment as vibe 000093 requires:
-`P` preserves lengths and angles (I4) · `D(P)·Pᵀ` is skew for both derivations,
-and Poisson's formula in general (I5) · rigid-body velocity and acceleration
-(I6) · `δω`, and the pendulum by d'Alembert–Lagrange (I7).
+a declared rotation preserves lengths and angles while an undeclared tensor
+does not (I4) · each way of writing a rotation is orthogonal by construction
+(I5) · `D(P)·Pᵀ` is skew for both derivations, and Poisson's formula in general
+(I6) · rigid-body velocity and acceleration (I7) · `δω`, and the pendulum by
+d'Alembert–Lagrange (I8).
 
 ## Open questions — Stepan's, recorded not resolved
 
@@ -362,9 +450,24 @@ variations, or is that user bookkeeping?  Recommendation: leave it open until a
 Neimark–Fufaev challenge is attempted; deciding it now would be designing
 against an imagined problem.
 
-**Q3 — which representation of `P` is the foundation?**  Settled in I4 as
-"declared, proved by constructed", but the declaration mechanism itself (trait
-on the symbol vs rule in a group) is decided by M1's fix, not by taste.
+**Q3 — ~~which representation of `P` is the foundation?~~**  **Settled
+(Stepan, 2026-09-02):** the property is carried by the tensor, as symmetry is,
+with proper and improper told apart; and an abstract declared `P` is necessary
+but not sufficient — the frame-pair, reflection, turn-tensor and composition
+forms are all first-class (I5).
+
+**Q5 — is a `det` operator needed now?**  The proper/improper distinction is
+det = ±1, but the *sign* can ride on the property, and each shipped form knows
+its own.  A real `det` would be wanted to check an unanticipated form, and by
+the continuum arc later.  Recommendation: sign on the property now, `det` when
+something cannot be done without it.
+
+**Q6 — how should an unanticipated form be admitted?**  Check-and-stamp (hand in
+the expression, the library verifies it against the declared constraints and
+returns a named symbol) versus a recogniser that spots known shapes in the wild.
+Recommendation: check-and-stamp, because the shapes are sums and canon is free
+to rearrange them — M3 and M4 are both instances of structural recognition
+being more fragile than it looks.
 
 **Q4 — left or right?**  `Ω = Ṗ·Pᵀ` (spatial) and `Pᵀ·Ṗ` (body) are both wanted
 and are not the same tensor.  Names and defaults to be chosen when I5 is
@@ -372,10 +475,12 @@ written; the construction is the same either way.
 
 ## Order and risk
 
-I1 → I3 are done.  I4 is blocked on the M1 refutation question and nothing
-else; I5 depends on I4 and on the axial-vector facts of M5; I6 is
-straightforward once I5 exists; I7 is the one that decides whether the
-virtual-work principle carries as far as this reframing hopes.
+I1 → I3 are done.  I4 (constrained symbols) is the foundation and the only
+increment with a genuine mechanism question left in it; I5 (the ways to write a
+rotation) is mostly constructors once I4 exists; I6 depends on I4 and on the
+axial-vector facts of M5; I7 is straightforward once I6 exists; I8 is the one
+that decides whether the virtual-work principle carries as far as this
+reframing hopes.
 
 The risk worth naming: **I4's declared property is a hypothesis the library
 must not be able to forget.**  A rule that fires is visible; a property that
