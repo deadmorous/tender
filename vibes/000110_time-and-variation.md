@@ -191,6 +191,37 @@ commutes with ∫ over a fixed domain, and the node round-trips canon.
 `δ∫L dt = 0` with `L = ½ m l² φ̇² + m g l cos φ`, derive
 `m l² φ̈ + m g l sin φ = 0` on the public surface (L2).
 
+## Challenges of the group
+
+Added to the plan *after* implementation started, which is the right way round
+for a challenge and the wrong way round for a plan — noted so the next brief
+opens with this section rather than acquiring it:
+
+| # | Claim | Level |
+|---|---|---|
+| 000025 | d/dt and δ are derivations; ∂ₜ passes through ∇ | L2 |
+| 000026 | m l² φ̈ + m g l sin φ = 0 from δ∫L dt = 0 | L0 — the red for I4/I5 |
+| 000027 | rotating frame: d/dt e_r = ω k × e_r = ω e_φ | L2 |
+
+**000027 is Stepan's**, proposed while this brief was still being written, and
+it is the one that most deserves to have been here first: it is the smallest
+statement in which a *vector* has a time derivative at all, so it is where the
+algebra and the mechanics first meet.  It needs the chain rule in time through
+an angle `φ = ω t` that is an expression rather than a coordinate; it needs the
+fixed frame to be constant in time (which it is because i, j, k are not fields
+— nothing had to be declared about `t` for that); and its middle member,
+Poisson's formula `d/dt e = Ω × e` with `Ω = ω k`, is the component-free form
+that M5A item 2's angle-free rotation tensors will generalise.
+
+It passes today at L2, with one piece of friction recorded in the challenge
+rather than hidden: **the cross of two concrete frame vectors does not fold.**
+`k × i` reduces to `−ε_{i13} e_i`, a bound sum, and four further public steps
+(`unroll_sums`, `eval_eps_concrete`, `fold_arithmetic`, `to_concrete`) are
+needed to get `j` out of it.  Every step is documented and the route is honest,
+but a concrete-concrete fold belongs in `simplify_basis_cross`, which already
+knows both indices and the frame's orientation.  Filed here as the group's one
+usability gap.
+
 ## Order and risk
 
 I1 → I2 are independent of I4 → I5 and unblock the whole of item 2 (rotation

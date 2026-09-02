@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**26 challenges** — 25 at L2, 0 at L1, 1 at L0.
+**27 challenges** — 26 at L2, 0 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -80,3 +80,4 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000023 | ∇·T in spherical coordinates = textbook equilibrium equations | **L2 performed** | Lurie, Theory of Elasticity, appendix of coordinate formulas |
 | 000025 | d/dt and δ are derivations; ∂ₜ passes through ∇ | **L2 performed** | Gantmacher, Lectures in Analytical Mechanics §1; vibe 000110 |
 | 000026 | m l² φ̈ + m g l sin φ = 0 from δ∫L dt = 0 | L0 failing | Gantmacher, Lectures in Analytical Mechanics §2 (pendulum) |
+| 000027 | rotating frame: d/dt e_r = ω k × e_r = ω e_φ | **L2 performed** | Poisson's formula for a uniformly rotating frame; vibe 000110 |
