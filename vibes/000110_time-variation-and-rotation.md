@@ -331,6 +331,24 @@ be minted correctly, and with it they can.  Measured: the first is *already*
 canonical for the left factor (`A·(a⊗b) = (A·a)⊗b` proves), while
 `(a⊗b)·A = a⊗(Aᵀ·b)` hits the M8 bug below; the two cross rules are absent.
 
+**Commutation, and why it is a *step* and not a rule.**  The conjugation
+theorem read the other way is the commutation rule — `Q·P(a) = P(Q·a)·Q` — so
+two rotations may be swapped at the price of rotating the axis of the one that
+moves.  Two consequences shape the increment:
+
+- It **must be applicable at a chosen site**, because with three or more
+  rotations `P₁·P₂·P₃` there are several adjacent pairs and the derivation
+  depends on which one is commuted (Stepan).  The library already has the
+  surface for that — the paths and `td.at` / `Expr.rewrite_at` of vibe 000054 —
+  so the increment's job is to supply the step, not a new addressing mechanism.
+  This is the first time that machinery is asked for by a *mechanics* problem
+  rather than by a manipulation of an expression's shape.
+- It **must not be a saturation rule.**  `P₁·P₂ → P(P₁a₂)·P₁` and its mirror
+  are each other's inverse, so an e-graph would loop on them and the cost model
+  has no reason to prefer either side.  Commutation is a *directed step the user
+  aims*, which is the vibe-000102 Q1 conclusion arriving again: a transformation,
+  not a pattern.
+
 **Polar decomposition** (`A = P·U = V·P`, `U`, `V` symmetric, `P` a rotation)
 needs nothing new: *using* the theorem means declaring an abstract rotation and
 an abstract symmetric tensor, which is I4.  Proving it is a different matter and
@@ -395,6 +413,19 @@ Poisson's formula `ė_k = ω × e_k` follows for `e_k = P·E_k`, with challenge
 
 ### I7 — rigid-body kinematics
 
+**Composed rotations first.**  For `P = P₁·P₂`, the transport rule of I5 gives
+the angular velocities' composition law directly:
+
+```
+Ṗ·Pᵀ = Ṗ₁·P₁ᵀ + P₁·(Ṗ₂·P₂ᵀ)·P₁ᵀ = (ω₁ + P₁·ω₂) × I     ⟹    ω = ω₁ + P₁·ω₂
+```
+
+— the second term needing `P₁·(a × I)·P₁ᵀ = (P₁·a) × I`, i.e. properness again.
+This is the bridge from the rotation increments to the kinematics: a body whose
+orientation is a product of rotations about named axes has an angular velocity
+that is a sum of transported ones, and that is what a real problem is written
+in.
+
 With `r = r_C + P·ρ` and `ρ` fixed in the body,
 
 ```
@@ -404,9 +435,19 @@ a = a_C + ε × (r − r_C) + ω × (ω × (r − r_C))          ε ≡ ω̇
 
 both by applying `d/dt` twice and folding through I5 — no components, no chart.
 
-*Done when:* the acceleration comes out with its Euler and centripetal terms
-from two applications of `tm.ddt()`, invariantly; and the same for a point of a
-body whose reference point itself moves.
+*Done when:* `ω = ω₁ + P₁·ω₂` is derived for a composition; the acceleration
+comes out with its Euler and centripetal terms from two applications of
+`tm.ddt()`, invariantly; and the same for a point of a body whose reference
+point itself moves.
+
+**The challenge for it (Stepan): a cone rolling on a plane** (Zhilin), or
+another body whose orientation is composed of two or three rotations about fixed
+axes.  It is the right shape for this increment because nothing in it is
+abstract: named axes, a composition, a rolling constraint, and an angular
+velocity that must come out along the contact line rather than being asserted
+to.  It exercises the composition law above, the transport rule, and the time
+chain together, and it is the first challenge in the brief that is a *problem*
+rather than an identity.
 
 ### I8 — virtual work, and δω
 
@@ -520,6 +561,18 @@ challenge needs.
 | 000026 | m l² φ̈ + m g l sin φ = 0 from δ∫L dt = 0 | L0 — moved to **vibe 000111** |
 | 000027 | rotating frame: d/dt e_r = ω k × e_r = ω e_φ | L2 |
 
+Six more are named below, all Stepan's, and they are the brief's real
+acceptance test — the increments are what makes them reachable:
+
+| | Claim | Increment |
+|---|---|---|
+| ω of a finite rotation | `ω = θ̇ n + sin θ ṅ + (1 − cos θ) n × ṅ` | I6 |
+| conjugation | `Q·P(θn)·Qᵀ = P(θ · Q·n)` | I5 |
+| commutation of two | `Q·P(a) = P(Q·a)·Q` | I5 |
+| commutation of three | the same, *at a chosen site* of `P₁·P₂·P₃` | I5 |
+| a cone rolling on a plane | composed rotations about fixed axes | I7 |
+| the pendulum, without an integral | d'Alembert–Lagrange | I8 |
+
 **000027 is Stepan's**, proposed while this brief was still being written, and
 it is the one that most deserved to be here first: it is the smallest statement
 in which a *vector* has a time derivative at all, so it is where the algebra and
@@ -562,14 +615,21 @@ each term needs one transport rule from I5: `Q(n⊗n)Qᵀ = (Qn)⊗(Qn)`,
 properness is *required*, so this challenge is also the negative test for the
 sign: with an improper `Q` the identity is false, and the library should say so.
 
+**Stepan's fourth and fifth — commutation of two and of three rotations**,
+both resting on the conjugation theorem.  The two-rotation case is the theorem
+read as a swap; the three-rotation case adds the part that matters, that the
+derivation must **select which pair to commute** and reach a stated form, so it
+is as much a test of the derivation surface (vibe 000054 paths) as of the
+rotation algebra.
+
 Planned for the rotation increments, one per increment as vibe 000093 requires:
 a declared rotation preserves lengths and angles while an undeclared tensor
 does not (I4) · each way of writing a rotation is orthogonal by construction
 (I5) · `D(P)·Pᵀ` is skew for both derivations, and Poisson's formula in general
-(I6) · Zhilin's `ω(θ, n)` and the conjugation theorem above, as the proof that
-the machinery is real ·
-rigid-body velocity and acceleration (I7) · `δω`, and the pendulum by
-d'Alembert–Lagrange (I8).
+(I6) · Zhilin's `ω(θ, n)`, the conjugation theorem and the two commutation
+derivations above, as the proof that the machinery is real ·
+rigid-body velocity and acceleration, and a cone rolling on a plane (I7) ·
+`δω`, and the pendulum by d'Alembert–Lagrange (I8).
 
 ## Open questions — Stepan's, recorded not resolved
 
@@ -613,11 +673,11 @@ written; the construction is the same either way.
 
 ## Order and risk
 
-**I0 — fix M8 first.**  `refuted` claiming a true identity is false is the one
-defect in this brief that makes the library actively misleading rather than
-merely incomplete, and every rotation statement below is written with
-transposes.  Nothing else should start until it is fixed and a challenge pins
-it.
+**I0 — fix M8 first** (confirmed by Stepan as the prerequisite and the first
+thing to do).  `refuted` claiming a true identity is false is the one defect in
+this brief that makes the library actively misleading rather than merely
+incomplete, and every rotation statement below is written with transposes.
+Nothing else starts until it is fixed and a challenge pins it.
 
 I1 → I3 are done.  I4 (constrained symbols) is the foundation and the only
 increment with a genuine mechanism question left in it; I5 (the ways to write a
