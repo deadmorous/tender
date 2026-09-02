@@ -53,6 +53,11 @@ is probably not worth abbreviating.
 | **Saint-Venant** | Either the generalized extension/bending/torsion problem for a prismatic body, or the strain compatibility equations — context distinguishes them. |
 | **Lamé constants** | The isotropic elastic moduli λ and μ. |
 | **generalized coordinate** | An independent parameter fixing a mechanical system's configuration (the `q` of Lagrangian mechanics), and its rates `q̇`, `q̈`.  In tender these are ordinary coordinate atoms of a chart-free coordinate group; what makes `q̇` the rate of `q` is the d/dt operator built over them, not the objects (vibe 000110). |
+| **rotation tensor / turn tensor** | A proper orthogonal `P` (`P·Pᵀ = I`, det P = 1) carrying one orthonormal frame onto another; the angle-free foundation of rigid-body kinematics in the Zhilin/Eliseev treatment, with Euler angles and other parameterizations *derived* from it rather than underlying it (vibe 000110 I4). |
+| **spin (of a derivation)** | `D(P)·Pᵀ` for a derivation `D` and a rotation `P` — skew, because differentiating `P·Pᵀ = I` says so.  `d/dt` gives the **angular velocity** tensor Ω (axial vector ω), δ gives the **virtual rotation** Θ (axial vector θ).  One construction serving both (vibe 000110 I5). |
+| **axial vector** | The vector ω of a skew tensor Ω, defined by `Ω·a = ω × a`; equivalently `Ω = ω × I`.  The bridge between the tensor and vector forms of an angular velocity. |
+| **Poisson's formula** | `ė = ω × e` for a vector rigidly attached to a rotating frame — the kinematic content of `Ṗ = Ω·P` (challenge 000027 is its single-angle instance). |
+| **virtual work** | `δA`, the work of the applied forces on a virtual displacement.  For finitely many degrees of freedom `δA = 0` for arbitrary independent virtual displacements concludes by equating coefficients — no integral, which is why vibe 000110 needs none (vibe 000111 owns the integral). |
 | **variation** | The operator δ of the calculus of variations: a derivation (`δ(ab) = δ(a)b + aδ(b)`) sending each generalized coordinate to an independent virtual displacement `δq`.  Measured to be of the ordinary `Σ c_k ∂_k` form — coefficients `δq_k`, partials with respect to the `q_k` — so it needs no mechanism of its own (vibe 000110, settling vibe 000102's question 1b). |
 
 ## The derivation surface
