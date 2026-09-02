@@ -267,15 +267,37 @@ the formula.  Composition needs no constructor: it is recognised structurally
 by I4's propagation.
 
 **The escape hatch matters more than the list.**  Stepan: "not sure what else
-can appear."  So the general mechanism is *name it, stamp it, and owe a proof*:
-a form the library has never seen is handed in, checked (by expansion against
-the constraints already declared), and comes back as a stamped symbol with its
-defining identity — the shipped forms being pre-proved instances of that same
-path.  Each shipped form owes a challenge that its formula really is
-orthogonal; measured, the reflection's proof is two rules deep —
-`(I − 2n⊗n)·(I − 2n⊗n)ᵀ` expands to `I·I + 4(n·n) n⊗n − 2n⊗(n·I) − 2(I·n)⊗n`,
-which needs only `I·a = a` (shipped, `identity-dot`) and `n·n = 1` (I4's unit
-property).
+can appear."  **Settled: check-and-stamp.**  A form the library has never seen
+is handed in, *verified* against the constraints already declared, and comes
+back as a stamped symbol with its defining identity:
+
+```python
+n = ws.vector("n", unit=True)
+P = ws.orthogonal_from("P", I - 2*(n*n), proper=False)
+```
+
+The verification is the engine proving `P·Pᵀ = I` from the declared
+constraints — so the stamp is *earned*, and a form that is not orthogonal is
+refused with its residual shown rather than silently accepted.  The five shipped
+forms are pre-proved instances of exactly this path, which is why the list not
+being exhaustive costs nothing.
+
+The alternative — a recogniser that spots known shapes inline — was declined:
+every form but the composition is a **sum**, canon is free to rearrange sums,
+and M3 and M4 are both instances of structural recognition being more fragile
+than it looks.
+
+One hole, named rather than papered over: **check-and-stamp can verify
+orthogonality but not the *sign*.**  `P·Pᵀ = I` holds for both kinds, and
+without a `det` nothing distinguishes them for an abstract form.  So `proper=`
+is the user's declaration, *recorded as an assertion* in the vibe-000102 Q2
+sense — and the day a form arrives whose sign cannot be taken on trust is the
+day `det` becomes necessary (Q5).
+
+Each shipped form owes a challenge that its formula really is orthogonal;
+measured, the reflection's proof is two rules deep — `(I − 2n⊗n)·(I − 2n⊗n)ᵀ`
+expands to `I·I + 4(n·n) n⊗n − 2n⊗(n·I) − 2(I·n)⊗n`, which needs only
+`I·a = a` (shipped, `identity-dot`) and `n·n = 1` (I4's unit property).
 
 **Polar decomposition** (`A = P·U = V·P`, `U`, `V` symmetric, `P` a rotation)
 needs nothing new: *using* the theorem means declaring an abstract rotation and
@@ -456,18 +478,15 @@ with proper and improper told apart; and an abstract declared `P` is necessary
 but not sufficient — the frame-pair, reflection, turn-tensor and composition
 forms are all first-class (I5).
 
-**Q5 — is a `det` operator needed now?**  The proper/improper distinction is
-det = ±1, but the *sign* can ride on the property, and each shipped form knows
-its own.  A real `det` would be wanted to check an unanticipated form, and by
-the continuum arc later.  Recommendation: sign on the property now, `det` when
-something cannot be done without it.
+**Q5 — ~~is a `det` operator needed now?~~**  **Settled (Stepan): no.**  The
+sign rides on the property; each shipped form knows its own, and a composition
+multiplies them.  `det` arrives when something cannot be done without it — the
+first such thing will be a form whose sign cannot be taken on the user's word
+(see I5), and the continuum arc will want one eventually.
 
-**Q6 — how should an unanticipated form be admitted?**  Check-and-stamp (hand in
-the expression, the library verifies it against the declared constraints and
-returns a named symbol) versus a recogniser that spots known shapes in the wild.
-Recommendation: check-and-stamp, because the shapes are sums and canon is free
-to rearrange them — M3 and M4 are both instances of structural recognition
-being more fragile than it looks.
+**Q6 — ~~how should an unanticipated form be admitted?~~**  **Settled (Stepan):
+check-and-stamp** — `ws.orthogonal_from(name, expr, proper=…)`, verified by the
+engine against the declared constraints.  See I5.
 
 **Q4 — left or right?**  `Ω = Ṗ·Pᵀ` (spatial) and `Pᵀ·Ṗ` (body) are both wanted
 and are not the same tensor.  Names and defaults to be chosen when I5 is
