@@ -817,6 +817,27 @@ auto chain_rule_side(Term const& t) -> std::optional<ChainView>
     return as_chain(t.tensors.front());
 }
 
+// The single tensor factor of a rule side, when it is not a chain: a term with
+// no scalars, no bound indices, and one tensor that is an atom, a unary, a
+// paren…  Such a pattern still has to reach *inside* a chain — `(A·B)ᵀ → Bᵀ·Aᵀ`
+// must fire on the second factor of `(P·Q)·(P·Q)ᵀ` — which is the mirror of the
+// replacement case above and was missing for the same reason (vibe 000110 I4b).
+//
+// A bare subtree variable is excluded: `U → …` as a pattern matches every
+// factor everywhere, which is not a rule anyone means to write.
+auto lone_factor_rule_side(Term const& t) -> Factor const*
+{
+    if (!t.scalars.empty() || !t.bound.empty() || t.tensors.size() != 1)
+        return nullptr;
+    auto const* f = t.tensors.front();
+    if (as_chain(f))
+        return nullptr;
+    if (auto const* a = std::get_if<Atom>(&f->node);
+        a && is_subtree_var(a->obj))
+        return nullptr;
+    return f;
+}
+
 // A resolved chain rule: the pattern and replacement factor/op sequences (the
 // op vectors are null for a cross).
 struct ChainRule final
@@ -942,18 +963,64 @@ auto rewrite_subchain(
     Nf const* rhs,
     Term const& tgt) -> std::optional<Term>
 {
-    auto pat = chain_rule_side(lhs_term);
-    if (!pat)
+    std::vector<Factor const*> pat_storage;
+    std::vector<COp> const* pat_ops = nullptr;
+    bool pat_is_cross = false;
+    if (auto pat = chain_rule_side(lhs_term))
+    {
+        pat_storage = *pat->factors;
+        pat_ops = pat->ops;
+        pat_is_cross = pat->is_cross;
+    }
+    else if (auto const* lone = lone_factor_rule_side(lhs_term))
+        pat_storage = {lone};
+    else
         return std::nullopt;
     if (!rhs || rhs->terms.size() != 1)
         return std::nullopt;
     Term const& rhs_term = rhs->terms.front();
-    auto rep = chain_rule_side(rhs_term);
-    if (!rep || rep->is_cross != pat->is_cross)
+
+    // The replacement, in one of two shapes (vibe 000110 I4b).
+    //
+    // A chain of the *same* kind splices inline, its factors and internal ops
+    // joining the surrounding chain — the original case.  Anything else that is
+    // a single tensor factor splices as one opaque factor: `A·B → I` replaces
+    // the run by the atom I, and a cross-valued replacement drops whole into a
+    // contraction chain.
+    //
+    // That second shape is what was missing, and it is the common one: a rule
+    // whose right-hand side is a single symbol could not fire inside a longer
+    // chain at all, so `A·B → I` did nothing to `a·A·B·b` — vibe 000100's
+    // context-blocking, measured again in vibe 000110 I4 and blocking the
+    // rotation arc.
+    //
+    // Still not handled: a replacement with *no* tensor factor (`n·n → 1`),
+    // which would shorten the chain rather than substitute within it and needs
+    // a boundary op dropped — and, when the run is the whole chain, the factor
+    // to disappear into the term's coefficient.  No consumer yet.
+    std::vector<Factor const*> rep_storage;
+    std::vector<COp> const* rep_ops = nullptr;
+    // (The chain-inlining branch is for a chain *pattern* only: a lone-factor
+    // pattern replaces one element, and dropping a chain in as a single factor
+    // there is both correct and simpler than splicing its ops into the host —
+    // canon flattens the nesting on the next pass anyway.)
+    if (auto rep = chain_rule_side(rhs_term);
+        rep && rep->is_cross == pat_is_cross && pat_storage.size() > 1)
+    {
+        rep_storage = *rep->factors;
+        rep_ops = rep->ops;
+    }
+    else if (
+        rhs_term.scalars.empty() && rhs_term.bound.empty()
+        && rhs_term.tensors.size() == 1)
+    {
+        rep_storage = {rhs_term.tensors.front()};
+    }
+    else
         return std::nullopt;
 
     ChainRule const cr{
-        pat->is_cross, pat->factors, pat->ops, rep->factors, rep->ops};
+        pat_is_cross, &pat_storage, pat_ops, &rep_storage, rep_ops};
 
     auto try_region = [&](std::vector<Factor const*> const& region,
                           std::size_t& hit) -> Factor const*

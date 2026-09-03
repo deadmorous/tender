@@ -89,26 +89,39 @@ def test_a_conditional_claim_is_not_refuted():
     assert not result.refuted
 
 
-@harness.level(
-    "L2",
-    expected=False,
-    reason="a rule does not fire inside a longer contraction chain "
-    "(vibe 000100 context-blocking; measured again in vibe 000110 I4)",
-)
+@harness.level("L2")
 def test_orthogonality_fires_inside_a_longer_chain():
-    """(P·a)·(P·b) = a·b — the enumerated red, and it is not about constraints.
+    """(P·a)·(P·b) = a·b, where the useful part sits inside a longer chain.
 
-    Canon normalises the left side to the chain `a·Pᵀ·P·b`, and no rule fires
-    on the interior run `Pᵀ·P`: a two-factor pattern does not match a
-    contiguous sub-run of a longer contraction chain.  Measured with ordinary
-    symbols and no constraint anywhere — `A·B → I` does not fire inside
-    `a·A·B·b` either — so this is vibe 000100's context-blocking problem, and
-    it is where the next increment of it should start.
+    Canon normalises the left side to the chain `a·Pᵀ·P·b`, so the
+    orthogonality rule has to fire on the *interior* run `Pᵀ·P` — which needed
+    vibe 000110 I4b, and had nothing to do with constraints: `A·B → I` did not
+    fire inside `a·A·B·b` either.
     """
     ws, P, n, I = _setup()
     a, b = ws.vector("a"), ws.vector("b")
     result = td.prove_equal(
-        (P @ a) @ (P @ b), a @ b, td.rules("transpose", ctx=ws.ctx)
+        (P @ a) @ (P @ b), a @ b, td.rules("transpose", "dyadic", ctx=ws.ctx)
     )
     show("(P·a)·(P·b) = a·b", f"{result.status}, fired={result.fired}")
+    assert result.proved
+
+
+@harness.level("L2")
+def test_rotations_compose_without_being_told():
+    """(P·Q)·(P·Q)ᵀ = I — the group property, derived rather than declared.
+
+    Nothing says a product of rotations is a rotation.  It falls out:
+    `transpose-product` splits the transpose, `Q-orthogonal` cancels the
+    interior, `identity-dot` clears the `I` it leaves behind, and
+    `P-orthogonal` closes.  Four rules, no rule about composition.
+    """
+    ws, P, n, I = _setup()
+    Q = ws.rotation("Q")
+    result = td.prove_equal(
+        (P @ Q) @ ((P @ Q).transpose()),
+        I,
+        td.rules("transpose", "dyadic", ctx=ws.ctx),
+    )
+    show("(P·Q)·(P·Q)ᵀ = I", f"{result.status}, fired={result.fired}")
     assert result.proved

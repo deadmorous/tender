@@ -239,7 +239,16 @@ ways.  The proposal:
 4. **Propagation**, which is what makes the group structure usable: `Pᵀ` is
    orthogonal with the same sign; a `·`-chain of orthogonal symbols is
    orthogonal with the product of their signs (so rotation·rotation is a
-   rotation, rotation·reflection is improper).  Structural, no pattern matching.
+   rotation, rotation·reflection is improper).
+
+   **Measured after I4b: neither needs any machinery.**  `Pᵀ·(Pᵀ)ᵀ` reduces to
+   `Pᵀ·P` by canon's transpose involution, which the minted rule closes; and
+   `(P·Q)·(P·Q)ᵀ = I` follows from the per-symbol rules plus the `transpose`
+   group.  (The user's route to the first — `Pᵀ = P⁻¹` and `A·A⁻¹ = I` — says
+   the same thing; tender has no inverse operator, so `P·Pᵀ = I` is the
+   primitive and `Pᵀ = P⁻¹` would be the derived reading.)  What propagation
+   *is* still needed for is the **sign**, which no rule computes: that belongs
+   with I5's check-and-stamp.
 
 Measured support for the pieces: a `Basis` already carries `Handedness` and a
 signed cell volume ±1, so "two orthonormal frames of the same orientation" is
@@ -277,7 +286,7 @@ Three corrections to the plan above, each measured:
 3. **`(P·a)·(P·b) = a·b` does not prove**, and the reason is not about
    constraints at all — see I4b.
 
-### I4b — a rule must fire inside a longer chain (vibe 000100, again)
+### I4b — a rule must fire inside a longer chain — **done**
 
 Canon normalises `(P·a)·(P·b)` to the contraction chain `a·Pᵀ·P·b`, and no rule
 fires on the interior run `Pᵀ·P`: a two-factor pattern does not match a
@@ -301,7 +310,36 @@ cancellable interior, and a rule that only fires on a whole term is not much use
 in one.
 
 *Done when:* `A·B → I` fires inside `a·A·B·b`; `(P·a)·(P·b) = a·b` proves; and
-challenges 000029 and 000030 lose their xfail markers.
+challenges 000029 and 000030 lose their xfail markers.  **All three.**
+
+It was narrower than vibe 000100's general problem, and the hint above was the
+right one: `rewrite_subchain` already matched a pattern run anywhere in a chain,
+at any depth, with the join operators checked.  What it refused was the *shape
+of the rule*, in two symmetric places:
+
+- **The replacement had to be a chain.**  `A·B → I` replaces a run with one
+  atom, and the path bailed before attempting a match.  Now a single tensor
+  factor splices in place of the run — which also covers a replacement of a
+  different chain kind (a cross-valued right-hand side dropping into a
+  contraction chain) as one opaque factor.
+- **The pattern had to be a chain.**  `(A·B)ᵀ → Bᵀ·Aᵀ` is one unary factor, so
+  it had to be matched against a chain's *elements* rather than as a run of
+  them.  A bare subtree variable is excluded — `U → …` would rewrite arbitrary
+  subterms, and nobody writes that on purpose.
+
+Both fire through `fire_identity_on_term`, which is the single door used by
+directed `apply_identity` *and* by e-graph saturation, so one fix served both.
+Each half was checked against a build with it neutered.
+
+One library gap fell out and is fixed with it: `identity-dot` was `I·a = a` with
+a **rank-1** variable, so `P·I·Pᵀ` stalled one step from `I`.  The variable is
+now unranked — `I·a = a` and `I·A = A` are the same defining property, and the
+gate was an accident of how the axiom was first written.
+
+The dividend is the one the plan predicted but could not yet demonstrate:
+**rotations compose without being told.**  `(P·Q)·(P·Q)ᵀ = I` proves by
+`transpose-product`, `Q-orthogonal`, `identity-dot`, `P-orthogonal` — four
+rules, none of them about composition (challenge 000030).
 
 ### I5 — the ways to write a rotation
 

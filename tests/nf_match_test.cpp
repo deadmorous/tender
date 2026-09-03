@@ -714,3 +714,97 @@ TEST(InstantiateNf, RemapsIndicesAndWalksAllKinds)
     auto const* cinst = instantiate_nf(ctx, cnf, NfBinding{});
     EXPECT_TRUE(equal(cinst, cnf)); // empty binding is an identity rebuild
 }
+
+// ---- rules must reach inside a chain (vibe 000110 I4b) -----------------
+//
+// Canon flattens a contraction into one chain factor, so a rule about two of
+// its factors has to fire on a contiguous *run* in the middle of a longer
+// chain.  The machinery for that existed; two shapes could not reach it, and
+// between them they covered most real rules:
+//
+//   * a replacement that is not itself a chain — `A·B → I`;
+//   * a pattern that is not itself a chain — `(A·B)ᵀ → Bᵀ·Aᵀ`.
+//
+// This is vibe 000100's context-blocking problem in its tenth instance, and
+// the one that blocked the rotation arc: `(P·a)·(P·b)` canonicalises to
+// `a·Pᵀ·P·b`, where the whole point is the interior.
+
+namespace
+{
+
+// Fire `lhs → rhs` on `target`; the rewritten expression, or nullptr.
+auto fired(Context& ctx, Expr const* lhs, Expr const* rhs, Expr const* target)
+    -> Expr const*
+{
+    auto out = fire_identity_on_term(
+        ctx,
+        only_term(to_nf(ctx, lhs)),
+        to_nf(ctx, rhs),
+        only_term(to_nf(ctx, target)));
+    if (!out)
+        return nullptr;
+    return raise(ctx, *make_nf(ctx, std::move(*out)));
+}
+
+} // namespace
+
+TEST(SubChain, ASingleSymbolReplacementFiresInsideALongerChain)
+{
+    // `A·B → I` on `a·A·B·b`: the replacement is one atom, not a chain, which
+    // used to make the whole path bail before a match was even attempted.
+    Context ctx;
+    auto const* A = rank2(ctx, "A");
+    auto const* B = rank2(ctx, "B");
+    auto const* a = vrank1(ctx, "a");
+    auto const* b = vrank1(ctx, "b");
+    auto const* I = make_identity(ctx);
+
+    auto const* got = fired(
+        ctx,
+        make_dot(ctx, A, B),
+        I,
+        make_dot(ctx, make_dot(ctx, a, A), make_dot(ctx, B, b)));
+    ASSERT_NE(got, nullptr);
+    EXPECT_TRUE(algebraic_eq(ctx, got, make_dot(ctx, make_dot(ctx, a, I), b)));
+}
+
+TEST(SubChain, ALoneFactorPatternFiresOnAChainElement)
+{
+    // `(A·B)ᵀ → Bᵀ·Aᵀ` on `(P·Q)·(P·Q)ᵀ`: the pattern is one unary factor, so
+    // it is matched against the chain's elements rather than as a run.
+    Context ctx;
+    auto const* A = rank2(ctx, "A");
+    auto const* B = rank2(ctx, "B");
+    auto const* P = rank2(ctx, "P");
+    auto const* Q = rank2(ctx, "Q");
+    auto const* PQ = make_dot(ctx, P, Q);
+
+    auto const* got = fired(
+        ctx,
+        make_transpose(ctx, make_dot(ctx, A, B)),
+        make_dot(ctx, make_transpose(ctx, B), make_transpose(ctx, A)),
+        make_dot(ctx, PQ, make_transpose(ctx, PQ)));
+    ASSERT_NE(got, nullptr);
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        got,
+        make_dot(
+            ctx,
+            PQ,
+            make_dot(ctx, make_transpose(ctx, Q), make_transpose(ctx, P)))));
+}
+
+TEST(SubChain, ABareVariablePatternIsNotARule)
+{
+    // `U → I` with U a subtree variable would match every factor everywhere.
+    // Nobody writes that on purpose, and letting it through would turn the
+    // lone-factor path into a rewriter of arbitrary subterms.
+    Context ctx;
+    auto const* U = rank2(ctx, "U"); // slot-less abstract ⇒ a pattern variable
+    auto const* a = vrank1(ctx, "a");
+    auto const* b = vrank1(ctx, "b");
+    auto const* A = rank2(ctx, "A");
+    auto const* I = make_identity(ctx);
+
+    EXPECT_EQ(fired(ctx, U, I, make_dot(ctx, make_dot(ctx, a, A), b)), nullptr);
+}

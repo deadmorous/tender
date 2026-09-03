@@ -86,26 +86,17 @@ def test_each_rule_fires_and_proves_its_own_statement():
         assert result.fired, f"{label} proved without any rule firing"
 
 
-@harness.level(
-    "L2",
-    expected=False,
-    reason="a rule does not fire inside a longer contraction chain "
-    "(vibe 000100 context-blocking); I4 removed the refutation, not this",
-)
+@harness.level("L2")
 def test_the_orthogonality_move_is_what_this_group_is_for():
     """(P·a)·(P·b) = a·b, given only that P·Pᵀ = I — the reason for the group.
 
-    Enumerated red, and it has now moved once: I4 made the claim *answerable*
-    (it used to come back `refuted`, because the component procedure expanded
-    P as an arbitrary tensor and answered before any rule fired), but not yet
-    provable.  What stops it now is one level down: canon normalises the left
-    side to the chain `a·Pᵀ·P·b`, and a two-factor pattern does not match a
-    contiguous sub-run of a longer contraction chain, so the orthogonality
-    rule never fires on the interior `Pᵀ·P`.
-
-    Nothing about constraints is involved — `A·B → I` does not fire inside
-    `a·A·B·b` either.  It is vibe 000100's context-blocking problem, measured
-    once more.  See challenge 000030.
+    This was the group's enumerated red through two increments, and what it
+    took is worth remembering.  It first came back `refuted`, because the
+    component procedure expanded P as an arbitrary tensor and answered before
+    any rule fired (I4 fixed that).  Then it came back `exhausted` with nothing
+    firing, because canon normalises the left side to the chain `a·Pᵀ·P·b` and
+    no rule reached the interior run `Pᵀ·P` (I4b fixed that).  Only then did
+    the three rules that were present all along get to do their work.
     """
     ws, A, B, u, v = _setup()
     P = ws.tensor("P", rank=2)

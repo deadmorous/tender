@@ -241,8 +241,13 @@ def trace_cyclic(ctx):
 
 
 def identity_dot(ctx):
-    """I · a = a."""
-    u = _var(ctx, "u", 1)
+    """I · X = X, at any rank.
+
+    The variable is deliberately *unranked*: `I·a = a` for a vector and
+    `I·A = A` for a tensor are the same defining property, and a rank-1 gate
+    left `P·I·Pᵀ` stuck one step from `I` (vibe 000110 I4b).
+    """
+    u = _var(ctx, "u", None)
     return Identity("identity-dot", _t.identity(ctx=ctx) @ u, u)
 
 
