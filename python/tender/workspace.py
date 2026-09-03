@@ -68,15 +68,38 @@ class Workspace:
             return _core.tensor(name, 1, ctx=self.ctx)
         return _core.constrained_tensor(name, 1, "unit", ctx=self.ctx)
 
-    def rotation(self, name):
+    def rotation(self, name, axis=None, angle=None):
         """A proper orthogonal tensor: ``P·Pᵀ = Pᵀ·P = I``, det P = +1.
+
+        With just a name, an *abstract* rotation — some rotation, nothing more.
+        With an axis and an angle, **the** rotation about that axis by that
+        angle, built from the three-term formula and verified on construction::
+
+            P = n⊗n + (I − n⊗n) cos θ + (n × I) sin θ
+
+        `axis` must be a declared unit vector (``ws.vector(..., unit=True)``);
+        the formula is registered as the symbol's definition, so
+        ``ws.definition(P)`` unfolds it where the formula is wanted.
 
         Rotations compose — a ``·``-chain of them is a rotation — which needs
         no declaring: it follows from the minted rules and the transpose group.
-        For a tensor containing a reflection use :meth:`orthogonal` with
-        ``proper=False``.
+        For a tensor containing a reflection use :meth:`reflection`, or
+        :meth:`orthogonal` with ``proper=False``.
         """
-        return self.orthogonal(name, proper=True)
+        if (axis is None) != (angle is None):
+            raise ValueError(
+                "give both an axis and an angle, or neither: "
+                "ws.rotation('P') is an abstract rotation, and "
+                "ws.rotation('P', n, theta) is the rotation about n by theta"
+            )
+        if axis is None:
+            return self.orthogonal(name, proper=True)
+        from . import _core as _c
+
+        I = self.identity()
+        nn = axis * axis
+        form = nn + (I - nn) * _c.cos(angle) + (axis % I) * _c.sin(angle)
+        return self.orthogonal_from(name, form, proper=True)
 
     def orthogonal(self, name, proper=True):
         """An orthogonal tensor, proper (a rotation) or improper.
@@ -91,7 +114,9 @@ class Workspace:
             name, 2, "orthogonal", proper=proper, ctx=self.ctx
         )
 
-    def orthogonal_from(self, name, expr, proper=True, rounds=None):
+    def orthogonal_from(
+        self, name, expr, proper=True, rounds=None, frames=()
+    ):
         """Name *expr* as an orthogonal tensor — after verifying that it is one.
 
         The general path, and the reason the list of shipped forms below need
@@ -112,7 +137,7 @@ class Workspace:
         """
         kw = {} if rounds is None else {"rounds": rounds}
         residual = _rotation.verify_orthogonal(
-            self.ctx, expr, self.identity(), **kw
+            self.ctx, expr, self.identity(), frames=frames, **kw
         )
         if residual is not None:
             raise ValueError(
@@ -134,21 +159,36 @@ class Workspace:
         I = self.identity()
         return self.orthogonal_from(name, I - 2 * (n * n), proper=False)
 
-    def turn(self, name, n, theta):
-        """The turn tensor about the unit axis `n` by the angle `theta`:
+    def frame_rotation(self, name, frame, reference):
+        """The rotation carrying `reference` onto `frame`: ``P = Σ e_i ⊗ E_i``.
 
-            P = n⊗n + (I − n⊗n) cos θ + (n × I) sin θ
+        Both frames must be orthonormal.  The result is proper when they share
+        an orientation and improper otherwise — the one sign the library can
+        settle for itself, because a `Basis` records its handedness as the sign
+        of its cell volume.
 
-        Proper.  Verified on construction, which takes the four skew-tensor
-        rules of the `rotation` group, `n·n = 1`, `a × a = 0`, and the
-        Pythagorean identity from the scalar simplifier.
+        Verified like the others, but the reduction needs the frames as well as
+        the rules: `e_i·e_j = δ_ij` is knowledge held by the basis, not an
+        identity about symbols.
         """
-        from . import _core as _c
-
-        I = self.identity()
-        nn = n * n
-        form = nn + (I - nn) * _c.cos(theta) + (n % I) * _c.sin(theta)
-        return self.orthogonal_from(name, form, proper=True)
+        if not (frame.is_orthonormal and reference.is_orthonormal):
+            raise ValueError(
+                f"{name!r}: both frames must be orthonormal — "
+                "P = Σ e_i ⊗ E_i is a rotation only between orthonormal frames"
+            )
+        if frame.dim != reference.dim:
+            raise ValueError(
+                f"{name!r}: the frames have different dimensions "
+                f"({frame.dim} and {reference.dim})"
+            )
+        form = None
+        for k in range(frame.dim):
+            dyad = frame.direction(k) * reference.direction(k)
+            form = dyad if form is None else form + dyad
+        proper = _td.algebraic_eq(frame.volume, reference.volume)
+        return self.orthogonal_from(
+            name, form, proper=proper, frames=(frame, reference)
+        )
 
     def definition(self, symbol):
         """The defining identity of a constructed rotation, for unfolding.

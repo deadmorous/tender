@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**31 challenges** — 28 at L2, 2 at L1, 1 at L0.
+**31 challenges** — 29 at L2, 1 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -56,7 +56,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000028 | `refuted` is sound: no true identity is called false | L1 verified | vibe 000110 M8 |
 | 000029 | transposing through products, traces, dots and vec | **L2 performed** | vibe 000110 I5/I6 (rotation tensors need them) |
 | 000030 | declared constraints: a rotation is orthogonal, an arbitrary tensor is not | **L2 performed** | vibe 000110 I4 |
-| 000031 | rotation forms: reflection and turn tensor, verified when built | L1 verified | Zhilin, angle-free rotation tensors; vibe 000110 I5 |
+| 000031 | rotation forms: reflection and turn tensor, verified when built | **L2 performed** | Zhilin, angle-free rotation tensors; vibe 000110 I5 |
 
 ## Tier B — Basis / coordinates
 

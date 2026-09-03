@@ -55,7 +55,7 @@ def _rules(ctx):
     )
 
 
-def reduce_orthogonality(ctx, expr, rounds=_ROUNDS):
+def reduce_orthogonality(ctx, expr, rounds=_ROUNDS, frames=()):
     """Reduce ``expr·exprᵀ`` as far as the rules and scalar simplifier go.
 
     Returns the reduced expression — ``I`` when the form is orthogonal.  The
@@ -63,19 +63,35 @@ def reduce_orthogonality(ctx, expr, rounds=_ROUNDS):
     because each exposes work for the other: `cos²θ + sin²θ → 1` is a *step*,
     not a rule, so no amount of saturation would reach it.
     """
+    from . import basis as _tb
+
     e = _td.canonicalize(_td.expand_products(expr))
     rules = _rules(ctx)
     for _ in range(rounds):
         previous = e
         for rule in rules:
             e = _td.apply_identity(e, rule)
+        # A frame contributes what no identity can: `e_i·e_j = δ_ij` is
+        # knowledge the basis holds, not a fact about symbols (vibe 000110 I5,
+        # the frame-pair form).
+        for frame in frames:
+            e = _tb.simplify_basis_dot(_td.canonicalize(e), frame)
+        if frames:
+            e = _td.fold_arithmetic(
+                _td.eval_delta_concrete(_td.canonicalize(e))
+            )
+            # …and the completeness of the frame, `Σ e_i⊗e_i = I`, which is
+            # how a frame-pair rotation reaches `I` at all: the reduction ends
+            # on the identity written out on the frame, not on the symbol.
+            for frame in frames:
+                e = _tb.fold_resolution_of_identity(_td.canonicalize(e), frame)
         e = _td.simplify_scalars(_td.canonicalize(_td.expand_products(e)))
         if _td.structural_eq(e, previous):
             break
     return e
 
 
-def verify_orthogonal(ctx, expr, identity, rounds=_ROUNDS):
+def verify_orthogonal(ctx, expr, identity, rounds=_ROUNDS, frames=()):
     """``None`` if ``expr`` is orthogonal, else the residual that stopped it.
 
     Both products are checked: `X·Xᵀ = I` alone leaves a left inverse
@@ -86,7 +102,7 @@ def verify_orthogonal(ctx, expr, identity, rounds=_ROUNDS):
         ("X·Xᵀ", expr @ expr.transpose()),
         ("Xᵀ·X", expr.transpose() @ expr),
     ):
-        reduced = reduce_orthogonality(ctx, product, rounds)
+        reduced = reduce_orthogonality(ctx, product, rounds, frames)
         if not _td.algebraic_eq(reduced, identity):
             return f"{label} reduced to {reduced}, not I"
     return None

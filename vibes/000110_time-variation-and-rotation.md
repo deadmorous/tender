@@ -486,12 +486,23 @@ And the four axial-vector rules of M5 are now the `rotation` group —
 `skew-transpose`, `skew-dot`, `skew-dot-left`, `skew-product` — measured true
 and absent before being written, and the content I6 rests on directly.
 
-**The frame-pair form `P = e_i ⊗ E_i` is the enumerated red**, blocked exactly
-where M3 said it would be: it reduces to `i⊗i + j⊗j + k⊗k`, which compares
-equal neither to `I` nor to `expand_identity(I)`, and
-`reassemble_completeness` does not fold it.  The form is right; the *equality*
-is what the library cannot see, because in an orthonormal frame `e_i` and `e^i`
-are distinct atoms that render identically.  Fixing M3 is what unblocks it.
+**The frame-pair form `P = e_i ⊗ E_i` was the increment's red, and M3 was
+fixed next, which cleared it** — see the M3 entry below for what the defect
+actually turned out to be.  `ws.frame_rotation(name, frame, reference)` builds
+and verifies it, and it is the one form whose *sign* the library settles for
+itself: a `Basis` records its handedness as the sign of its cell volume, so
+frames of one orientation give a rotation and opposite ones a reflection.
+
+Its reduction needs one thing the others do not — the frame's own knowledge,
+`e_i·e_j = δ_ij` and the completeness `Σ e_i⊗e_i = I`.  Neither is an identity
+about symbols, so the verifier takes the frames as an argument and runs those
+steps alongside the rules.  The reduction ends on the identity *written out on
+the frame*, and completeness is what turns that back into `I`.
+
+**Naming (Stepan, 2026-09-03):** the three-term form is `ws.rotation(name, axis,
+angle)`, not `ws.turn` — "turn" is reserved for a particular small-rotation
+case.  `ws.rotation(name)` with no axis remains the abstract declaration, so
+one verb covers "some rotation" and "this rotation".
 
 ### I6 — spin: the angular velocity of a *derivation*
 
@@ -633,14 +644,24 @@ prerequisites rather than nice-to-haves:
 - **M2 — Leibniz already reaches through the transpose**, for both operators.
   `d/dt(P·Pᵀ)` and `δ(Q·Qᵀ)` both come out as the correct two-term sums.  I5's
   skewness derivation has no representational obstacle.
-- **M3 — in an orthonormal frame `e_i` and `e^i` are distinct atoms that render
-  identically.**  `wcs.direction(0)` and `wcs.cobasis(0)` both print bold **i**
-  and compare unequal, and no public step bridges them (`simplify`,
-  `reduce_frame`, `to_concrete`, `insert_metric`, `contract_metric` all leave
-  them apart).  So `expand_identity(I)` does *not* compare equal to
-  `i⊗i + j⊗j + k⊗k` built from `direction()` — measured, and it is exactly the
-  comparison the constructed `P = e_k ⊗ E_k` route ends on.  Invisible in the
-  rendering, which is what makes it a trap rather than a nuisance.
+- **M3 — two spellings of one frame vector.**  ~~`e_i` and `e^i`~~ — the
+  variance reading was wrong, and fixing it started by measuring again:
+  `basis(0)` and `cobasis(0)` are the *same object* in an orthonormal frame.
+  What differed was the **value symbol** `i` and the **indexed frame vector**
+  `e₁`: `wcs.basis(0)` returns the first, `wcs.direction(0)` the second, both
+  print bold **i**, and `structural_eq` said they differed.  So
+  `expand_identity(I)` did not compare equal to `i⊗i + j⊗j + k⊗k`, and nothing
+  on the page said why.
+
+  **Fixed (I5 postscript):** canon folds a *concrete* indexed direction into
+  its value symbol, in the direction the renderer had already chosen — a
+  difference invisible in the notation is not a distinction the algebra should
+  keep.  Symbolic `e_i` is untouched: it is a bound direction that completeness
+  and reassembly match on, and it has no value symbol to fold to.  One
+  consumer had to follow: `fold_operator` compared a *raw* operator's
+  coefficients against a canonicalized target, so it now canonicalizes the
+  operator first — the vibe-000060 "steps self-prepare" rule, arriving as a
+  consequence.
 - **M4 — the cross of two concrete frame vectors does not fold** (recorded with
   challenge 000027): `k × i` reduces to the bound sum `−ε_{i13} e_i`, and four
   further public steps are needed to reach `j`.

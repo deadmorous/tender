@@ -1,5 +1,7 @@
 #include <tender/nf_lower.hpp>
 
+#include <tender/basis.hpp>
+
 #include <tender/derivation.hpp> // infer_rank
 #include <tender/rewrite.hpp>    // rewrite_tree (fold_forced_zeros)
 #include <tender/summation.hpp>  // contracted_ids, substitute_index_ids, …
@@ -386,20 +388,65 @@ auto reassociate_cross_fence(Context& ctx, Expr const* l, Expr const* r)
 // operand: in `∇·(f u)` the ⊗-product `f⊗u` holds no ∇ itself, yet floating
 // the scalar out — `∇·(f u) → f (∇·u)` — is exactly the Leibniz error.  So
 // such an operand must be carried opaquely too, and only the caller knows.
+// A *concrete* frame vector written in its indexed form — `e` with the
+// ConcreteIndex 1 and a basis id — is the same vector as the frame's own value
+// symbol, `i`.  Fold the first into the second (vibe 000110 M3).
+//
+// They were two atoms that rendered identically: the renderer has always shown
+// `e₁` of the World frame as bold **i** (`basis_vector_override`), while
+// `structural_eq` said they differed.  So `Σ e_i⊗e_i` built one way did not
+// compare equal to the same sum built the other, `expand_identity(I)` did not
+// compare equal to `i⊗i + j⊗j + k⊗k`, and nothing said why — the two forms
+// looked the same on the page.  A difference invisible in the notation is not a
+// distinction the algebra should keep, so canon collapses it, in the direction
+// the renderer already chose.
+//
+// Concrete indices only.  A *symbolic* `e_i` is a bound direction that later
+// steps match on (completeness, reassembly); it has no value symbol to fold to
+// and must stay as it is.
+auto fold_concrete_direction(Context& ctx, TensorObject const& t)
+    -> std::optional<TensorObject>
+{
+    if (t.slots.size() != 1 || !t.slots[0].index)
+        return std::nullopt;
+    auto const& sb = t.slots[0];
+    if (sb.slot.basis_id == 0)
+        return std::nullopt;
+    auto const* ci = std::get_if<ConcreteIndex>(&*sb.index);
+    if (!ci)
+        return std::nullopt;
+    auto const* b = ctx.basis(sb.slot.basis_id);
+    if (!b || t.name.v.view() != b->vector_symbol().v.view())
+        return std::nullopt;
+    auto sym = b->vector_symbol_for(ci->value);
+    if (!sym)
+        return std::nullopt;
+    TensorObject out = t;
+    out.name = *sym;
+    out.slots.clear();
+    return out;
+}
+
 auto encapsulate(Context& ctx, Expr const* factor, bool sibling_operator)
     -> SignedFactor
 {
     if (auto const* t = std::get_if<TensorObject>(&factor->node))
     {
+
+        // A concrete frame vector becomes its value symbol first (see above),
+        // so `e₁` and `i` are one atom by the time anything compares them.
+        TensorObject const& obj0 = *t;
+        auto const folded = fold_concrete_direction(ctx, obj0);
+        TensorObject const& base = folded ? *folded : obj0;
         // Symmetry-orbit canonicalization (vibe 000047): put a symmetric /
         // antisymmetric tensor's slots into orbit-minimal order, folding the
         // antisymmetric sign out.  Sign 0 means the object is identically zero
         // (e.g. ε with a repeated index) — carried as a 0 multiplier so the
         // whole term collects to coeff 0 and drops out.
-        auto [slots, sign] = canon_symmetry_slots(*t);
+        auto [slots, sign] = canon_symmetry_slots(base);
         if (sign == 0)
-            return {0, make_atom(ctx, *t)};
-        TensorObject obj = *t;
+            return {0, make_atom(ctx, base)};
+        TensorObject obj = base;
         obj.slots = std::move(slots);
         return {sign, make_atom(ctx, std::move(obj))};
     }

@@ -83,10 +83,11 @@ chart → write an invariant expression (optionally with ∇ operators) → `eva
 | `identity(space=None)` | `Expr` | Identity tensor `I`, carries its dimension (`tr(I)=n`); defaults 3-D | Provide a dimension-agnostic `I` |
 | `coordinate(name, chart_id=0, slot=0, nonneg=False)` | `Expr` | One coordinate atom; prefer `coords` for a set | — |
 | `vector(name, unit=False)` | `Expr` | Rank-1 tensor; `unit=True` declares \|n\| = 1 (mints `n·n → 1`) | Normalise anything for you |
-| `rotation(name)` | `Expr` | A proper orthogonal tensor: `P·Pᵀ = Pᵀ·P = I`, det = +1 | Check the sign — it is your assertion |
+| `rotation(name)` | `Expr` | An *abstract* proper orthogonal tensor: `P·Pᵀ = Pᵀ·P = I`, det = +1 | Check the sign — it is your assertion |
+| `rotation(name, axis, angle)` | `Expr` | **The** rotation about a unit `axis` by `angle`: `n⊗n + (I−n⊗n)cos θ + (n×I)sin θ`, verified | — |
 | `orthogonal(name, proper=True)` | `Expr` | As above; `proper=False` for a tensor containing a reflection | — |
 | `reflection(name, n)` | `Expr` | `I − 2 n⊗n` about a unit `n`, **verified**, stamped improper | Accept a non-unit axis |
-| `turn(name, n, theta)` | `Expr` | `n⊗n + (I−n⊗n)cos θ + (n×I)sin θ`, **verified**, proper | — |
+| `frame_rotation(name, frame, reference)` | `Expr` | `Σ e_i ⊗ E_i`, verified; proper iff the frames share an orientation | Accept non-orthonormal frames |
 | `orthogonal_from(name, expr, proper=True)` | `Expr` | Name *any* form after verifying `X·Xᵀ = Xᵀ·X = I`; refuses with the residual | Verify the *sign* — no determinant exists |
 | `definition(symbol)` | `Identity` | The formula a constructed rotation stands for, to unfold with `apply_identity` | Exist for an abstract `rotation()` |
 | `coords(*names, chart_id=None, nonneg=())` | `list[Expr]` | Mint a coordinate set, slots by position, one fresh `chart_id`; `nonneg` names license `√(x²)→x` | — |
@@ -562,7 +563,7 @@ letter and unfolds only where the formula is wanted:
 
 ```python
 n = ws.vector("n", unit=True)
-P = ws.turn("P", n, theta)              # verified on construction, or refused
+P = ws.rotation("P", n, theta)          # verified on construction, or refused
 td.apply_identity(expr, ws.definition(P))   # P → n⊗n + (I−n⊗n)cos θ + (n×I)sin θ
 ```
 

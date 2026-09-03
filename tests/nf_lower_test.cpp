@@ -1,5 +1,7 @@
 #include <tender/nf_lower.hpp>
 
+#include <tender/basis.hpp>
+#include <tender/coord_system.hpp>
 #include <tender/derivation.hpp>  // steps::canonicalize (differential harness)
 #include <tender/index_space.hpp> // space_3d
 
@@ -1373,4 +1375,47 @@ TEST(OperatorFence, ConcreteDerivProductsStillDistribute)
     auto const* inner = make_tensor_product(ctx, d, f);
     EXPECT_NO_THROW(
         (void)canonicalize_nf(ctx, make_tensor_product(ctx, inner, e)));
+}
+
+// ---- one vector, one spelling (vibe 000110 M3) -------------------------
+
+TEST(Canonicalize, AConcreteFrameVectorFoldsToItsValueSymbol)
+{
+    // `e₁` of the World frame and the frame's own symbol `i` are the same
+    // vector, and the renderer has always shown them the same way — but
+    // `structural_eq` said they differed, so `Σ e_i⊗e_i` built one way did not
+    // compare equal to the same sum built the other, and nothing on the page
+    // said why.  Canon now folds the indexed form into the value symbol, in
+    // the direction the renderer already chose.
+    Context ctx;
+    auto const frame = wcs(ctx);
+    auto const* indexed = frame.direction(ctx, 0);
+    auto const* symbol = frame.basis(0);
+
+    EXPECT_FALSE(structural_eq(indexed, symbol)); // two spellings…
+    EXPECT_TRUE(structural_eq(
+        steps::canonicalize(ctx, indexed), steps::canonicalize(ctx, symbol)));
+    EXPECT_TRUE(algebraic_eq(ctx, indexed, symbol)); // …one vector
+
+    // The dyads built from either spelling agree, which is what
+    // `expand_identity` against a hand-written `i⊗i + j⊗j + k⊗k` needs.
+    auto const* d_indexed = make_tensor_product(ctx, indexed, indexed);
+    auto const* d_symbol = make_tensor_product(ctx, symbol, symbol);
+    EXPECT_TRUE(algebraic_eq(ctx, d_indexed, d_symbol));
+}
+
+TEST(Canonicalize, ASymbolicFrameVectorIsLeftAlone)
+{
+    // Only a *concrete* direction folds.  A symbolic `e_i` is a bound
+    // direction that completeness and reassembly match on; it has no value
+    // symbol to fold to, and folding it would erase the index they need.
+    Context ctx;
+    auto const frame = wcs(ctx);
+    CountableIndex const i{ctx.alloc_index_id()};
+    auto const* symbolic = frame.covariant_vector(ctx, i);
+    auto const* canon = steps::canonicalize(ctx, symbolic);
+
+    auto const& obj = std::get<TensorObject>(canon->node);
+    EXPECT_EQ(obj.slots.size(), 1u);
+    EXPECT_EQ(obj.name.v.view(), frame.vector_symbol().v.view());
 }

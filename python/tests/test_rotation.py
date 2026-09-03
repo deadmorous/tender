@@ -19,9 +19,9 @@ def test_reflection_is_stamped_improper():
     assert td.prove_equal(Q @ Q.transpose(), ws.identity(), []).proved
 
 
-def test_turn_tensor_is_stamped_proper():
+def test_the_rotation_about_an_axis_is_stamped_proper():
     ws, n, theta = _ws()
-    P = ws.turn("P", n, theta)
+    P = ws.rotation("P", n, theta)
     assert ("P", "orthogonal", True) in ws.ctx.constrained_symbols()
     assert td.prove_equal(P @ P.transpose(), ws.identity(), []).proved
 
@@ -66,9 +66,31 @@ def test_verification_reduces_a_known_form_to_the_identity():
     )
 
 
+def test_an_abstract_rotation_takes_no_axis():
+    ws, n, _ = _ws()
+    with pytest.raises(ValueError, match="both an axis and an angle"):
+        ws.rotation("P", n)
+
+
+def test_a_frame_pair_is_a_rotation_between_frames_of_one_orientation():
+    ws, _, _ = _ws()
+    E = ws.wcs()
+    F = ws.frame_rotation("F", E, E)
+    assert ("F", "orthogonal", True) in ws.ctx.constrained_symbols()
+    assert td.prove_equal(F @ F.transpose(), ws.identity(), []).proved
+
+
+def test_a_frame_pair_refuses_frames_of_different_dimension():
+    # Both are orthonormal; a 2-D frame and a 3-D one still do not name a
+    # rotation between them.
+    ws, _, _ = _ws()
+    with pytest.raises(ValueError, match="different dimensions"):
+        ws.frame_rotation("F", ws.wcs(), ws.polar_2d())
+
+
 def test_constructed_rotations_compose_without_being_told():
     ws, n, theta = _ws()
-    P = ws.turn("P", n, theta)
+    P = ws.rotation("P", n, theta)
     Q = ws.reflection("Q", n)
     result = td.prove_equal(
         (P @ Q) @ ((P @ Q).transpose()),

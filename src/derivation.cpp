@@ -5359,7 +5359,13 @@ auto fold_operator(
     Expr const* op,
     StepReport* report) -> Expr const*
 {
-    auto const terms = parse_operator(ctx, op);
+    // Self-prepare the operator (vibe 000060/000061): its coefficients are
+    // compared to the target's factors by `structural_eq`, and the target has
+    // been canonicalized.  A frame vector has two spellings — the indexed `e₁`
+    // and the value symbol `i` — that canon now folds into one (vibe 000110
+    // M3), so an operator built from `basis.direction(0)` and left raw would
+    // no longer match its own expansion.
+    auto const terms = parse_operator(ctx, canonicalize(ctx, op));
     if (!terms)
     {
         report_no_op(

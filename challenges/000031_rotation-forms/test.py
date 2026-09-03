@@ -3,8 +3,9 @@
 An abstract `ws.rotation("P")` says that P is orthogonal.  These say which
 orthogonal tensor it is:
 
-    Q = ws.reflection("Q", n)        Q = I − 2 n⊗n                  improper
-    P = ws.turn("P", n, θ)           P = n⊗n + (I−n⊗n)cos θ + (n×I)sin θ
+    Q = ws.reflection("Q", n)         Q = I − 2 n⊗n                 improper
+    P = ws.rotation("P", n, θ)        P = n⊗n + (I−n⊗n)cos θ + (n×I)sin θ
+    F = ws.frame_rotation("F", e, E)  F = Σ e_i ⊗ E_i
 
 Both come back as *named symbols* carrying the property, with their formula
 registered as a defining identity — so the algebra runs on one letter and
@@ -116,7 +117,7 @@ def test_the_turn_tensor_is_verified_when_built():
     rather than a rule — the Pythagorean identity from `simplify_scalars`.
     """
     ws, n, theta, I = _setup()
-    P = ws.turn("P", n, theta)
+    P = ws.rotation("P", n, theta)
     show("P unfolds to", ws.definition(P).rhs)
     reduced = tr.reduce_orthogonality(ws.ctx, P_formula(ws, n, theta))
     show("P·Pᵀ reduces to", reduced)
@@ -159,7 +160,7 @@ def test_constructed_rotations_compose():
     """
     ws, n, theta, I = _setup()
     Q = ws.reflection("Q", n)
-    P = ws.turn("P", n, theta)
+    P = ws.rotation("P", n, theta)
     result = td.prove_equal(
         (P @ Q) @ ((P @ Q).transpose()), I, td.rules("transpose", "dyadic", ctx=ws.ctx)
     )
@@ -167,28 +168,23 @@ def test_constructed_rotations_compose():
     assert result.proved
 
 
-@harness.level(
-    "L2",
-    expected=False,
-    reason="P = e_i⊗E_i needs e_i and e^i to compare equal (vibe 000110 M3)",
-)
-def test_the_frame_pair_form():
-    """P = Σ e_i ⊗ E_i — the third form, and the one still out of reach.
+@harness.level("L2")
+def test_the_frame_pair_form_is_verified_when_built():
+    """P = Σ e_i ⊗ E_i, the tensor carrying one frame onto another.
 
-    It reduces to `i⊗i + j⊗j + k⊗k`, which does not compare equal to `I`, nor
-    to `expand_identity(I)`, and `reassemble_completeness` does not fold it:
-    in an orthonormal frame `e_i` and `e^i` are distinct atoms that render
-    identically (vibe 000110 M3).  The form is right; the equality is what the
-    library cannot yet see.
+    This was the increment's red until M3 was fixed.  It reduces to the
+    identity *written out on the frame* — `i⊗i + j⊗j + k⊗k` — and two things
+    had to be true for that to be recognised as `I`: the indexed `e₁` and the
+    value symbol `i` had to be one atom (M3), and the reduction had to be
+    allowed to use the frame's own completeness, which is knowledge no identity
+    about symbols can carry.
+
+    Its sign is the one the library settles for itself: two frames of the same
+    orientation give a rotation, opposite ones a reflection.
     """
-    import tender.basis as tb
-
     ws, n, theta, I = _setup()
     E = ws.wcs()
-    P = sum(
-        (E.direction(k) * E.direction(k) for k in range(1, 3)),
-        E.direction(0) * E.direction(0),
-    )
-    reduced = tr.reduce_orthogonality(ws.ctx, P @ P.transpose())
-    show("Σ e_i⊗e_i · (…)ᵀ", reduced)
-    harness.assert_algebraic_eq(reduced, I, "frame-pair form is orthogonal")
+    F = ws.frame_rotation("F", E, E)
+    show("F unfolds to", ws.definition(F).rhs)
+    assert td.prove_equal(F @ F.transpose(), I, []).proved
+    assert ("F", "orthogonal", True) in ws.ctx.constrained_symbols()

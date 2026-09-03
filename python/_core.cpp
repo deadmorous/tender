@@ -1587,6 +1587,12 @@ NB_MODULE(_core, m)
             "is_orthonormal",
             [](PyBasis const& b) { return b.basis.is_orthonormal(); })
         .def_prop_ro(
+            "volume",
+            [](PyBasis const& b) -> PyExpr
+            { return PyExpr{b.ctx_keep, b.ctx, b.basis.volume()}; },
+            "The signed cell volume √g: ±1 for an orthonormal frame, which is "
+            "its orientation, and the scalar triple product otherwise.")
+        .def_prop_ro(
             "vector_symbol",
             [](PyBasis const& b) -> std::string
             { return std::string{b.basis.vector_symbol().v.view()}; })
