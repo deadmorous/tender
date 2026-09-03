@@ -14,6 +14,7 @@ from ._core import (
     field,
     coordinate,
     constrained_tensor,
+    constrained_field,
     nabla,
     laplacian,
     sin,

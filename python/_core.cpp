@@ -734,6 +734,54 @@ NB_MODULE(_core, m)
         "can be minted.");
 
     m.def(
+        "constrained_field",
+        [](std::string const& name,
+           int rank,
+           std::string const& kind,
+           std::optional<std::vector<PyExpr>> deps,
+           bool proper,
+           nb::object ctx_arg) -> PyExpr
+        {
+            auto [ctx, keep] = resolve_ctx(ctx_arg);
+            auto k = kind == "unit" ? SymbolConstraint::Kind::Unit :
+                     kind == "orthogonal" ?
+                                      SymbolConstraint::Kind::Orthogonal :
+                                      throw nb::value_error(
+                                          "constraint kind must be \"unit\" or "
+                                          "\"orthogonal\"");
+            std::vector<CoordinateRef> refs;
+            if (deps)
+                for (auto const& d: *deps)
+                {
+                    auto const* t = std::get_if<TensorObject>(&d.expr->node);
+                    if (!t || !t->traits || !t->traits->coordinate)
+                        throw nb::value_error(
+                            "field deps must be coordinate variables");
+                    refs.push_back(*t->traits->coordinate);
+                }
+            return PyExpr{
+                keep,
+                ctx,
+                make_constrained_field(
+                    *ctx,
+                    make_tensor_name(name),
+                    rank,
+                    SymbolConstraint{k, proper},
+                    std::move(refs))};
+        },
+        "name"_a,
+        "rank"_a,
+        "kind"_a,
+        "deps"_a = nb::none(),
+        "proper"_a = true,
+        "ctx"_a = nb::none(),
+        "A constrained symbol that is also a field (vibe 000110 I6): a "
+        "rotation that turns with time is both.  The constraint must ride on "
+        "the field object, or a marked derivative and its base — which share a "
+        "name — are two pattern variables in one, and no rule about a spin "
+        "ever fires.");
+
+    m.def(
         "coordinate",
         [](std::string const& name,
            int chart_id,

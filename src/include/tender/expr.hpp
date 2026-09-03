@@ -458,6 +458,19 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
 [[nodiscard]] auto make_constrained_tensor(
     Context&, TensorName, int rank, SymbolConstraint) -> Expr const*;
 
+// A constrained symbol that is also a *field* (vibe 000110 I6): a rotation that
+// turns with time is both.  Carrying the constraint on the field object is not
+// bookkeeping — a marked derivative `∂_t P` inherits its base's traits, and
+// without the constraint both it and `P` are pattern *variables* sharing one
+// name, so any rule mentioning `Ṗ` and `P` together binds the same variable to
+// two different factors and never fires.  Every rule about a spin does that.
+[[nodiscard]] auto make_constrained_field(
+    Context&,
+    TensorName,
+    int rank,
+    SymbolConstraint,
+    std::vector<CoordinateRef> deps = {}) -> Expr const*;
+
 // A tensor field of any rank (vibe 000070 P7): a TensorObject carrying a
 // FieldDeps trait so the differentiator treats it as varying in space rather
 // than constant.  `deps` empty means depend on all coordinates (general

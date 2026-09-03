@@ -504,7 +504,7 @@ angle)`, not `ws.turn` — "turn" is reserved for a particular small-rotation
 case.  `ws.rotation(name)` with no axis remains the abstract declaration, so
 one verb covers "some rotation" and "this rotation".
 
-### I6 — spin: the angular velocity of a *derivation*
+### I6 — spin: the angular velocity of a *derivation* — **first half done**
 
 The observation this brief is organised around.  For **any** derivation `D` and
 any orthogonal `P`, differentiating `P·Pᵀ = I` gives
@@ -555,6 +555,45 @@ the `rotation` group.  A third is wanted by I8: the commutator
 `δ`; `Ṗ = ω × P` and `δP = δo × P` are available with `ω = −½ (Ṗ·Pᵀ)_×`; and
 Poisson's formula `ė_k = ω × e_k` follows for `e_k = P·E_k`, with challenge
 000027 recovered as its planar, single-angle instance.
+
+**Shipped: the skewness, both spins, and the axial vector.**  `tm.rotation`,
+`tm.unit_field`, `tm.spin`, `tm.angular_velocity`, `tm.constraint_rules`;
+challenge 000032.  Skewness is *derived* — `d/dt(P·Pᵀ)` is the spin plus its
+transpose, and `P·Pᵀ` is `I`, whose derivative is zero — and the minted rule is
+the citable record of that derivation rather than an assertion standing in for
+it.
+
+The claim the increment exists to make is visible in one line:
+
+```
+Ṗ·Pᵀ  =  q̇  (∂_q P)·Pᵀ            δP·Pᵀ  =  δq  (∂_q P)·Pᵀ
+```
+
+— the same tensor, with `q̇` in one and `δq` in the other.  The virtual rotation
+is not separate machinery; it is this construction handed a different
+derivation.
+
+Two things had to be true, and neither was in the plan:
+
+- **A turning rotation is a field *and* a constrained symbol, on one object.**
+  Without the field dependence `d/dt P` is zero.  Without the constraint riding
+  on the *same* object, `∂_t P` and `P` — which share a name — are two pattern
+  **variables in one**, so every rule relating them binds the same variable to
+  two different factors and never fires.  Measured: the identical rule fired on
+  `(A·Bᵀ)ᵀ → −(A·Bᵀ)` and not on the marked form.  Hence
+  `make_constrained_field`, and hence `tm.rotation` rather than
+  `ws.rotation` for a rotation that moves.
+- **δ reaches a rotation only through the generalized coordinates.**  A
+  rotation depending on `t` alone has `δP = 0` — correctly, since a variation
+  varies the configuration and not the clock — so `tm.rotation` takes `deps`,
+  and no rule is minted about a spin that vanishes.
+
+**I6b, still to do:** `Ṗ = ω × P` and Poisson's `ė_k = ω × e_k`.  These need
+the *other* direction of the axial-vector bridge — from the skew tensor back to
+`ω × I` — which cannot be a rule about an anonymous expression: it needs `ω` to
+be a **name**.  That is I5's "name it, stamp it, owe a proof" applied to the
+angular velocity, and it is a deliberate design step rather than an oversight,
+so it starts the next increment instead of ending this one.
 
 ### I7 — rigid-body kinematics
 

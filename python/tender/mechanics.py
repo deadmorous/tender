@@ -28,6 +28,7 @@ factory below owns that invariant so no derivation has to.
 """
 
 from . import derivation as _td
+from ._core import Rational as _Rational
 
 __all__ = ["Time"]
 
@@ -56,6 +57,10 @@ class Time:
         #: The time coordinate itself.
         self.t = self._mint(name)
         self._chains = {}  # base name -> [q, q̇, …] incl. the closing member
+        # name -> (kind, rank, deps, proper) for the constrained symbols minted
+        # on this chain (vibe 000110 I6): their *differentiated* constraints
+        # need the dependence, which the context's registry does not record.
+        self._constrained = {}
         self._vars = {}  # base name -> [δq, δq̇, …], same length
 
     # ---- minting --------------------------------------------------------
@@ -125,6 +130,110 @@ class Time:
                 "Use Workspace.field for a field of a spatial chart."
             )
         return self._ws.field(name, rank, deps=deps, symmetric=symmetric)
+
+    def rotation(self, name, deps=None, proper=True):
+        """A rotation that *turns*: a rank-2 field, declared orthogonal.
+
+        Both halves are needed and neither is optional.  Without the field
+        dependence `d/dt P` is zero; without the constraint the whole spin
+        construction collapses, because `∂_t P` and `P` share a name and would
+        be two pattern *variables* in one — every rule relating `Ṗ` to `P`
+        would bind the same variable twice and never fire (vibe 000110 I6).
+
+        `deps` defaults to time alone, which is the orientation of a body whose
+        motion is not yet parameterized.  Pass the generalized coordinates when
+        it is — `deps=[q]` — because δ reaches a rotation only through them: a
+        rotation that depends on `t` alone has `δP = 0`, and rightly so, since
+        the variation varies the configuration and not the clock.
+        """
+        return self._constrain(name, 2, "orthogonal", deps, proper)
+
+    def unit_field(self, name, deps=None):
+        """A unit vector that moves: rank-1 field with `n·n = 1`.
+
+        Its differentiated constraint `n·ṅ = 0` is what
+        :meth:`constraint_rules` mints — the same mechanism as the rotation's
+        skewness, which is Stepan's observation that the two are one thing.
+        """
+        return self._constrain(name, 1, "unit", deps, True)
+
+    def _constrain(self, name, rank, kind, deps, proper):
+        from . import _core as _c
+
+        deps = [self.t] if deps is None else list(deps)
+        self._constrained[name] = (kind, rank, deps, proper)
+        return _c.constrained_field(
+            name, rank, kind, deps=deps, proper=proper, ctx=self._ws.ctx
+        )
+
+    def spin(self, P, operator=None):
+        """`D(P)·Pᵀ` — the spin of a rotation under a derivation.
+
+        Skew, and *derivably* so: differentiating `P·Pᵀ = I` gives
+        `D(P)·Pᵀ + P·D(P)ᵀ = 0`.  With `operator` omitted the derivation is
+        d/dt and the spin is the angular velocity's tensor form; pass
+        :meth:`variation` for the virtual rotation's.
+        """
+        op = self.ddt() if operator is None else operator
+        return _td.apply_operators(op * P) @ P.transpose()
+
+    def angular_velocity(self, P, operator=None):
+        """The axial vector of :meth:`spin`: `ω = −½ (D(P)·Pᵀ)_×`.
+
+        The project writes a skew tensor as `w × I`, never as a standalone Ω,
+        and `(a × I)_× = −2a` in tender's own conventions — so this factor of
+        −½ is the library's, not a textbook's (vibe 000110 M7).
+        """
+        half = self._ws.scalar(_Rational(-1, 2))
+        return half * self.spin(P, operator).vec()
+
+    def constraint_rules(self):
+        """The *differentiated* constraints of every symbol on this chain.
+
+        Stepan's observation, and the reason these are one mechanism rather
+        than two: `n·ṅ = 0` and the skewness of `Ṗ·Pᵀ` are the same statement —
+        the derivative of a constraint is a constraint.  For every derivation
+        in play (d/dt, and δ once coordinates are minted):
+
+            D(n·n = 1)   ⟹   n·D(n) = 0
+            D(P·Pᵀ = I)  ⟹   (D(P)·Pᵀ)ᵀ = −D(P)·Pᵀ
+
+        The undifferentiated forms come from the context itself and are already
+        in force everywhere (vibe 000110 I4); these are what a *moving*
+        constrained symbol adds.
+        """
+        rules = []
+        operators = [("dt", self.ddt())]
+        if self._chains:
+            operators.append(("delta", self.variation()))
+        # Only what this Time minted: the context's registry records a name and
+        # a kind, not what the symbol *depends on*, and a rule built with the
+        # wrong dependence would be about a different object.
+        for name, (kind, rank, deps, proper) in self._constrained.items():
+            for tag, op in operators:
+                rule = self._differentiated(name, kind, rank, deps, proper, tag, op)
+                if rule is not None:
+                    rules.append(rule)
+        return rules
+
+    def _differentiated(self, name, kind, rank, deps, proper, tag, op):
+        from . import _core as _c
+
+        symbol = _c.constrained_field(
+            name, rank, kind, deps=deps, proper=proper, ctx=self._ws.ctx
+        )
+        derivative = _td.apply_operators(op * symbol)
+        if _td.algebraic_eq(derivative, self._ws.scalar(0)):
+            # The derivation does not reach this symbol — δ of a rotation that
+            # depends on time alone, say.  A rule about `0` is noise, not a
+            # fact.
+            return None
+        if kind == "unit":
+            return _td.Identity(
+                f"{name}-unit-{tag}", symbol @ derivative, self._ws.scalar(0)
+            )
+        spin = derivative @ symbol.transpose()
+        return _td.Identity(f"{name}-spin-{tag}", spin.transpose(), -spin)
 
     # ---- the two operators ----------------------------------------------
 

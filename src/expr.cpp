@@ -59,6 +59,24 @@ auto make_constrained_tensor(
         .slots = {}});
 }
 
+auto make_constrained_field(
+    Context& ctx,
+    TensorName name,
+    int rank,
+    SymbolConstraint c,
+    std::vector<CoordinateRef> deps) -> Expr const*
+{
+    ctx.declare_constraint(std::string{name.v.view()}, c);
+    return ctx.make<Expr>(TensorObject{
+        .name = std::move(name),
+        .rank = rank,
+        .traits =
+            TensorTraits{
+                .constraint = c,
+                .field = FieldDeps{deps.empty(), std::move(deps)}},
+        .slots = {}});
+}
+
 auto make_field(
     Context& ctx,
     TensorName name,

@@ -110,3 +110,66 @@ def test_a_spatial_coordinate_does_not_get_that_licence():
     u = ws.field("u", 1)
     with pytest.raises(ValueError):
         td.apply_operators(td.deriv(r) * (ws.nabla() * u))
+
+
+# ---- spin: the angular velocity of a derivation (vibe 000110 I6) --------
+
+
+def _turning():
+    ws = t.Workspace()
+    tm = ws.time("t")
+    q, qd = tm.coordinate("q", orders=1)
+    return ws, tm, q, qd, tm.rotation("P", deps=[q])
+
+
+def test_a_turning_rotation_is_a_field_and_a_constrained_symbol():
+    ws, tm, q, qd, P = _turning()
+    assert ("P", "orthogonal", True) in ws.ctx.constrained_symbols()
+    # A field: it differentiates.  A rotation: P·Pᵀ is I with no rules passed.
+    assert not td.algebraic_eq(
+        td.apply_operators(tm.ddt() * P), t.scalar(0, ctx=ws.ctx)
+    )
+    assert td.prove_equal(P @ P.transpose(), ws.identity(), []).proved
+
+
+def test_the_spin_is_skew_under_both_derivations():
+    ws, tm, q, qd, P = _turning()
+    rules = tm.constraint_rules()
+    for operator in (tm.ddt(), tm.variation()):
+        spin = tm.spin(P, operator)
+        assert td.prove_equal(spin.transpose(), -spin, rules).proved
+
+
+def test_the_two_spins_differ_only_in_the_derivation():
+    ws, tm, q, qd, P = _turning()
+    virtual = tm.spin(P, tm.variation())
+    substituted = virtual.replace_at(virtual.find(name=r"\delta{q}")[0], qd)
+    assert td.algebraic_eq(substituted, tm.spin(P))
+
+
+def test_a_rotation_of_time_alone_has_no_variation():
+    ws = t.Workspace()
+    tm = ws.time("t")
+    tm.coordinate("q", orders=1)
+    P = tm.rotation("P")
+    assert td.algebraic_eq(
+        td.apply_operators(tm.variation() * P), t.scalar(0, ctx=ws.ctx)
+    )
+    # …and no rule is minted about it: a rule concerning 0 is noise.
+    assert not any(r.name.endswith("-delta") for r in tm.constraint_rules())
+
+
+def test_a_moving_unit_vector_gets_its_differentiated_constraint():
+    ws, tm, q, qd, P = _turning()
+    n = tm.unit_field("n", deps=[q])
+    ndot = td.apply_operators(tm.ddt() * n)
+    assert td.prove_equal(
+        n @ ndot, t.scalar(0, ctx=ws.ctx), tm.constraint_rules()
+    ).proved
+
+
+def test_the_angular_velocity_is_minus_half_the_vector_invariant():
+    ws, tm, q, qd, P = _turning()
+    omega = tm.angular_velocity(P)
+    expected = t.scalar(t.Rational(-1, 2), ctx=ws.ctx) * tm.spin(P).vec()
+    assert td.algebraic_eq(omega, expected)
