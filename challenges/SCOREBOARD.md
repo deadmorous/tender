@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**28 challenges** — 26 at L2, 1 at L1, 1 at L0.
+**29 challenges** — 26 at L2, 2 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -22,6 +22,11 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | `lagrange` | derived | 1 | `eps-delta-1`, `delta-contraction` | challenge 000014 |
 | `cross-identity` | derived | 0 | — | challenge 000005 |
 | `cross-removal` | derived | 0 | — | challenge 000015 |
+| `transpose-product` | derived | 0 | — | challenge 000029 |
+| `transpose-trace` | derived | 0 | — | challenge 000029 |
+| `transpose-adjoint` | derived | 0 | — | challenge 000029 |
+| `transpose-dot-left` | derived | 0 | — | challenge 000029 |
+| `transpose-vec` | derived | 0 | — | challenge 000029 |
 | `trace-cyclic` | derived | 0 | — | challenge 000016 |
 | `grad-product` | derived | 0 | — | challenge 000013 |
 | `div-cross` | derived | 0 | — | challenge 000013 |
@@ -43,6 +48,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000015 | a×(b×I) = b⊗a − (a·b)I | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors; vibe 000056 |
 | 000016 | tr(A·B) = tr(B·A) | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors |
 | 000028 | `refuted` is sound: no true identity is called false | L1 verified | vibe 000110 M8 |
+| 000029 | transposing through products, traces, dots and vec | L1 verified | vibe 000110 I5/I6 (rotation tensors need them) |
 
 ## Tier B — Basis / coordinates
 

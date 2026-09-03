@@ -61,14 +61,14 @@ def _true_transpose_identities(ws, A, B):
 def test_no_true_transpose_identity_is_refuted():
     """Each of these is true, and each was refuted before the fix.
 
-    The verdict wanted is *not* "proved" — no transpose rule is supplied, so
-    the rules genuinely cannot reach them.  It is that the component procedure
-    agrees the two sides are equal and the blame falls on the rule set.
+    Asked with **no rules at all**, so the component procedure is the only
+    thing that can answer and the test is about it alone.  (With the transpose
+    group supplied these now prove outright — challenge 000029 — but that would
+    test the rules, not the procedure they are independent of.)
     """
     ws, A, B = _setup()
-    rules = td.rules("dyadic", ctx=ws.ctx)
     for label, lhs, rhs in _true_transpose_identities(ws, A, B):
-        result = td.prove_equal(lhs, rhs, rules)
+        result = td.prove_equal(lhs, rhs, [])
         show(label, f"{result.status}, components_agree={result.components_agree}")
         assert not result.refuted, f"{label} was refuted, and it is true"
         assert result.components_agree, (
@@ -105,6 +105,6 @@ def test_a_false_claim_is_still_refuted():
         ("A·B = B·A", A @ B, B @ A),
         ("tr(A) = tr(A) + 1", A.tr(), A.tr() + t.scalar(1, ctx=ws.ctx)),
     ]:
-        result = td.prove_equal(lhs, rhs, td.rules("dyadic", ctx=ws.ctx))
+        result = td.prove_equal(lhs, rhs, td.rules("transpose", ctx=ws.ctx))
         show(label, result.status)
         assert result.refuted, f"{label} is false and should be refuted"

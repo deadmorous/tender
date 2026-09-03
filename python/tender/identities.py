@@ -246,6 +246,61 @@ def identity_dot(ctx):
     return Identity("identity-dot", _t.identity(ctx=ctx) @ u, u)
 
 
+# ---- transpose group: moving a transpose through the algebra --------------
+#
+# The five facts a derivation about orthogonal tensors leans on constantly
+# (vibe 000110 I5/I6), and the reason they were missing was invisible until
+# I0: every one of them used to come back `refuted`, so the gap read as a
+# wrong answer rather than as an absent rule.
+#
+# Two neighbours are deliberately *not* here: `(a⊗b)ᵀ = b⊗a` and
+# `(A+B)ᵀ = Aᵀ+Bᵀ` are decided by canon with no rules at all (measured), so
+# registering them would add saturation cost and never fire.
+
+
+def transpose_product(ctx):
+    """(A · B)ᵀ = Bᵀ · Aᵀ — the workhorse; conjugation is built from it."""
+    a, b = (_var(ctx, n, 2) for n in "UW")
+    return Identity(
+        "transpose-product", (a @ b).transpose(), b.transpose() @ a.transpose()
+    )
+
+
+def transpose_trace(ctx):
+    """tr(Aᵀ) = tr(A)."""
+    a = _var(ctx, "U", 2)
+    return Identity("transpose-trace", _t.tr(a.transpose()), _t.tr(a))
+
+
+def transpose_adjoint(ctx):
+    """(A · u) · v = u · (Aᵀ · v) — the defining property, as a move.
+
+    What every orthogonality argument runs on: it is how `(P·a)·(P·b) = a·b`
+    reaches `a·(Pᵀ·P)·b` and thence `a·b`.
+    """
+    a = _var(ctx, "U", 2)
+    u, v = (_var(ctx, n, 1) for n in "uw")
+    return Identity("transpose-adjoint", (a @ u) @ v, u @ (a.transpose() @ v))
+
+
+def transpose_dot_left(ctx):
+    """a · Aᵀ = A · a — a vector crosses a transposed tensor by dropping it."""
+    a = _var(ctx, "U", 2)
+    u = _var(ctx, "u", 1)
+    return Identity("transpose-dot-left", u @ a.transpose(), a @ u)
+
+
+def transpose_vec(ctx):
+    """vec(Aᵀ) = −vec(A); a symmetric tensor therefore has none.
+
+    With `(a⊗b)ᵀ = b⊗a` and `vec(a⊗b) = a×b`, transposing reverses every
+    dyad's cross product.  Wanted by the axial-vector bridge, where a skew
+    tensor is exactly one that equals minus its transpose.
+    """
+    a = _var(ctx, "U", 2)
+    return Identity("transpose-vec", _t.vec(a.transpose()), -_t.vec(a))
+
+
 # ---- leibniz group: ∇ acting on a product ---------------------------------
 #
 # These need a *workspace-bound* ∇, so unlike the algebraic rules they build
@@ -554,6 +609,31 @@ register(
 register(
     "cross-removal", cross_removal, tags=("cross",), proof="000015",
     summary="a × (b × I) = b ⊗ a − (a·b) I",
+)
+register(
+    "transpose-product", transpose_product, tags=("dyadic", "transpose"),
+    proof="000029",
+    summary="(A·B)ᵀ = Bᵀ·Aᵀ — transposing reverses a contraction chain",
+)
+register(
+    "transpose-trace", transpose_trace, tags=("dyadic", "transpose"),
+    proof="000029",
+    summary="tr(Aᵀ) = tr(A)",
+)
+register(
+    "transpose-adjoint", transpose_adjoint, tags=("dyadic", "transpose"),
+    proof="000029",
+    summary="(A·u)·v = u·(Aᵀ·v) — the defining property of the transpose",
+)
+register(
+    "transpose-dot-left", transpose_dot_left, tags=("dyadic", "transpose"),
+    proof="000029",
+    summary="a·Aᵀ = A·a",
+)
+register(
+    "transpose-vec", transpose_vec, tags=("dyadic", "transpose"),
+    proof="000029",
+    summary="vec(Aᵀ) = −vec(A)",
 )
 register(
     "trace-cyclic", trace_cyclic, tags=("dyadic",), proof="000016",

@@ -290,7 +290,7 @@ engine finds the route.
 |---|---|---|
 | `prove_equal(lhs, rhs, rules, budget=None)` | `ProofResult` | Saturate both sides together and report. `status` is `"proved"`, `"refuted"` (components differ — a real negative), `"exhausted"` (rules too weak; `components_agree` says the claim still looks true), `"budget"` (nothing concluded), or `"unsupported"` (tender cannot canonicalize it; see `detail`) |
 | `engine_simplify(expr, rules, prefer=…, cost=…)` | `(Expr, report)` | Saturate and extract the best form **under your intent** — `"fewest_eps"` (default), `"smallest"`, `"fewest_crosses"`, `"fewest_identities"`, or raw `cost={…}` weights |
-| `rules(*groups, ctx=…)` | `list[Identity]` | The shipped identities by group: `"eps_delta"`, `"cross"`, `"dyadic"`, `"double_dot"` |
+| `rules(*groups, ctx=…)` | `list[Identity]` | The shipped identities by group: `"eps_delta"`, `"cross"`, `"dyadic"`, `"transpose"`, `"double_dot"`, `"leibniz"` |
 | `citable_for(name, ctx=…)` | `list[Identity]` | Exactly what a derivation of identity `name` may cite — its DAG ancestors, never itself |
 | `Budget(max_passes, max_nodes, max_seconds, max_bytes)` | — | Effort caps. Passes/nodes are **deterministic** (use these in tests); seconds/bytes are machine-dependent, for interactive work. `set_default_budget()` sets the session default |
 
