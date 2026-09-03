@@ -594,6 +594,11 @@ tm.variation_of(qd)              # δq̇
 - **`deps` is required** on `tm.field`: a field left to depend on "all
   coordinates" would chain through the variations too.  For a field of space
   *and* time use `ws.field(..., deps=[x, y, z, tm.t])`.
+- **A rotation that turns** is `tm.rotation(name, deps=…)` — a field *and* a
+  declared orthogonal symbol.  `tm.spin(P)` is `D(P)·Pᵀ`, `tm.angular_velocity(P)`
+  its axial vector `−½(D(P)·Pᵀ)_×`, and `tm.poisson(P)` *derives* `Ṗ = ω × P`
+  and hands it back as a citable rule.  Pass `tm.variation()` to any of them
+  for the virtual rotation `δo`; it is the same construction.
 - **∂ₜ passes through an abstract ∇** — `∂ₜ(∇·σ) = ∇·(∂ₜσ)` with no chart —
   because time is not a coordinate of space, so nothing about the frame varies
   with it.  A coordinate of space gets no such licence (`∂_r ∇` picks up the

@@ -309,9 +309,9 @@ def test_groups_are_named_and_populated():
     # The transpose rules carry both tags: their own group, and `dyadic`,
     # where someone reaching for tr/vec/transpose facts would look for them.
     assert len(ti.group(ctx, "transpose")) == 5
-    assert len(ti.group(ctx, "rotation")) == 4
+    assert len(ti.group(ctx, "rotation")) == 8
     assert len(ti.group(ctx, "dyadic")) == 8
-    assert len(ti.all_rules(ctx)) == 27
+    assert len(ti.all_rules(ctx)) == 31
 
 
 def test_unknown_group_raises_with_the_available_names():

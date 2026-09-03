@@ -40,6 +40,13 @@ auto to_components(Context& ctx, Basis const& frame, Expr const* e)
     for (int i = 0; i < 8; ++i)
     {
         auto const* prev = e;
+        // Distribute first: a claim written with its coefficient factored out
+        // — `½(A − Aᵀ)` — must reduce to the same components as the same claim
+        // written term by term, or the comparison reads a difference of
+        // *shape* as a difference of value.  Measured (vibe 000110 I6b):
+        // `½(A − Aᵀ) = −½(A_×) × I` is true and came back `refuted`, because
+        // one side distributed on the way down and the other did not.
+        e = steps::expand_products(ctx, e);
         e = steps::expand_dyad_ops(ctx, e);
         e = simplify_basis_cross(ctx, e, frame);
         e = simplify_basis_dot(ctx, e, frame);

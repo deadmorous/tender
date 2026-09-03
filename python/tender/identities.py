@@ -591,6 +591,73 @@ def skew_dot_left(ctx):
     return Identity("skew-dot-left", v @ (u % _t.identity(ctx=ctx)), v % u)
 
 
+def skew_decomposition(ctx):
+    """½(A − Aᵀ) = −½ (A_×) × I — the skew part *is* the vector invariant.
+
+    Unconditional, for every rank-2 A, which is what makes it useful: a skew
+    tensor is its own skew part, so `S = −½ (S_×) × I` follows without a
+    skewness hypothesis to encode.  That is the step from "the spin is skew" to
+    "the spin is ω × I", and hence to `Ṗ = ω × P` (vibe 000110 I6b).
+
+    The −½ is the library's own convention, not a textbook's: `(a × I)_× = −2a`
+    here, measured on a concrete vector.
+    """
+    a = _var(ctx, "U", 2)
+    half = _t.scalar(_t.Rational(1, 2), ctx=ctx)
+    eye = _t.identity(ctx=ctx)
+    return Identity(
+        "skew-decomposition",
+        (a - a.transpose()) * half,
+        (_t.scalar(_t.Rational(-1, 2), ctx=ctx) * _t.vec(a)) % eye,
+    )
+
+
+def axial_to_skew(ctx):
+    """(−½ A_×) × I = ½(A − Aᵀ) — :func:`skew_decomposition` read the other way.
+
+    One theorem, two directed rules, because a rewrite library has directions
+    and both are wanted: the first *extracts* an axial vector from a tensor,
+    this one *consumes* one.  It is the step that turns `ω × I` back into the
+    spin it came from, and hence the one that gets `Ṗ = ω × P` (vibe 000110
+    I6b).
+    """
+    a = _var(ctx, "U", 2)
+    half = _t.scalar(_t.Rational(1, 2), ctx=ctx)
+    return Identity(
+        "axial-to-skew",
+        (_t.scalar(_t.Rational(-1, 2), ctx=ctx) * _t.vec(a))
+        % _t.identity(ctx=ctx),
+        (a - a.transpose()) * half,
+    )
+
+
+def skew_dot_tensor(ctx):
+    """(a × I)·B = a × B for a rank-2 B — the rank-2 form of :func:`skew_dot`.
+
+    Two rules rather than one because the rank matters to the matcher, and it
+    matters to the mathematics too: the rank-1 form ends a chain, this one
+    continues it.
+    """
+    u = _var(ctx, "u", 1)
+    b = _var(ctx, "W", 2)
+    return Identity("skew-dot-tensor", (u % _t.identity(ctx=ctx)) @ b, u % b)
+
+
+def cross_dot_assoc(ctx):
+    """(a × B)·c = a × (B·c), for a *rank-2* B.
+
+    Canon flattens a chain of one operator — `(A·B)·c` and `A·(B·c)` are one
+    form — but not across two, and rightly: with a rank-1 middle operand the
+    two groupings are not both well-formed, since `b·c` is a scalar and `a × `
+    a scalar is nothing.  Associativity here is rank-conditional, which a
+    flattening keyed on the operator cannot decide, so it is a rule (vibe
+    000110 I6b).
+    """
+    u, w = (_var(ctx, n, 1) for n in "uw")
+    b = _var(ctx, "W", 2)
+    return Identity("cross-dot-assoc", (u % b) @ w, u % (b @ w))
+
+
 def skew_product(ctx):
     """(a × I)·(b × I) = b⊗a − (a·b) I.
 
@@ -783,6 +850,23 @@ register(
 register(
     "skew-product", skew_product, tags=("rotation",), proof="000031",
     summary="(a × I)·(b × I) = b⊗a − (a·b) I",
+)
+register(
+    "skew-decomposition", skew_decomposition, tags=("rotation",),
+    proof="000033",
+    summary="½(A − Aᵀ) = −½ (A_×) × I — the skew part is the vector invariant",
+)
+register(
+    "axial-to-skew", axial_to_skew, tags=("rotation",), proof="000033",
+    summary="(−½ A_×) × I = ½(A − Aᵀ) — the decomposition, consumed",
+)
+register(
+    "skew-dot-tensor", skew_dot_tensor, tags=("rotation",), proof="000033",
+    summary="(a × I)·B = a × B for rank-2 B",
+)
+register(
+    "cross-dot-assoc", cross_dot_assoc, tags=("rotation",), proof="000033",
+    summary="(a × B)·c = a × (B·c) for rank-2 B",
 )
 register(
     "trace-cyclic", trace_cyclic, tags=("dyadic",), proof="000016",

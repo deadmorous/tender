@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**32 challenges** — 30 at L2, 1 at L1, 1 at L0.
+**33 challenges** — 31 at L2, 1 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -33,6 +33,10 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | `skew-dot` | derived | 0 | — | challenge 000031 |
 | `skew-dot-left` | derived | 0 | — | challenge 000031 |
 | `skew-product` | derived | 0 | — | challenge 000031 |
+| `skew-decomposition` | derived | 0 | — | challenge 000033 |
+| `axial-to-skew` | derived | 0 | — | challenge 000033 |
+| `skew-dot-tensor` | derived | 0 | — | challenge 000033 |
+| `cross-dot-assoc` | derived | 0 | — | challenge 000033 |
 | `trace-cyclic` | derived | 0 | — | challenge 000016 |
 | `grad-product` | derived | 0 | — | challenge 000013 |
 | `div-cross` | derived | 0 | — | challenge 000013 |
@@ -97,3 +101,4 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000026 | m l² φ̈ + m g l sin φ = 0 from δ∫L dt = 0 | L0 failing | Gantmacher, Lectures in Analytical Mechanics §2 (pendulum) |
 | 000027 | rotating frame: d/dt e_r = ω k × e_r = ω e_φ | **L2 performed** | Poisson's formula for a uniformly rotating frame; vibe 000110 |
 | 000032 | the spin D(P)·Pᵀ is skew, for d/dt and for δ alike | **L2 performed** | Zhilin, angle-free rotation kinematics; vibe 000110 I6 |
+| 000033 | Ṗ = ω × P, and Poisson's ė = ω × e as its corollary | **L2 performed** | Zhilin, angle-free rotation kinematics; vibe 000110 I6b |

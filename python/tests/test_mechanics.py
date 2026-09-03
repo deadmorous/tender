@@ -173,3 +173,40 @@ def test_the_angular_velocity_is_minus_half_the_vector_invariant():
     omega = tm.angular_velocity(P)
     expected = t.scalar(t.Rational(-1, 2), ctx=ws.ctx) * tm.spin(P).vec()
     assert td.algebraic_eq(omega, expected)
+
+
+def test_poisson_is_derived_and_returns_a_citable_rule():
+    ws, tm, q, qd, P = _turning()
+    rule = tm.poisson(P, tm.variation())
+    assert rule.name.endswith("poisson")
+    assert td.algebraic_eq(
+        rule.lhs, td.apply_operators(tm.variation() * P)
+    )
+    assert td.algebraic_eq(rule.rhs, tm.angular_velocity(P, tm.variation()) % P)
+
+
+def test_poisson_carries_a_frame_vector():
+    ws = t.Workspace()
+    tm = ws.time("t")
+    P = tm.rotation("P")
+    E = ws.wcs()
+    e0 = P @ E.direction(0)
+    rules = (
+        td.rules("rotation", "transpose", "dyadic", ctx=ws.ctx)
+        + tm.constraint_rules()
+        + [tm.poisson(P)]
+    )
+    assert td.prove_equal(
+        td.apply_operators(tm.ddt() * e0),
+        tm.angular_velocity(P) % e0,
+        rules,
+    ).proved
+
+
+def test_poisson_refuses_a_symbol_it_cannot_derive_for():
+    ws = t.Workspace()
+    tm = ws.time("t")
+    # A field that is not declared a rotation: no spin, no skewness, no rule.
+    F = tm.field("F", 2, deps=[tm.t])
+    with pytest.raises(ValueError):
+        tm.poisson(F)

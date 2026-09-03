@@ -187,6 +187,65 @@ class Time:
         half = self._ws.scalar(_Rational(-1, 2))
         return half * self.spin(P, operator).vec()
 
+    def poisson(self, P, operator=None):
+        """Derive `D(P) = w × P` for a rotation, and hand it back as a rule.
+
+        With `operator` omitted this is `Ṗ = ω × P`, the kinematic content of a
+        rotation: the rate of a rotation is its angular velocity crossed into
+        it.  Pass :meth:`variation` for `δP = δo × P`, which is the same
+        derivation and the reason the virtual rotation needs no machinery of
+        its own.
+
+        *Derived, not asserted.*  Three links, each of them the library's own
+        work (vibe 000110 I6b):
+
+            w × I   =  D(P)·Pᵀ        the spin is skew, and a skew tensor is
+                                      its axial vector crossed into I
+            (w × I)·P  =  w × P       `skew-dot-tensor`
+            D(P)·Pᵀ·P  =  D(P)        orthogonality
+
+        The returned :class:`~tender.derivation.Identity` is the citable record
+        of that, in the shape a later derivation can use — Poisson's formula
+        for a moving frame vector follows from it in one step.  Raises if any
+        link fails rather than returning a rule that was never proved.
+        """
+        op = self.ddt() if operator is None else operator
+        derivative = _td.apply_operators(op * P)
+        w = self.angular_velocity(P, operator)
+        eye = self._ws.identity()
+        spin = derivative @ P.transpose()
+        rules = (
+            _td.rules("rotation", "transpose", "dyadic", ctx=self._ws.ctx)
+            + self.constraint_rules()
+        )
+        by_name = {r.name: r for r in rules}
+
+        # Link 1 is directed rather than saturated, and deliberately so: after
+        # `axial-to-skew` the spin's transpose sits inside a *parenthesised*
+        # sum, where no rule reaches it (vibe 000100 again), so the sum is
+        # distributed before the skewness fires.
+        reduced = _td.canonicalize(w % eye)
+        reduced = _td.apply_identity(reduced, by_name["axial-to-skew"])
+        reduced = _td.canonicalize(_td.expand_products(reduced))
+        for rule in rules:
+            if rule.name.endswith("-spin-dt") or rule.name.endswith("-spin-delta"):
+                reduced = _td.apply_identity(reduced, rule)
+        reduced = _td.canonicalize(reduced)
+        if not _td.algebraic_eq(reduced, spin):
+            raise ValueError(
+                f"the spin of this rotation does not reduce to its axial "
+                f"form: {w} × I gave {reduced}, not {spin}.  Is the symbol "
+                "declared orthogonal, and does the derivation reach it?"
+            )
+        for claim, (lhs, rhs) in {
+            "(w × I)·P = w × P": ((w % eye) @ P, w % P),
+            "D(P)·Pᵀ·P = D(P)": (spin @ P, derivative),
+        }.items():
+            if not _td.prove_equal(lhs, rhs, rules).proved:
+                raise ValueError(f"link failed: {claim}")
+        name = str(P).replace("\\mathbf{", "").replace("}", "")
+        return _td.Identity(f"{name}-poisson", derivative, w % P)
+
     def constraint_rules(self):
         """The *differentiated* constraints of every symbol on this chain.
 

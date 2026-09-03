@@ -588,12 +588,57 @@ Two things had to be true, and neither was in the plan:
   varies the configuration and not the clock — so `tm.rotation` takes `deps`,
   and no rule is minted about a spin that vanishes.
 
-**I6b, still to do:** `Ṗ = ω × P` and Poisson's `ė_k = ω × e_k`.  These need
-the *other* direction of the axial-vector bridge — from the skew tensor back to
-`ω × I` — which cannot be a rule about an anonymous expression: it needs `ω` to
-be a **name**.  That is I5's "name it, stamp it, owe a proof" applied to the
-angular velocity, and it is a deliberate design step rather than an oversight,
-so it starts the next increment instead of ending this one.
+### I6b — `Ṗ = ω × P`, and Poisson — **done**
+
+The guess that this needed `ω` to be a **name** was wrong, and measuring said
+so: the step from "the spin is skew" to "the spin is `ω × I`" is a special case
+of an **unconditional** identity, so there is no hypothesis to encode and
+nothing to name.
+
+```
+½(A − Aᵀ)  =  −½ (A_×) × I        for every rank-2 A
+```
+
+A skew tensor is its own skew part, so `S = −½(S_×) × I` follows.  Four rules
+shipped: that decomposition, its converse (one theorem, two directed rules —
+one *extracts* an axial vector, the other *consumes* one), and the rank-2 forms
+of `(a × I)·B = a × B` and `(a × B)·c = a × (B·c)`.
+
+`tm.poisson(P)` derives `D(P) = w × P` in three links and returns it as a
+citable `Identity`, refusing if a link fails:
+
+```
+ω × I      = Ṗ·Pᵀ      skewness (I6) + the decomposition
+(ω × I)·P  = ω × P     skew-dot-tensor
+(Ṗ·Pᵀ)·P   = Ṗ         orthogonality
+```
+
+Poisson's `ė_k = ω × e_k` is then one step from it, exactly as Stepan put it —
+`ė_k = Ṗ·E_k = (ω × P)·E_k = ω × (P·E_k)` — and `δP = δo × P` is the *same
+call* with `δ` passed instead, which is the arc's claim discharged rather than
+asserted.  Challenge 000033.
+
+Three things measured on the way, all of them costs of the current design:
+
+- **`refuted` was unsound once more, and this one was live.**  `½(A − Aᵀ) =
+  −½(A_×) × I` came back **refuted** — true, and called false — because
+  `to_components` never *distributed*: one side arrived with its coefficient
+  factored outside a sum and the other term by term, and the difference of
+  shape read as a difference of value.  Fixed in the same reduction loop as I0.
+  Two false refutations in two increments, both in `to_components`, both
+  "the reduction did not finish and the leftovers were compared".
+- **A rule does not reach inside a parenthesised sum.**  After `axial-to-skew`
+  fires, the spin's transpose sits inside `½(S − Sᵀ)`, where the skewness rule
+  cannot see it — `rewrite_in_factor` does not descend into a `Paren`.  The
+  derivation distributes first, which works; the general fix is vibe 000100's,
+  and this is another instance for its file.
+- **Mixed-operator associativity is rank-conditional.**  Stepan expected the
+  fence design to give `(a × B)·c = a × (B·c)`.  Canon does flatten a chain of
+  *one* operator — `(A·B)·c` and `A·(B·c)` are structurally one form — but not
+  across two, and it is right not to: with a rank-1 middle operand the two
+  groupings are not both well-formed (`b·c` is a scalar, and `a ×` a scalar is
+  nothing).  A flattening keyed on the operator cannot decide that, so the fact
+  is a rank-gated rule.
 
 ### I7 — rigid-body kinematics
 

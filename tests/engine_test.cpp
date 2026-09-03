@@ -681,3 +681,24 @@ TEST(Constraints, AreNotSharedWithAnotherContext)
     EXPECT_TRUE(a.constraint("P"));
     EXPECT_FALSE(b.constraint("P"));
 }
+
+TEST(Refutation, AFactoredCoefficientIsNotADifference)
+{
+    // The reduction must distribute, or a claim written with its coefficient
+    // factored out is compared against the same claim written term by term and
+    // the difference of *shape* is read as a difference of value.  Measured on
+    // the identity that motivated it (vibe 000110 I6b): ½(A − Aᵀ) is the skew
+    // part, and it came back `refuted` against the distributed right-hand side.
+    Context ctx;
+    auto const* A = rank2(ctx, "A");
+    auto const* half = make_scalar(ctx, Rational{1, 2});
+    auto const* lhs = make_tensor_product(
+        ctx, half, make_difference(ctx, A, make_transpose(ctx, A)));
+    auto const* rhs = make_difference(
+        ctx,
+        make_tensor_product(ctx, half, A),
+        make_tensor_product(ctx, half, make_transpose(ctx, A)));
+
+    EXPECT_EQ(decide_by_components(ctx, lhs, rhs), ComponentVerdict::Equal);
+    EXPECT_FALSE(prove_equal(ctx, lhs, rhs, {}).refuted());
+}
