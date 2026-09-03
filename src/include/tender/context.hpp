@@ -1,9 +1,13 @@
 #pragma once
 
 #include <mpk/mix/util/resource_list.hpp>
+#include <tender/constraint.hpp>
 
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace tender
@@ -159,6 +163,45 @@ public:
         return it == chart_embedding_registry_->end() ? nullptr : &it->second;
     }
 
+    // Declare that `name` satisfies `c` (vibe 000110 I4).  Re-declaring a name
+    // replaces the constraint.  The registry is *per context*, like the chart
+    // registries below and unlike the basis ids: a symbol name is exactly the
+    // kind of thing two independent contexts reuse for different objects, and
+    // one context's rotation named P must not silently constrain another's.
+    // (Every Python `Context` is a child of one hidden default, so sharing
+    // would have made every declaration global — measured, in a test where a
+    // fresh Workspace inherited the previous one's rotations.)
+    void declare_constraint(std::string name, SymbolConstraint c)
+    {
+        (*constraint_registry_)[std::move(name)] = c;
+    }
+
+    // The constraint declared for `name`, or nullopt.
+    auto constraint(std::string_view name) const
+        -> std::optional<SymbolConstraint>
+    {
+        auto it = constraint_registry_->find(std::string{name});
+        if (it == constraint_registry_->end())
+            return std::nullopt;
+        return it->second;
+    }
+
+    // Every declared symbol, in declaration order of the underlying map (by
+    // name).  What the rule minting walks (vibe 000110 I4).
+    auto constrained_symbols() const
+        -> std::vector<std::pair<std::string, SymbolConstraint>>
+    {
+        return {constraint_registry_->begin(), constraint_registry_->end()};
+    }
+
+    // Does this context constrain anything at all?  The fast path for the
+    // component procedure, which must otherwise walk an expression looking for
+    // constrained symbols on every call.
+    auto has_constraints() const -> bool
+    {
+        return !constraint_registry_->empty();
+    }
+
     // Create a child context: shares the id factory (ids remain contiguous)
     // but starts with an empty resource list (independent allocation scope).
     auto new_context() -> Context
@@ -187,6 +230,10 @@ private:
     // Chart-id → embedding metadata for cross-chart reprojection (vibe 000090).
     std::shared_ptr<std::map<int, ChartEmbedding>> chart_embedding_registry_{
         std::make_shared<std::map<int, ChartEmbedding>>()};
+    // Declared symbol constraints (vibe 000110 I4), keyed by tensor name.
+    std::shared_ptr<std::map<std::string, SymbolConstraint>>
+        constraint_registry_{
+            std::make_shared<std::map<std::string, SymbolConstraint>>()};
 
     // Private copy constructor: shares the id factory and basis registry (basis
     // ids stay globally unique across the group), but starts with FRESH

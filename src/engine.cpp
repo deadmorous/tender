@@ -100,11 +100,36 @@ auto has_residue(Expr const* e) -> bool
     return false;
 }
 
+// Does `e` mention a symbol this context constrains (vibe 000110 I4)?
+//
+// A claim about such a symbol is *conditional* — "if P·Pᵀ = I then …" — and the
+// component expansion cannot represent the condition: it writes P as nine
+// independent components, which satisfy no relation at all.  Expanding anyway
+// and comparing would refute true conditional claims, which is what it did
+// before this existed (vibe 000110 M1).  The constraints are quadratic in the
+// components, so this is not a gap to be closed later by a better expansion;
+// it is the boundary of what a component check can decide.
+auto mentions_constrained_symbol(Context const& ctx, Expr const* e) -> bool
+{
+    if (!ctx.has_constraints())
+        return false;
+    if (auto const* t = std::get_if<TensorObject>(&e->node))
+        if (ctx.constraint(t->name.v.view()))
+            return true;
+    for (auto const* c: children(e))
+        if (mentions_constrained_symbol(ctx, c))
+            return true;
+    return false;
+}
+
 } // namespace
 
 auto decide_by_components(Context& ctx, Expr const* lhs, Expr const* rhs)
     -> ComponentVerdict
 {
+    if (mentions_constrained_symbol(ctx, lhs)
+        || mentions_constrained_symbol(ctx, rhs))
+        return ComponentVerdict::Undecided;
     try
     {
         auto const frame = wcs(ctx);

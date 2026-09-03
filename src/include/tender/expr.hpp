@@ -2,6 +2,7 @@
 
 #include <mpk/mix/enum_flags.hpp>
 #include <mpk/mix/util/overloads.hpp>
+#include <tender/constraint.hpp>
 #include <tender/index.hpp>
 #include <tender/permutation_spec.hpp>
 #include <tender/rational.hpp>
@@ -149,6 +150,11 @@ struct TensorTraits
     // well_known: a coordinate is told apart from a plain scalar by inspecting
     // this marker, not by comparison.
     std::optional<CoordinateRef> coordinate = {};
+    // Set on a symbol declared to satisfy an algebraic constraint (vibe 000110
+    // I4): a unit vector, an orthogonal tensor.  Identity-neutral like the
+    // rest — a name means one thing per context — but *not* inert: the matcher
+    // reads it to keep the symbol literal in a pattern (see constraint.hpp).
+    std::optional<SymbolConstraint> constraint = {};
     // Set on a tensor declared as a field (vibe 000070 P7): its coordinate
     // dependence.  Identity-neutral like the rest of the traits — field-ness is
     // consistent per tensor name.  The *applied derivatives*, which DO bear
@@ -443,6 +449,14 @@ decltype(auto) visit(Visitor&& v, Expr const& a, Expr const& b)
     int slot = 0,
     bool nonneg = false,
     bool nonspatial = false) -> Expr const*;
+
+// A symbol declared to satisfy an algebraic constraint (vibe 000110 I4): a
+// rank-1 unit vector or a rank-2 orthogonal tensor.  Stamps the constraint on
+// the object *and* registers it in the Context under the tensor's name, which
+// is the single call that keeps the two in step — the trait is what the
+// matcher can see, the registry is what can be enumerated.
+[[nodiscard]] auto make_constrained_tensor(
+    Context&, TensorName, int rank, SymbolConstraint) -> Expr const*;
 
 // A tensor field of any rank (vibe 000070 P7): a TensorObject carrying a
 // FieldDeps trait so the differentiator treats it as varying in space rather

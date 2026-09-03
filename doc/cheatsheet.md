@@ -82,6 +82,9 @@ chart → write an invariant expression (optionally with ∇ operators) → `eva
 | `scalar(value)` | `Expr` | Scalar literal (int or `Rational`) | Accept floats |
 | `identity(space=None)` | `Expr` | Identity tensor `I`, carries its dimension (`tr(I)=n`); defaults 3-D | Provide a dimension-agnostic `I` |
 | `coordinate(name, chart_id=0, slot=0, nonneg=False)` | `Expr` | One coordinate atom; prefer `coords` for a set | — |
+| `vector(name, unit=False)` | `Expr` | Rank-1 tensor; `unit=True` declares \|n\| = 1 (mints `n·n → 1`) | Normalise anything for you |
+| `rotation(name)` | `Expr` | A proper orthogonal tensor: `P·Pᵀ = Pᵀ·P = I`, det = +1 | Check the sign — it is your assertion |
+| `orthogonal(name, proper=True)` | `Expr` | As above; `proper=False` for a tensor containing a reflection | — |
 | `coords(*names, chart_id=None, nonneg=())` | `list[Expr]` | Mint a coordinate set, slots by position, one fresh `chart_id`; `nonneg` names license `√(x²)→x` | — |
 | `wcs()` | `Basis` | World Cartesian frame i, j, k — **memoised** (same basis every call, so sibling charts share a reference) | Return a fresh frame per call |
 | `cartesian_chart()` / `cylindrical_chart()` / `spherical_chart()` / `polar_chart()` | `(chart, coords)` | **The standard charts, by name.** Mints the coordinates too, with `nonneg` set where it matters | — |
@@ -523,6 +526,30 @@ chart required.  `chart.nabla()` returns ∇ in exactly this form when you want
 to see or manipulate the expansion (challenge 000024, vibe 000102).
 
 ---
+
+## Declared constraints (`ws.rotation`, `ws.vector(unit=True)`)
+
+A constraint is a property of the **symbol**, not of an expression's shape, and
+it is what that symbol *means* — so it is in force in every claim about it,
+with no rule list to remember:
+
+```python
+P = ws.rotation("P")            # P·Pᵀ = Pᵀ·P = I
+n = ws.vector("n", unit=True)   # n·n = 1
+
+td.prove_equal(P @ P.transpose(), ws.identity(), [])   # proved, no rules passed
+td.prove_equal(A @ A.transpose(), ws.identity(), [])   # refuted — A is not one
+```
+
+- **Only that symbol has it.**  An arbitrary rank-2 tensor is not orthogonal,
+  and saying so stays refutable.
+- **A claim about a constrained symbol is never refuted.**  The component check
+  writes `P` as nine independent components, which satisfy no relation, so it
+  abstains rather than answering a question it cannot ask.  You get
+  `exhausted`, not `refuted`.
+- **`proper=` is your assertion, recorded as one.**  `P·Pᵀ = I` holds for a
+  reflection too and tender has no determinant, so nothing checks it.
+- Constraints are per `Workspace`; two workspaces may each have their own `P`.
 
 ## Time, generalized coordinates and δ (`ws.time`)
 

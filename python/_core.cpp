@@ -196,7 +196,45 @@ NB_MODULE(_core, m)
         .def(
             "new_context",
             [](Context& self) -> Context { return self.new_context(); },
-            "Create a child context sharing the index-id factory.");
+            "Create a child context sharing the index-id factory.")
+        .def(
+            "_declare_constraint",
+            [](Context& self,
+               std::string const& name,
+               std::string const& kind,
+               bool proper)
+            {
+                auto k = kind == "unit" ?
+                             SymbolConstraint::Kind::Unit :
+                         kind == "orthogonal" ?
+                             SymbolConstraint::Kind::Orthogonal :
+                             throw nb::value_error(
+                                 "constraint kind must be \"unit\" or "
+                                 "\"orthogonal\"");
+                self.declare_constraint(name, SymbolConstraint{k, proper});
+            },
+            "name"_a,
+            "kind"_a,
+            "proper"_a = true,
+            "Declare that the symbol `name` is a unit vector or an orthogonal "
+            "tensor (vibe 000110 I4).  The declaration is a property of the "
+            "symbol: it mints rewrite rules, and it makes the component "
+            "decision procedure abstain, since a claim about a constrained "
+            "symbol is conditional.")
+        .def(
+            "constrained_symbols",
+            [](Context const& self) -> nb::list
+            {
+                nb::list out;
+                for (auto const& [name, c]: self.constrained_symbols())
+                    out.append(nb::make_tuple(
+                        name,
+                        c.kind == SymbolConstraint::Kind::Unit ? "unit" :
+                                                                 "orthogonal",
+                        c.proper));
+                return out;
+            },
+            "Every declared constraint as (name, kind, proper) triples.");
 
     // ------------------------------------------------------------------ //
     // IndexNameMap
@@ -391,6 +429,14 @@ NB_MODULE(_core, m)
             },
             "map"_a = nb::none(),
             "Render to a LaTeX math string (no surrounding $).")
+        .def_prop_ro(
+            "ctx",
+            [](PyExpr const& e) -> Context* { return e.ctx; },
+            nb::rv_policy::reference_internal,
+            "The Context this expression belongs to.  Needed wherever a "
+            "context-level fact has to be read off an expression rather than "
+            "asked of the caller — the declared symbol constraints, for one "
+            "(vibe 000110 I4).")
         .def_prop_ro(
             "rank",
             [](PyExpr const& e) -> std::optional<int>
@@ -652,6 +698,40 @@ NB_MODULE(_core, m)
         "nabla@nabla (no operand) is NOT a Laplacian.");
 
     // ---- scalar fields (vibe 000069 M1) -------------------------------- //
+
+    m.def(
+        "constrained_tensor",
+        [](std::string const& name,
+           int rank,
+           std::string const& kind,
+           bool proper,
+           nb::object ctx_arg) -> PyExpr
+        {
+            auto [ctx, keep] = resolve_ctx(ctx_arg);
+            auto k = kind == "unit"       ? SymbolConstraint::Kind::Unit :
+                     kind == "orthogonal" ? SymbolConstraint::Kind::Orthogonal :
+                                            throw nb::value_error(
+                                                "constraint kind must be "
+                                                "\"unit\" or \"orthogonal\"");
+            return PyExpr{
+                keep,
+                ctx,
+                make_constrained_tensor(
+                    *ctx,
+                    make_tensor_name(name),
+                    rank,
+                    SymbolConstraint{k, proper})};
+        },
+        "name"_a,
+        "rank"_a,
+        "kind"_a,
+        "proper"_a = true,
+        "ctx"_a = nb::none(),
+        "A symbol declared to satisfy an algebraic constraint (vibe 000110 "
+        "I4): a rank-1 unit vector or a rank-2 orthogonal tensor.  The "
+        "declaration stamps the symbol and registers it in the context, so "
+        "the matcher keeps it literal in a pattern and the constraint's rules "
+        "can be minted.");
 
     m.def(
         "coordinate",

@@ -526,6 +526,51 @@ def citable_for(ctx, name, realm=_t.Realm.Oblique, space=None):
     return rules_for(ctx, *order, realm=realm, space=space)
 
 
+# ---- constrained symbols: rules a *context* declares (vibe 000110 I4) -----
+
+
+def constraint_rules(ctx):
+    """The rules the declared constraints of *ctx* amount to.
+
+    A constraint is not an optional fact about a problem — it is what the
+    symbol *means* — so these are supplied to the verbs automatically rather
+    than passed by hand.  Declaring nothing costs nothing.
+
+        ws.rotation("P")      →   P·Pᵀ → I,  Pᵀ·P → I
+        ws.vector("n", unit=True)  →   n·n → 1
+
+    Per symbol, rather than one schema over a property-restricted pattern
+    variable: a derivation has a handful of rotations, and this needs no
+    matcher work.  Composition needs no rule of its own — `(P·Q)·(P·Q)ᵀ`
+    reaches `I` through these plus the `transpose` group.
+    """
+    out = []
+    for name, kind, proper in ctx.constrained_symbols():
+        # Built through the constrained factory, not `tensor`: the rule's atom
+        # must carry the constraint trait, or the matcher reads it as a pattern
+        # variable and the rule becomes "for any X, X·Xᵀ = I" (measured — it
+        # proved the orthogonality of every tensor in sight).
+        if kind == "unit":
+            n = _t.constrained_tensor(name, 1, "unit", ctx=ctx)
+            out.append(
+                Identity(f"{name}-unit", n @ n, _t.scalar(1, ctx=ctx))
+            )
+        elif kind == "orthogonal":
+            p = _t.constrained_tensor(
+                name, 2, "orthogonal", proper=proper, ctx=ctx
+            )
+            eye = _t.identity(ctx=ctx)
+            out.append(
+                Identity(f"{name}-orthogonal", p @ p.transpose(), eye)
+            )
+            out.append(
+                Identity(
+                    f"{name}-orthogonal-T", p.transpose() @ p, eye
+                )
+            )
+    return out
+
+
 # ---- groups: a labelling over the DAG, for convenient selection -----------
 #
 # Rules that canonicalization already decides are deliberately absent: tr(a⊗b)

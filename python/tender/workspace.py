@@ -50,6 +50,42 @@ class Workspace:
             name, rank, deps=deps, symmetric=symmetric, ctx=self.ctx
         )
 
+    # ---- constrained symbols (vibe 000110 I4) ---------------------------
+
+    def vector(self, name, unit=False):
+        """A rank-1 tensor; ``unit=True`` declares ``|n| = 1``.
+
+        The constraint is a property of the symbol, not of this expression:
+        it mints the rewrite rule ``n·n → 1`` and it is in force in every claim
+        about ``n``, whoever built the expression.
+        """
+        if not unit:
+            return _core.tensor(name, 1, ctx=self.ctx)
+        return _core.constrained_tensor(name, 1, "unit", ctx=self.ctx)
+
+    def rotation(self, name):
+        """A proper orthogonal tensor: ``P·Pᵀ = Pᵀ·P = I``, det P = +1.
+
+        Rotations compose — a ``·``-chain of them is a rotation — which needs
+        no declaring: it follows from the minted rules and the transpose group.
+        For a tensor containing a reflection use :meth:`orthogonal` with
+        ``proper=False``.
+        """
+        return self.orthogonal(name, proper=True)
+
+    def orthogonal(self, name, proper=True):
+        """An orthogonal tensor, proper (a rotation) or improper.
+
+        ``proper`` is your assertion and is recorded as one: ``P·Pᵀ = I`` holds
+        for both kinds and tender has no determinant, so nothing here can check
+        it (vibe 000110 I5).  It matters because the transport rules — cross
+        products survive a rotation and are reversed by a reflection — depend
+        on it.
+        """
+        return _core.constrained_tensor(
+            name, 2, "orthogonal", proper=proper, ctx=self.ctx
+        )
+
     def scalar(self, value):
         """A scalar literal (int or Rational)."""
         return _core.scalar(value, ctx=self.ctx)

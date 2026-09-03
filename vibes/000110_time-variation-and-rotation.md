@@ -185,7 +185,7 @@ correctly: `∂_r ∇` picks up the scale factors and the connection.  Both
 directions are in challenge 000025, and the pass-through test was checked
 against a build with the bit ignored.
 
-### I4 — constrained symbols: `unit` and `orthogonal`
+### I4 — constrained symbols: `unit` and `orthogonal` — **mostly done**
 
 Stepan's requirement, and it reframes the increment: orthogonality is a
 **property carried by the tensor**, the way symmetry is — and, like symmetry, it
@@ -249,6 +249,59 @@ rides on the property instead (see the open question below).
 *Done when:* `prove_equal(P·Pᵀ, I)` proves for a declared rotation with no rule
 list passed by hand; `(P·a)·(P·b) = a·b` proves; the same claim about an
 undeclared rank-2 `A` is still `refuted`; and `n·n → 1` holds for a unit vector.
+
+**Shipped: all but the second.**  `ws.rotation("P")`, `ws.orthogonal("Q",
+proper=False)` and `ws.vector("n", unit=True)`; the constraint rides on the
+symbol *and* in the context registry from one factory call; the rules are added
+to every `prove_equal` automatically; the component procedure abstains when a
+constrained symbol appears; and the negatives hold — an undeclared `A·Aᵀ = I` is
+still refuted.  Challenge 000030.
+
+Three corrections to the plan above, each measured:
+
+1. **"Per-symbol rules need no matcher work" was wrong.**  A slot-less abstract
+   tensor *is* a pattern variable, so the minted `P·Pᵀ → I` first read as "for
+   any X, X·Xᵀ = I" and proved the orthogonality of every tensor in sight.  The
+   fix is not a property-restricted variable but its dual and simpler cousin: a
+   **constrained symbol is literal in a pattern**.  That is why the declaration
+   is stamped on the object as well as registered in the context — the matcher
+   has no `Context` in hand, and threading one through it would be a far larger
+   change than the bit.
+2. **The registry must be per context, not shared with children.**  Sharing
+   read well in the abstract ("a child must see its parent's declarations") and
+   was wrong in practice: every Python `Context` is a child of one hidden
+   default, so every declaration became global and a fresh `Workspace`
+   inherited the previous one's rotations.  A symbol *name* is exactly what two
+   contexts reuse for different objects — the same reasoning the chart
+   registries already carry.
+3. **`(P·a)·(P·b) = a·b` does not prove**, and the reason is not about
+   constraints at all — see I4b.
+
+### I4b — a rule must fire inside a longer chain (vibe 000100, again)
+
+Canon normalises `(P·a)·(P·b)` to the contraction chain `a·Pᵀ·P·b`, and no rule
+fires on the interior run `Pᵀ·P`: a two-factor pattern does not match a
+contiguous sub-run of a longer chain.  Measured with ordinary symbols and no
+constraint anywhere —
+
+```
+rule  A·B → I        target  a·A·B·b        fires: nothing
+```
+
+— through the e-matcher *and* through directed `apply_identity`, so it is not a
+saturation-scheduling accident.  `nf_match.cpp` does have sub-chain machinery
+(`rewrite_subchain`, `splice_chain`), which makes this a narrower question than
+it looks: why that path does not take this case.
+
+This is vibe 000100's context-blocking problem — the ninth instance became the
+tenth — and it now blocks the rotation arc rather than an isolated challenge, so
+it stops being a neighbouring concern.  **I4b is the next thing to do**, before
+I5: every rotation derivation below is a chain of contractions with a
+cancellable interior, and a rule that only fires on a whole term is not much use
+in one.
+
+*Done when:* `A·B → I` fires inside `a·A·B·b`; `(P·a)·(P·b) = a·b` proves; and
+challenges 000029 and 000030 lose their xfail markers.
 
 ### I5 — the ways to write a rotation
 

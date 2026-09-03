@@ -608,3 +608,76 @@ TEST(Refutation, AnUnreducedContractionIsResidueNotAVerdict)
             make_trace(ctx, make_dot(ctx, Y, X))),
         ComponentVerdict::Undecided);
 }
+
+// ---- declared constraints (vibe 000110 I4) ----------------------------
+
+TEST(Refutation, AConstrainedSymbolMakesTheComponentCheckAbstain)
+{
+    // A claim about a declared symbol is conditional, and the component
+    // expansion cannot represent the condition: it writes P as nine
+    // independent components, which satisfy no relation.  Answering from them
+    // refutes true conditional claims, so the procedure must abstain.
+    Context ctx;
+    auto const* P = make_constrained_tensor(
+        ctx,
+        make_tensor_name("P"),
+        2,
+        SymbolConstraint{SymbolConstraint::Kind::Orthogonal, true});
+    auto const* a = vec1(ctx, "a");
+    auto const* b = vec1(ctx, "b");
+
+    EXPECT_EQ(
+        decide_by_components(
+            ctx,
+            make_dot(ctx, make_dot(ctx, P, a), make_dot(ctx, P, b)),
+            make_dot(ctx, a, b)),
+        ComponentVerdict::Undecided);
+
+    // …and only for claims that mention it: the same shape with an
+    // undeclared tensor is still decided, and decided false.
+    auto const* A = rank2(ctx, "A");
+    EXPECT_EQ(
+        decide_by_components(
+            ctx,
+            make_dot(ctx, make_dot(ctx, A, a), make_dot(ctx, A, b)),
+            make_dot(ctx, a, b)),
+        ComponentVerdict::Different);
+}
+
+TEST(Constraints, DeclarationStampsTheSymbolAndRegistersIt)
+{
+    // One call does both, because the two consumers differ: the matcher reads
+    // the stamp (it has no Context), and only the registry can be enumerated
+    // to mint the rules.
+    Context ctx;
+    auto const* P = make_constrained_tensor(
+        ctx,
+        make_tensor_name("P"),
+        2,
+        SymbolConstraint{SymbolConstraint::Kind::Orthogonal, false});
+
+    auto const& obj = std::get<TensorObject>(P->node);
+    ASSERT_TRUE(obj.traits && obj.traits->constraint);
+    EXPECT_EQ(obj.traits->constraint->kind, SymbolConstraint::Kind::Orthogonal);
+    EXPECT_FALSE(obj.traits->constraint->proper);
+
+    auto const c = ctx.constraint("P");
+    ASSERT_TRUE(c);
+    EXPECT_FALSE(c->proper);
+    EXPECT_FALSE(ctx.constraint("Q"));
+}
+
+TEST(Constraints, AreNotSharedWithAnotherContext)
+{
+    // A symbol name is exactly what two independent contexts reuse for
+    // different objects; one context's rotation P must not constrain another's.
+    Context a;
+    (void)make_constrained_tensor(
+        a,
+        make_tensor_name("P"),
+        2,
+        SymbolConstraint{SymbolConstraint::Kind::Orthogonal, true});
+    Context b = a.new_context();
+    EXPECT_TRUE(a.constraint("P"));
+    EXPECT_FALSE(b.constraint("P"));
+}

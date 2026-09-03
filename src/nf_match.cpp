@@ -187,11 +187,18 @@ auto nf_rank(Nf const* nf) -> std::optional<int>
 // ---- subtree variables ------------------------------------------------------
 
 // A slot-less, non-well-known named tensor in the LHS is a subtree variable: it
-// matches any whole target factor.  Well-known tensors (I, δ, ε) and slotted
-// tensors stay literal.
+// matches any whole target factor.  Well-known tensors (I, δ, ε), slotted
+// tensors, and *constrained symbols* stay literal.
+//
+// The last of those is what lets a declared constraint be stated as a rule at
+// all (vibe 000110 I4).  `P·Pᵀ → I` written with an ordinary abstract P would
+// be read as "for any X, X·Xᵀ = I" — measured, and it proved the orthogonality
+// of every tensor in sight.  A declared symbol is a specific object, so the
+// pattern must mean *that* symbol.
 auto is_subtree_var(TensorObject const& t) -> bool
 {
-    return t.slots.empty() && !(t.traits && t.traits->well_known);
+    return t.slots.empty()
+           && !(t.traits && (t.traits->well_known || t.traits->constraint));
 }
 
 auto try_bind_subtree(NfBinding& bnd, std::string_view name, Factor const* tgt)

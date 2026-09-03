@@ -89,23 +89,23 @@ def test_each_rule_fires_and_proves_its_own_statement():
 @harness.level(
     "L2",
     expected=False,
-    reason="the component check refutes a conditional claim (vibe 000110 M1); "
-    "needs I4's constrained symbols",
+    reason="a rule does not fire inside a longer contraction chain "
+    "(vibe 000100 context-blocking); I4 removed the refutation, not this",
 )
 def test_the_orthogonality_move_is_what_this_group_is_for():
     """(P·a)·(P·b) = a·b, given only that P·Pᵀ = I — the reason for the group.
 
-    Enumerated red, and it is precisely vibe 000110 I4's acceptance test.  The
-    rules are all present now: `transpose-adjoint` takes the left side to
-    `a·(Pᵀ·P)·b`, and the two orthogonality rules finish it.  What stops it is
-    upstream of the rules — the component decision procedure expands `P` as an
-    *arbitrary* tensor, finds the sides differ, and refutes before a single
-    rule fires (M1).  A hypothesis given as a rewrite rule is invisible to it.
+    Enumerated red, and it has now moved once: I4 made the claim *answerable*
+    (it used to come back `refuted`, because the component procedure expanded
+    P as an arbitrary tensor and answered before any rule fired), but not yet
+    provable.  What stops it now is one level down: canon normalises the left
+    side to the chain `a·Pᵀ·P·b`, and a two-factor pattern does not match a
+    contiguous sub-run of a longer contraction chain, so the orthogonality
+    rule never fires on the interior `Pᵀ·P`.
 
-    I4 fixes that by carrying orthogonality on the *symbol*, where both the
-    rules and the refutation can see it.  When it lands, this test starts
-    passing and CI turns red until the marker is removed — which is the point
-    of a strict xfail.
+    Nothing about constraints is involved — `A·B → I` does not fire inside
+    `a·A·B·b` either.  It is vibe 000100's context-blocking problem, measured
+    once more.  See challenge 000030.
     """
     ws, A, B, u, v = _setup()
     P = ws.tensor("P", rank=2)

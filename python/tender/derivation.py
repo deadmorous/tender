@@ -1003,6 +1003,20 @@ class ProofResult:
         )
 
 
+def _constraint_rules_for(expr):
+    """The constraint rules of the context *expr* belongs to (vibe 000110 I4).
+
+    Read off the expression rather than asked of the caller, so a declared
+    rotation behaves like one wherever it appears.
+    """
+    from . import identities as _ident
+
+    ctx = expr.ctx
+    if not ctx.constrained_symbols():
+        return []
+    return _ident.constraint_rules(ctx)
+
+
 def _rule_arrays(rules):
     rules = list(rules)
     return (
@@ -1033,10 +1047,17 @@ def prove_equal(lhs, rhs, rules, budget=None, max_passes=None, max_nodes=None):
     false claim comes back ``"refuted"`` rather than merely unproved
     (vibe 000097).
 
+    A context's **declared constraints** (``ws.rotation``, ``ws.vector(…,
+    unit=True)``) are added to *rules* automatically: a constraint is not an
+    optional fact about the problem but what the symbol means, so it is in
+    force in every claim about that symbol (vibe 000110 I4).  Declaring
+    nothing costs nothing.
+
     Returns a :class:`ProofResult`; a budget trip also warns
     :class:`BudgetExceeded`, because "not proved within budget" must never be
     mistaken for "not equal".
     """
+    rules = list(rules) + _constraint_rules_for(lhs)
     lhss, rhss, names = _rule_arrays(rules)
     budget = _resolve_budget(budget, max_passes, max_nodes)
     result = ProofResult(

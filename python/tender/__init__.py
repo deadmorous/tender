@@ -13,6 +13,7 @@ from ._core import (
     identity,
     field,
     coordinate,
+    constrained_tensor,
     nabla,
     laplacian,
     sin,

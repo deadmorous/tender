@@ -48,6 +48,17 @@ auto make_coordinate(
         .slots = {}});
 }
 
+auto make_constrained_tensor(
+    Context& ctx, TensorName name, int rank, SymbolConstraint c) -> Expr const*
+{
+    ctx.declare_constraint(std::string{name.v.view()}, c);
+    return ctx.make<Expr>(TensorObject{
+        .name = std::move(name),
+        .rank = rank,
+        .traits = TensorTraits{.constraint = c},
+        .slots = {}});
+}
+
 auto make_field(
     Context& ctx,
     TensorName name,
