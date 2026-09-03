@@ -1538,6 +1538,39 @@ auto split_dyad(Expr const* e) -> std::optional<DyadSplit>
     return DyadSplit{std::move(scalars), legs[0], legs[1]};
 }
 
+// The same split for a *scaled single* tensor: `2A`, `cos θ (I − n⊗n)`.  All
+// three invariant unaries below are linear over scalar multiplication, so the
+// scalars come out and the operation stays on the leg.
+//
+// Without it `tr(2A)`, `(2A)ᵀ` and `vec(2A)` did not canonicalize *at all*
+// (vibe 000110 I5): not being dyads, they kept the unary wrapped around a ⊗
+// node, and `encapsulate` refuses one of those with a message about fence
+// distribution — a diagnosis that sent the reader a long way from a missing
+// two-line case.  It surfaced on the turn tensor, whose every term is a scaled
+// one.  Requires at least one scalar, so a bare `Aᵀ` is untouched.
+struct ScaledSplit final
+{
+    std::vector<Expr const*> scalars;
+    Expr const* leg;
+};
+auto split_scaled(Expr const* e) -> std::optional<ScaledSplit>
+{
+    std::vector<Expr const*> flat;
+    flatten_factors(e, flat);
+    std::vector<Expr const*> scalars;
+    std::vector<Expr const*> legs;
+    for (auto const* f: flat)
+    {
+        if (infer_rank(f) == std::optional<int>{0})
+            scalars.push_back(f);
+        else
+            legs.push_back(f);
+    }
+    if (legs.size() != 1 || scalars.empty())
+        return std::nullopt;
+    return ScaledSplit{std::move(scalars), legs[0]};
+}
+
 // Left-fold factors into a TensorProduct (one factor returns itself).
 auto product_of(Context& ctx, std::vector<Expr const*> const& factors)
     -> Expr const*
@@ -1667,6 +1700,12 @@ auto expand_unary(
         {
             if (auto const sp = split_dyad(leaf))
                 return dyad_rule(*sp);
+            if (auto const sc = split_scaled(leaf))
+            {
+                auto fs = sc->scalars;
+                fs.push_back(make_node(sc->leg));
+                return product_of(ctx, fs);
+            }
             return make_node(leaf); // not reducible — leave the op in place
         });
 }

@@ -299,17 +299,19 @@ def test_groups_are_named_and_populated():
     # Groups are a labelling over the DAG, so their order follows the
     # registration (dependency) order of the nodes carrying each tag.
     assert set(ti.group_names()) == {
-        "eps_delta", "cross", "dyadic", "transpose", "double_dot", "leibniz",
+        "eps_delta", "cross", "dyadic", "transpose", "rotation",
+        "double_dot", "leibniz",
     }
     assert len(ti.group(ctx, "eps_delta")) == 4
-    assert len(ti.group(ctx, "cross")) == 4
+    assert len(ti.group(ctx, "cross")) == 5
     assert len(ti.group(ctx, "double_dot")) == 1
     assert len(ti.group(ctx, "leibniz")) == 5
     # The transpose rules carry both tags: their own group, and `dyadic`,
     # where someone reaching for tr/vec/transpose facts would look for them.
     assert len(ti.group(ctx, "transpose")) == 5
-    assert len(ti.group(ctx, "dyadic")) == 7
-    assert len(ti.all_rules(ctx)) == 21
+    assert len(ti.group(ctx, "rotation")) == 4
+    assert len(ti.group(ctx, "dyadic")) == 8
+    assert len(ti.all_rules(ctx)) == 27
 
 
 def test_unknown_group_raises_with_the_available_names():

@@ -341,7 +341,7 @@ The dividend is the one the plan predicted but could not yet demonstrate:
 `transpose-product`, `Q-orthogonal`, `identity-dot`, `P-orthogonal` — four
 rules, none of them about composition (challenge 000030).
 
-### I5 — the ways to write a rotation
+### I5 — the ways to write a rotation — **mostly done**
 
 An abstract declared `P` is necessary and **not sufficient** (Stepan).  The
 forms that must all be first-class, each of them orthogonal *by construction*:
@@ -449,6 +449,49 @@ is not in this brief.
 `P·Pᵀ = I` through the library's own rules, with the right sign; a composition
 of two declared rotations is a rotation without being told; and an unanticipated
 form can be checked and stamped by the general path.
+
+**Shipped: the reflection, the turn tensor, composition, and check-and-stamp.**
+`ws.reflection`, `ws.turn`, `ws.orthogonal_from`, `ws.definition`; both
+constructors *verify* on construction and refuse with the residual, so nothing
+here is asserted except the sign.  Challenge 000031.
+
+Four things learned in the building, three of them gaps closed on the way:
+
+1. **The verification is a directed reduction, not a saturation.**
+   `prove_equal` on the turn tensor exhausted memory; the same facts applied as
+   directed rewrites, interleaved with `simplify_scalars`, close in four
+   rounds.  It has to be that way for a reason worth keeping: `cos²θ + sin²θ =
+   1` is a **step**, not a rule, so no amount of saturation would ever reach
+   it.  Vibe 000102's Q1 conclusion — a transformation, not a pattern — for the
+   fourth time.
+2. **Canon could not transpose a scaled tensor.**  `(2A)ᵀ`, `tr(2A)` and
+   `vec(2A)` did not canonicalize *at all*: not being dyads, they kept the
+   unary wrapped around a ⊗ node, and `encapsulate` refuses one of those with a
+   message about fence distribution — a diagnosis that sends the reader a long
+   way from a missing two-line case.  All three unaries are linear over scalar
+   multiplication; `expand_dyad_ops` now splits a *scaled single* operand as
+   well as a dyad.  Its docstring had claimed "scalar factors pulled through"
+   all along.
+3. **`I·X = X` had no right-hand companion.**  Canon does not commute a
+   contraction chain, so `I·X` and `X·I` are two shapes and one rule cannot
+   cover both; the reflection stalled on `n·I`.  `identity-dot-right` is an
+   axiom beside `identity-dot`.
+4. **`a × a = 0` was not known.**  Canon folds `a×b + b×a` — the antisymmetry —
+   but not its degenerate case, because the canonical ordering of a cross has
+   nothing to swap when the operands are already equal.  Registered as
+   `cross-self`; without it the turn tensor reduced to `I + (…)(n × n)` and
+   stopped one step short.
+
+And the four axial-vector rules of M5 are now the `rotation` group —
+`skew-transpose`, `skew-dot`, `skew-dot-left`, `skew-product` — measured true
+and absent before being written, and the content I6 rests on directly.
+
+**The frame-pair form `P = e_i ⊗ E_i` is the enumerated red**, blocked exactly
+where M3 said it would be: it reduces to `i⊗i + j⊗j + k⊗k`, which compares
+equal neither to `I` nor to `expand_identity(I)`, and
+`reassemble_completeness` does not fold it.  The form is right; the *equality*
+is what the library cannot see, because in an orthonormal frame `e_i` and `e^i`
+are distinct atoms that render identically.  Fixing M3 is what unblocks it.
 
 ### I6 — spin: the angular velocity of a *derivation*
 

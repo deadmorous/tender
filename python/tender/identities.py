@@ -189,6 +189,19 @@ def bac_cab(ctx):
     return Identity("bac-cab", u % (v % w), v * (u @ w) - w * (u @ v))
 
 
+def cross_self(ctx):
+    """a × a = 0.
+
+    Canon knows the antisymmetry — `a×b + b×a` folds to 0 — but not its
+    degenerate case, because the canonical ordering of a cross has nothing to
+    swap when the two operands are already equal.  So the fact is a rule, and
+    it is not decoration: without it the turn tensor's `P·Pᵀ` reduced to
+    `I + (…)(n × n)` and stopped one step from the answer (vibe 000110 I5).
+    """
+    u = _var(ctx, "u", 1)
+    return Identity("cross-self", u % u, _t.scalar(0, ctx=ctx))
+
+
 def cross_identity(ctx):
     """a × I = I × a."""
     u = _var(ctx, "u", 1)
@@ -249,6 +262,18 @@ def identity_dot(ctx):
     """
     u = _var(ctx, "u", None)
     return Identity("identity-dot", _t.identity(ctx=ctx) @ u, u)
+
+
+def identity_dot_right(ctx):
+    """X · I = X, at any rank — the companion of :func:`identity_dot`.
+
+    Canon does not commute a contraction chain, so `I·X` and `X·I` are two
+    shapes and one rule cannot cover both.  Missing it left the reflection
+    tensor `(I − 2n⊗n)` stuck one step from `I`, on the term `n·I`
+    (vibe 000110 I5).
+    """
+    u = _var(ctx, "u", None)
+    return Identity("identity-dot-right", u @ _t.identity(ctx=ctx), u)
 
 
 # ---- transpose group: moving a transpose through the algebra --------------
@@ -531,6 +556,56 @@ def citable_for(ctx, name, realm=_t.Realm.Oblique, space=None):
     return rules_for(ctx, *order, realm=realm, space=space)
 
 
+# ---- rotation group: the skew tensor `a × I` and its axial vector ---------
+#
+# A skew tensor is written `a × I` here, never as a standalone Ω (vibe 000110
+# I6), so these four are how an angular velocity is manipulated at all: they
+# are what turns `Ṗ·Pᵀ` into `ω × P`.  All four were measured true and absent
+# before being written down — the component procedure agreed, and no rule
+# fired.
+
+
+def skew_transpose(ctx):
+    """(a × I)ᵀ = −(a × I) — the skewness, as a rewrite."""
+    u = _var(ctx, "u", 1)
+    return Identity(
+        "skew-transpose", (u % _t.identity(ctx=ctx)).transpose(),
+        -(u % _t.identity(ctx=ctx)),
+    )
+
+
+def skew_dot(ctx):
+    """(a × I)·b = a × b — the axial vector acting to the right."""
+    u, v = (_var(ctx, n, 1) for n in "uw")
+    return Identity("skew-dot", (u % _t.identity(ctx=ctx)) @ v, u % v)
+
+
+def skew_dot_left(ctx):
+    """b·(a × I) = b × a — acting to the left, hence the reversed cross.
+
+    Not a restatement of :func:`skew_dot`: canon does not commute a
+    contraction, so the two sides of a skew tensor are two shapes.  The sign
+    follows from skewness — `b·T = Tᵀ·b = −T·b`.
+    """
+    u, v = (_var(ctx, n, 1) for n in "uw")
+    return Identity("skew-dot-left", v @ (u % _t.identity(ctx=ctx)), v % u)
+
+
+def skew_product(ctx):
+    """(a × I)·(b × I) = b⊗a − (a·b) I.
+
+    The composition of two skew tensors, and the identity behind the
+    commutator that relates δω to the virtual rotation.
+    """
+    u, v = (_var(ctx, n, 1) for n in "uw")
+    eye = _t.identity(ctx=ctx)
+    return Identity(
+        "skew-product",
+        (u % eye) @ (v % eye),
+        v * u - (u @ v) * eye,
+    )
+
+
 # ---- constrained symbols: rules a *context* declares (vibe 000110 I4) -----
 
 
@@ -653,12 +728,20 @@ register(
     summary="(a × b) · (c × d) = (a·c)(b·d) − (a·d)(b·c)",
 )
 register(
+    "cross-self", cross_self, tags=("cross",), proof="000031",
+    summary="a × a = 0 — the degenerate case of antisymmetry",
+)
+register(
     "cross-identity", cross_identity, tags=("cross",), proof="000005",
     summary="a × I = I × a",
 )
 register(
     "cross-removal", cross_removal, tags=("cross",), proof="000015",
     summary="a × (b × I) = b ⊗ a − (a·b) I",
+)
+register(
+    "identity-dot-right", identity_dot_right, kind=AXIOM, tags=("dyadic",),
+    summary="a · I = a — the identity tensor on the right",
 )
 register(
     "transpose-product", transpose_product, tags=("dyadic", "transpose"),
@@ -684,6 +767,22 @@ register(
     "transpose-vec", transpose_vec, tags=("dyadic", "transpose"),
     proof="000029",
     summary="vec(Aᵀ) = −vec(A)",
+)
+register(
+    "skew-transpose", skew_transpose, tags=("rotation",), proof="000031",
+    summary="(a × I)ᵀ = −(a × I) — a skew tensor is minus its transpose",
+)
+register(
+    "skew-dot", skew_dot, tags=("rotation",), proof="000031",
+    summary="(a × I)·b = a × b — the axial vector acting to the right",
+)
+register(
+    "skew-dot-left", skew_dot_left, tags=("rotation",), proof="000031",
+    summary="b·(a × I) = b × a — acting to the left",
+)
+register(
+    "skew-product", skew_product, tags=("rotation",), proof="000031",
+    summary="(a × I)·(b × I) = b⊗a − (a·b) I",
 )
 register(
     "trace-cyclic", trace_cyclic, tags=("dyadic",), proof="000016",

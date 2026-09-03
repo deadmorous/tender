@@ -85,6 +85,10 @@ chart → write an invariant expression (optionally with ∇ operators) → `eva
 | `vector(name, unit=False)` | `Expr` | Rank-1 tensor; `unit=True` declares \|n\| = 1 (mints `n·n → 1`) | Normalise anything for you |
 | `rotation(name)` | `Expr` | A proper orthogonal tensor: `P·Pᵀ = Pᵀ·P = I`, det = +1 | Check the sign — it is your assertion |
 | `orthogonal(name, proper=True)` | `Expr` | As above; `proper=False` for a tensor containing a reflection | — |
+| `reflection(name, n)` | `Expr` | `I − 2 n⊗n` about a unit `n`, **verified**, stamped improper | Accept a non-unit axis |
+| `turn(name, n, theta)` | `Expr` | `n⊗n + (I−n⊗n)cos θ + (n×I)sin θ`, **verified**, proper | — |
+| `orthogonal_from(name, expr, proper=True)` | `Expr` | Name *any* form after verifying `X·Xᵀ = Xᵀ·X = I`; refuses with the residual | Verify the *sign* — no determinant exists |
+| `definition(symbol)` | `Identity` | The formula a constructed rotation stands for, to unfold with `apply_identity` | Exist for an abstract `rotation()` |
 | `coords(*names, chart_id=None, nonneg=())` | `list[Expr]` | Mint a coordinate set, slots by position, one fresh `chart_id`; `nonneg` names license `√(x²)→x` | — |
 | `wcs()` | `Basis` | World Cartesian frame i, j, k — **memoised** (same basis every call, so sibling charts share a reference) | Return a fresh frame per call |
 | `cartesian_chart()` / `cylindrical_chart()` / `spherical_chart()` / `polar_chart()` | `(chart, coords)` | **The standard charts, by name.** Mints the coordinates too, with `nonneg` set where it matters | — |
@@ -550,6 +554,21 @@ td.prove_equal(A @ A.transpose(), ws.identity(), [])   # refuted — A is not on
 - **`proper=` is your assertion, recorded as one.**  `P·Pᵀ = I` holds for a
   reflection too and tender has no determinant, so nothing checks it.
 - Constraints are per `Workspace`; two workspaces may each have their own `P`.
+
+**Writing a particular rotation.**  `ws.reflection` / `ws.turn` /
+`ws.orthogonal_from` return a *named symbol* that carries the property, with
+the formula kept aside as `ws.definition(P)` — so the algebra runs on one
+letter and unfolds only where the formula is wanted:
+
+```python
+n = ws.vector("n", unit=True)
+P = ws.turn("P", n, theta)              # verified on construction, or refused
+td.apply_identity(expr, ws.definition(P))   # P → n⊗n + (I−n⊗n)cos θ + (n×I)sin θ
+```
+
+Composition needs nothing: `(P·Q)·(P·Q)ᵀ = I` follows from the two symbols'
+own rules plus `td.rules("transpose")`.  The *sign* of a composite is the part
+no rule computes.
 
 ## Time, generalized coordinates and δ (`ws.time`)
 

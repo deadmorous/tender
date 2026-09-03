@@ -20,9 +20,11 @@ The explicit ``ctx=`` API still works unchanged; the facade is purely additive.
 """
 
 from . import _core
+from . import derivation as _td
 from . import basis as _basis
 from . import chart as _chart
 from . import mechanics as _mechanics
+from . import rotation as _rotation
 
 __all__ = ["Workspace"]
 
@@ -34,6 +36,9 @@ class Workspace:
         self.ctx = _core.Context()
         self._next_chart_id = 1
         self._wcs = None
+        # name -> the expression a constructed rotation stands for (vibe
+        # 000110 I5); read by `definition`, never by the algebra.
+        self._definitions = {}
 
     # ---- expression factories (ctx implicit) ----------------------------
 
@@ -84,6 +89,85 @@ class Workspace:
         """
         return _core.constrained_tensor(
             name, 2, "orthogonal", proper=proper, ctx=self.ctx
+        )
+
+    def orthogonal_from(self, name, expr, proper=True, rounds=None):
+        """Name *expr* as an orthogonal tensor — after verifying that it is one.
+
+        The general path, and the reason the list of shipped forms below need
+        not be closed (vibe 000110 I5): hand in a form the library has never
+        seen, and it is checked against the constraints already declared before
+        it is stamped.
+
+            n = ws.vector("n", unit=True)
+            Q = ws.orthogonal_from("Q", I - 2*(n*n), proper=False)
+
+        Returns a *symbol* carrying the property, with `expr` registered as its
+        definition (see :meth:`definition`).  Raises with the residual if the
+        form does not reduce — a refusal, not a warning, because a stamp that
+        might be wrong is worse than no stamp.
+
+        ``proper`` cannot be verified: `X·Xᵀ = I` holds for a reflection too and
+        tender has no determinant.  It is your assertion, recorded as one.
+        """
+        kw = {} if rounds is None else {"rounds": rounds}
+        residual = _rotation.verify_orthogonal(
+            self.ctx, expr, self.identity(), **kw
+        )
+        if residual is not None:
+            raise ValueError(
+                f"{name!r} is not orthogonal, so it was not declared: "
+                f"{residual}.  If the form is right and the library merely "
+                f"cannot see it, the missing step is a rule, not a stamp."
+            )
+        symbol = self.orthogonal(name, proper=proper)
+        self._definitions[name] = (symbol, expr)
+        return symbol
+
+    def reflection(self, name, n):
+        """The reflection `I − 2 n⊗n` in the plane ⟂ `n`; improper.
+
+        `n` must be a declared unit vector (`ws.vector(..., unit=True)`) —
+        without `n·n = 1` the form is not orthogonal and the verification says
+        so rather than stamping it anyway.
+        """
+        I = self.identity()
+        return self.orthogonal_from(name, I - 2 * (n * n), proper=False)
+
+    def turn(self, name, n, theta):
+        """The turn tensor about the unit axis `n` by the angle `theta`:
+
+            P = n⊗n + (I − n⊗n) cos θ + (n × I) sin θ
+
+        Proper.  Verified on construction, which takes the four skew-tensor
+        rules of the `rotation` group, `n·n = 1`, `a × a = 0`, and the
+        Pythagorean identity from the scalar simplifier.
+        """
+        from . import _core as _c
+
+        I = self.identity()
+        nn = n * n
+        form = nn + (I - nn) * _c.cos(theta) + (n % I) * _c.sin(theta)
+        return self.orthogonal_from(name, form, proper=True)
+
+    def definition(self, symbol):
+        """The defining identity of a constructed rotation, for unfolding.
+
+            P = ws.turn("P", n, theta)
+            td.apply_identity(expr, ws.definition(P))    # P → its formula
+
+        Raises for a symbol that has no definition — an abstract
+        `ws.rotation("P")` is a rotation and nothing more.
+        """
+        # Matched structurally rather than by the rendered name: a rank-2
+        # symbol renders bolded, and string surgery on LaTeX is not identity.
+        for name, (declared, expr) in self._definitions.items():
+            if _td.structural_eq(declared, symbol):
+                return _td.Identity(f"{name}-definition", declared, expr)
+        raise ValueError(
+            f"{symbol} has no definition: it was declared orthogonal, not "
+            "constructed.  Only the forms built by reflection / turn / "
+            "orthogonal_from carry one."
         )
 
     def scalar(self, value):

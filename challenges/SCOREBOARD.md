@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**30 challenges** — 28 at L2, 1 at L1, 1 at L0.
+**31 challenges** — 28 at L2, 2 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -20,13 +20,19 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | `eps-delta-2` | derived | 0 | — | challenge 000003 |
 | `bac-cab` | derived | 1 | `eps-delta-1` | challenge 000001 |
 | `lagrange` | derived | 1 | `eps-delta-1`, `delta-contraction` | challenge 000014 |
+| `cross-self` | derived | 0 | — | challenge 000031 |
 | `cross-identity` | derived | 0 | — | challenge 000005 |
 | `cross-removal` | derived | 0 | — | challenge 000015 |
+| `identity-dot-right` | axiom | — | — | — |
 | `transpose-product` | derived | 0 | — | challenge 000029 |
 | `transpose-trace` | derived | 0 | — | challenge 000029 |
 | `transpose-adjoint` | derived | 0 | — | challenge 000029 |
 | `transpose-dot-left` | derived | 0 | — | challenge 000029 |
 | `transpose-vec` | derived | 0 | — | challenge 000029 |
+| `skew-transpose` | derived | 0 | — | challenge 000031 |
+| `skew-dot` | derived | 0 | — | challenge 000031 |
+| `skew-dot-left` | derived | 0 | — | challenge 000031 |
+| `skew-product` | derived | 0 | — | challenge 000031 |
 | `trace-cyclic` | derived | 0 | — | challenge 000016 |
 | `grad-product` | derived | 0 | — | challenge 000013 |
 | `div-cross` | derived | 0 | — | challenge 000013 |
@@ -50,6 +56,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000028 | `refuted` is sound: no true identity is called false | L1 verified | vibe 000110 M8 |
 | 000029 | transposing through products, traces, dots and vec | **L2 performed** | vibe 000110 I5/I6 (rotation tensors need them) |
 | 000030 | declared constraints: a rotation is orthogonal, an arbitrary tensor is not | **L2 performed** | vibe 000110 I4 |
+| 000031 | rotation forms: reflection and turn tensor, verified when built | L1 verified | Zhilin, angle-free rotation tensors; vibe 000110 I5 |
 
 ## Tier B — Basis / coordinates
 
