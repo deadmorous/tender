@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**27 challenges** — 26 at L2, 0 at L1, 1 at L0.
+**28 challenges** — 26 at L2, 1 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -42,6 +42,7 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000014 | (a×b)·(c×d) = (a·c)(b·d) − (a·d)(b·c) | **L2 performed** | Gibbs–Wilson, Vector Analysis |
 | 000015 | a×(b×I) = b⊗a − (a·b)I | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors; vibe 000056 |
 | 000016 | tr(A·B) = tr(B·A) | **L2 performed** | Zhilin, Vectors and Second-Rank Tensors |
+| 000028 | `refuted` is sound: no true identity is called false | L1 verified | vibe 000110 M8 |
 
 ## Tier B — Basis / coordinates
 

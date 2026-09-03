@@ -529,12 +529,27 @@ prerequisites rather than nice-to-haves:
   `VectorInvariant`, so the procedure believes it decided.  `(Aᵀ)ᵀ = A` escapes
   only because canon collapses the double transpose first.
 
-  Two fixes, wanted in this order: make `has_residue` conservative about the
-  unary invariants (a wrong answer becomes an honest `exhausted`), then teach
-  `to_components` to push a transpose through the component form (an honest
-  answer becomes the right one).  Every rotation identity in I4–I8 is stated
-  with transposes, and I4's abstention design assumes this procedure is
+  Two fixes, wanted in this order: make `has_residue` conservative (a wrong
+  answer becomes an honest `exhausted`), then make the reduction finish the job
+  (an honest answer becomes the right one).  Every rotation identity in I4–I8 is
+  stated with transposes, and I4's abstention design assumes this procedure is
   trustworthy, so this is a **prerequisite**, not a neighbouring bug.
+
+  **Done — I0, commit below.**  Implementing it corrected the diagnosis above in
+  one respect and widened it in another.  The transpose *was* being pushed
+  through by `expand_in_basis`; what survived was the layer beneath — the frame
+  dots `i·j` that opening a trace or transpose *creates*, which were produced
+  after `simplify_basis_dot` had already run and so were never collapsed.  So
+  the fault was **ordering**, not a missing case: `to_components` now iterates
+  {`expand_dyad_ops`, cross, dot, canon} to a fixed point, since each pass makes
+  work for the others.  And pinning the belt turned up a **second, independent
+  false refutation** with no transpose in it at all: a tensor of *unknown rank*
+  cannot expand on a frame, so `tr(X·Y)` and `tr(Y·X)` reach the comparison
+  whole and differ structurally — the cyclicity of the trace, refuted.  Hence
+  the residue rule is stated positively rather than as a list of node kinds: a
+  complete reduction leaves *a polynomial in the component symbols and nothing
+  else*, so any surviving contraction or invariant operator means it did not
+  finish.  Challenge 000028 pins both classes and the negatives.
 - **M7 — the `vec` convention already agrees with Zhilin's.**  `(a × I)_× = −2a`,
   measured on a concrete vector in WCS, so `ω = −½ (Ṗ·Pᵀ)_×` is the library's
   own convention and nothing has to be adjusted or chosen.

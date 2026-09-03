@@ -26,17 +26,27 @@ auto to_components(Context& ctx, Basis const& frame, Expr const* e)
     -> Expr const*
 {
     e = expand_in_basis(ctx, e, frame, Variance::Covariant);
-    // A nested cross (`a × (b × c)`) needs one pass per level; the pass is a
-    // no-op once none are left, so iterating to a fixed point is safe.
-    for (int i = 0; i < 4; ++i)
+    // Reduce to a fixed point rather than in one pass, because each of these
+    // creates work for the others: `expand_dyad_ops` opens tr/vec/transpose of
+    // the dyads the expansion produced *into dots and crosses*, and a nested
+    // cross needs one pass per level.
+    //
+    // The order matters, and getting it wrong is what caused vibe 000110's M8:
+    // with a single pass, `simplify_basis_dot` ran *before* a trace or
+    // transpose had been opened, so the frame dots it should have collapsed
+    // (i·j → δ) were created after it had already gone by.  They survived to
+    // the comparison unevaluated, the two sides of a *true* identity differed
+    // term by term, and the procedure called it a refutation.
+    for (int i = 0; i < 8; ++i)
     {
-        auto const* next = simplify_basis_cross(ctx, e, frame);
-        if (next == e)
+        auto const* prev = e;
+        e = steps::expand_dyad_ops(ctx, e);
+        e = simplify_basis_cross(ctx, e, frame);
+        e = simplify_basis_dot(ctx, e, frame);
+        e = steps::canonicalize(ctx, e);
+        if (e == prev)
             break;
-        e = next;
     }
-    e = simplify_basis_dot(ctx, e, frame);
-    e = steps::canonicalize(ctx, e);
     e = steps::unroll_sums(ctx, e);
     e = steps::eval_eps_concrete(ctx, e);
     e = steps::eval_delta_concrete(ctx, e);
@@ -44,10 +54,23 @@ auto to_components(Context& ctx, Basis const& frame, Expr const* e)
     return steps::canonicalize(ctx, e);
 }
 
-// Does `e` still hold anything the component reduction could not evaluate —
-// a leftover ε / δ symbol, an unexpanded summation binder, or a differential
-// operator?  Such a residue means the reduction did not decide, so a
-// difference between two sides is not evidence of inequality.
+// Does `e` still hold anything the component reduction could not evaluate?
+// A complete reduction leaves a *polynomial in the component symbols* times
+// frame dyads — nothing else.  So anything that is still a contraction (·, ×,
+// :, ··) or an invariant unary operator (transpose, trace, vector invariant),
+// as well as the older residues (a leftover ε / δ / metric symbol, an
+// unexpanded binder, a differential operator), means the reduction did not
+// finish, and a difference between the two sides is not evidence of
+// inequality.
+//
+// The operator cases are here because of the defect they caused (vibe 000110
+// M8).  A trace or transpose opened into frame dots only *after*
+// `simplify_basis_dot` had run, so unevaluated `i·j` reached the comparison;
+// the two sides of a true identity differed term by term and the procedure
+// reported `Different` — a confident refutation of `tr(Aᵀ) = tr(A)`.
+// `to_components` now iterates to a fixed point so this cannot happen, and
+// this predicate is the belt to that pair of braces: whatever the expansion
+// still cannot open, the verdict must be silence rather than a verdict.
 auto has_residue(Expr const* e) -> bool
 {
     if (auto const* t = std::get_if<TensorObject>(&e->node);
@@ -62,7 +85,14 @@ auto has_residue(Expr const* e) -> bool
     if (std::holds_alternative<ExplicitSum>(e->node)
         || std::holds_alternative<NoSum>(e->node)
         || std::holds_alternative<Nabla>(e->node)
-        || std::holds_alternative<Deriv>(e->node))
+        || std::holds_alternative<Deriv>(e->node)
+        || std::holds_alternative<Transpose>(e->node)
+        || std::holds_alternative<Trace>(e->node)
+        || std::holds_alternative<VectorInvariant>(e->node)
+        || std::holds_alternative<Dot>(e->node)
+        || std::holds_alternative<Cross>(e->node)
+        || std::holds_alternative<DDot>(e->node)
+        || std::holds_alternative<DDotAlt>(e->node))
         return true;
     for (auto const* c: children(e))
         if (has_residue(c))

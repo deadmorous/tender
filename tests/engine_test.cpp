@@ -503,3 +503,108 @@ TEST(Budget, ReportCarriesResourceUsage)
     EXPECT_EQ(res.report.bytes, res.report.nodes * nf::kEstimatedBytesPerNode);
     EXPECT_GE(res.report.elapsed.count(), 0);
 }
+
+// ---- transposes reach the components (vibe 000110 M8) ------------------
+//
+// The defect these pin: a trace or transpose opened into frame dots only
+// *after* `simplify_basis_dot` had run, so unevaluated `i·j` reached the
+// comparison, the two sides of a true identity differed term by term, and the
+// procedure reported `Different`.  `refuted` is the one verdict this library
+// states as a fact about the mathematics rather than about its own reach, so
+// a false one is worse than no answer at all.
+
+namespace
+{
+
+auto rank2(Context& ctx, char const* n) -> Expr const*
+{
+    return make_tensor_object(ctx, make_tensor_name(n), {}, 2);
+}
+
+} // namespace
+
+TEST(Refutation, TrueTransposeIdentitiesAreNotRefuted)
+{
+    Context ctx;
+    auto const* A = rank2(ctx, "A");
+    auto const* B = rank2(ctx, "B");
+    auto const* a = vec1(ctx, "a");
+    auto const* b = vec1(ctx, "b");
+    auto const* At = make_transpose(ctx, A);
+    auto const* Bt = make_transpose(ctx, B);
+
+    // tr(Aᵀ) = tr(A)
+    EXPECT_EQ(
+        decide_by_components(ctx, make_trace(ctx, At), make_trace(ctx, A)),
+        ComponentVerdict::Equal);
+    // a·Aᵀ = A·a  and  a·A = Aᵀ·a
+    EXPECT_EQ(
+        decide_by_components(ctx, make_dot(ctx, a, At), make_dot(ctx, A, a)),
+        ComponentVerdict::Equal);
+    EXPECT_EQ(
+        decide_by_components(ctx, make_dot(ctx, a, A), make_dot(ctx, At, a)),
+        ComponentVerdict::Equal);
+    // Aᵀ·Bᵀ = (B·A)ᵀ
+    EXPECT_EQ(
+        decide_by_components(
+            ctx,
+            make_dot(ctx, At, Bt),
+            make_transpose(ctx, make_dot(ctx, B, A))),
+        ComponentVerdict::Equal);
+    // (a⊗b)·A = a⊗(Aᵀ·b)
+    EXPECT_EQ(
+        decide_by_components(
+            ctx,
+            make_dot(ctx, make_tensor_product(ctx, a, b), A),
+            make_tensor_product(ctx, a, make_dot(ctx, At, b))),
+        ComponentVerdict::Equal);
+}
+
+TEST(Refutation, AFalseTransposeClaimIsStillRefuted)
+{
+    // The fix must not buy safety by refusing to decide: a general tensor is
+    // not its own transpose, and the procedure still says so.
+    Context ctx;
+    auto const* A = rank2(ctx, "A");
+    EXPECT_EQ(
+        decide_by_components(ctx, make_transpose(ctx, A), A),
+        ComponentVerdict::Different);
+
+    auto const res = prove_equal(ctx, make_transpose(ctx, A), A, {});
+    EXPECT_TRUE(res.refuted());
+}
+
+TEST(Refutation, ATrueTransposeIdentityBlamesTheRulesNotTheClaim)
+{
+    // End to end through the verb: with no transpose rule supplied, the answer
+    // is "the rules are incomplete", never "the claim is false".
+    Context ctx;
+    auto const* A = rank2(ctx, "A");
+    auto const res = prove_equal(
+        ctx, make_trace(ctx, make_transpose(ctx, A)), make_trace(ctx, A), {});
+    EXPECT_EQ(res.status, ProofStatus::Exhausted);
+    EXPECT_FALSE(res.refuted());
+    EXPECT_TRUE(res.components_agree);
+}
+
+TEST(Refutation, AnUnreducedContractionIsResidueNotAVerdict)
+{
+    // The belt to the fix's braces, and a second false refutation of the same
+    // family found while pinning it: a tensor of *unknown rank* cannot expand
+    // on a frame, so tr(X·Y) and tr(Y·X) both reach the comparison with their
+    // trace and dot intact and differ structurally.  Reading that as a verdict
+    // refutes the cyclicity of the trace.
+    //
+    // A complete reduction leaves a polynomial in the component symbols and
+    // nothing else, so a surviving contraction or invariant operator means the
+    // reduction did not finish — silence, not a verdict.
+    Context ctx;
+    auto const* X = make_tensor_object(ctx, make_tensor_name("X"), {});
+    auto const* Y = make_tensor_object(ctx, make_tensor_name("Y"), {});
+    EXPECT_EQ(
+        decide_by_components(
+            ctx,
+            make_trace(ctx, make_dot(ctx, X, Y)),
+            make_trace(ctx, make_dot(ctx, Y, X))),
+        ComponentVerdict::Undecided);
+}
