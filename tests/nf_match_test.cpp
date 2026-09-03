@@ -808,3 +808,61 @@ TEST(SubChain, ABareVariablePatternIsNotARule)
 
     EXPECT_EQ(fired(ctx, U, I, make_dot(ctx, make_dot(ctx, a, A), b)), nullptr);
 }
+
+// ---- ∂-marks are part of identity when matching (vibe 000110 I7) -------
+
+TEST(MatchFactor, ADerivativeDoesNotMatchItsUndifferentiatedSymbol)
+{
+    // `∂_t P → …` must not fire on a bare `P`.  It did: the literal-atom
+    // comparison checked name, rank and slots but not the applied-derivative
+    // marks, so a rule about a rate rewrote the thing itself — and then its own
+    // output, without end.  Poisson's rule `Ṗ = ω × P` is the first rule whose
+    // left-hand side carries a mark, which is why nothing caught it earlier.
+    Context ctx;
+    auto const* P = make_constrained_field(
+        ctx,
+        make_tensor_name("P"),
+        2,
+        SymbolConstraint{SymbolConstraint::Kind::Orthogonal, true},
+        {});
+    auto const* Pdot = make_field_derivative(
+        ctx, P, make_tensor_name("t"), CoordinateRef{7, 0, false, true});
+    auto const* w = vrank1(ctx, "w");
+    auto const* rhs = make_cross(ctx, w, P);
+
+    // Fires on the derivative …
+    EXPECT_NE(fired(ctx, Pdot, rhs, Pdot), nullptr);
+    // … and not on the symbol it is a derivative of.
+    EXPECT_EQ(fired(ctx, Pdot, rhs, P), nullptr);
+    // Nor on a *different* derivative of the same symbol.
+    auto const* Pdot_other = make_field_derivative(
+        ctx, P, make_tensor_name("s"), CoordinateRef{9, 0, false, true});
+    EXPECT_EQ(fired(ctx, Pdot, rhs, Pdot_other), nullptr);
+}
+
+TEST(SubChain, ALoneFactorPatternReachesInsideACrossChain)
+{
+    // A one-factor pattern belongs to no chain kind, so it must reach into a
+    // cross as readily as into a contraction: `∂_t P → ω × P` has to fire on
+    // the `∂_t P` inside `ω × ∂_t P`, which is where the rigid-body
+    // acceleration produces it (vibe 000110 I7).
+    // The rotation is *declared*, as Poisson's rule requires: that is what
+    // makes the pattern's atom literal rather than a variable, and a lone
+    // variable pattern is excluded on purpose (it would match everything).
+    Context ctx;
+    auto const* P = make_constrained_field(
+        ctx,
+        make_tensor_name("P"),
+        2,
+        SymbolConstraint{SymbolConstraint::Kind::Orthogonal, true},
+        {});
+    auto const* Pdot = make_field_derivative(
+        ctx, P, make_tensor_name("t"), CoordinateRef{7, 0, false, true});
+    auto const* w = vrank1(ctx, "w");
+
+    auto const* got =
+        fired(ctx, Pdot, make_cross(ctx, w, P), make_cross(ctx, w, Pdot));
+    ASSERT_NE(got, nullptr);
+    EXPECT_TRUE(
+        algebraic_eq(ctx, got, make_cross(ctx, w, make_cross(ctx, w, P))));
+}

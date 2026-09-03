@@ -184,6 +184,23 @@ auto nf_rank(Nf const* nf) -> std::optional<int>
     return r;
 }
 
+// Do two tensor objects carry the same applied-derivative marks?  The marks
+// are kept sorted by their builders, so a positional comparison is exact.
+auto same_deriv_marks(TensorObject const& a, TensorObject const& b) -> bool
+{
+    if (a.deriv_marks.size() != b.deriv_marks.size())
+        return false;
+    for (std::size_t i = 0; i < a.deriv_marks.size(); ++i)
+    {
+        auto const& x = a.deriv_marks[i];
+        auto const& y = b.deriv_marks[i];
+        if (x.wrt.chart_id != y.wrt.chart_id || x.wrt.slot != y.wrt.slot
+            || x.free != y.free || x.link != y.link)
+            return false;
+    }
+    return true;
+}
+
 // ---- subtree variables ------------------------------------------------------
 
 // A slot-less, non-well-known named tensor in the LHS is a subtree variable: it
@@ -292,6 +309,19 @@ auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
                         if (auto tr = factor_rank(tgt);
                             tr && *tr != *p.obj.rank)
                             return false;
+                    // A pattern atom carrying applied-derivative marks is not
+                    // a plain placeholder: `∂_t U` must not match an
+                    // undifferentiated factor, or a rule about a rate rewrites
+                    // the thing itself (vibe 000110 I7).  Require the target to
+                    // carry the same marks; the variable then binds the whole
+                    // marked factor, which is the only reading no shipped rule
+                    // has to guess about.
+                    if (!p.obj.deriv_marks.empty())
+                    {
+                        auto const* t = std::get_if<Atom>(&tgt->node);
+                        if (!t || !same_deriv_marks(p.obj, t->obj))
+                            return false;
+                    }
                     return try_bind_subtree(bnd, p.obj.name.v.view(), tgt);
                 }
                 auto const* t = std::get_if<Atom>(&tgt->node);
@@ -301,6 +331,16 @@ auto match_factor(Factor const* pat, Factor const* tgt, NfBinding& bnd) -> bool
                 auto const& to = t->obj;
                 if (po.name != to.name || po.rank != to.rank
                     || po.slots.size() != to.slots.size())
+                    return false;
+                // Applied-derivative marks are part of identity (vibe 000077
+                // step D): ∂_t P is not P.  Comparing everything *but* them
+                // let a rule about a derivative rewrite the undifferentiated
+                // symbol — `∂_t P → ω × P` fired on a bare `P`, and then on
+                // its own output, forever (measured, vibe 000110 I7).  Marks
+                // are matched exactly rather than bound: a pattern that means
+                // "any derivative of P" would be a variable over marks, and
+                // nothing wants one yet.
+                if (!same_deriv_marks(po, to))
                     return false;
                 for (std::size_t i = 0; i < po.slots.size(); ++i)
                     if (!match_slot(po.slots[i], to.slots[i], bnd))
@@ -843,6 +883,11 @@ auto lone_factor_rule_side(Term const& t) -> Factor const*
 struct ChainRule final
 {
     bool is_cross;
+    // A one-factor pattern belongs to no chain kind: `∂_t P → ω × P` must
+    // reach the `∂_t P` inside a *cross* chain as readily as inside a
+    // contraction one (vibe 000110 I7).  With the kinds gated against each
+    // other it reached neither but its own.
+    bool lone = false;
     std::vector<Factor const*> const* pat;
     std::vector<COp> const* pat_ops;
     std::vector<Factor const*> const* rep;
@@ -867,7 +912,9 @@ auto splice_chain(
         fs.push_back(inst_factor(ctx, rf, b, {}));
     fs.insert(
         fs.end(), C.begin() + static_cast<std::ptrdiff_t>(k + pn), C.end());
-    if (cr.is_cross)
+    // The *target's* chain kind decides how it is rebuilt, not the pattern's:
+    // a lone-factor pattern may be spliced into either (null ops ⇒ a cross).
+    if (CO == nullptr)
         return make_cross(ctx, std::move(fs));
 
     std::vector<COp> ops;
@@ -892,7 +939,7 @@ auto rewrite_in_factor(Context& ctx, ChainRule const& cr, Factor const* f)
     std::size_t const pn = cr.pat->size();
 
     // Match the pattern as a contiguous run at this chain level.
-    if (auto cv = as_chain(f); cv && cv->is_cross == cr.is_cross)
+    if (auto cv = as_chain(f); cv && (cr.lone || cv->is_cross == cr.is_cross))
     {
         auto const& C = *cv->factors;
         for (std::size_t k = 0; pn <= C.size() && k + pn <= C.size(); ++k)
@@ -1020,7 +1067,12 @@ auto rewrite_subchain(
         return std::nullopt;
 
     ChainRule const cr{
-        pat_is_cross, &pat_storage, pat_ops, &rep_storage, rep_ops};
+        pat_is_cross,
+        pat_storage.size() == 1,
+        &pat_storage,
+        pat_ops,
+        &rep_storage,
+        rep_ops};
 
     auto try_region = [&](std::vector<Factor const*> const& region,
                           std::size_t& hit) -> Factor const*

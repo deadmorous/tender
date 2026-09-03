@@ -210,3 +210,58 @@ def test_poisson_refuses_a_symbol_it_cannot_derive_for():
     F = tm.field("F", 2, deps=[tm.t])
     with pytest.raises(ValueError):
         tm.poisson(F)
+
+
+def test_a_rule_about_a_rate_does_not_rewrite_the_symbol_itself():
+    # ∂-marks are part of identity: `Ṗ → ω × P` must not fire on a bare P.
+    # It did, and then on its own output, without end (vibe 000110 I7).
+    ws = t.Workspace()
+    tm = ws.time("t")
+    P = tm.rotation("P")
+    tm.angular_velocity(P, name=r"\omega")
+    poisson = tm.poisson(P)
+    assert td.structural_eq(
+        td.apply_identity(td.canonicalize(P), poisson), td.canonicalize(P)
+    )
+    assert not td.structural_eq(
+        td.apply_identity(
+            td.canonicalize(td.apply_operators(tm.ddt() * P)), poisson
+        ),
+        td.canonicalize(td.apply_operators(tm.ddt() * P)),
+    )
+
+
+def test_composed_rotations_add_their_transported_angular_velocities():
+    ws = t.Workspace()
+    tm = ws.time("t")
+    I = ws.identity()
+    P, Q = tm.rotation("P"), tm.rotation("Q")
+    wP = tm.angular_velocity(P, name=r"\omega")
+    wQ = tm.angular_velocity(Q, name=r"\varpi")
+    product = P @ Q
+    spin = td.apply_operators(tm.ddt() * product) @ product.transpose()
+    reduced = tm.reduce(spin, [tm.poisson(P), tm.poisson(Q)])
+    assert td.algebraic_eq(
+        reduced, td.canonicalize(td.expand_products((wP + P @ wQ) % I))
+    )
+
+
+def test_the_rigid_body_acceleration_has_its_two_named_terms():
+    ws = t.Workspace()
+    tm = ws.time("t")
+    P = tm.rotation("P")
+    omega = tm.angular_velocity(P, name=r"\omega")
+    poisson = tm.poisson(P)
+    rho = ws.tensor(r"\rho", rank=1)
+    rC = tm.field("c", 1, deps=[tm.t])
+    ap = td.apply_operators
+
+    v = tm.reduce(ap(tm.ddt() * (rC + P @ rho)), [poisson])
+    a = tm.reduce(ap(tm.ddt() * v), [poisson])
+    arm = P @ rho
+    expected = (
+        ap(tm.ddt() * ap(tm.ddt() * rC))
+        + ap(tm.ddt() * omega) % arm
+        + omega % (omega % arm)
+    )
+    assert td.algebraic_eq(a, expected)

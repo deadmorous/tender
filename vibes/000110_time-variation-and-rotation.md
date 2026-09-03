@@ -640,7 +640,7 @@ Three things measured on the way, all of them costs of the current design:
   nothing).  A flattening keyed on the operator cannot decide that, so the fact
   is a rank-gated rule.
 
-### I7 — rigid-body kinematics
+### I7 — rigid-body kinematics — **done but for the cone**
 
 **Composed rotations first.**  For `P = P₁·P₂`, the transport rule of I5 gives
 the angular velocities' composition law directly:
@@ -667,7 +667,48 @@ both by applying `d/dt` twice and folding through I5 — no components, no chart
 *Done when:* `ω = ω₁ + P₁·ω₂` is derived for a composition; the acceleration
 comes out with its Euler and centripetal terms from two applications of
 `tm.ddt()`, invariantly; and the same for a point of a body whose reference
-point itself moves.
+point itself moves.  **All three done**; the rolling cone remains, and it is a
+*problem* rather than an identity — it needs the rolling constraint, which is
+where I8's admissibility form comes in, so it may belong there.
+
+**Shipped: the composition law, the velocity and the acceleration**, all
+invariantly, with challenge 000034 and `tm.reduce` (the directed reduction with
+everything a chain knows — the rules a rotation derivation needs come from
+three places, and `prove_equal` gathers them while a directed derivation does
+not).  `ω = ω₁ + P₁·ω₂` needs the transport rule, which is where the
+proper/improper sign finally does work, and the challenge carries the negative:
+a reflection's transport flips, and the rotation's sign is not available to it.
+
+The acceleration is derived by differentiating the **velocity**, not the
+position twice — which is how one does it by hand, and here it is also what
+keeps every rewrite's right-hand side a single term: a rule whose RHS is a sum
+cannot be spliced into a chain (an I4b limit), so `P̈ = ε×P + ω×(ω×P)` would not
+fire inside `P̈·ρ`.  Going through the velocity never forms that shape.
+
+Four findings, one of them serious:
+
+- **A rule about a derivative rewrote the undifferentiated symbol.**  The
+  matcher's literal-atom comparison checked name, rank and slots but *not* the
+  applied-derivative marks, so `∂_t P → ω × P` fired on a bare `P` — and then
+  on its own output, thirteen times over, which is how it was noticed.  The
+  same hole existed for a pattern *variable* carrying marks.  Both fixed; marks
+  are part of identity (vibe 000077 step D) and now the matcher agrees.
+  Poisson's rule is the first shipped rule whose left-hand side carries a mark,
+  which is why nothing caught it earlier.
+- **A lone-factor pattern could not reach inside a *cross* chain** — the I4b
+  path gated the pattern's chain kind against the target's, and a one-factor
+  pattern belongs to no kind.  `∂_t P` sits inside `ω × ∂_t P` in every
+  acceleration.
+- **Naming ω earns its keep here, where I6b did not need it.**  `ω̇` of a name
+  is one mark; `ω̇` of the formula `−½(Ṗ·Pᵀ)_×` is a page, and the second
+  derivative stops being readable.  `tm.angular_velocity(P, name=…)` mints it
+  as a field and registers the formula as its definition.
+- **Two rules can race.**  Adding `cross-dot-assoc-tensor` diverted the turn
+  tensor's verification into `a × (b × I)`, a shape `skew-product` no longer
+  reached, and the reduction stopped one step short.  `cross-skew` is the exit
+  from it: two routes into one place, so both need a way out.  A directed
+  reduction is order-sensitive in a way saturation is not, and this is the
+  price.
 
 **The challenge for it (Stepan): a cone rolling on a plane** (Zhilin), or
 another body whose orientation is composed of two or three rotations about fixed

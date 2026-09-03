@@ -658,6 +658,32 @@ def cross_dot_assoc(ctx):
     return Identity("cross-dot-assoc", (u % b) @ w, u % (b @ w))
 
 
+def cross_dot_assoc_tensor(ctx):
+    """(a × B)·C = a × (B·C), both B and C rank-2.
+
+    The companion of :func:`cross_dot_assoc` for a rank-2 third operand, and
+    what the composition of rotations runs on: `(ω × P)·Pᵀ` has to become
+    `ω × (P·Pᵀ)` before orthogonality can close it (vibe 000110 I7).
+    """
+    u = _var(ctx, "u", 1)
+    b, c = (_var(ctx, n, 2) for n in "WY")
+    return Identity("cross-dot-assoc-tensor", (u % b) @ c, u % (b @ c))
+
+
+def cross_skew(ctx):
+    """a × (b × I) = b⊗a − (a·b) I — the cross form of :func:`skew_product`.
+
+    The same right-hand side, reached from a different left: with
+    `cross-dot-assoc-tensor` in the set, `(a × I)·(b × I)` may reduce to
+    `a × (b × I)` before `skew-product` gets to it, and without this rule the
+    reduction stops there (measured on the turn tensor, vibe 000110 I7).  Two
+    routes into one place, so both need a way out.
+    """
+    u, v = (_var(ctx, n, 1) for n in "uw")
+    eye = _t.identity(ctx=ctx)
+    return Identity("cross-skew", u % (v % eye), v * u - (u @ v) * eye)
+
+
 def skew_product(ctx):
     """(a × I)·(b × I) = b⊗a − (a·b) I.
 
@@ -702,7 +728,7 @@ def constraint_rules(ctx):
             out.append(
                 Identity(f"{name}-unit", n @ n, _t.scalar(1, ctx=ctx))
             )
-        elif kind == "orthogonal":
+        elif kind == "orthogonal":  # noqa: PLR2004
             p = _t.constrained_tensor(
                 name, 2, "orthogonal", proper=proper, ctx=ctx
             )
@@ -713,6 +739,31 @@ def constraint_rules(ctx):
             out.append(
                 Identity(
                     f"{name}-orthogonal-T", p.transpose() @ p, eye
+                )
+            )
+            # Transport: conjugation carries an axial vector along, and this is
+            # the one place the proper/improper *sign* does work (vibe 000110
+            # I5/I7).  A rotation preserves a cross product; a reflection
+            # reverses it, so an improper symbol mints the negated rule.  It is
+            # what makes the angular velocities of composed rotations add:
+            # `ω = ω₁ + P₁·ω₂` is this rule applied to `P₁ (ω₂ × I) P₁ᵀ`.
+            u = _var(ctx, "u", 1)
+            transported = (p @ u) % eye
+            out.append(
+                Identity(
+                    f"{name}-transport",
+                    (p @ (u % eye)) @ p.transpose(),
+                    transported if proper else -transported,
+                )
+            )
+            # …and the same fact in the shape the other rules leave behind:
+            # `(u × I)·Pᵀ` reduces to `u × Pᵀ` on its way past, so a transport
+            # keyed only on the first form would arrive too late to fire.
+            out.append(
+                Identity(
+                    f"{name}-transport-reduced",
+                    p @ (u % p.transpose()),
+                    transported if proper else -transported,
                 )
             )
     return out
@@ -846,6 +897,15 @@ register(
 register(
     "skew-dot-left", skew_dot_left, tags=("rotation",), proof="000031",
     summary="b·(a × I) = b × a — acting to the left",
+)
+register(
+    "cross-skew", cross_skew, tags=("rotation",), proof="000034",
+    summary="a × (b × I) = b⊗a − (a·b) I",
+)
+register(
+    "cross-dot-assoc-tensor", cross_dot_assoc_tensor, tags=("rotation",),
+    proof="000034",
+    summary="(a × B)·C = a × (B·C) for rank-2 B and C",
 )
 register(
     "skew-product", skew_product, tags=("rotation",), proof="000031",

@@ -37,6 +37,8 @@ def test_minted_rules_are_per_symbol():
     assert sorted(r.name for r in ti.constraint_rules(ws.ctx)) == [
         "P-orthogonal",
         "P-orthogonal-T",
+        "P-transport",
+        "P-transport-reduced",
         "n-unit",
     ]
     assert ti.constraint_rules(t.Workspace().ctx) == []

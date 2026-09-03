@@ -61,6 +61,9 @@ class Time:
         # on this chain (vibe 000110 I6): their *differentiated* constraints
         # need the dependence, which the context's registry does not record.
         self._constrained = {}
+        # (rotation, derivation) -> the named angular velocity, when one was
+        # minted (vibe 000110 I7).
+        self._axial = {}
         self._vars = {}  # base name -> [δq, δq̇, …], same length
 
     # ---- minting --------------------------------------------------------
@@ -177,15 +180,30 @@ class Time:
         op = self.ddt() if operator is None else operator
         return _td.apply_operators(op * P) @ P.transpose()
 
-    def angular_velocity(self, P, operator=None):
+    def angular_velocity(self, P, operator=None, name=None):
         """The axial vector of :meth:`spin`: `ω = −½ (D(P)·Pᵀ)_×`.
 
         The project writes a skew tensor as `w × I`, never as a standalone Ω,
         and `(a × I)_× = −2a` in tender's own conventions — so this factor of
         −½ is the library's, not a textbook's (vibe 000110 M7).
+
+        With a `name`, the vector is minted as a *field* of the same
+        coordinates as `P` and the formula is registered as its definition
+        (``ws.definition(ω)``), so `ω̇` is one mark rather than the derivative
+        of a three-deep expression.  Nothing about the mathematics changes; the
+        difference is whether a second derivative stays readable — measured,
+        and the reason I7 names it where I6b did not need to.
         """
         half = self._ws.scalar(_Rational(-1, 2))
-        return half * self.spin(P, operator).vec()
+        formula = half * self.spin(P, operator).vec()
+        if name is None:
+            return formula
+        key = (str(P), "delta" if operator is not None else "dt")
+        deps = self._constrained.get(str(P).strip(), (None, None, [self.t], None))[2]
+        w = self._ws.field(name, 1, deps=deps)
+        self._ws._definitions[name] = (w, formula)
+        self._axial[key] = w
+        return w
 
     def poisson(self, P, operator=None):
         """Derive `D(P) = w × P` for a rotation, and hand it back as a rule.
@@ -211,6 +229,8 @@ class Time:
         """
         op = self.ddt() if operator is None else operator
         derivative = _td.apply_operators(op * P)
+        key = (str(P), "delta" if operator is not None else "dt")
+        named = self._axial.get(key)
         w = self.angular_velocity(P, operator)
         eye = self._ws.identity()
         spin = derivative @ P.transpose()
@@ -244,7 +264,43 @@ class Time:
             if not _td.prove_equal(lhs, rhs, rules).proved:
                 raise ValueError(f"link failed: {claim}")
         name = str(P).replace("\\mathbf{", "").replace("}", "")
-        return _td.Identity(f"{name}-poisson", derivative, w % P)
+        # State the rule with the *named* angular velocity when there is one:
+        # the fact is the same, and a second derivative of a name is a mark
+        # where a second derivative of the formula is a page.
+        axial = named if named is not None else w
+        return _td.Identity(f"{name}-poisson", derivative, axial % P)
+
+    def reduce(self, expr, extra=(), rounds=16):
+        """Reduce *expr* with everything this chain knows, to a fixed point.
+
+        The rules a rotation derivation needs come from three places — the
+        `rotation`/`transpose`/`dyadic` groups, the context's own declarations
+        (`P·Pᵀ → I` and the transport), and this chain's differentiated
+        constraints — and `prove_equal` gathers them for you while a *directed*
+        derivation does not.  Pass anything further (a `poisson` rule, say) as
+        `extra`.
+
+        Directed rather than saturated for the reason the rotation forms found
+        in I5: the reduction has to interleave rewriting with re-expansion, and
+        some of what it needs (scalar simplification) is a step, not a rule.
+        """
+        from . import identities as _ti
+
+        rules = (
+            _td.rules("rotation", "transpose", "dyadic", ctx=self._ws.ctx)
+            + _ti.constraint_rules(self._ws.ctx)
+            + self.constraint_rules()
+            + list(extra)
+        )
+        e = _td.canonicalize(_td.expand_products(expr))
+        for _ in range(rounds):
+            previous = e
+            for rule in rules:
+                e = _td.apply_identity(e, rule)
+            e = _td.canonicalize(_td.expand_products(e))
+            if _td.structural_eq(e, previous):
+                break
+        return e
 
     def constraint_rules(self):
         """The *differentiated* constraints of every symbol on this chain.
