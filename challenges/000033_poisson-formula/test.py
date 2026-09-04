@@ -94,6 +94,8 @@ def test_the_spin_equals_its_axial_vector_crossed_into_the_identity():
     ws, tm, P, I = _setup()
     rules = {r.name: r for r in _rules(ws, tm)}
     omega, spin = tm.angular_velocity(P), tm.spin(P)
+    # The skewness is minted per *independent variable* (vibe 000110 I8), so
+    # it is named for the coordinate rather than for the derivation.
 
     e = td.canonicalize(omega % I)
     show("ω × I", e)
@@ -101,7 +103,8 @@ def test_the_spin_equals_its_axial_vector_crossed_into_the_identity():
         td.expand_products(td.apply_identity(e, rules["axial-to-skew"]))
     )
     show("after axial-to-skew", e)
-    e = td.canonicalize(td.apply_identity(e, rules["P-spin-dt"]))
+    skewness = next(r for r in _rules(ws, tm) if "-spin-" in r.name)
+    e = td.canonicalize(td.apply_identity(e, skewness))
     show("after the skewness", e)
     harness.assert_algebraic_eq(e, spin, "ω × I is the spin")
 

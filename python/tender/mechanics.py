@@ -245,12 +245,20 @@ class Time:
         # sum, where no rule reaches it (vibe 000100 again), so the sum is
         # distributed before the skewness fires.
         reduced = _td.canonicalize(w % eye)
-        reduced = _td.apply_identity(reduced, by_name["axial-to-skew"])
-        reduced = _td.canonicalize(_td.expand_products(reduced))
-        for rule in rules:
-            if rule.name.endswith("-spin-dt") or rule.name.endswith("-spin-delta"):
-                reduced = _td.apply_identity(reduced, rule)
-        reduced = _td.canonicalize(reduced)
+        # A fixed point, not one pass: `apply_identity` rewrites the first hit,
+        # and a rotation of several generalized coordinates has one term per
+        # coordinate — each needing `axial-to-skew` and then its own partial
+        # skewness (vibe 000110 I8).
+        for _ in range(2 * len(rules) + 4):
+            previous = reduced
+            reduced = _td.apply_identity(reduced, by_name["axial-to-skew"])
+            reduced = _td.canonicalize(_td.expand_products(reduced))
+            for rule in rules:
+                if "-spin-" in rule.name:
+                    reduced = _td.apply_identity(reduced, rule)
+            reduced = _td.canonicalize(_td.expand_products(reduced))
+            if _td.structural_eq(reduced, previous):
+                break
         if not _td.algebraic_eq(reduced, spin):
             raise ValueError(
                 f"the spin of this rotation does not reduce to its axial "
@@ -288,6 +296,11 @@ class Time:
 
         rules = (
             _td.rules("rotation", "transpose", "dyadic", ctx=self._ws.ctx)
+            # `a × a = 0` lives in the `cross` group, whose other members
+            # (`cross-identity` especially) take a skew tensor out of the shape
+            # the rotation rules expect — so it is picked out by name, as the
+            # rotation-form verifier does (vibe 000110 I5).
+            + [_td.rule("cross-self", self._ws.ctx)]
             + _ti.constraint_rules(self._ws.ctx)
             + self.constraint_rules()
             + list(extra)
@@ -307,42 +320,42 @@ class Time:
 
         Stepan's observation, and the reason these are one mechanism rather
         than two: `n·ṅ = 0` and the skewness of `Ṗ·Pᵀ` are the same statement —
-        the derivative of a constraint is a constraint.  For every derivation
-        in play (d/dt, and δ once coordinates are minted):
+        the derivative of a constraint is a constraint.
 
-            D(n·n = 1)   ⟹   n·D(n) = 0
-            D(P·Pᵀ = I)  ⟹   (D(P)·Pᵀ)ᵀ = −D(P)·Pᵀ
+        Differentiated **per independent variable**, not per operator, and that
+        is not a detail: `d/dt P` for a rotation of two generalized coordinates
+        is `q̇ ∂_q P + ṙ ∂_r P`, so a rule about the whole spin is a rule about a
+        *sum*, and the moment anything distributes it there is nothing left for
+        the rule to match.  Each partial spin is skew in its own right —
+        differentiating `P·Pᵀ = I` by one coordinate says so — and a sum of
+        skew terms is skew, so the finer statement is both truer and more
+        usable (vibe 000110 I8).
+
+            ∂_c(n·n = 1)   ⟹   n·∂_c n = 0
+            ∂_c(P·Pᵀ = I)  ⟹   (∂_c P·Pᵀ)ᵀ = −∂_c P·Pᵀ
 
         The undifferentiated forms come from the context itself and are already
         in force everywhere (vibe 000110 I4); these are what a *moving*
         constrained symbol adds.
         """
         rules = []
-        operators = [("dt", self.ddt())]
-        if self._chains:
-            operators.append(("delta", self.variation()))
-        # Only what this Time minted: the context's registry records a name and
-        # a kind, not what the symbol *depends on*, and a rule built with the
-        # wrong dependence would be about a different object.
         for name, (kind, rank, deps, proper) in self._constrained.items():
-            for tag, op in operators:
-                rule = self._differentiated(name, kind, rank, deps, proper, tag, op)
+            for coord in deps:
+                rule = self._differentiated(name, kind, rank, deps, proper, coord)
                 if rule is not None:
                     rules.append(rule)
         return rules
 
-    def _differentiated(self, name, kind, rank, deps, proper, tag, op):
+    def _differentiated(self, name, kind, rank, deps, proper, coord):
         from . import _core as _c
 
         symbol = _c.constrained_field(
             name, rank, kind, deps=deps, proper=proper, ctx=self._ws.ctx
         )
-        derivative = _td.apply_operators(op * symbol)
+        derivative = _td.partial(symbol, coord)
         if _td.algebraic_eq(derivative, self._ws.scalar(0)):
-            # The derivation does not reach this symbol — δ of a rotation that
-            # depends on time alone, say.  A rule about `0` is noise, not a
-            # fact.
             return None
+        tag = str(coord).replace("\\", "")
         if kind == "unit":
             return _td.Identity(
                 f"{name}-unit-{tag}", symbol @ derivative, self._ws.scalar(0)

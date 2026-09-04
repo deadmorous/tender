@@ -265,3 +265,33 @@ def test_the_rigid_body_acceleration_has_its_two_named_terms():
         + omega % (omega % arm)
     )
     assert td.algebraic_eq(a, expected)
+
+
+def test_constraints_are_differentiated_per_independent_variable():
+    # Not per operator: d/dt P of a two-coordinate rotation is a *sum*, and a
+    # rule about a sum has a multi-term LHS the matcher cannot compile.  Each
+    # partial spin is skew on its own (vibe 000110 I8).
+    ws = t.Workspace()
+    tm = ws.time("t")
+    q, qd = tm.coordinate("q", orders=1)
+    r, rd = tm.coordinate("r", orders=1)
+    tm.rotation("P", deps=[q, r])
+    names = sorted(rule.name for rule in tm.constraint_rules())
+    assert names == ["P-spin-q", "P-spin-r"]
+
+
+def test_the_variation_of_the_angular_velocity_with_one_coordinate():
+    ws = t.Workspace()
+    tm = ws.time("t")
+    q, qd = tm.coordinate("q", orders=1)
+    P = tm.rotation("P", deps=[q])
+    ap = td.apply_operators
+    omega = tm.angular_velocity(P)
+    virtual = tm.angular_velocity(P, tm.variation())
+    assert td.algebraic_eq(
+        tm.reduce(omega % virtual, rounds=8), t.scalar(0, ctx=ws.ctx)
+    )
+    assert td.algebraic_eq(
+        tm.reduce(ap(tm.variation() * omega), rounds=12),
+        tm.reduce(ap(tm.ddt() * virtual) - omega % virtual, rounds=12),
+    )

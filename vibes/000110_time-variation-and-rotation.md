@@ -721,7 +721,7 @@ to carry a constraint, not a nonholonomic one; see Q2.  It exercises the composi
 chain together, and it is the first challenge in the brief that is a *problem*
 rather than an identity.
 
-### I8 — virtual work, and δω
+### I8 — virtual work, and δω — **δω started**
 
 The payoff, and the increment that decides how far the virtual-work principle
 carries.  Two parts:
@@ -742,6 +742,26 @@ carries.  Two parts:
    lemma over a domain — for finitely many degrees of freedom the lemma is just
    "the coefficient of each independent arbitrary vector vanishes".  That is the
    whole reason the integral could move to vibe 000111 without stalling M5A.
+
+**δω, so far:** verified for **one** generalized coordinate — challenge 000036,
+and the cross term is *proved* zero rather than assumed, `a × a = 0` doing the
+work.  With **two** it stalls, and what stalls is not the identity but a
+theorem beneath it: the residual is the integrability condition
+`∂_r a_q − ∂_q a_r = −a_q × a_r`, which follows from `∂_q∂_r P = ∂_r∂_q P` (canon
+already gives that — marks are sorted) once each partial spin can be put in
+axial form.  The missing rule is `vec((a×I)·(b×I)) = −(a×b)`, measured true and
+absent.
+
+One change of substance came out of it, and it is the kind that should have
+been obvious earlier: **the differentiated constraints are minted per
+independent variable, not per operator.**  `d/dt P` for a rotation of two
+coordinates is `q̇ ∂_q P + ṙ ∂_r P`, so a rule about the whole spin is a rule
+about a *sum* — and a multi-term left-hand side is exactly what the matcher
+cannot compile, so the rule died the moment anything distributed.  Each partial
+spin is skew in its own right (differentiate `P·Pᵀ = I` by one coordinate), and
+a sum of skew terms is skew, so the finer statement is both truer and usable.
+`tm.poisson` reduces to a fixed point for the same reason: one term per
+coordinate, each needing its own pass.
 
 *Done when:* `δω = (δo)˙ − ω × δo` is derived; and the plane pendulum's equation of motion comes
 out of d'Alembert–Lagrange (virtual work of active and inertial forces) with no
