@@ -4818,7 +4818,13 @@ auto enumerate_trig_squares(Context& ctx, Expr const* term)
         if (!p)
             continue;
         auto const* n = std::get_if<ScalarLiteral>(&p->exponent->node);
-        if (!n || !(n->value == Rational{2}))
+        // Exponent *at least* 2, not exactly 2: `cos³u` is one Pow node, not
+        // `cos²u · cos u`, so requiring 2 made a cube invisible and the pair
+        // `cos³u·C + cos u·sin²u·C` — which is `cos u·C` — went unfolded.
+        // That is the whole of what stopped Zhilin's ω on a concrete axis
+        // (vibe 000110 I8 leftovers).  Two are peeled and the rest stays in
+        // the remainder.
+        if (!n || !n->value.is_integer() || n->value < Rational{2})
             continue;
         auto const* fn = std::get_if<ScalarFn>(&p->base->node);
         if (!fn
@@ -4828,6 +4834,11 @@ auto enumerate_trig_squares(Context& ctx, Expr const* term)
         for (std::size_t j = 0; j < factors.size(); ++j)
             if (j != i)
                 rest.push_back(factors[j]);
+        if (n->value == Rational{3})
+            rest.push_back(p->base); // `f¹` is `f`, not a Pow of exponent 1
+        else if (n->value > Rational{3})
+            rest.push_back(make_pow(
+                ctx, p->base, make_scalar(ctx, n->value - Rational{2})));
         Expr const* rem = rest.empty() ? make_scalar(ctx, Rational{1}) :
                                          product_of(ctx, rest);
         if (neg)

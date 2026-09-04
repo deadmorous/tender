@@ -672,3 +672,38 @@ TEST(Partial, SpatialCoordinateStillRefusesNabla)
         (void)steps::partial(ctx, make_dot(ctx, nab, u), r),
         std::invalid_argument);
 }
+
+// ---- the Pythagorean fold sees a cube (vibe 000110 I8) ------------------
+
+TEST(SimplifyScalars, APythagoreanPairHiddenInACubeFolds)
+{
+    // `cos³u + cos u sin²u` is `cos u`, and the fold missed it because `cos³u`
+    // is one Pow node of exponent 3 while the enumerator required exactly 2.
+    // Peeling two from any exponent ≥ 2 closes it — which is the whole of what
+    // stopped Zhilin's ω on a concrete axis.
+    Context ctx;
+    auto* u = coord(ctx, "u", 0);
+    auto* c = make_scalar_fn(ctx, ScalarFnKind::Cos, u);
+    auto* s = make_scalar_fn(ctx, ScalarFnKind::Sin, u);
+    auto* two = make_scalar(ctx, Rational{2});
+    auto* three = make_scalar(ctx, Rational{3});
+
+    auto* cubed = make_pow(ctx, c, three);
+    auto* mixed = make_tensor_product(ctx, c, make_pow(ctx, s, two));
+    EXPECT_TRUE(algebraic_eq(
+        ctx, steps::simplify_scalars(ctx, make_sum(ctx, cubed, mixed)), c));
+
+    // The plain pair still folds, and so does a higher even power.
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::simplify_scalars(
+            ctx, make_sum(ctx, make_pow(ctx, c, two), make_pow(ctx, s, two))),
+        make_scalar(ctx, Rational{1})));
+    auto* fourth = make_pow(ctx, c, make_scalar(ctx, Rational{4}));
+    auto* squares =
+        make_tensor_product(ctx, make_pow(ctx, c, two), make_pow(ctx, s, two));
+    EXPECT_TRUE(algebraic_eq(
+        ctx,
+        steps::simplify_scalars(ctx, make_sum(ctx, fourth, squares)),
+        make_pow(ctx, c, two)));
+}

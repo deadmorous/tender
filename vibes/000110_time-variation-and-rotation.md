@@ -933,12 +933,14 @@ per route, and neither is about rotations:
   *proves*.  What it cannot do is fold `ṅ⊗n − n⊗ṅ` back into `(n × ṅ) × I`:
   that needs a rule whose **left-hand side is two terms**, which the matcher
   cannot compile.
-- **Concrete route.**  With a genuinely moving axis (`n = cos φ i + sin φ j`,
-  φ(t)) everything is decidable in components, and the whole difference
-  collapses to one scalar that is identically zero:
-  `cos φ (cos²φ + sin²φ − 1)(1 − cos θ)`.  Nothing folds it —
-  `simplify_scalars` knows a Pythagorean *pair* but not a pair sharing a factor
-  with the rest of a sum, i.e. `cos²φ·X + sin²φ·X → X`.
+- **Concrete route — now green.**  With a genuinely moving axis
+  (`n = cos φ i + sin φ j`, φ(t)) everything is decidable in components, and the
+  whole difference collapses to one scalar that is identically zero:
+  `cos φ (cos²φ + sin²φ − 1)(1 − cos θ)`.  What stopped it was smaller than it
+  looked: `cos³φ` is a single `Pow` node of exponent 3, and the Pythagorean
+  enumerator required exactly 2, so the cube was invisible to it.  Peeling
+  *two* from any exponent ≥ 2 and leaving the rest in the remainder closes it —
+  a four-line change, and Zhilin's formula is verified on a moving axis.
 
 Both gaps are named capabilities that block other things too, which is what a
 red challenge is for.  The pieces the derivation rests on are kept green in the

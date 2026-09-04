@@ -24,17 +24,15 @@ leaves `ṅ⊗n − n⊗ṅ`, and turning that back into `(n × ṅ) × I` needs
 limitation `bac-cab-rev` is warned about under).
 
 *The concrete route* (L1) takes a genuinely moving axis — `n = cos φ i +
-sin φ j` with φ(t) — so the component procedure can decide everything, and gets
-to a single scalar coefficient that is identically zero:
+sin φ j` with φ(t) — so the component procedure can decide everything, and it
+**verifies**.  Getting there took one fix, and it was smaller than it looked:
+the whole difference collapses to `cos φ (cos²φ + sin²φ − 1)(1 − cos θ)`, and
+the Pythagorean fold could not see it because `cos³φ` is a single `Pow` node of
+exponent 3, while the fold required exactly 2.  Peeling *two* from any exponent
+≥ 2 and leaving the rest in the remainder closes it.
 
-    cos φ (cos²φ + sin²φ − 1)(1 − cos θ)
-
-Nothing in the library folds it.  `simplify_scalars` recognises a Pythagorean
-*pair*, but not a pair that shares a factor with the other terms of a sum —
-`cos²φ·X + sin²φ·X → X` is the missing shape.
-
-Neither gap is about rotations.  One is a matcher limitation and one is a
-scalar-simplifier limitation, and each blocks other things too.
+So the formula is verified, on a moving axis, and what is still red is the
+*invariant* derivation — a matcher limitation, not a fact in doubt.
 """
 
 import tender as t
@@ -113,12 +111,7 @@ def test_the_invariant_derivation():
     harness.assert_algebraic_eq(reduced, tm.reduce(omega % I), "Zhilin's ω")
 
 
-@harness.level(
-    "L1",
-    expected=False,
-    reason="the residual is cos φ (cos²φ + sin²φ − 1)(1 − cos θ); the "
-    "Pythagorean fold does not see a pair sharing a factor with a sum",
-)
+@harness.level("L1")
 def test_verified_on_a_concrete_moving_axis():
     """n = cos φ i + sin φ j with φ(t): a moving axis, decidable in components."""
     ws = t.Workspace()

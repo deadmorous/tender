@@ -5,7 +5,7 @@ hand.  Levels: **L2 performed** = direct-notation derivation on the
 public surface; L1 verified = endpoint confirmed by component check;
 L0 failing = enumerated, not yet reached (strict xfail).
 
-**37 challenges** — 33 at L2, 2 at L1, 2 at L0.
+**37 challenges** — 33 at L2, 3 at L1, 1 at L0.
 
 ## Identity DAG
 
@@ -107,6 +107,6 @@ Axioms are definitional (no proof obligation); a derived identity owes a derivat
 | 000032 | the spin D(P)·Pᵀ is skew, for d/dt and for δ alike | **L2 performed** | Zhilin, angle-free rotation kinematics; vibe 000110 I6 |
 | 000033 | Ṗ = ω × P, and Poisson's ė = ω × e as its corollary | **L2 performed** | Zhilin, angle-free rotation kinematics; vibe 000110 I6b |
 | 000034 | rigid body: ω₁ + P₁·ω₂, and the velocity and acceleration of a point | **L2 performed** | Zhilin, rigid-body kinematics; vibe 000110 I7 |
-| 000035 | ω = θ̇ n + sin θ ṅ + (1 − cos θ) n × ṅ for a finite rotation | L0 failing | Zhilin, rotation tensors; vibe 000110 I6 |
+| 000035 | ω = θ̇ n + sin θ ṅ + (1 − cos θ) n × ṅ for a finite rotation | L1 verified | Zhilin, rotation tensors; vibe 000110 I6 |
 | 000036 | δω = (δo)˙ − ω × δo | L1 verified | Zhilin / Eliseev, virtual rotations; vibe 000110 I8 |
 | 000037 | virtual work: δA = δq (F·∂_q r_C + (ρ × F)·q̂), and equilibrium | **L2 performed** | Gantmacher, virtual work; vibe 000110 I8 |
