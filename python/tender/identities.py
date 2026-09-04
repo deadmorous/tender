@@ -658,6 +658,20 @@ def cross_dot_assoc(ctx):
     return Identity("cross-dot-assoc", (u % b) @ w, u % (b @ w))
 
 
+def cross_of_cross_skew(ctx):
+    """(a × b) × I = b⊗a − a⊗b — the skew tensor of a cross product, in dyads.
+
+    The bridge between the two ways an axial vector can appear: as the vector
+    of a skew tensor, or spread into the dyads a differentiation leaves behind.
+    Zhilin's `ω(θ, n)` needs it, because the derivation produces `n⊗ṅ` terms
+    while the formula is written with `n × ṅ` (vibe 000110 I6 challenge).
+    """
+    u, v = (_var(ctx, n, 1) for n in "uw")
+    return Identity(
+        "cross-of-cross-skew", (u % v) % _t.identity(ctx=ctx), v * u - u * v
+    )
+
+
 def cross_dot_assoc_tensor(ctx):
     """(a × B)·C = a × (B·C), both B and C rank-2.
 
@@ -897,6 +911,11 @@ register(
 register(
     "skew-dot-left", skew_dot_left, tags=("rotation",), proof="000031",
     summary="b·(a × I) = b × a — acting to the left",
+)
+register(
+    "cross-of-cross-skew", cross_of_cross_skew, tags=("rotation",),
+    proof="000034",
+    summary="(a × b) × I = b⊗a − a⊗b",
 )
 register(
     "cross-skew", cross_skew, tags=("rotation",), proof="000034",

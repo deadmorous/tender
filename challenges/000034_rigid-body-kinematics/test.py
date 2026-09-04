@@ -32,7 +32,7 @@ CHALLENGE = harness.declare(
     title="rigid body: ω₁ + P₁·ω₂, and the velocity and acceleration of a point",
     tier="E",
     source="Zhilin, rigid-body kinematics; vibe 000110 I7",
-    proves=["cross-dot-assoc-tensor", "cross-skew"],
+    proves=["cross-dot-assoc-tensor", "cross-skew", "cross-of-cross-skew"],
 )
 
 
@@ -159,6 +159,7 @@ def test_the_two_rules_this_increment_added():
     for label, lhs, rhs in [
         ("(a × B)·C = a × (B·C)", (a % B) @ C, a % (B @ C)),
         ("a × (b × I) = b⊗a − (a·b) I", a % (b % I), b * a - (a @ b) * I),
+        ("(a × b) × I = b⊗a − a⊗b", (a % b) % I, b * a - a * b),
     ]:
         result = td.prove_equal(lhs, rhs, [])
         show(label, f"{result.status}, agree={result.components_agree}")

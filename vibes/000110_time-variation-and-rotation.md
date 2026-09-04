@@ -879,7 +879,30 @@ frame to be constant in time (which it is because i, j, k are not fields —
 nothing had to be declared about `t`); and its middle member is Poisson's
 formula for `Ω = ω k`, the planar instance of I6.
 
-**Stepan's second challenge — the angular velocity of a finite rotation.**  For
+**Stepan's second challenge — the angular velocity of a finite rotation** —
+**filed as challenge 000035, and it is red.**  It was listed as I6's
+proof-of-realness and then not written; Stepan asked where it had gone, which
+is the right question.  Attempting it now stops at two *different* places, one
+per route, and neither is about rotations:
+
+- **Invariant route.**  The spin of the turn tensor reduces to within a factor
+  of the answer — the residual is `sin θ (cos θ − 1)·[(ṅ × I) + (n×(n×ṅ))×I]`,
+  and the bracket vanishes because `n × (n × ṅ) = −ṅ`, which the library
+  *proves*.  What it cannot do is fold `ṅ⊗n − n⊗ṅ` back into `(n × ṅ) × I`:
+  that needs a rule whose **left-hand side is two terms**, which the matcher
+  cannot compile.
+- **Concrete route.**  With a genuinely moving axis (`n = cos φ i + sin φ j`,
+  φ(t)) everything is decidable in components, and the whole difference
+  collapses to one scalar that is identically zero:
+  `cos φ (cos²φ + sin²φ − 1)(1 − cos θ)`.  Nothing folds it —
+  `simplify_scalars` knows a Pythagorean *pair* but not a pair sharing a factor
+  with the rest of a sum, i.e. `cos²φ·X + sin²φ·X → X`.
+
+Both gaps are named capabilities that block other things too, which is what a
+red challenge is for.  The pieces the derivation rests on are kept green in the
+same challenge, so the red is known to be about the last step.
+
+For
 a rotation of angle `θ` about a unit axis `n` (the finite rotation vector `θ n`,
 Zhilin):
 
