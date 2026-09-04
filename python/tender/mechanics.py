@@ -64,6 +64,9 @@ class Time:
         # (rotation, derivation) -> the named angular velocity, when one was
         # minted (vibe 000110 I7).
         self._axial = {}
+        # (rotation, coordinate) -> the named axis of that coordinate's partial
+        # rotation (vibe 000110 I8): `∂_c P = ĉ × P`.
+        self._axes = {}
         self._vars = {}  # base name -> [δq, δq̇, …], same length
 
     # ---- minting --------------------------------------------------------
@@ -314,6 +317,112 @@ class Time:
             if _td.structural_eq(e, previous):
                 break
         return e
+
+    def poisson_rules(self, P):
+        """Poisson's relation **per coordinate**: `∂_c P = a_c × P`.
+
+        The usable form, and for the same reason the constraints are minted per
+        variable: `D(P)` for a rotation of several coordinates is a *sum*, so a
+        rule about it has a multi-term left-hand side the matcher cannot
+        compile — and even with one coordinate it is a *product* (`δq ∂_q P`),
+        which no rule can match inside a contraction chain.  One coordinate at
+        a time, each rule a single factor on the left, and the operator-level
+        statement is their sum.
+
+        `a_c = −½ (∂_c P·Pᵀ)_×` is the axial vector of that partial spin — the
+        **axis about which that coordinate turns the body** — and it is minted
+        as a *named* field `ĉ`, with the formula registered as its definition.
+        The name is not decoration: the formula contains `∂_c P`, so a rule
+        written with it rewrites its own right-hand side, over and over
+        (measured: seven times before the reduction was stopped).
+
+        The angular velocity is then `ω = Σ_c ċ ĉ` and the virtual rotation
+        `δo = Σ_c δc ĉ`, which is why the two are one construction.
+        """
+        # Keyed by the declared name, matched structurally rather than by the
+        # rendered form: a rank-2 symbol renders bolded.
+        from . import _core as _c
+
+        entry = None
+        for name, record in self._constrained.items():
+            kind, rank, deps, proper = record
+            built = _c.constrained_field(
+                name, rank, kind, deps=deps, proper=proper, ctx=self._ws.ctx
+            )
+            if _td.structural_eq(built, P):
+                entry = record
+                break
+        if entry is None:
+            raise ValueError(
+                f"{P} was not minted on this time chain, so its dependence is "
+                "unknown; use tm.rotation(...) to declare a rotation that turns"
+            )
+        kind, rank, deps, proper = entry
+        rules = []
+        for coord in deps:
+            partial = _td.partial(P, coord)
+            if _td.algebraic_eq(partial, self._ws.scalar(0)):
+                continue
+            formula = self._ws.scalar(_Rational(-1, 2)) * (
+                partial @ P.transpose()
+            ).vec()
+            base = str(coord)
+            axis = self._axes.get((str(P), base))
+            if axis is None:
+                axis = self._ws.field(
+                    "\\hat{" + base + "}", 1, deps=deps
+                )
+                self._ws._definitions["\\hat{" + base + "}"] = (axis, formula)
+                self._axes[(str(P), base)] = axis
+            tag = base.replace("\\", "")
+            rules.append(_td.Identity(f"{tag}-poisson", partial, axis % P))
+        return rules
+
+    def coefficients(self, expr):
+        """Split an expression *linear in the variations* into their factors.
+
+        The finite-dimensional fundamental lemma, in the only form it needs:
+        `δA = Σ_c δc Q_c` with the `δc` arbitrary and independent, so `δA = 0`
+        means every `Q_c = 0`.  No integral, no lemma over a domain — for
+        finitely many degrees of freedom the conclusion is reached by *equating
+        coefficients*, which is why the whole applied-mechanics arc needs no
+        integral (vibe 000110, and why vibe 000111 owns that separately).
+
+        Returns ``{variation name: coefficient}``.  A term carrying no
+        variation, or two, is an error rather than a silent omission: the first
+        means the expression was not a virtual work, the second that it is not
+        linear and the lemma does not apply.
+        """
+        variations = {}
+        for chain in self._vars.values():
+            for member in chain:
+                variations[str(member)] = member
+        out = {}
+        for path in _td.canonicalize(_td.expand_products(expr)).addends():
+            term = _td.canonicalize(_td.expand_products(expr)).at(path)
+            found = [
+                name for name in variations if term.find(name=name)
+            ]
+            if len(found) != 1:
+                raise ValueError(
+                    f"the term {term} carries {len(found)} variations; a "
+                    "virtual work must be linear in them, one to a term"
+                )
+            name = found[0]
+            spots = term.find(name=name)
+            if len(spots) != 1:
+                raise ValueError(
+                    f"the term {term} carries {name} more than once, so it is "
+                    "not linear in it"
+                )
+            one = self._ws.scalar(1)
+            coefficient = _td.canonicalize(term.replace_at(spots[0], one))
+            out[name] = (
+                coefficient
+                if name not in out
+                else _td.canonicalize(out[name] + coefficient)
+            )
+        return out
 
     def constraint_rules(self):
         """The *differentiated* constraints of every symbol on this chain.

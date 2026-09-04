@@ -295,3 +295,57 @@ def test_the_variation_of_the_angular_velocity_with_one_coordinate():
         tm.reduce(ap(tm.variation() * omega), rounds=12),
         tm.reduce(ap(tm.ddt() * virtual) - omega % virtual, rounds=12),
     )
+
+
+def _rigid():
+    ws = t.Workspace()
+    tm = ws.time("t")
+    q, qd = tm.coordinate("q", orders=1)
+    P = tm.rotation("P", deps=[q])
+    return ws, tm, q, P, tm.poisson_rules(P)
+
+
+def test_poisson_is_stated_per_coordinate_with_a_named_axis():
+    ws, tm, q, P, rules = _rigid()
+    assert [r.name for r in rules] == ["q-poisson"]
+    assert td.structural_eq(rules[0].lhs, td.partial(P, q))
+    # `q̂ × P`, with the axis named — the formula would rewrite its own RHS.
+    assert r"\hat{q}" in str(rules[0].rhs)
+
+
+def test_the_virtual_displacement_mirrors_the_velocity():
+    ws, tm, q, P, rules = _rigid()
+    ap = td.apply_operators
+    rho = ws.tensor(r"\rho", rank=1)
+    rC = tm.field("c", 1, deps=[q])
+    r = rC + P @ rho
+    axis = ws.field(r"\hat{q}", 1, deps=[q])
+    dq = tm.variation_of(q)
+    qdot = ap(tm.ddt() * q)
+    assert td.algebraic_eq(
+        tm.reduce(ap(tm.variation() * r), rules, rounds=10),
+        dq * td.partial(rC, q) + dq * (axis % (P @ rho)),
+    )
+    assert td.algebraic_eq(
+        tm.reduce(ap(tm.ddt() * r), rules, rounds=10),
+        qdot * td.partial(rC, q) + qdot * (axis % (P @ rho)),
+    )
+
+
+def test_coefficients_splits_a_virtual_work():
+    ws, tm, q, P, rules = _rigid()
+    dq = tm.variation_of(q)
+    a, b = ws.tensor("a", rank=1), ws.tensor("b", rank=1)
+    work = dq * (a @ b) + dq * (b @ a)
+    out = tm.coefficients(work)
+    assert list(out) == [r"\delta{q}"]
+    assert td.algebraic_eq(out[r"\delta{q}"], td.canonicalize(a @ b + b @ a))
+
+
+def test_coefficients_refuses_what_the_lemma_does_not_cover():
+    ws, tm, q, P, rules = _rigid()
+    dq = tm.variation_of(q)
+    with pytest.raises(ValueError, match="linear"):
+        tm.coefficients(dq * dq)
+    with pytest.raises(ValueError, match="variations"):
+        tm.coefficients(ws.tensor("s", rank=0))

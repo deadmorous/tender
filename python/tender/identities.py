@@ -189,6 +189,19 @@ def bac_cab(ctx):
     return Identity("bac-cab", u % (v % w), v * (u @ w) - w * (u @ v))
 
 
+def triple_rotate(ctx):
+    """a·(b × c) = (c × a)·b — the scalar triple product, rotated.
+
+    Directed so it *terminates*: the cross ends up on the left of the dot,
+    where the pattern no longer matches.  The choice of which rotation to ship
+    is not arbitrary — this one puts the third factor last, which is what turns
+    the virtual work of a force into a moment: `F·(δo × ρ) = (ρ × F)·δo` reads
+    off the coefficient of the virtual rotation (vibe 000110 I8).
+    """
+    u, v, w = (_var(ctx, n, 1) for n in "uwy")
+    return Identity("triple-rotate", u @ (v % w), (w % u) @ v)
+
+
 def cross_self(ctx):
     """a × a = 0.
 
@@ -858,6 +871,10 @@ register(
     "lagrange", lagrange, tags=("cross",), proof="000014",
     cites=("eps-delta-1", "delta-contraction"),
     summary="(a × b) · (c × d) = (a·c)(b·d) − (a·d)(b·c)",
+)
+register(
+    "triple-rotate", triple_rotate, tags=("cross",), proof="000037",
+    summary="a·(b × c) = (c × a)·b — the scalar triple product, rotated",
 )
 register(
     "cross-self", cross_self, tags=("cross",), proof="000031",

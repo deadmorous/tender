@@ -1273,8 +1273,9 @@ def test_rule_groups_are_named_and_populated():
         "cross-removal",
         "cross-self",
         "lagrange",
+        "triple-rotate",
     ]
-    assert len(td.rules("eps_delta", "cross", "dyadic", ctx=ctx)) == 17
+    assert len(td.rules("eps_delta", "cross", "dyadic", ctx=ctx)) == 18
 
 
 def test_cross_group_proves_bac_cab():

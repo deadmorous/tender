@@ -736,6 +736,28 @@ carries.  Two parts:
    settled by derivation, not by memory).  This is the identity that makes
    rotations usable in a variational argument at all, and it is the sharpest
    test of whether I2's commuting invariant was built right.
+**Shipped (I8, second half):** `tm.poisson_rules(P)` — Poisson *per
+coordinate*, `∂_c P = ĉ × P` with the axis **named** — `tm.coefficients(δA)`,
+the `triple-rotate` identity, and challenge 000037.  The virtual displacement
+`δr = δr_C + δo × (r − r_C)` is the velocity with δ in place of d/dt, the same
+call with a different derivation; the generalized force `Q_q = F·∂_q r_C +
+(ρ × F)·q̂` comes out with its moment term rather than having one put in; and
+`δA = 0` concludes by equating coefficients, which is the whole of the
+fundamental lemma for finitely many degrees of freedom.
+
+Two more instances of the naming and reach lessons, both now familiar:
+
+- **Poisson has to be per coordinate.**  The operator form is a *sum* for
+  several coordinates and a *product* (`δq ∂_q P`) even for one, and neither can
+  be matched inside a contraction chain.
+- **The axis has to be named.**  `ĉ = −½(∂_c P·Pᵀ)_×` mentions `∂_c P`, so the
+  rule rewrites its own right-hand side — measured, seven times deep before the
+  reduction was stopped.  `q̂` also *reads* as what it is.
+- And one new instance of the reach problem: the triple-product rotation proves
+  on atoms and **not** with a compound operand — `(q̂ × (P·ρ))·F` against
+  `((P·ρ) × F)·q̂` comes back `exhausted`.  Pinned in the challenge as a
+  negative so it is not mistaken for a truth.
+
 2. **Virtual work for a finite-DOF system.**  `δA = F·δr_C + M·θ` for a rigid
    body; the equations follow from `δA = 0` for *arbitrary independent* `δr_C`
    and `δo`.  Note what this does **not** need: no integral, no fundamental

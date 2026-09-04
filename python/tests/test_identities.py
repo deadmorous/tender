@@ -303,7 +303,7 @@ def test_groups_are_named_and_populated():
         "double_dot", "leibniz",
     }
     assert len(ti.group(ctx, "eps_delta")) == 4
-    assert len(ti.group(ctx, "cross")) == 5
+    assert len(ti.group(ctx, "cross")) == 6
     assert len(ti.group(ctx, "double_dot")) == 1
     assert len(ti.group(ctx, "leibniz")) == 5
     # The transpose rules carry both tags: their own group, and `dyadic`,
@@ -311,7 +311,7 @@ def test_groups_are_named_and_populated():
     assert len(ti.group(ctx, "transpose")) == 5
     assert len(ti.group(ctx, "rotation")) == 11
     assert len(ti.group(ctx, "dyadic")) == 8
-    assert len(ti.all_rules(ctx)) == 34
+    assert len(ti.all_rules(ctx)) == 35
 
 
 def test_unknown_group_raises_with_the_available_names():
